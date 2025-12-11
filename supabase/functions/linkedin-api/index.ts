@@ -246,14 +246,41 @@ serve(async (req) => {
         const creativesData = await creativesResponse.json();
         console.log('Fetched creatives:', creativesData.elements?.length || 0);
 
-        // Build creative to campaign mapping and get creative IDs
+        // Build creative to campaign mapping and get creative IDs with names
         const creativeList = (creativesData.elements || []).map((c: any) => {
           const campaignUrn = c.campaign || '';
           const campaignId = campaignUrn.split(':').pop() || '';
+          
+          // Extract Creative Direct Sponsored Content name from variables
+          let creativeName = '';
+          if (c.variables?.data) {
+            const variablesData = c.variables.data;
+            // Check for Direct Sponsored Content name
+            const dsContent = variablesData['com.linkedin.ads.DirectSponsoredContentCreativeVariables'];
+            const sponsoredUpdate = variablesData['com.linkedin.ads.SponsoredUpdateCreativeVariables'];
+            const textAd = variablesData['com.linkedin.ads.TextAdCreativeVariables'];
+            
+            if (dsContent?.name) {
+              creativeName = dsContent.name;
+            } else if (dsContent?.share) {
+              creativeName = `DSC-${dsContent.share.split(':').pop() || c.id}`;
+            } else if (sponsoredUpdate?.activity) {
+              creativeName = `Sponsored-${sponsoredUpdate.activity.split(':').pop() || c.id}`;
+            } else if (textAd?.title) {
+              creativeName = textAd.title;
+            }
+          }
+          
+          // Fallback to reference or ID if no name found
+          if (!creativeName) {
+            creativeName = c.reference?.split(':').pop() || `Creative ${c.id}`;
+          }
+          
           return {
             id: c.id?.toString() || '',
             campaignId,
             campaignName: campaignMap.get(campaignId) || `Campaign ${campaignId}`,
+            creativeName,
             status: c.status || 'UNKNOWN',
             type: c.type || 'UNKNOWN',
           };
@@ -300,7 +327,7 @@ serve(async (req) => {
           const analytics = analyticsMap.get(creative.id) || { impressions: 0, clicks: 0, spent: 0, leads: 0 };
           return {
             adId: creative.id,
-            adName: `${creative.campaignName} - Ad ${creative.id.slice(-6)}`,
+            adName: creative.creativeName,
             campaignName: creative.campaignName,
             status: creative.status,
             type: creative.type,
