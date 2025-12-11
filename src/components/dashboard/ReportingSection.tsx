@@ -192,7 +192,7 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
                 Ad Performance
               </CardTitle>
               <CardDescription>
-                Aggregated performance data by campaign
+                Aggregated performance data by ad name
               </CardDescription>
             </CardHeader>
             <CardContent>
