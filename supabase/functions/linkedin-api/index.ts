@@ -222,7 +222,7 @@ serve(async (req) => {
         const endDate = dateRange?.end || new Date().toISOString().split('T')[0];
         const granularity = timeGranularity || 'DAILY';
         
-        // Fetch campaigns first
+        // Fetch campaigns first (required for CREATIVE pivot)
         const campaignsResponse = await fetch(
           `https://api.linkedin.com/v2/adCampaignsV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=100`,
           { headers: { 'Authorization': `Bearer ${accessToken}` } }
@@ -237,7 +237,21 @@ serve(async (req) => {
           });
         }
 
-        // Build URL with CAMPAIGN pivot
+        // Fetch creatives to get ad names
+        const creativesResponse = await fetch(
+          `https://api.linkedin.com/v2/adCreativesV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=100`,
+          { headers: { 'Authorization': `Bearer ${accessToken}` } }
+        );
+        const creativesData = await creativesResponse.json();
+        const creativeMap = new Map((creativesData.elements || []).map((c: any) => {
+          const id = c.id?.toString() || '';
+          // Try to get name from various fields
+          const name = c.name || c.variables?.data?.['com.linkedin.ads.TextAdCreativeVariables']?.text || `Ad ${id}`;
+          return [id, name];
+        }));
+        console.log('Fetched creatives for ad names:', creativeMap.size);
+
+        // Build URL with CREATIVE pivot
         let url = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
           `dateRange.start.day=${new Date(startDate).getDate()}&` +
           `dateRange.start.month=${new Date(startDate).getMonth() + 1}&` +
@@ -246,23 +260,28 @@ serve(async (req) => {
           `dateRange.end.month=${new Date(endDate).getMonth() + 1}&` +
           `dateRange.end.year=${new Date(endDate).getFullYear()}&` +
           `timeGranularity=${granularity}&` +
-          `pivot=CAMPAIGN&` +
-          `accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
+          `pivot=CREATIVE&` +
           `fields=impressions,clicks,costInLocalCurrency,conversions,externalWebsiteConversions,oneClickLeads,dateRange,pivotValue`;
 
-        console.log('Fetching ad analytics with CAMPAIGN pivot');
+        // Add campaigns to query (required for CREATIVE pivot)
+        campaigns.slice(0, 20).forEach((id: string, i: number) => {
+          url += `&campaigns[${i}]=urn:li:sponsoredCampaign:${id}`;
+        });
+
+        console.log('Fetching ad analytics with CREATIVE pivot');
         const analyticsResponse = await fetch(url, {
           headers: { 'Authorization': `Bearer ${accessToken}` },
         });
         const analytics = await analyticsResponse.json();
         
-        // Merge campaign names
-        const campaignMap = new Map((campaignsData.elements || []).map((c: any) => [c.id.toString(), c.name]));
+        // Enrich with ad names
         const enrichedElements = (analytics.elements || []).map((el: any) => {
-          const campaignId = (el.pivotValue || '').split(':').pop() || '';
+          const creativeUrn = el.pivotValue || '';
+          const creativeId = creativeUrn.split(':').pop() || '';
           return {
             ...el,
-            campaignName: campaignMap.get(campaignId) || `Campaign ${campaignId}`,
+            adId: creativeId,
+            adName: creativeMap.get(creativeId) || `Ad ${creativeId}`,
           };
         });
         

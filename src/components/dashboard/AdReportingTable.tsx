@@ -92,7 +92,7 @@ export function AdReportingTable({ data, isLoading }: AdReportingTableProps) {
       <Table>
         <TableHeader>
           <TableRow className="bg-muted/30">
-            <SortableHeader label="Campaign Name" sortKeyName="name" />
+            <SortableHeader label="Ad Name" sortKeyName="name" />
             <SortableHeader label="Impressions" sortKeyName="impressions" />
             <SortableHeader label="Clicks" sortKeyName="clicks" />
             <SortableHeader label="Spent" sortKeyName="spent" />
@@ -113,7 +113,7 @@ export function AdReportingTable({ data, isLoading }: AdReportingTableProps) {
           ))}
           {/* Totals Row */}
           <TableRow className="bg-muted/50 font-semibold border-t-2">
-            <TableCell>Total ({data.length} campaigns)</TableCell>
+            <TableCell>Total ({data.length} ads)</TableCell>
             <TableCell>{totals.impressions.toLocaleString()}</TableCell>
             <TableCell>{totals.clicks.toLocaleString()}</TableCell>
             <TableCell>${totals.spent.toFixed(2)}</TableCell>

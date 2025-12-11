@@ -3,8 +3,8 @@ import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 
 export interface AdAnalytics {
-  campaignId: string;
-  campaignName: string;
+  adId: string;
+  adName: string;
   impressions: number;
   clicks: number;
   spent: number;
@@ -115,14 +115,12 @@ export function useAdReporting(accessToken: string | null) {
       if (error) throw error;
       
       const analyticsData = (data.elements || []).map((el: any) => {
-        const campaignUrn = el.pivotValue || '';
-        const campaignId = campaignUrn.split(':').pop() || '';
         const impressions = el.impressions || 0;
         const clicks = el.clicks || 0;
         
         return {
-          campaignId,
-          campaignName: el.campaignName || `Campaign ${campaignId}`,
+          adId: el.adId || '',
+          adName: el.adName || `Ad ${el.adId}`,
           impressions,
           clicks,
           spent: parseFloat(el.costInLocalCurrency || '0'),
@@ -148,7 +146,7 @@ export function useAdReporting(accessToken: string | null) {
     const aggregation = new Map<string, AggregatedAdData>();
     
     adAnalytics.forEach((item) => {
-      const name = item.campaignName;
+      const name = item.adName;
       const existing = aggregation.get(name);
       
       if (existing) {
