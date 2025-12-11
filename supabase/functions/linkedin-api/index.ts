@@ -216,6 +216,62 @@ serve(async (req) => {
         });
       }
 
+      case 'get_ad_analytics': {
+        const { accountId, dateRange, timeGranularity } = params || {};
+        const startDate = dateRange?.start || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        const endDate = dateRange?.end || new Date().toISOString().split('T')[0];
+        const granularity = timeGranularity || 'DAILY';
+        
+        // Fetch campaigns first
+        const campaignsResponse = await fetch(
+          `https://api.linkedin.com/v2/adCampaignsV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=100`,
+          { headers: { 'Authorization': `Bearer ${accessToken}` } }
+        );
+        const campaignsData = await campaignsResponse.json();
+        const campaigns = (campaignsData.elements || []).map((c: any) => c.id.toString());
+        console.log('Fetched campaigns for ad analytics:', campaigns.length);
+
+        if (campaigns.length === 0) {
+          return new Response(JSON.stringify({ elements: [] }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+
+        // Build URL with CAMPAIGN pivot
+        let url = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
+          `dateRange.start.day=${new Date(startDate).getDate()}&` +
+          `dateRange.start.month=${new Date(startDate).getMonth() + 1}&` +
+          `dateRange.start.year=${new Date(startDate).getFullYear()}&` +
+          `dateRange.end.day=${new Date(endDate).getDate()}&` +
+          `dateRange.end.month=${new Date(endDate).getMonth() + 1}&` +
+          `dateRange.end.year=${new Date(endDate).getFullYear()}&` +
+          `timeGranularity=${granularity}&` +
+          `pivot=CAMPAIGN&` +
+          `accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
+          `fields=impressions,clicks,costInLocalCurrency,conversions,externalWebsiteConversions,oneClickLeads,dateRange,pivotValue`;
+
+        console.log('Fetching ad analytics with CAMPAIGN pivot');
+        const analyticsResponse = await fetch(url, {
+          headers: { 'Authorization': `Bearer ${accessToken}` },
+        });
+        const analytics = await analyticsResponse.json();
+        
+        // Merge campaign names
+        const campaignMap = new Map((campaignsData.elements || []).map((c: any) => [c.id.toString(), c.name]));
+        const enrichedElements = (analytics.elements || []).map((el: any) => {
+          const campaignId = (el.pivotValue || '').split(':').pop() || '';
+          return {
+            ...el,
+            campaignName: campaignMap.get(campaignId) || `Campaign ${campaignId}`,
+          };
+        });
+        
+        console.log('Ad analytics fetched:', enrichedElements.length);
+        return new Response(JSON.stringify({ elements: enrichedElements }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
       case 'update_campaign_status': {
         const { campaignId, status } = params;
         const updateResponse = await fetch(

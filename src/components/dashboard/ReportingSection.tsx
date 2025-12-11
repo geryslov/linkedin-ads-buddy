@@ -2,9 +2,11 @@ import { useEffect, useState } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { RefreshCw, FileBarChart, Image, Users, Target } from 'lucide-react';
+import { RefreshCw, FileBarChart, Image, Users, Target, Megaphone } from 'lucide-react';
 import { useCreativeReporting, TimeFrameOption } from '@/hooks/useCreativeReporting';
+import { useAdReporting, TimeFrameOption as AdTimeFrameOption } from '@/hooks/useAdReporting';
 import { CreativeReportingTable } from './CreativeReportingTable';
+import { AdReportingTable } from './AdReportingTable';
 import { TimeFrameSelector } from './TimeFrameSelector';
 import { MetricCard } from './MetricCard';
 
@@ -14,39 +16,60 @@ interface ReportingSectionProps {
 }
 
 export function ReportingSection({ accessToken, selectedAccount }: ReportingSectionProps) {
-  const {
-    aggregatedData,
-    isLoading,
-    timeGranularity,
-    setTimeGranularity,
-    dateRange,
-    timeFrameOptions,
-    setTimeFrame,
-    fetchCreativeAnalytics,
-  } = useCreativeReporting(accessToken);
+  const creativeReporting = useCreativeReporting(accessToken);
+  const adReporting = useAdReporting(accessToken);
 
   const [selectedTimeFrame, setSelectedTimeFrame] = useState('30d');
-  const [reportType, setReportType] = useState('creatives');
+  const [reportType, setReportType] = useState('ads');
 
   useEffect(() => {
     if (selectedAccount) {
-      fetchCreativeAnalytics(selectedAccount);
+      if (reportType === 'creatives') {
+        creativeReporting.fetchCreativeAnalytics(selectedAccount);
+      } else if (reportType === 'ads') {
+        adReporting.fetchAdAnalytics(selectedAccount);
+      }
     }
-  }, [selectedAccount, dateRange, timeGranularity, fetchCreativeAnalytics]);
+  }, [selectedAccount, reportType]);
 
-  const handleTimeFrameChange = (option: TimeFrameOption) => {
+  // Re-fetch when time/granularity changes for creatives
+  useEffect(() => {
+    if (selectedAccount && reportType === 'creatives') {
+      creativeReporting.fetchCreativeAnalytics(selectedAccount);
+    }
+  }, [creativeReporting.dateRange, creativeReporting.timeGranularity]);
+
+  // Re-fetch when time/granularity changes for ads
+  useEffect(() => {
+    if (selectedAccount && reportType === 'ads') {
+      adReporting.fetchAdAnalytics(selectedAccount);
+    }
+  }, [adReporting.dateRange, adReporting.timeGranularity]);
+
+  const handleCreativeTimeFrameChange = (option: TimeFrameOption) => {
     setSelectedTimeFrame(option.value);
-    setTimeFrame(option);
+    creativeReporting.setTimeFrame(option);
+  };
+
+  const handleAdTimeFrameChange = (option: AdTimeFrameOption) => {
+    setSelectedTimeFrame(option.value);
+    adReporting.setTimeFrame(option);
   };
 
   const handleRefresh = () => {
     if (selectedAccount) {
-      fetchCreativeAnalytics(selectedAccount);
+      if (reportType === 'creatives') {
+        creativeReporting.fetchCreativeAnalytics(selectedAccount);
+      } else if (reportType === 'ads') {
+        adReporting.fetchAdAnalytics(selectedAccount);
+      }
     }
   };
 
-  // Calculate summary metrics
-  const totals = aggregatedData.reduce(
+  const isLoading = reportType === 'creatives' ? creativeReporting.isLoading : adReporting.isLoading;
+
+  // Calculate summary metrics for creatives
+  const creativeTotals = creativeReporting.aggregatedData.reduce(
     (acc, item) => ({
       impressions: acc.impressions + item.impressions,
       clicks: acc.clicks + item.clicks,
@@ -56,8 +79,23 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
     { impressions: 0, clicks: 0, spent: 0, leads: 0 }
   );
 
-  const avgCtr = totals.impressions > 0 
-    ? ((totals.clicks / totals.impressions) * 100).toFixed(2) 
+  const creativeAvgCtr = creativeTotals.impressions > 0 
+    ? ((creativeTotals.clicks / creativeTotals.impressions) * 100).toFixed(2) 
+    : '0.00';
+
+  // Calculate summary metrics for ads
+  const adTotals = adReporting.aggregatedData.reduce(
+    (acc, item) => ({
+      impressions: acc.impressions + item.impressions,
+      clicks: acc.clicks + item.clicks,
+      spent: acc.spent + item.spent,
+      leads: acc.leads + item.leads,
+    }),
+    { impressions: 0, clicks: 0, spent: 0, leads: 0 }
+  );
+
+  const adAvgCtr = adTotals.impressions > 0 
+    ? ((adTotals.clicks / adTotals.impressions) * 100).toFixed(2) 
     : '0.00';
 
   return (
@@ -84,6 +122,10 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
       {/* Report Type Tabs */}
       <Tabs value={reportType} onValueChange={setReportType}>
         <TabsList className="bg-muted/50">
+          <TabsTrigger value="ads" className="gap-2">
+            <Megaphone className="h-4 w-4" />
+            Ads
+          </TabsTrigger>
           <TabsTrigger value="creatives" className="gap-2">
             <Image className="h-4 w-4" />
             Creatives
@@ -100,51 +142,108 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="creatives" className="space-y-6 mt-6">
-          {/* Time Frame Selector */}
+        {/* Ads Tab */}
+        <TabsContent value="ads" className="space-y-6 mt-6">
           <Card className="bg-card/50 backdrop-blur-sm border-border/50">
             <CardContent className="pt-4">
               <TimeFrameSelector
-                timeFrameOptions={timeFrameOptions}
+                timeFrameOptions={adReporting.timeFrameOptions}
                 selectedTimeFrame={selectedTimeFrame}
-                onTimeFrameChange={handleTimeFrameChange}
-                timeGranularity={timeGranularity}
-                onGranularityChange={setTimeGranularity}
-                dateRange={dateRange}
+                onTimeFrameChange={handleAdTimeFrameChange}
+                timeGranularity={adReporting.timeGranularity}
+                onGranularityChange={adReporting.setTimeGranularity}
+                dateRange={adReporting.dateRange}
               />
             </CardContent>
           </Card>
 
-          {/* Summary Metrics */}
           <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
             <MetricCard
               title="Total Impressions"
-              value={totals.impressions.toLocaleString()}
+              value={adTotals.impressions.toLocaleString()}
               icon={FileBarChart}
             />
             <MetricCard
               title="Total Clicks"
-              value={totals.clicks.toLocaleString()}
+              value={adTotals.clicks.toLocaleString()}
               icon={FileBarChart}
             />
             <MetricCard
               title="Total Spent"
-              value={`$${totals.spent.toFixed(2)}`}
+              value={`$${adTotals.spent.toFixed(2)}`}
               icon={FileBarChart}
             />
             <MetricCard
               title="Total Leads"
-              value={totals.leads.toLocaleString()}
+              value={adTotals.leads.toLocaleString()}
               icon={FileBarChart}
             />
             <MetricCard
               title="Avg CTR"
-              value={`${avgCtr}%`}
+              value={`${adAvgCtr}%`}
               icon={FileBarChart}
             />
           </div>
 
-          {/* Data Table */}
+          <Card className="bg-card/50 backdrop-blur-sm border-border/50">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Megaphone className="h-5 w-5 text-primary" />
+                Ad Performance
+              </CardTitle>
+              <CardDescription>
+                Aggregated performance data by campaign
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <AdReportingTable data={adReporting.aggregatedData} isLoading={adReporting.isLoading} />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Creatives Tab */}
+        <TabsContent value="creatives" className="space-y-6 mt-6">
+          <Card className="bg-card/50 backdrop-blur-sm border-border/50">
+            <CardContent className="pt-4">
+              <TimeFrameSelector
+                timeFrameOptions={creativeReporting.timeFrameOptions}
+                selectedTimeFrame={selectedTimeFrame}
+                onTimeFrameChange={handleCreativeTimeFrameChange}
+                timeGranularity={creativeReporting.timeGranularity}
+                onGranularityChange={creativeReporting.setTimeGranularity}
+                dateRange={creativeReporting.dateRange}
+              />
+            </CardContent>
+          </Card>
+
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+            <MetricCard
+              title="Total Impressions"
+              value={creativeTotals.impressions.toLocaleString()}
+              icon={FileBarChart}
+            />
+            <MetricCard
+              title="Total Clicks"
+              value={creativeTotals.clicks.toLocaleString()}
+              icon={FileBarChart}
+            />
+            <MetricCard
+              title="Total Spent"
+              value={`$${creativeTotals.spent.toFixed(2)}`}
+              icon={FileBarChart}
+            />
+            <MetricCard
+              title="Total Leads"
+              value={creativeTotals.leads.toLocaleString()}
+              icon={FileBarChart}
+            />
+            <MetricCard
+              title="Avg CTR"
+              value={`${creativeAvgCtr}%`}
+              icon={FileBarChart}
+            />
+          </div>
+
           <Card className="bg-card/50 backdrop-blur-sm border-border/50">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -156,7 +255,7 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <CreativeReportingTable data={aggregatedData} isLoading={isLoading} />
+              <CreativeReportingTable data={creativeReporting.aggregatedData} isLoading={creativeReporting.isLoading} />
             </CardContent>
           </Card>
         </TabsContent>
