@@ -6,6 +6,7 @@ import { AccountSelector } from "@/components/dashboard/AccountSelector";
 import { MetricCard } from "@/components/dashboard/MetricCard";
 import { CampaignTable } from "@/components/dashboard/CampaignTable";
 import { AudienceCard } from "@/components/dashboard/AudienceCard";
+import { ReportingSection } from "@/components/dashboard/ReportingSection";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { 
@@ -84,6 +85,7 @@ export default function Dashboard() {
               {activeTab === "campaigns" && "Campaign Management"}
               {activeTab === "audiences" && "Audience Insights"}
               {activeTab === "analytics" && "Analytics & Reports"}
+              {activeTab === "reports" && "Reports"}
             </h1>
             <p className="text-muted-foreground">
               Manage your LinkedIn advertising campaigns
@@ -261,6 +263,13 @@ export default function Dashboard() {
               </p>
             </div>
           </div>
+        )}
+
+        {activeTab === "reports" && (
+          <ReportingSection 
+            accessToken={accessToken} 
+            selectedAccount={selectedAccount}
+          />
         )}
       </main>
     </div>

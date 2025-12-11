@@ -148,6 +148,49 @@ serve(async (req) => {
         });
       }
 
+      case 'get_creatives': {
+        const { accountId } = params || {};
+        const creativesResponse = await fetch(
+          `https://api.linkedin.com/v2/adCreativesV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}`,
+          { headers: { 'Authorization': `Bearer ${accessToken}` } }
+        );
+        const creatives = await creativesResponse.json();
+        console.log('Creatives fetched:', creatives.elements?.length || 0);
+        
+        return new Response(JSON.stringify(creatives), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      case 'get_creative_analytics': {
+        const { accountId, dateRange, timeGranularity } = params || {};
+        const startDate = dateRange?.start || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        const endDate = dateRange?.end || new Date().toISOString().split('T')[0];
+        const granularity = timeGranularity || 'DAILY';
+        
+        const url = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
+          `dateRange.start.day=${new Date(startDate).getDate()}&` +
+          `dateRange.start.month=${new Date(startDate).getMonth() + 1}&` +
+          `dateRange.start.year=${new Date(startDate).getFullYear()}&` +
+          `dateRange.end.day=${new Date(endDate).getDate()}&` +
+          `dateRange.end.month=${new Date(endDate).getMonth() + 1}&` +
+          `dateRange.end.year=${new Date(endDate).getFullYear()}&` +
+          `timeGranularity=${granularity}&` +
+          `pivot=CREATIVE&` +
+          `accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
+          `fields=impressions,clicks,costInLocalCurrency,conversions,externalWebsiteConversions,oneClickLeads,dateRange,pivotValue`;
+        
+        const analyticsResponse = await fetch(url, {
+          headers: { 'Authorization': `Bearer ${accessToken}` },
+        });
+        const analytics = await analyticsResponse.json();
+        console.log('Creative analytics fetched:', analytics.elements?.length || 0);
+        
+        return new Response(JSON.stringify(analytics), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
       case 'update_campaign_status': {
         const { campaignId, status } = params;
         const updateResponse = await fetch(

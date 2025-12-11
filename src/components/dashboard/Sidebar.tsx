@@ -5,7 +5,7 @@ import {
   Megaphone,
   Users,
   BarChart3,
-  Settings,
+  FileBarChart,
   LogOut,
   Linkedin,
 } from "lucide-react";
@@ -22,6 +22,7 @@ const navItems = [
   { id: "campaigns", label: "Campaigns", icon: Megaphone },
   { id: "audiences", label: "Audiences", icon: Users },
   { id: "analytics", label: "Analytics", icon: BarChart3 },
+  { id: "reports", label: "Reports", icon: FileBarChart },
 ];
 
 export function Sidebar({ activeTab, onTabChange, onLogout, profileName }: SidebarProps) {
