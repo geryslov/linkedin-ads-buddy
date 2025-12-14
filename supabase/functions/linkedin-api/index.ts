@@ -466,9 +466,9 @@ serve(async (req) => {
           
           console.log('[Versioned API] Fetching all creatives from REST API (primary source)...');
           
-          // Use the correct endpoint format: q=search with account filter
-          const baseUrl = `https://api.linkedin.com/rest/adAccounts/${accountId}/creatives`;
-          const searchUrl = `${baseUrl}?q=search&search=(account:(values:List(urn:li:sponsoredAccount:${accountId})))&count=100`;
+          // Use the correct versioned endpoint: /rest/creatives with q=search
+          const accountUrn = `urn:li:sponsoredAccount:${accountId}`;
+          const searchUrl = `https://api.linkedin.com/rest/creatives?q=search&search=(account:(values:List(${encodeURIComponent(accountUrn)})))&count=100`;
           
           let start = 0;
           let hasMore = true;
