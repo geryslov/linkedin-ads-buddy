@@ -674,18 +674,15 @@ serve(async (req) => {
           }
         } else {
           // For other pivots, extract human-readable name from URN or use as-is
-          // LinkedIn returns values like "urn:li:function:1" for job function, etc.
-          // We can map some common values or just extract the value part
           entityUrns.forEach(urn => {
-            // Try to extract a readable name from the URN
-            // Format is usually: urn:li:type:value or just the value itself
-            const parts = urn.split(':');
-            if (parts.length > 1) {
-              const value = parts[parts.length - 1];
-              // For non-company pivots, the value is often already human-readable
-              // or we use the URN value
+            // MEMBER_JOB_TITLE returns plain text strings, not URNs
+            if (selectedPivot === 'MEMBER_JOB_TITLE') {
+              entityNames.set(urn, urn || 'Unknown Job Title');
+            } else if (urn.includes(':')) {
+              // URN format like "urn:li:function:1"
               entityNames.set(urn, formatPivotValue(urn, selectedPivot));
             } else {
+              // Plain text value
               entityNames.set(urn, urn || 'Unknown');
             }
           });
