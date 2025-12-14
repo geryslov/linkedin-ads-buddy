@@ -424,8 +424,16 @@ serve(async (req) => {
         const creativesData = await creativesResponse.json();
         console.log(`[Step 3] Fetched ${creativesData.elements?.length || 0} creative metadata records`);
 
-        // Step 4: Extract creative names from metadata
+        // Step 4: Build creative ID → name lookup from Creatives API metadata
+        // Priority: 1) Top-level 'name' field, 2) Variables-specific name, 3) Fallback to ID
+        console.log('[Step 4] Building creative ID → name lookup...');
         const creativeMetadataMap = new Map<string, { name: string; campaignId: string; campaignName: string; status: string; type: string }>();
+        
+        // Log sample creative for debugging
+        if (creativesData.elements?.length > 0) {
+          console.log('[Step 4] Sample creative metadata:', JSON.stringify(creativesData.elements[0]).substring(0, 500));
+        }
+        
         (creativesData.elements || []).forEach((c: any) => {
           const creativeId = c.id?.toString() || '';
           const campaignUrn = c.campaign || '';
@@ -434,7 +442,13 @@ serve(async (req) => {
           let creativeName = '';
           let creativeType = 'UNKNOWN';
           
-          if (c.variables?.data) {
+          // Priority 1: Check for top-level 'name' field (LinkedIn's new standard field)
+          if (c.name) {
+            creativeName = c.name;
+          }
+          
+          // Priority 2: Extract from variables.data based on creative type
+          if (!creativeName && c.variables?.data) {
             const variablesData = c.variables.data;
             const dsContent = variablesData['com.linkedin.ads.DirectSponsoredContentCreativeVariables'];
             const sponsoredUpdate = variablesData['com.linkedin.ads.SponsoredUpdateCreativeVariables'];
@@ -445,44 +459,57 @@ serve(async (req) => {
             const videoAd = variablesData['com.linkedin.ads.VideoCreativeVariables'];
             const carouselAd = variablesData['com.linkedin.ads.CarouselCreativeVariables'];
             
-            if (dsContent?.name) {
-              creativeName = dsContent.name;
+            if (dsContent) {
               creativeType = 'SPONSORED_CONTENT';
-            } else if (dsContent?.share) {
-              creativeName = `Sponsored Content #${dsContent.share.split(':').pop() || creativeId}`;
-              creativeType = 'SPONSORED_CONTENT';
-            } else if (sponsoredUpdate?.activity) {
-              creativeName = `Sponsored Update #${sponsoredUpdate.activity.split(':').pop() || creativeId}`;
+              creativeName = dsContent.name || '';
+              if (!creativeName && dsContent.share) {
+                creativeName = `Sponsored Content #${dsContent.share.split(':').pop() || creativeId}`;
+              }
+            } else if (sponsoredUpdate) {
               creativeType = 'SPONSORED_UPDATE';
+              creativeName = sponsoredUpdate.name || '';
+              if (!creativeName && sponsoredUpdate.activity) {
+                creativeName = `Sponsored Update #${sponsoredUpdate.activity.split(':').pop() || creativeId}`;
+              }
             } else if (textAd) {
-              creativeName = textAd.title || textAd.text || `Text Ad #${creativeId}`;
               creativeType = 'TEXT_AD';
+              creativeName = textAd.name || textAd.title || textAd.text || `Text Ad #${creativeId}`;
             } else if (spotlightAd) {
-              creativeName = spotlightAd.headline || spotlightAd.ctaLabel || `Spotlight Ad #${creativeId}`;
               creativeType = 'SPOTLIGHT_AD';
+              creativeName = spotlightAd.name || spotlightAd.headline || spotlightAd.ctaLabel || `Spotlight Ad #${creativeId}`;
             } else if (followerAd) {
-              creativeName = followerAd.headline || `Follower Ad #${creativeId}`;
               creativeType = 'FOLLOWER_AD';
+              creativeName = followerAd.name || followerAd.headline || `Follower Ad #${creativeId}`;
             } else if (jobsAd) {
-              creativeName = jobsAd.headline || `Jobs Ad #${creativeId}`;
               creativeType = 'JOBS_AD';
+              creativeName = jobsAd.name || jobsAd.headline || `Jobs Ad #${creativeId}`;
             } else if (videoAd) {
-              creativeName = videoAd.name || videoAd.title || `Video Ad #${creativeId}`;
               creativeType = 'VIDEO_AD';
+              creativeName = videoAd.name || videoAd.title || `Video Ad #${creativeId}`;
             } else if (carouselAd) {
-              const cardCount = carouselAd.cards?.length || 0;
-              creativeName = `Carousel Ad (${cardCount} cards) #${creativeId}`;
               creativeType = 'CAROUSEL_AD';
+              const cardCount = carouselAd.cards?.length || 0;
+              creativeName = carouselAd.name || `Carousel Ad (${cardCount} cards) #${creativeId}`;
             }
           }
           
+          // Determine type from creative reference if not already set
+          if (creativeType === 'UNKNOWN' && c.type) {
+            creativeType = c.type;
+          }
+          
+          // Priority 3: Fallback naming based on reference type
           if (!creativeName) {
             if (c.reference) {
-              const refType = c.reference.split(':')[2] || '';
+              const refParts = c.reference.split(':');
+              const refType = refParts[2] || '';
+              const refId = refParts[refParts.length - 1] || creativeId;
               if (refType === 'share') {
-                creativeName = `Share Ad #${c.reference.split(':').pop()}`;
+                creativeName = `Share Ad #${refId}`;
+                creativeType = creativeType || 'SPONSORED_CONTENT';
               } else if (refType === 'ugcPost') {
-                creativeName = `UGC Post Ad #${c.reference.split(':').pop()}`;
+                creativeName = `UGC Post #${refId}`;
+                creativeType = creativeType || 'SPONSORED_CONTENT';
               } else {
                 creativeName = `Creative #${creativeId}`;
               }
@@ -497,10 +524,10 @@ serve(async (req) => {
             campaignId,
             campaignName: typeof resolvedCampaignName === 'string' ? resolvedCampaignName : `Campaign ${campaignId}`,
             status: c.status || 'UNKNOWN',
-            type: creativeType,
+            type: creativeType !== 'UNKNOWN' ? creativeType : (c.type || 'UNKNOWN'),
           });
         });
-        console.log(`[Step 4] Built metadata map for ${creativeMetadataMap.size} creatives`);
+        console.log(`[Step 4] Built lookup for ${creativeMetadataMap.size} creatives`);
 
         // Step 5: Merge analytics with creative names - include ALL creatives from metadata
         console.log('[Step 5] Merging analytics with creative metadata...');
