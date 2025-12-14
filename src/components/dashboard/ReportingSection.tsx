@@ -33,7 +33,7 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
 
   useEffect(() => {
     if (selectedAccount) {
-      if (reportType === 'creatives') {
+      if (reportType === 'creatives' || reportType === 'creative_names') {
         creativeReporting.fetchCreativeAnalytics(selectedAccount);
       } else if (reportType === 'companies') {
         companyIntelligence.fetchCompanyIntelligence(selectedAccount);
