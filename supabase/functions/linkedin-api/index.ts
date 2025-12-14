@@ -320,7 +320,7 @@ serve(async (req) => {
       }
 
       case 'get_creative_report': {
-        // Fetches creative-level analytics with batch creative name resolution
+        // Fetches creative-level analytics with legacy name resolution + fallbacks
         const { accountId, dateRange, timeGranularity } = params || {};
         const startDate = dateRange?.start || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
         const endDate = dateRange?.end || new Date().toISOString().split('T')[0];
@@ -328,50 +328,164 @@ serve(async (req) => {
         
         console.log(`[get_creative_report] Starting for account ${accountId}, date range: ${startDate} to ${endDate}, granularity: ${granularity}`);
 
-        // Helper: Fetch creative names using batch finders API
-        async function fetchCreativeNamesBatch(creativeUrns: string[], token: string): Promise<Map<string, string>> {
-          const uniqueUrns = [...new Set(creativeUrns)];
-          if (uniqueUrns.length === 0) return new Map();
+        // Resolution stats for logging
+        const resolutionStats = {
+          legacyApi: 0,
+          versionedApiFallback: 0,
+          referenceResolved: 0,
+          placeholder: 0,
+          total: 0
+        };
+
+        // Helper: Extract name from legacy adCreativesV2 creative object
+        function extractCreativeNameFromLegacy(creative: any): string | null {
+          // Try top-level 'name' field first (if present)
+          if (creative.name && typeof creative.name === 'string' && creative.name.trim()) {
+            return creative.name.trim();
+          }
           
-          const creativeNames = new Map<string, string>();
+          // Try nested creative content/variables
+          const variables = creative.variables || {};
+          const data = variables.data || {};
           
-          // Process in batches of 50 (LinkedIn API limit)
+          // Check for sponsored content text
+          if (data.com?.linkedin?.ads?.SponsoredVideoCreativeVariables?.userGeneratedContentPost) {
+            // UGC Post reference - would need separate resolution
+            return null;
+          }
+          
+          // Check for text-based creative content
+          if (data.com?.linkedin?.ads?.TextAdCreativeVariables?.text) {
+            return data.com.linkedin.ads.TextAdCreativeVariables.text;
+          }
+          
+          // Check for InMail subject
+          if (data.com?.linkedin?.ads?.MessageAdCreativeVariables?.subject) {
+            return data.com.linkedin.ads.MessageAdCreativeVariables.subject;
+          }
+          
+          // Check for carousel headline
+          if (data.com?.linkedin?.ads?.CarouselAdCreativeVariables?.headline) {
+            return data.com.linkedin.ads.CarouselAdCreativeVariables.headline;
+          }
+          
+          // Try reference field for UGC content
+          if (creative.reference && typeof creative.reference === 'string') {
+            // Reference contains URN to share/ugcPost - could resolve but skip for now
+            return null;
+          }
+          
+          return null;
+        }
+
+        // Helper: Fetch creative names via LEGACY adCreativesV2 endpoint
+        async function fetchCreativeNamesLegacy(accountId: string, token: string): Promise<Map<string, { name: string; source: string; campaignId: string; status: string; type: string }>> {
+          const creativeData = new Map<string, { name: string; source: string; campaignId: string; status: string; type: string }>();
+          
+          console.log('[Legacy API] Fetching creatives from adCreativesV2...');
+          const url = `https://api.linkedin.com/v2/adCreativesV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=500`;
+          
+          try {
+            const response = await fetch(url, {
+              headers: { 'Authorization': `Bearer ${token}` }
+            });
+            
+            if (!response.ok) {
+              console.log(`[Legacy API] Failed with status ${response.status}`);
+              return creativeData;
+            }
+            
+            const data = await response.json();
+            const elements = data.elements || [];
+            console.log(`[Legacy API] Retrieved ${elements.length} creatives`);
+            
+            for (const creative of elements) {
+              const creativeId = creative.id?.toString() || '';
+              if (!creativeId) continue;
+              
+              const campaignUrn = creative.campaign || '';
+              const campaignId = campaignUrn.split(':').pop() || '';
+              
+              let creativeType = 'SPONSORED_CONTENT';
+              if (creative.type) creativeType = creative.type;
+              else if (creative.variables?.type) creativeType = creative.variables.type;
+              
+              const extractedName = extractCreativeNameFromLegacy(creative);
+              
+              creativeData.set(creativeId, {
+                name: extractedName || '', // Empty if not found - will use fallback later
+                source: extractedName ? 'legacy_api' : 'pending',
+                campaignId,
+                status: creative.status || 'UNKNOWN',
+                type: creativeType,
+              });
+            }
+            
+            console.log(`[Legacy API] Extracted names for ${[...creativeData.values()].filter(v => v.name).length} of ${creativeData.size} creatives`);
+          } catch (err) {
+            console.error('[Legacy API] Error:', err);
+          }
+          
+          return creativeData;
+        }
+
+        // Helper: Fetch creative names via NEW versioned Creatives API (fallback)
+        async function fetchCreativeNamesVersioned(creativeIds: string[], accountId: string, token: string): Promise<Map<string, string>> {
+          const names = new Map<string, string>();
+          if (creativeIds.length === 0) return names;
+          
+          console.log(`[Versioned API] Attempting fallback for ${creativeIds.length} unresolved creatives...`);
+          
+          // Try the REST versioned API
           const batchSize = 50;
-          for (let i = 0; i < uniqueUrns.length; i += batchSize) {
-            const batch = uniqueUrns.slice(i, i + batchSize);
-            const idsParam = batch.map(urn => `ids=${encodeURIComponent(urn)}`).join('&');
-            const path = `https://api.linkedin.com/v2/creatives?${idsParam}`;
+          for (let i = 0; i < creativeIds.length; i += batchSize) {
+            const batch = creativeIds.slice(i, i + batchSize);
             
             try {
-              const response = await fetch(path, {
-                headers: { 'Authorization': `Bearer ${token}` }
+              // Try to fetch via versioned creatives endpoint
+              const idsParam = batch.map(id => `ids=urn:li:sponsoredCreative:${id}`).join('&');
+              const url = `https://api.linkedin.com/rest/adAccounts/${accountId}/creatives?${idsParam}`;
+              
+              const response = await fetch(url, {
+                headers: { 
+                  'Authorization': `Bearer ${token}`,
+                  'LinkedIn-Version': '202401',
+                  'X-Restli-Protocol-Version': '2.0.0'
+                }
               });
               
               if (response.ok) {
                 const data = await response.json();
-                // Handle both 'results' (batch finder) and 'elements' (search) formats
-                if (data.results) {
+                
+                // Handle different response formats
+                if (data.elements) {
+                  for (const creative of data.elements) {
+                    const id = creative.id?.toString() || creative.id?.split(':').pop() || '';
+                    if (creative.name && id) {
+                      names.set(id, creative.name);
+                    }
+                  }
+                } else if (data.results) {
                   for (const urn of Object.keys(data.results)) {
                     const creative = data.results[urn];
-                    creativeNames.set(urn, creative.name || 'Untitled Creative');
-                  }
-                } else if (data.elements) {
-                  for (const creative of data.elements) {
-                    const urn = `urn:li:sponsoredCreative:${creative.id}`;
-                    creativeNames.set(urn, creative.name || 'Untitled Creative');
-                    creativeNames.set(creative.id?.toString(), creative.name || 'Untitled Creative');
+                    const id = urn.split(':').pop() || '';
+                    if (creative.name && id) {
+                      names.set(id, creative.name);
+                    }
                   }
                 }
-                console.log(`[Batch ${Math.floor(i/batchSize) + 1}] Resolved ${creativeNames.size} names so far`);
+                
+                console.log(`[Versioned API] Batch ${Math.floor(i/batchSize) + 1}: Resolved ${names.size} names`);
               } else {
-                console.log(`[Batch ${Math.floor(i/batchSize) + 1}] API returned ${response.status}`);
+                console.log(`[Versioned API] Batch ${Math.floor(i/batchSize) + 1}: Failed with status ${response.status}`);
               }
             } catch (err) {
-              console.error(`[Batch ${Math.floor(i/batchSize) + 1}] Error:`, err);
+              console.error(`[Versioned API] Batch ${Math.floor(i/batchSize) + 1} error:`, err);
             }
           }
           
-          return creativeNames;
+          console.log(`[Versioned API] Total resolved via fallback: ${names.size}`);
+          return names;
         }
 
         // Step 1: Fetch campaigns for campaign name resolution
@@ -399,8 +513,13 @@ serve(async (req) => {
           });
         }
 
-        // Step 2: Fetch Ad Analytics pivoted by CREATIVE
-        console.log('[Step 2] Fetching analytics with pivot=CREATIVE...');
+        // Step 2: Fetch creatives via LEGACY adCreativesV2 (primary source for metadata + names)
+        console.log('[Step 2] Fetching creative metadata via legacy adCreativesV2...');
+        const legacyCreativeData = await fetchCreativeNamesLegacy(accountId, accessToken);
+        console.log(`[Step 2] Legacy API returned ${legacyCreativeData.size} creatives`);
+
+        // Step 3: Fetch Ad Analytics pivoted by CREATIVE
+        console.log('[Step 3] Fetching analytics with pivot=CREATIVE...');
         const analyticsUrl = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
           `dateRange.start.day=${new Date(startDate).getDate()}&` +
           `dateRange.start.month=${new Date(startDate).getMonth() + 1}&` +
@@ -420,16 +539,14 @@ serve(async (req) => {
         });
         
         const analyticsData = analyticsResponse.ok ? await analyticsResponse.json() : { elements: [] };
-        console.log(`[Step 2] Received ${analyticsData.elements?.length || 0} analytics records`);
+        console.log(`[Step 3] Received ${analyticsData.elements?.length || 0} analytics records`);
 
-        // Step 3: Extract Creative URNs and aggregate metrics
-        const creativeUrns: string[] = [];
+        // Step 4: Aggregate analytics by creative ID
         const analyticsMap = new Map<string, { impressions: number; clicks: number; spent: number; spentUsd: number; leads: number }>();
         
         (analyticsData.elements || []).forEach((el: any) => {
           const pivotValue = el.pivotValue || '';
           if (pivotValue) {
-            creativeUrns.push(pivotValue);
             const creativeId = pivotValue.split(':').pop() || pivotValue;
             const existing = analyticsMap.get(creativeId) || { impressions: 0, clicks: 0, spent: 0, spentUsd: 0, leads: 0 };
             analyticsMap.set(creativeId, {
@@ -441,67 +558,56 @@ serve(async (req) => {
             });
           }
         });
-        console.log(`[Step 3] Aggregated ${analyticsMap.size} unique creatives with analytics`);
+        console.log(`[Step 4] Aggregated ${analyticsMap.size} unique creatives with analytics`);
 
-        // Step 4: Fetch Creative Names using batch API
-        console.log('[Step 4] Fetching creative names via batch API...');
-        const creativeNameMap = await fetchCreativeNamesBatch(creativeUrns, accessToken);
-        console.log(`[Step 4] Resolved ${creativeNameMap.size} creative names`);
-
-        // Step 5: Also fetch all creatives metadata for campaign association
-        console.log('[Step 5] Fetching creative metadata for campaign association...');
-        const creativesResponse = await fetch(
-          `https://api.linkedin.com/v2/adCreativesV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=500`,
-          { headers: { 'Authorization': `Bearer ${accessToken}` } }
-        );
-        
-        const creativesData = creativesResponse.ok ? await creativesResponse.json() : { elements: [] };
-        console.log(`[Step 5] Fetched ${creativesData.elements?.length || 0} creatives metadata`);
-        
-        // Build creative → campaign mapping
-        const creativeMetaMap = new Map<string, { campaignId: string; status: string; type: string }>();
-        (creativesData.elements || []).forEach((c: any) => {
-          const creativeId = c.id?.toString() || '';
-          const campaignUrn = c.campaign || '';
-          const campaignId = campaignUrn.split(':').pop() || '';
-          
-          let creativeType = 'SPONSORED_CONTENT';
-          if (c.type) creativeType = c.type;
-          else if (c.variables?.type) creativeType = c.variables.type;
-          
-          creativeMetaMap.set(creativeId, {
-            campaignId,
-            status: c.status || 'UNKNOWN',
-            type: creativeType,
-          });
+        // Step 5: Identify creatives that need fallback name resolution
+        const unresolvedCreativeIds: string[] = [];
+        legacyCreativeData.forEach((data, creativeId) => {
+          if (!data.name || data.source === 'pending') {
+            unresolvedCreativeIds.push(creativeId);
+          }
         });
+        console.log(`[Step 5] ${unresolvedCreativeIds.length} creatives need fallback name resolution`);
 
-        // Step 6: Build final report - iterate over ALL creatives from metadata
-        console.log('[Step 6] Building final report from all creatives...');
+        // Step 6: Attempt fallback via versioned Creatives API
+        let versionedNames = new Map<string, string>();
+        if (unresolvedCreativeIds.length > 0) {
+          versionedNames = await fetchCreativeNamesVersioned(unresolvedCreativeIds, accountId, accessToken);
+          console.log(`[Step 6] Versioned API resolved ${versionedNames.size} additional names`);
+        }
+
+        // Step 7: Build final report with resolution tracking
+        console.log('[Step 7] Building final report...');
         const reportElements: any[] = [];
-        let creativesWithData = 0;
-        let unresolvedCount = 0;
         
-        // Iterate over creativeMetaMap (all creatives) instead of analyticsMap
-        creativeMetaMap.forEach((meta, creativeId) => {
-          const urn = `urn:li:sponsoredCreative:${creativeId}`;
-          let creativeName = creativeNameMap.get(urn) || creativeNameMap.get(creativeId) || '';
+        legacyCreativeData.forEach((meta, creativeId) => {
+          resolutionStats.total++;
           
-          const campaignId = meta.campaignId || '';
-          const campaignName = campaignMap.get(campaignId) || 'Unknown Campaign';
+          let creativeName = '';
+          let resolutionSource = '';
           
-          // Fallback name if batch lookup failed
-          if (!creativeName) {
+          // Priority 1: Legacy API name
+          if (meta.name && meta.source === 'legacy_api') {
+            creativeName = meta.name;
+            resolutionSource = 'legacy_api';
+            resolutionStats.legacyApi++;
+          }
+          // Priority 2: Versioned API fallback
+          else if (versionedNames.has(creativeId)) {
+            creativeName = versionedNames.get(creativeId)!;
+            resolutionSource = 'versioned_api_fallback';
+            resolutionStats.versionedApiFallback++;
+          }
+          // Priority 3: Placeholder with campaign context
+          else {
+            const campaignName = campaignMap.get(meta.campaignId) || 'Unknown Campaign';
             creativeName = `${campaignName} - Creative ${creativeId}`;
-            unresolvedCount++;
+            resolutionSource = 'placeholder';
+            resolutionStats.placeholder++;
           }
           
-          // Get analytics data if available, otherwise use zeros
+          const campaignName = campaignMap.get(meta.campaignId) || 'Unknown Campaign';
           const metrics = analyticsMap.get(creativeId) || { impressions: 0, clicks: 0, spent: 0, spentUsd: 0, leads: 0 };
-          
-          if (metrics.impressions > 0 || metrics.spent > 0) {
-            creativesWithData++;
-          }
           
           const ctr = metrics.impressions > 0 ? (metrics.clicks / metrics.impressions) * 100 : 0;
           const cpc = metrics.clicks > 0 ? metrics.spent / metrics.clicks : 0;
@@ -521,13 +627,23 @@ serve(async (req) => {
             ctr: ctr.toFixed(2),
             cpc: cpc.toFixed(2),
             cpm: cpm.toFixed(2),
+            _resolutionSource: resolutionSource, // Internal tracking field
           });
         });
 
         // Sort by spend descending
         reportElements.sort((a, b) => parseFloat(b.costInLocalCurrency) - parseFloat(a.costInLocalCurrency));
         
-        console.log(`[get_creative_report] Complete. Total: ${reportElements.length}, with data: ${creativesWithData}, unresolved: ${unresolvedCount}`);
+        // Log resolution statistics
+        console.log('[Resolution Stats] Creative name resolution breakdown:');
+        console.log(`  - Legacy API (adCreativesV2): ${resolutionStats.legacyApi}`);
+        console.log(`  - Versioned API fallback: ${resolutionStats.versionedApiFallback}`);
+        console.log(`  - Placeholder (unresolved): ${resolutionStats.placeholder}`);
+        console.log(`  - Total creatives: ${resolutionStats.total}`);
+        
+        const creativesWithData = reportElements.filter(r => r.impressions > 0 || parseFloat(r.costInLocalCurrency) > 0).length;
+        
+        console.log(`[get_creative_report] Complete. Total: ${reportElements.length}, with data: ${creativesWithData}`);
         
         return new Response(JSON.stringify({ 
           elements: reportElements,
@@ -537,7 +653,7 @@ serve(async (req) => {
             timeGranularity: granularity,
             totalCreatives: reportElements.length,
             creativesWithData,
-            unresolvedCount,
+            resolutionStats,
           }
         }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
