@@ -320,26 +320,21 @@ serve(async (req) => {
       }
 
       case 'get_creative_report': {
-        // Uses LinkedIn REST API (version 202411) to fetch creative-level analytics with proper name resolution
+        // Fetches creative-level analytics using v2 API for campaigns/analytics
+        // and REST API (v202411) for creatives metadata to get the `name` field
         const { accountId, dateRange, timeGranularity } = params || {};
         const startDate = dateRange?.start || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
         const endDate = dateRange?.end || new Date().toISOString().split('T')[0];
         const granularity = timeGranularity || 'ALL';
         
-        // Standard REST API headers for LinkedIn Marketing API v202411
-        const restHeaders = {
-          'Authorization': `Bearer ${accessToken}`,
-          'LinkedIn-Version': '202411',
-          'X-Restli-Protocol-Version': '2.0.0',
-        };
-        
         console.log(`[get_creative_report] Starting for account ${accountId}, date range: ${startDate} to ${endDate}, granularity: ${granularity}`);
 
-        // Step 1: Fetch campaigns using REST API
-        console.log('[Step 1] Fetching campaigns via /rest/adCampaigns...');
-        const campaignsUrl = `https://api.linkedin.com/rest/adCampaigns?q=search&search=(account:(values:List(urn:li:sponsoredAccount:${accountId})))&count=100`;
-        
-        const campaignsResponse = await fetch(campaignsUrl, { headers: restHeaders });
+        // Step 1: Fetch campaigns using v2 API (stable and works)
+        console.log('[Step 1] Fetching campaigns via /v2/adCampaignsV2...');
+        const campaignsResponse = await fetch(
+          `https://api.linkedin.com/v2/adCampaignsV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=100`,
+          { headers: { 'Authorization': `Bearer ${accessToken}` } }
+        );
         
         if (!campaignsResponse.ok) {
           const errorText = await campaignsResponse.text();
@@ -373,26 +368,26 @@ serve(async (req) => {
           });
         }
 
-        // Step 2: Query Ad Analytics API with pivot=CREATIVE using REST format
-        console.log('[Step 2] Querying /rest/adAnalytics with pivot=CREATIVE...');
-        const startParts = startDate.split('-');
-        const endParts = endDate.split('-');
-        
-        // Build campaign URNs list for the query
-        const campaignUrns = campaignIds.slice(0, 20).map(id => `urn:li:sponsoredCampaign:${id}`);
-        const campaignsList = campaignUrns.join(',');
-        
-        const analyticsUrl = `https://api.linkedin.com/rest/adAnalytics?q=analytics&` +
-          `dateRange=(start:(year:${startParts[0]},month:${parseInt(startParts[1])},day:${parseInt(startParts[2])}),end:(year:${endParts[0]},month:${parseInt(endParts[1])},day:${parseInt(endParts[2])}))&` +
+        // Step 2: Query Ad Analytics API with pivot=CREATIVE using v2 API
+        console.log('[Step 2] Querying /v2/adAnalyticsV2 with pivot=CREATIVE...');
+        const analyticsUrl = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
+          `dateRange.start.day=${new Date(startDate).getDate()}&` +
+          `dateRange.start.month=${new Date(startDate).getMonth() + 1}&` +
+          `dateRange.start.year=${new Date(startDate).getFullYear()}&` +
+          `dateRange.end.day=${new Date(endDate).getDate()}&` +
+          `dateRange.end.month=${new Date(endDate).getMonth() + 1}&` +
+          `dateRange.end.year=${new Date(endDate).getFullYear()}&` +
           `timeGranularity=${granularity === 'ALL' ? 'ALL' : granularity}&` +
           `pivot=CREATIVE&` +
-          `accounts=List(urn:li:sponsoredAccount:${accountId})&` +
-          `campaigns=List(${campaignsList})&` +
-          `fields=impressions,clicks,costInLocalCurrency,costInUsd,externalWebsiteConversions,oneClickLeads,pivotValues&` +
-          `count=500`;
+          `accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
+          `fields=impressions,clicks,costInLocalCurrency,costInUsd,externalWebsiteConversions,oneClickLeads,pivotValue&` +
+          `count=500&` +
+          campaignIds.slice(0, 20).map((id: string, i: number) => `campaigns[${i}]=urn:li:sponsoredCampaign:${id}`).join('&');
 
-        console.log('[Step 2] Analytics URL:', analyticsUrl);
-        const analyticsResponse = await fetch(analyticsUrl, { headers: restHeaders });
+        console.log('[Step 2] Fetching analytics...');
+        const analyticsResponse = await fetch(analyticsUrl, {
+          headers: { 'Authorization': `Bearer ${accessToken}` },
+        });
         
         if (!analyticsResponse.ok) {
           const errorText = await analyticsResponse.text();
@@ -403,11 +398,10 @@ serve(async (req) => {
         const analyticsData = await analyticsResponse.json();
         console.log(`[Step 2] Received ${analyticsData.elements?.length || 0} analytics records`);
 
-        // Aggregate analytics by creative URN - REST API uses pivotValues array
+        // Aggregate analytics by creative URN
         const analyticsMap = new Map<string, { impressions: number; clicks: number; spent: number; spentUsd: number; leads: number }>();
         (analyticsData.elements || []).forEach((el: any) => {
-          // REST API returns pivotValues as an array
-          const creativeUrn = el.pivotValues?.[0] || el.pivotValue || '';
+          const creativeUrn = el.pivotValue || '';
           const creativeId = creativeUrn.split(':').pop() || '';
           if (!creativeId) return;
           
@@ -422,23 +416,54 @@ serve(async (req) => {
         });
         console.log(`[Step 2] Aggregated ${analyticsMap.size} unique creatives with analytics`);
 
-        // Step 4: Fetch ALL creatives using REST API to get names (the `name` field is available in v202410+)
-        console.log('[Step 4] Fetching creatives via /rest/creatives for name resolution...');
-        const creativesUrl = `https://api.linkedin.com/rest/creatives?q=search&search=(account:(values:List(urn:li:sponsoredAccount:${accountId})))&count=500`;
+        // Step 3: Fetch creatives using REST API (v202411) to get the `name` field
+        console.log('[Step 3] Fetching creatives via /rest/creatives for name resolution...');
+        const restHeaders = {
+          'Authorization': `Bearer ${accessToken}`,
+          'LinkedIn-Version': '202411',
+          'X-Restli-Protocol-Version': '2.0.0',
+        };
         
-        const creativesResponse = await fetch(creativesUrl, { headers: restHeaders });
+        // Try REST API first for name field, fallback to v2 if it fails
+        let creativesData: any = { elements: [] };
+        let usedRestApi = false;
         
-        if (!creativesResponse.ok) {
-          const errorText = await creativesResponse.text();
-          console.error('[Error] Failed to fetch creatives:', creativesResponse.status, errorText);
-          throw new Error(`Failed to fetch creatives: ${creativesResponse.status}`);
+        try {
+          const creativesResponse = await fetch(
+            `https://api.linkedin.com/rest/creatives?q=criteria&account=urn:li:sponsoredAccount:${accountId}&count=500`,
+            { headers: restHeaders }
+          );
+          
+          if (creativesResponse.ok) {
+            creativesData = await creativesResponse.json();
+            usedRestApi = true;
+            console.log(`[Step 3] REST API: Fetched ${creativesData.elements?.length || 0} creatives`);
+          } else {
+            console.log(`[Step 3] REST API returned ${creativesResponse.status}, falling back to v2...`);
+          }
+        } catch (restErr) {
+          console.log(`[Step 3] REST API error: ${restErr}, falling back to v2...`);
         }
         
-        const creativesData = await creativesResponse.json();
-        console.log(`[Step 4] Fetched ${creativesData.elements?.length || 0} creative metadata records`);
+        // Fallback to v2 API if REST API failed
+        if (!usedRestApi || !creativesData.elements?.length) {
+          const v2CreativesResponse = await fetch(
+            `https://api.linkedin.com/v2/adCreativesV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=500`,
+            { headers: { 'Authorization': `Bearer ${accessToken}` } }
+          );
+          
+          if (v2CreativesResponse.ok) {
+            creativesData = await v2CreativesResponse.json();
+            console.log(`[Step 3] v2 API: Fetched ${creativesData.elements?.length || 0} creatives`);
+          } else {
+            console.error('[Step 3] Both REST and v2 APIs failed for creatives');
+          }
+        }
 
-        // Step 5: Build creative ID → metadata lookup with name extraction
-        console.log('[Step 5] Building creative ID → name lookup...');
+        console.log(`[Step 3] Total creatives fetched: ${creativesData.elements?.length || 0}`);
+
+        // Step 4: Build creative ID → metadata lookup with name extraction
+        console.log('[Step 4] Building creative ID → name lookup...');
         const creativeMetadataMap = new Map<string, { name: string; campaignId: string; campaignName: string; status: string; type: string }>();
         const unresolvedCreatives: string[] = [];
         
