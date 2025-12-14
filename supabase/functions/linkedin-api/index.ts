@@ -672,13 +672,70 @@ serve(async (req) => {
               }
             }
           }
+        } else if (selectedPivot === 'MEMBER_JOB_TITLE') {
+          // Resolve job title URNs using LinkedIn Titles API
+          // Format: urn:li:title:X -> call /v2/titles/{X}?locale=en_US
+          const titleIds: string[] = [];
+          entityUrns.forEach(urn => {
+            const match = urn.match(/^urn:li:title:(\d+)$/);
+            if (match) {
+              titleIds.push(match[1]);
+            } else {
+              // Plain text or unknown format - use as-is
+              entityNames.set(urn, urn || 'Unknown Job Title');
+            }
+          });
+          
+          console.log(`[get_demographic_analytics] Resolving ${titleIds.length} job title URNs`);
+          
+          // Batch lookup titles (LinkedIn doesn't have a batch endpoint, so we parallelize)
+          const batchSize = 20;
+          for (let i = 0; i < titleIds.length; i += batchSize) {
+            const batch = titleIds.slice(i, i + batchSize);
+            
+            const titlePromises = batch.map(async (titleId) => {
+              try {
+              const titleResponse = await fetch(
+                  `https://api.linkedin.com/v2/titles/${titleId}?locale=en_US`,
+                  { headers: { 'Authorization': `Bearer ${accessToken}` } }
+                );
+                
+                if (titleResponse.ok) {
+                  const titleData = await titleResponse.json();
+                  // Extract localized name: name.localized.en_US
+                  let localizedName: string | null = null;
+                  if (titleData?.name?.localized?.en_US) {
+                    localizedName = titleData.name.localized.en_US;
+                  } else if (titleData?.name?.localized) {
+                    // Try first available locale
+                    const locales = Object.values(titleData.name.localized);
+                    if (locales.length > 0 && typeof locales[0] === 'string') {
+                      localizedName = locales[0];
+                    }
+                  }
+                  return { 
+                    urn: `urn:li:title:${titleId}`, 
+                    name: localizedName || `Title ${titleId}` 
+                  };
+                } else {
+                  console.log(`[Warning] Title lookup failed for ${titleId}: ${titleResponse.status}`);
+                  return { urn: `urn:li:title:${titleId}`, name: `Title ${titleId}` };
+                }
+              } catch (e) {
+                console.log(`[Warning] Title lookup error for ${titleId}:`, e);
+                return { urn: `urn:li:title:${titleId}`, name: `Title ${titleId}` };
+              }
+            });
+            
+            const results = await Promise.all(titlePromises);
+            results.forEach((result) => {
+              entityNames.set(result.urn, result.name);
+            });
+          }
         } else {
           // For other pivots, extract human-readable name from URN or use as-is
           entityUrns.forEach(urn => {
-            // MEMBER_JOB_TITLE returns plain text strings, not URNs
-            if (selectedPivot === 'MEMBER_JOB_TITLE') {
-              entityNames.set(urn, urn || 'Unknown Job Title');
-            } else if (urn.includes(':')) {
+            if (urn.includes(':')) {
               // URN format like "urn:li:function:1"
               entityNames.set(urn, formatPivotValue(urn, selectedPivot));
             } else {
