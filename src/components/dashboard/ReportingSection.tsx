@@ -3,12 +3,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { RefreshCw, FileBarChart, Image, Users, Target, Megaphone, Building2, PieChart } from 'lucide-react';
-import { useCreativeReporting, TimeFrameOption, TimeGranularity } from '@/hooks/useCreativeReporting';
-import { useAdReporting, TimeFrameOption as AdTimeFrameOption } from '@/hooks/useAdReporting';
+import { RefreshCw, FileBarChart, Users, Target, Megaphone, Building2, PieChart } from 'lucide-react';
+import { useAdReporting, TimeFrameOption as AdTimeFrameOption, TimeGranularity } from '@/hooks/useAdReporting';
 import { useCompanyIntelligence, LookbackWindow } from '@/hooks/useCompanyIntelligence';
 import { useDemographicReporting, TimeFrameOption as DemoTimeFrameOption, DemographicPivot, DEMOGRAPHIC_PIVOT_OPTIONS } from '@/hooks/useDemographicReporting';
-import { CreativeReportingTable } from './CreativeReportingTable';
 import { AdReportingTable } from './AdReportingTable';
 import { CompanyIntelligenceTable } from './CompanyIntelligenceTable';
 import { DemographicTable } from './DemographicTable';
@@ -21,7 +19,6 @@ interface ReportingSectionProps {
 }
 
 export function ReportingSection({ accessToken, selectedAccount }: ReportingSectionProps) {
-  const creativeReporting = useCreativeReporting(accessToken);
   const adReporting = useAdReporting(accessToken);
   const companyIntelligence = useCompanyIntelligence(accessToken);
   const demographicReporting = useDemographicReporting(accessToken);
@@ -31,9 +28,7 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
 
   useEffect(() => {
     if (selectedAccount) {
-      if (reportType === 'creatives') {
-        creativeReporting.fetchCreativeAnalytics(selectedAccount);
-      } else if (reportType === 'ads') {
+      if (reportType === 'ads') {
         adReporting.fetchAdAnalytics(selectedAccount);
       } else if (reportType === 'companies') {
         companyIntelligence.fetchCompanyIntelligence(selectedAccount);
@@ -43,12 +38,6 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
     }
   }, [selectedAccount, reportType]);
 
-  // Re-fetch when time/granularity changes for creatives
-  useEffect(() => {
-    if (selectedAccount && reportType === 'creatives') {
-      creativeReporting.fetchCreativeAnalytics(selectedAccount);
-    }
-  }, [creativeReporting.dateRange, creativeReporting.timeGranularity]);
 
   // Re-fetch when time/granularity changes for ads
   useEffect(() => {
@@ -71,10 +60,6 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
     }
   }, [demographicReporting.dateRange, demographicReporting.timeGranularity, demographicReporting.pivot]);
 
-  const handleCreativeTimeFrameChange = (option: TimeFrameOption) => {
-    setSelectedTimeFrame(option.value);
-    creativeReporting.setTimeFrame(option);
-  };
 
   const handleAdTimeFrameChange = (option: AdTimeFrameOption) => {
     setSelectedTimeFrame(option.value);
@@ -88,9 +73,7 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
 
   const handleRefresh = () => {
     if (selectedAccount) {
-      if (reportType === 'creatives') {
-        creativeReporting.fetchCreativeAnalytics(selectedAccount);
-      } else if (reportType === 'ads') {
+      if (reportType === 'ads') {
         adReporting.fetchAdAnalytics(selectedAccount);
       } else if (reportType === 'companies') {
         companyIntelligence.fetchCompanyIntelligence(selectedAccount);
@@ -101,25 +84,9 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
   };
 
   const isLoading = 
-    reportType === 'creatives' ? creativeReporting.isLoading : 
     reportType === 'ads' ? adReporting.isLoading :
     reportType === 'companies' ? companyIntelligence.isLoading : 
     reportType === 'demographics' ? demographicReporting.isLoading : false;
-
-  // Calculate summary metrics for creatives
-  const creativeTotals = creativeReporting.aggregatedData.reduce(
-    (acc, item) => ({
-      impressions: acc.impressions + item.impressions,
-      clicks: acc.clicks + item.clicks,
-      spent: acc.spent + item.spent,
-      leads: acc.leads + item.leads,
-    }),
-    { impressions: 0, clicks: 0, spent: 0, leads: 0 }
-  );
-
-  const creativeAvgCtr = creativeTotals.impressions > 0 
-    ? ((creativeTotals.clicks / creativeTotals.impressions) * 100).toFixed(2) 
-    : '0.00';
 
   // Calculate summary metrics for ads
   const adTotals = adReporting.aggregatedData.reduce(
@@ -171,10 +138,6 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
           <TabsTrigger value="ads" className="gap-2">
             <Megaphone className="h-4 w-4" />
             Ads
-          </TabsTrigger>
-          <TabsTrigger value="creatives" className="gap-2">
-            <Image className="h-4 w-4" />
-            Creatives
           </TabsTrigger>
           <TabsTrigger value="companies" className="gap-2">
             <Building2 className="h-4 w-4" />
@@ -265,64 +228,6 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
           </Card>
         </TabsContent>
 
-        {/* Creatives Tab */}
-        <TabsContent value="creatives" className="space-y-6 mt-6">
-          <Card className="bg-card/50 backdrop-blur-sm border-border/50">
-            <CardContent className="pt-4">
-              <TimeFrameSelector
-                timeFrameOptions={creativeReporting.timeFrameOptions}
-                selectedTimeFrame={selectedTimeFrame}
-                onTimeFrameChange={handleCreativeTimeFrameChange}
-                timeGranularity={creativeReporting.timeGranularity}
-                onGranularityChange={creativeReporting.setTimeGranularity}
-                dateRange={creativeReporting.dateRange}
-              />
-            </CardContent>
-          </Card>
-
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-            <MetricCard
-              title="Total Impressions"
-              value={creativeTotals.impressions.toLocaleString()}
-              icon={FileBarChart}
-            />
-            <MetricCard
-              title="Total Clicks"
-              value={creativeTotals.clicks.toLocaleString()}
-              icon={FileBarChart}
-            />
-            <MetricCard
-              title="Total Spent"
-              value={`$${creativeTotals.spent.toFixed(2)}`}
-              icon={FileBarChart}
-            />
-            <MetricCard
-              title="Total Leads"
-              value={creativeTotals.leads.toLocaleString()}
-              icon={FileBarChart}
-            />
-            <MetricCard
-              title="Avg CTR"
-              value={`${creativeAvgCtr}%`}
-              icon={FileBarChart}
-            />
-          </div>
-
-          <Card className="bg-card/50 backdrop-blur-sm border-border/50">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Image className="h-5 w-5 text-primary" />
-                Creative Performance
-              </CardTitle>
-              <CardDescription>
-                Aggregated performance data by creative name
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <CreativeReportingTable data={creativeReporting.aggregatedData} isLoading={creativeReporting.isLoading} />
-            </CardContent>
-          </Card>
-        </TabsContent>
 
         {/* Companies Tab */}
         <TabsContent value="companies" className="space-y-6 mt-6">
