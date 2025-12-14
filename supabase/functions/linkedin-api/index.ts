@@ -354,7 +354,7 @@ serve(async (req) => {
           });
         }
 
-        // Build analytics URL with pagination support
+        // Build analytics URL with pagination support - must include accounts parameter
         const analyticsUrl = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
           `dateRange.start.day=${new Date(startDate).getDate()}&` +
           `dateRange.start.month=${new Date(startDate).getMonth() + 1}&` +
@@ -364,6 +364,7 @@ serve(async (req) => {
           `dateRange.end.year=${new Date(endDate).getFullYear()}&` +
           `timeGranularity=${granularity === 'ALL' ? 'ALL' : granularity}&` +
           `pivot=CREATIVE&` +
+          `accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
           `fields=impressions,clicks,costInLocalCurrency,costInUsd,externalWebsiteConversions,oneClickLeads,pivotValue&` +
           `count=500&` +
           campaignIds.slice(0, 20).map((id: string, i: number) => `campaigns[${i}]=urn:li:sponsoredCampaign:${id}`).join('&');
