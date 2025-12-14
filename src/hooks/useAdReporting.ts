@@ -3,10 +3,11 @@ import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 
 export interface AdAnalytics {
-  creativeUrn: string;
+  adId: string;
   adName: string;
-  campaignUrn: string;
+  campaignName: string;
   status: string;
+  type: string;
   impressions: number;
   clicks: number;
   spent: number;
@@ -17,8 +18,11 @@ export interface AdAnalytics {
 }
 
 export interface AggregatedAdData {
+  adId: string;
   name: string;
-  campaignUrn: string;
+  campaignName: string;
+  status: string;
+  type: string;
   impressions: number;
   clicks: number;
   spent: number;
@@ -126,10 +130,11 @@ export function useAdReporting(accessToken: string | null) {
       
       // Map API response to AdAnalytics interface
       const analyticsData: AdAnalytics[] = (data.elements || []).map((el: any) => ({
-        creativeUrn: el.creativeUrn || '',
-        adName: el.adName || `Ad ${el.creativeUrn?.split(':').pop() || 'Unknown'}`,
-        campaignUrn: el.campaignUrn || '',
+        adId: el.adId || '',
+        adName: el.adName || `Ad ${el.adId || 'Unknown'}`,
+        campaignName: el.campaignName || 'Unknown Campaign',
         status: el.status || 'UNKNOWN',
+        type: el.type || 'UNKNOWN',
         impressions: el.impressions || 0,
         clicks: el.clicks || 0,
         spent: parseFloat(el.costInLocalCurrency || '0'),
@@ -152,11 +157,14 @@ export function useAdReporting(accessToken: string | null) {
     }
   }, [accessToken, dateRange, timeGranularity, toast]);
 
-  // Aggregate data by ad name
+  // Map data to aggregated format
   const aggregatedData = useMemo((): AggregatedAdData[] => {
     return adAnalytics.map((item) => ({
+      adId: item.adId,
       name: item.adName,
-      campaignUrn: item.campaignUrn,
+      campaignName: item.campaignName,
+      status: item.status,
+      type: item.type,
       impressions: item.impressions,
       clicks: item.clicks,
       spent: item.spent,
