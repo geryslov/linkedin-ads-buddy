@@ -3,12 +3,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { RefreshCw, FileBarChart, Users, Target, Megaphone, Building2, PieChart, Globe } from 'lucide-react';
-import { useAdReporting, TimeFrameOption as AdTimeFrameOption, TimeGranularity } from '@/hooks/useAdReporting';
+import { RefreshCw, FileBarChart, Users, Target, Building2, PieChart, Globe } from 'lucide-react';
 import { useCompanyIntelligence, LookbackWindow } from '@/hooks/useCompanyIntelligence';
-import { useDemographicReporting, TimeFrameOption as DemoTimeFrameOption, DemographicPivot, DEMOGRAPHIC_PIVOT_OPTIONS } from '@/hooks/useDemographicReporting';
+import { useDemographicReporting, TimeFrameOption as DemoTimeFrameOption, TimeGranularity, DemographicPivot, DEMOGRAPHIC_PIVOT_OPTIONS } from '@/hooks/useDemographicReporting';
 import { useCompanyDemographic, TimeFrameOption as CompanyDemoTimeFrameOption } from '@/hooks/useCompanyDemographic';
-import { AdReportingTable } from './AdReportingTable';
 import { CompanyIntelligenceTable } from './CompanyIntelligenceTable';
 import { DemographicTable } from './DemographicTable';
 import { CompanyDemographicTable } from './CompanyDemographicTable';
@@ -21,19 +19,16 @@ interface ReportingSectionProps {
 }
 
 export function ReportingSection({ accessToken, selectedAccount }: ReportingSectionProps) {
-  const adReporting = useAdReporting(accessToken);
   const companyIntelligence = useCompanyIntelligence(accessToken);
   const demographicReporting = useDemographicReporting(accessToken);
   const companyDemographic = useCompanyDemographic(accessToken);
 
   const [selectedTimeFrame, setSelectedTimeFrame] = useState('30d');
-  const [reportType, setReportType] = useState('ads');
+  const [reportType, setReportType] = useState('companies');
 
   useEffect(() => {
     if (selectedAccount) {
-      if (reportType === 'ads') {
-        adReporting.fetchAdAnalytics(selectedAccount);
-      } else if (reportType === 'companies') {
+      if (reportType === 'companies') {
         companyIntelligence.fetchCompanyIntelligence(selectedAccount);
       } else if (reportType === 'demographics') {
         demographicReporting.fetchDemographicAnalytics(selectedAccount);
@@ -42,14 +37,6 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
       }
     }
   }, [selectedAccount, reportType]);
-
-
-  // Re-fetch when time/granularity changes for ads
-  useEffect(() => {
-    if (selectedAccount && reportType === 'ads') {
-      adReporting.fetchAdAnalytics(selectedAccount);
-    }
-  }, [adReporting.dateRange, adReporting.timeGranularity]);
 
   // Re-fetch when lookback window changes for companies
   useEffect(() => {
@@ -72,12 +59,6 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
     }
   }, [companyDemographic.dateRange, companyDemographic.timeGranularity]);
 
-
-  const handleAdTimeFrameChange = (option: AdTimeFrameOption) => {
-    setSelectedTimeFrame(option.value);
-    adReporting.setTimeFrame(option);
-  };
-
   const handleDemoTimeFrameChange = (option: DemoTimeFrameOption) => {
     setSelectedTimeFrame(option.value);
     demographicReporting.setTimeFrame(option);
@@ -90,9 +71,7 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
 
   const handleRefresh = () => {
     if (selectedAccount) {
-      if (reportType === 'ads') {
-        adReporting.fetchAdAnalytics(selectedAccount);
-      } else if (reportType === 'companies') {
+      if (reportType === 'companies') {
         companyIntelligence.fetchCompanyIntelligence(selectedAccount);
       } else if (reportType === 'demographics') {
         demographicReporting.fetchDemographicAnalytics(selectedAccount);
@@ -103,33 +82,9 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
   };
 
   const isLoading = 
-    reportType === 'ads' ? adReporting.isLoading :
     reportType === 'companies' ? companyIntelligence.isLoading : 
     reportType === 'demographics' ? demographicReporting.isLoading : 
     reportType === 'company_demo' ? companyDemographic.isLoading : false;
-
-  // Calculate summary metrics for ads
-  const adTotals = adReporting.aggregatedData.reduce(
-    (acc, item) => ({
-      impressions: acc.impressions + item.impressions,
-      clicks: acc.clicks + item.clicks,
-      spent: acc.spent + item.spent,
-      leads: acc.leads + item.leads,
-    }),
-    { impressions: 0, clicks: 0, spent: 0, leads: 0 }
-  );
-
-  const adAvgCtr = adTotals.impressions > 0 
-    ? ((adTotals.clicks / adTotals.impressions) * 100).toFixed(2) 
-    : '0.00';
-
-  const adAvgCpc = adTotals.clicks > 0 
-    ? (adTotals.spent / adTotals.clicks).toFixed(2) 
-    : '0.00';
-
-  const adAvgCpm = adTotals.impressions > 0 
-    ? ((adTotals.spent / adTotals.impressions) * 1000).toFixed(2) 
-    : '0.00';
 
   return (
     <div className="space-y-6">
@@ -155,10 +110,6 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
       {/* Report Type Tabs */}
       <Tabs value={reportType} onValueChange={setReportType}>
         <TabsList className="bg-muted/50">
-          <TabsTrigger value="ads" className="gap-2">
-            <Megaphone className="h-4 w-4" />
-            Ads
-          </TabsTrigger>
           <TabsTrigger value="companies" className="gap-2">
             <Building2 className="h-4 w-4" />
             Companies
@@ -182,76 +133,6 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
             <span className="text-xs text-muted-foreground">(Soon)</span>
           </TabsTrigger>
         </TabsList>
-
-        {/* Ads Tab */}
-        <TabsContent value="ads" className="space-y-6 mt-6">
-          <Card className="bg-card/50 backdrop-blur-sm border-border/50">
-            <CardContent className="pt-4">
-              <TimeFrameSelector
-                timeFrameOptions={adReporting.timeFrameOptions}
-                selectedTimeFrame={selectedTimeFrame}
-                onTimeFrameChange={handleAdTimeFrameChange}
-                timeGranularity={adReporting.timeGranularity}
-                onGranularityChange={adReporting.setTimeGranularity}
-                dateRange={adReporting.dateRange}
-              />
-            </CardContent>
-          </Card>
-
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
-            <MetricCard
-              title="Impressions"
-              value={adTotals.impressions.toLocaleString()}
-              icon={FileBarChart}
-            />
-            <MetricCard
-              title="Clicks"
-              value={adTotals.clicks.toLocaleString()}
-              icon={FileBarChart}
-            />
-            <MetricCard
-              title="Spent"
-              value={`$${adTotals.spent.toFixed(2)}`}
-              icon={FileBarChart}
-            />
-            <MetricCard
-              title="Leads"
-              value={adTotals.leads.toLocaleString()}
-              icon={FileBarChart}
-            />
-            <MetricCard
-              title="CTR"
-              value={`${adAvgCtr}%`}
-              icon={FileBarChart}
-            />
-            <MetricCard
-              title="CPC"
-              value={`$${adAvgCpc}`}
-              icon={FileBarChart}
-            />
-            <MetricCard
-              title="CPM"
-              value={`$${adAvgCpm}`}
-              icon={FileBarChart}
-            />
-          </div>
-
-          <Card className="bg-card/50 backdrop-blur-sm border-border/50">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Megaphone className="h-5 w-5 text-primary" />
-                Ad Performance
-              </CardTitle>
-              <CardDescription>
-                Performance metrics by ad name with campaign attribution
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <AdReportingTable data={adReporting.aggregatedData} isLoading={adReporting.isLoading} />
-            </CardContent>
-          </Card>
-        </TabsContent>
-
 
         {/* Companies Tab */}
         <TabsContent value="companies" className="space-y-6 mt-6">
@@ -433,10 +314,10 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <PieChart className="h-5 w-5 text-primary" />
-                Demographics by {DEMOGRAPHIC_PIVOT_OPTIONS.find(o => o.value === demographicReporting.pivot)?.label || 'Entity'}
+                Demographic Analytics
               </CardTitle>
               <CardDescription>
-                Ad performance broken down by {DEMOGRAPHIC_PIVOT_OPTIONS.find(o => o.value === demographicReporting.pivot)?.label.toLowerCase() || 'demographic'}
+                Ad performance breakdown by {DEMOGRAPHIC_PIVOT_OPTIONS.find(o => o.value === demographicReporting.pivot)?.label || 'demographic'}
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -464,7 +345,7 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
             </CardContent>
           </Card>
 
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
             <MetricCard
               title="Impressions"
               value={companyDemographic.totals.impressions.toLocaleString()}
@@ -486,13 +367,18 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
               icon={FileBarChart}
             />
             <MetricCard
-              title="Resolved"
-              value={companyDemographic.totals.resolved.toLocaleString()}
-              icon={Globe}
+              title="Avg CTR"
+              value={`${companyDemographic.totals.impressions > 0 ? ((companyDemographic.totals.clicks / companyDemographic.totals.impressions) * 100).toFixed(2) : '0.00'}%`}
+              icon={FileBarChart}
             />
             <MetricCard
-              title="Unresolved"
-              value={companyDemographic.totals.unresolved.toLocaleString()}
+              title="Avg CPC"
+              value={`$${companyDemographic.totals.clicks > 0 ? (companyDemographic.totals.spent / companyDemographic.totals.clicks).toFixed(2) : '0.00'}`}
+              icon={FileBarChart}
+            />
+            <MetricCard
+              title="Avg CPM"
+              value={`$${companyDemographic.totals.impressions > 0 ? ((companyDemographic.totals.spent / companyDemographic.totals.impressions) * 1000).toFixed(2) : '0.00'}`}
               icon={FileBarChart}
             />
           </div>
@@ -503,9 +389,6 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
                 <p className="text-sm text-destructive">
                   <strong>Note:</strong> {companyDemographic.error}
                 </p>
-                <p className="text-xs text-muted-foreground mt-2">
-                  The MEMBER_COMPANY pivot may require additional permissions or may not be available for all accounts.
-                </p>
               </CardContent>
             </Card>
           )}
@@ -514,10 +397,10 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Globe className="h-5 w-5 text-primary" />
-                Company Demographics with Website Enrichment
+                Company Demographic with Website Enrichment
               </CardTitle>
               <CardDescription>
-                Companies that have seen your ads, enriched with website data from LinkedIn Organization API
+                Company-level ad performance with enriched website URLs from LinkedIn organization data
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -525,6 +408,31 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
                 data={companyDemographic.companyData} 
                 isLoading={companyDemographic.isLoading}
               />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Coming Soon Tabs */}
+        <TabsContent value="campaigns" className="mt-6">
+          <Card className="bg-card/50 backdrop-blur-sm border-border/50">
+            <CardContent className="py-12 text-center">
+              <Target className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+              <h3 className="text-lg font-semibold mb-2">Campaign Reports Coming Soon</h3>
+              <p className="text-muted-foreground">
+                Campaign-level analytics and performance tracking will be available in a future update.
+              </p>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="audiences" className="mt-6">
+          <Card className="bg-card/50 backdrop-blur-sm border-border/50">
+            <CardContent className="py-12 text-center">
+              <Users className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+              <h3 className="text-lg font-semibold mb-2">Audience Reports Coming Soon</h3>
+              <p className="text-muted-foreground">
+                Audience insights and segment analysis will be available in a future update.
+              </p>
             </CardContent>
           </Card>
         </TabsContent>
