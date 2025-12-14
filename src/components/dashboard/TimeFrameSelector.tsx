@@ -7,7 +7,7 @@ import {
 } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { Calendar } from 'lucide-react';
-import { TimeFrameOption, TimeGranularity } from '@/hooks/useAdReporting';
+import { TimeFrameOption, TimeGranularity } from '@/hooks/useDemographicReporting';
 
 interface TimeFrameSelectorProps {
   timeFrameOptions: TimeFrameOption[];
