@@ -7,7 +7,7 @@ import { RefreshCw, FileBarChart, Image, Users, Target, Megaphone, Building2, Pi
 import { useCreativeReporting, TimeFrameOption, TimeGranularity } from '@/hooks/useCreativeReporting';
 import { useAdReporting, TimeFrameOption as AdTimeFrameOption } from '@/hooks/useAdReporting';
 import { useCompanyIntelligence, LookbackWindow } from '@/hooks/useCompanyIntelligence';
-import { useDemographicReporting, TimeFrameOption as DemoTimeFrameOption } from '@/hooks/useDemographicReporting';
+import { useDemographicReporting, TimeFrameOption as DemoTimeFrameOption, DemographicPivot, DEMOGRAPHIC_PIVOT_OPTIONS } from '@/hooks/useDemographicReporting';
 import { CreativeReportingTable } from './CreativeReportingTable';
 import { AdReportingTable } from './AdReportingTable';
 import { CompanyIntelligenceTable } from './CompanyIntelligenceTable';
@@ -64,12 +64,12 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
     }
   }, [companyIntelligence.lookbackWindow]);
 
-  // Re-fetch when time/granularity changes for demographics
+  // Re-fetch when time/granularity/pivot changes for demographics
   useEffect(() => {
     if (selectedAccount && reportType === 'demographics') {
       demographicReporting.fetchDemographicAnalytics(selectedAccount);
     }
-  }, [demographicReporting.dateRange, demographicReporting.timeGranularity]);
+  }, [demographicReporting.dateRange, demographicReporting.timeGranularity, demographicReporting.pivot]);
 
   const handleCreativeTimeFrameChange = (option: TimeFrameOption) => {
     setSelectedTimeFrame(option.value);
@@ -420,14 +420,32 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
         <TabsContent value="demographics" className="space-y-6 mt-6">
           <Card className="bg-card/50 backdrop-blur-sm border-border/50">
             <CardContent className="pt-4">
-              <TimeFrameSelector
-                timeFrameOptions={demographicReporting.timeFrameOptions}
-                selectedTimeFrame={selectedTimeFrame}
-                onTimeFrameChange={handleDemoTimeFrameChange}
-                timeGranularity={demographicReporting.timeGranularity as TimeGranularity}
-                onGranularityChange={(g: TimeGranularity) => demographicReporting.setTimeGranularity(g as any)}
-                dateRange={demographicReporting.dateRange}
-              />
+              <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium">Pivot By:</span>
+                  <Select 
+                    value={demographicReporting.pivot} 
+                    onValueChange={(v) => demographicReporting.setPivot(v as DemographicPivot)}
+                  >
+                    <SelectTrigger className="w-[160px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {DEMOGRAPHIC_PIVOT_OPTIONS.map(opt => (
+                        <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <TimeFrameSelector
+                  timeFrameOptions={demographicReporting.timeFrameOptions}
+                  selectedTimeFrame={selectedTimeFrame}
+                  onTimeFrameChange={handleDemoTimeFrameChange}
+                  timeGranularity={demographicReporting.timeGranularity as TimeGranularity}
+                  onGranularityChange={(g: TimeGranularity) => demographicReporting.setTimeGranularity(g as any)}
+                  dateRange={demographicReporting.dateRange}
+                />
+              </div>
             </CardContent>
           </Card>
 
@@ -486,16 +504,17 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <PieChart className="h-5 w-5 text-primary" />
-                Demographics by Company
+                Demographics by {DEMOGRAPHIC_PIVOT_OPTIONS.find(o => o.value === demographicReporting.pivot)?.label || 'Entity'}
               </CardTitle>
               <CardDescription>
-                Ad performance broken down by the companies of members who viewed your ads
+                Ad performance broken down by {DEMOGRAPHIC_PIVOT_OPTIONS.find(o => o.value === demographicReporting.pivot)?.label.toLowerCase() || 'demographic'}
               </CardDescription>
             </CardHeader>
             <CardContent>
               <DemographicTable 
                 data={demographicReporting.demographicData} 
-                isLoading={demographicReporting.isLoading} 
+                isLoading={demographicReporting.isLoading}
+                pivot={demographicReporting.pivot}
               />
             </CardContent>
           </Card>

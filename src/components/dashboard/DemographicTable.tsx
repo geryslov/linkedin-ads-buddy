@@ -9,22 +9,35 @@ import {
 } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { ArrowUpDown, Search, Building } from 'lucide-react';
+import { ArrowUpDown, Search, Building, Briefcase, Factory, Users, Globe } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
-import { CompanyDemographic } from '@/hooks/useDemographicReporting';
+import { DemographicItem, DemographicPivot } from '@/hooks/useDemographicReporting';
 
 interface DemographicTableProps {
-  data: CompanyDemographic[];
+  data: DemographicItem[];
   isLoading: boolean;
+  pivot: DemographicPivot;
 }
 
-type SortField = 'companyName' | 'impressions' | 'clicks' | 'spent' | 'leads' | 'ctr' | 'cpc' | 'cpm';
+type SortField = 'entityName' | 'impressions' | 'clicks' | 'spent' | 'leads' | 'ctr' | 'cpc' | 'cpm';
 type SortDirection = 'asc' | 'desc';
 
-export function DemographicTable({ data, isLoading }: DemographicTableProps) {
+const PIVOT_LABELS: Record<DemographicPivot, { singular: string; plural: string; icon: typeof Building }> = {
+  MEMBER_COMPANY: { singular: 'Company', plural: 'companies', icon: Building },
+  MEMBER_JOB_TITLE: { singular: 'Job Title', plural: 'job titles', icon: Briefcase },
+  MEMBER_JOB_FUNCTION: { singular: 'Job Function', plural: 'job functions', icon: Users },
+  MEMBER_INDUSTRY: { singular: 'Industry', plural: 'industries', icon: Factory },
+  MEMBER_SENIORITY: { singular: 'Seniority', plural: 'seniority levels', icon: Users },
+  MEMBER_COUNTRY: { singular: 'Country', plural: 'countries', icon: Globe },
+};
+
+export function DemographicTable({ data, isLoading, pivot }: DemographicTableProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [sortField, setSortField] = useState<SortField>('impressions');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+
+  const pivotInfo = PIVOT_LABELS[pivot];
+  const IconComponent = pivotInfo.icon;
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -41,7 +54,7 @@ export function DemographicTable({ data, isLoading }: DemographicTableProps) {
     if (searchQuery) {
       const query = searchQuery.toLowerCase();
       filtered = data.filter(item => 
-        item.companyName.toLowerCase().includes(query)
+        item.entityName.toLowerCase().includes(query)
       );
     }
     
@@ -91,14 +104,14 @@ export function DemographicTable({ data, isLoading }: DemographicTableProps) {
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
-            placeholder="Search companies..."
+            placeholder={`Search ${pivotInfo.plural}...`}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="pl-9"
           />
         </div>
         <span className="text-sm text-muted-foreground">
-          {filteredAndSortedData.length} companies
+          {filteredAndSortedData.length} {pivotInfo.plural}
         </span>
       </div>
 
@@ -107,7 +120,7 @@ export function DemographicTable({ data, isLoading }: DemographicTableProps) {
           <TableHeader>
             <TableRow className="bg-muted/30 hover:bg-muted/30">
               <TableHead className="w-[280px]">
-                <SortButton field="companyName">Company Name</SortButton>
+                <SortButton field="entityName">{pivotInfo.singular}</SortButton>
               </TableHead>
               <TableHead className="text-right">
                 <SortButton field="impressions">Impressions</SortButton>
@@ -137,19 +150,19 @@ export function DemographicTable({ data, isLoading }: DemographicTableProps) {
               <TableRow>
                 <TableCell colSpan={8} className="h-24 text-center text-muted-foreground">
                   <div className="flex flex-col items-center gap-2">
-                    <Building className="h-8 w-8 opacity-50" />
+                    <IconComponent className="h-8 w-8 opacity-50" />
                     <span>No demographic data available</span>
                   </div>
                 </TableCell>
               </TableRow>
             ) : (
               filteredAndSortedData.map((item, index) => (
-                <TableRow key={item.companyUrn || index} className="hover:bg-muted/20">
+                <TableRow key={item.entityUrn || index} className="hover:bg-muted/20">
                   <TableCell className="font-medium">
                     <div className="flex items-center gap-2">
-                      <Building className="h-4 w-4 text-muted-foreground" />
-                      <span className="truncate max-w-[240px]" title={item.companyName}>
-                        {item.companyName}
+                      <IconComponent className="h-4 w-4 text-muted-foreground" />
+                      <span className="truncate max-w-[240px]" title={item.entityName}>
+                        {item.entityName}
                       </span>
                     </div>
                   </TableCell>
