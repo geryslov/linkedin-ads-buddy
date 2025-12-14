@@ -261,7 +261,7 @@ serve(async (req) => {
           `dateRange.end.year=${new Date(endDate).getFullYear()}&` +
           `timeGranularity=${granularity === 'ALL' ? 'ALL' : granularity}&` +
           `pivot=CREATIVE&` +
-          `fields=impressions,clicks,costInLocalCurrency,costInUsd,conversions,externalWebsiteConversions,oneClickLeads,pivotValue&` +
+          `fields=impressions,clicks,costInLocalCurrency,costInUsd,externalWebsiteConversions,oneClickLeads,pivotValue&` +
           `count=500&` +
           campaignIds.slice(0, 20).map((id: string, i: number) => `campaigns[${i}]=urn:li:sponsoredCampaign:${id}`).join('&');
 
