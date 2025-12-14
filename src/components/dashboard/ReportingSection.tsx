@@ -3,13 +3,15 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { RefreshCw, FileBarChart, Image, Users, Target, Megaphone, Building2 } from 'lucide-react';
-import { useCreativeReporting, TimeFrameOption } from '@/hooks/useCreativeReporting';
+import { RefreshCw, FileBarChart, Image, Users, Target, Megaphone, Building2, PieChart } from 'lucide-react';
+import { useCreativeReporting, TimeFrameOption, TimeGranularity } from '@/hooks/useCreativeReporting';
 import { useAdReporting, TimeFrameOption as AdTimeFrameOption } from '@/hooks/useAdReporting';
 import { useCompanyIntelligence, LookbackWindow } from '@/hooks/useCompanyIntelligence';
+import { useDemographicReporting, TimeFrameOption as DemoTimeFrameOption } from '@/hooks/useDemographicReporting';
 import { CreativeReportingTable } from './CreativeReportingTable';
 import { AdReportingTable } from './AdReportingTable';
 import { CompanyIntelligenceTable } from './CompanyIntelligenceTable';
+import { DemographicTable } from './DemographicTable';
 import { TimeFrameSelector } from './TimeFrameSelector';
 import { MetricCard } from './MetricCard';
 
@@ -22,6 +24,7 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
   const creativeReporting = useCreativeReporting(accessToken);
   const adReporting = useAdReporting(accessToken);
   const companyIntelligence = useCompanyIntelligence(accessToken);
+  const demographicReporting = useDemographicReporting(accessToken);
 
   const [selectedTimeFrame, setSelectedTimeFrame] = useState('30d');
   const [reportType, setReportType] = useState('ads');
@@ -34,6 +37,8 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
         adReporting.fetchAdAnalytics(selectedAccount);
       } else if (reportType === 'companies') {
         companyIntelligence.fetchCompanyIntelligence(selectedAccount);
+      } else if (reportType === 'demographics') {
+        demographicReporting.fetchDemographicAnalytics(selectedAccount);
       }
     }
   }, [selectedAccount, reportType]);
@@ -59,6 +64,13 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
     }
   }, [companyIntelligence.lookbackWindow]);
 
+  // Re-fetch when time/granularity changes for demographics
+  useEffect(() => {
+    if (selectedAccount && reportType === 'demographics') {
+      demographicReporting.fetchDemographicAnalytics(selectedAccount);
+    }
+  }, [demographicReporting.dateRange, demographicReporting.timeGranularity]);
+
   const handleCreativeTimeFrameChange = (option: TimeFrameOption) => {
     setSelectedTimeFrame(option.value);
     creativeReporting.setTimeFrame(option);
@@ -69,6 +81,11 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
     adReporting.setTimeFrame(option);
   };
 
+  const handleDemoTimeFrameChange = (option: DemoTimeFrameOption) => {
+    setSelectedTimeFrame(option.value);
+    demographicReporting.setTimeFrame(option);
+  };
+
   const handleRefresh = () => {
     if (selectedAccount) {
       if (reportType === 'creatives') {
@@ -77,6 +94,8 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
         adReporting.fetchAdAnalytics(selectedAccount);
       } else if (reportType === 'companies') {
         companyIntelligence.fetchCompanyIntelligence(selectedAccount);
+      } else if (reportType === 'demographics') {
+        demographicReporting.fetchDemographicAnalytics(selectedAccount);
       }
     }
   };
@@ -84,7 +103,8 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
   const isLoading = 
     reportType === 'creatives' ? creativeReporting.isLoading : 
     reportType === 'ads' ? adReporting.isLoading :
-    reportType === 'companies' ? companyIntelligence.isLoading : false;
+    reportType === 'companies' ? companyIntelligence.isLoading : 
+    reportType === 'demographics' ? demographicReporting.isLoading : false;
 
   // Calculate summary metrics for creatives
   const creativeTotals = creativeReporting.aggregatedData.reduce(
@@ -159,6 +179,10 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
           <TabsTrigger value="companies" className="gap-2">
             <Building2 className="h-4 w-4" />
             Companies
+          </TabsTrigger>
+          <TabsTrigger value="demographics" className="gap-2">
+            <PieChart className="h-4 w-4" />
+            Demographics
           </TabsTrigger>
           <TabsTrigger value="campaigns" className="gap-2" disabled>
             <Target className="h-4 w-4" />
@@ -387,6 +411,91 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
               <CompanyIntelligenceTable 
                 data={companyIntelligence.companyData} 
                 isLoading={companyIntelligence.isLoading} 
+              />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Demographics Tab */}
+        <TabsContent value="demographics" className="space-y-6 mt-6">
+          <Card className="bg-card/50 backdrop-blur-sm border-border/50">
+            <CardContent className="pt-4">
+              <TimeFrameSelector
+                timeFrameOptions={demographicReporting.timeFrameOptions}
+                selectedTimeFrame={selectedTimeFrame}
+                onTimeFrameChange={handleDemoTimeFrameChange}
+                timeGranularity={demographicReporting.timeGranularity as TimeGranularity}
+                onGranularityChange={(g: TimeGranularity) => demographicReporting.setTimeGranularity(g as any)}
+                dateRange={demographicReporting.dateRange}
+              />
+            </CardContent>
+          </Card>
+
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
+            <MetricCard
+              title="Impressions"
+              value={demographicReporting.totals.impressions.toLocaleString()}
+              icon={FileBarChart}
+            />
+            <MetricCard
+              title="Clicks"
+              value={demographicReporting.totals.clicks.toLocaleString()}
+              icon={FileBarChart}
+            />
+            <MetricCard
+              title="Spent"
+              value={`$${demographicReporting.totals.spent.toFixed(2)}`}
+              icon={FileBarChart}
+            />
+            <MetricCard
+              title="Leads"
+              value={demographicReporting.totals.leads.toLocaleString()}
+              icon={FileBarChart}
+            />
+            <MetricCard
+              title="Avg CTR"
+              value={`${demographicReporting.totals.impressions > 0 ? ((demographicReporting.totals.clicks / demographicReporting.totals.impressions) * 100).toFixed(2) : '0.00'}%`}
+              icon={FileBarChart}
+            />
+            <MetricCard
+              title="Avg CPC"
+              value={`$${demographicReporting.totals.clicks > 0 ? (demographicReporting.totals.spent / demographicReporting.totals.clicks).toFixed(2) : '0.00'}`}
+              icon={FileBarChart}
+            />
+            <MetricCard
+              title="Avg CPM"
+              value={`$${demographicReporting.totals.impressions > 0 ? ((demographicReporting.totals.spent / demographicReporting.totals.impressions) * 1000).toFixed(2) : '0.00'}`}
+              icon={FileBarChart}
+            />
+          </div>
+
+          {demographicReporting.error && (
+            <Card className="bg-destructive/10 border-destructive/30">
+              <CardContent className="pt-4">
+                <p className="text-sm text-destructive">
+                  <strong>Note:</strong> {demographicReporting.error}
+                </p>
+                <p className="text-xs text-muted-foreground mt-2">
+                  The MEMBER_COMPANY demographic pivot may require additional permissions or may not be available for all accounts.
+                </p>
+              </CardContent>
+            </Card>
+          )}
+
+          <Card className="bg-card/50 backdrop-blur-sm border-border/50">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <PieChart className="h-5 w-5 text-primary" />
+                Demographics by Company
+              </CardTitle>
+              <CardDescription>
+                Ad performance broken down by the companies of members who viewed your ads
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <DemographicTable 
+                data={demographicReporting.demographicData} 
+                isLoading={demographicReporting.isLoading} 
               />
             </CardContent>
           </Card>
