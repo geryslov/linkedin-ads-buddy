@@ -9,6 +9,109 @@ const corsHeaders = {
 const LINKEDIN_CLIENT_ID = Deno.env.get('LINKEDIN_CLIENT_ID');
 const LINKEDIN_CLIENT_SECRET = Deno.env.get('LINKEDIN_CLIENT_SECRET');
 
+// Helper function to format pivot values into human-readable names
+function formatPivotValue(urn: string, pivot: string): string {
+  const parts = urn.split(':');
+  const value = parts[parts.length - 1];
+  
+  // Job function mappings (LinkedIn uses numeric IDs)
+  const jobFunctionMap: Record<string, string> = {
+    '1': 'Accounting', '2': 'Administrative', '3': 'Arts and Design',
+    '4': 'Business Development', '5': 'Community & Social Services', '6': 'Consulting',
+    '7': 'Education', '8': 'Engineering', '9': 'Entrepreneurship',
+    '10': 'Finance', '11': 'Healthcare Services', '12': 'Human Resources',
+    '13': 'Information Technology', '14': 'Legal', '15': 'Marketing',
+    '16': 'Media & Communications', '17': 'Military & Protective Services', '18': 'Operations',
+    '19': 'Product Management', '20': 'Program & Project Management', '21': 'Purchasing',
+    '22': 'Quality Assurance', '23': 'Real Estate', '24': 'Research',
+    '25': 'Sales', '26': 'Support',
+  };
+  
+  // Seniority mappings
+  const seniorityMap: Record<string, string> = {
+    '1': 'Unpaid', '2': 'Training', '3': 'Entry',
+    '4': 'Senior', '5': 'Manager', '6': 'Director',
+    '7': 'VP', '8': 'CXO', '9': 'Partner', '10': 'Owner',
+  };
+  
+  // Industry mappings (common ones)
+  const industryMap: Record<string, string> = {
+    '1': 'Defense & Space', '3': 'Computer Hardware', '4': 'Computer Software',
+    '5': 'Computer Networking', '6': 'Internet', '7': 'Semiconductors',
+    '8': 'Telecommunications', '9': 'Law Practice', '10': 'Legal Services',
+    '11': 'Management Consulting', '12': 'Biotechnology', '13': 'Medical Practice',
+    '14': 'Hospital & Health Care', '15': 'Pharmaceuticals', '16': 'Veterinary',
+    '17': 'Medical Devices', '18': 'Cosmetics', '19': 'Apparel & Fashion',
+    '20': 'Sporting Goods', '21': 'Tobacco', '22': 'Supermarkets',
+    '23': 'Food Production', '24': 'Consumer Electronics', '25': 'Consumer Goods',
+    '26': 'Furniture', '27': 'Retail', '28': 'Entertainment',
+    '29': 'Gambling & Casinos', '30': 'Leisure, Travel & Tourism', '31': 'Hospitality',
+    '32': 'Restaurants', '33': 'Sports', '34': 'Food & Beverages',
+    '35': 'Motion Pictures and Film', '36': 'Broadcast Media', '37': 'Museums and Institutions',
+    '38': 'Fine Art', '39': 'Performing Arts', '40': 'Recreational Facilities and Services',
+    '41': 'Banking', '42': 'Insurance', '43': 'Financial Services',
+    '44': 'Real Estate', '45': 'Investment Banking', '46': 'Investment Management',
+    '47': 'Accounting', '48': 'Construction', '49': 'Building Materials',
+    '50': 'Architecture & Planning', '51': 'Civil Engineering', '52': 'Aviation & Aerospace',
+    '53': 'Automotive', '54': 'Chemicals', '55': 'Machinery',
+    '56': 'Mining & Metals', '57': 'Oil & Energy', '58': 'Shipbuilding',
+    '59': 'Utilities', '60': 'Textiles', '61': 'Paper & Forest Products',
+    '62': 'Railroad Manufacture', '63': 'Farming', '64': 'Ranching',
+    '65': 'Dairy', '66': 'Fishery', '67': 'Primary/Secondary Education',
+    '68': 'Higher Education', '69': 'Education Management', '70': 'Research',
+    '71': 'Military', '72': 'Legislative Office', '73': 'Judiciary',
+    '74': 'International Affairs', '75': 'Government Administration', '76': 'Executive Office',
+    '77': 'Law Enforcement', '78': 'Public Safety', '79': 'Public Policy',
+    '80': 'Marketing and Advertising', '81': 'Newspapers', '82': 'Publishing',
+    '83': 'Printing', '84': 'Information Services', '85': 'Libraries',
+    '86': 'Environmental Services', '87': 'Package/Freight Delivery', '88': 'Individual & Family Services',
+    '89': 'Religious Institutions', '90': 'Civic & Social Organization', '91': 'Consumer Services',
+    '92': 'Transportation/Trucking/Railroad', '93': 'Warehousing', '94': 'Airlines/Aviation',
+    '95': 'Maritime', '96': 'Information Technology and Services', '97': 'Market Research',
+    '98': 'Public Relations and Communications', '99': 'Design', '100': 'Nonprofit Organization Management',
+    '101': 'Fund-Raising', '102': 'Program Development', '103': 'Writing and Editing',
+    '104': 'Staffing and Recruiting', '105': 'Professional Training & Coaching', '106': 'Venture Capital & Private Equity',
+    '107': 'Political Organization', '108': 'Translation and Localization', '109': 'Computer Games',
+    '110': 'Events Services', '111': 'Arts and Crafts', '112': 'Electrical/Electronic Manufacturing',
+    '113': 'Online Media', '114': 'Nanotechnology', '115': 'Music',
+    '116': 'Logistics and Supply Chain', '117': 'Plastics', '118': 'Computer & Network Security',
+    '119': 'Wireless', '120': 'Alternative Dispute Resolution', '121': 'Security and Investigations',
+    '122': 'Facilities Services', '123': 'Outsourcing/Offshoring', '124': 'Health, Wellness and Fitness',
+    '125': 'Alternative Medicine', '126': 'Media Production', '127': 'Animation',
+    '128': 'Commercial Real Estate', '129': 'Capital Markets', '130': 'Think Tanks',
+    '131': 'Philanthropy', '132': 'E-Learning', '133': 'Wholesale',
+    '134': 'Import and Export', '135': 'Mechanical or Industrial Engineering', '136': 'Photography',
+    '137': 'Human Resources', '138': 'Business Supplies and Equipment', '139': 'Mental Health Care',
+    '140': 'Graphic Design', '141': 'International Trade and Development', '142': 'Wine and Spirits',
+    '143': 'Luxury Goods & Jewelry', '144': 'Renewables & Environment', '145': 'Glass, Ceramics & Concrete',
+    '146': 'Packaging and Containers', '147': 'Industrial Automation', '148': 'Government Relations',
+  };
+  
+  switch (pivot) {
+    case 'MEMBER_JOB_FUNCTION':
+      return jobFunctionMap[value] || `Job Function ${value}`;
+    case 'MEMBER_SENIORITY':
+      return seniorityMap[value] || `Seniority ${value}`;
+    case 'MEMBER_INDUSTRY':
+      return industryMap[value] || `Industry ${value}`;
+    case 'MEMBER_COUNTRY':
+      // Country codes are usually ISO 2-letter codes
+      return value.toUpperCase();
+    case 'MEMBER_JOB_TITLE':
+      // Job titles come as-is from LinkedIn
+      return value || 'Unknown Job Title';
+    default:
+      return value || 'Unknown';
+  }
+}
+
+// Helper to extract a name from URN when no lookup is available
+function extractNameFromUrn(urn: string): string {
+  if (!urn) return 'Unknown';
+  const parts = urn.split(':');
+  return parts[parts.length - 1] || 'Unknown';
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -452,14 +555,15 @@ serve(async (req) => {
       }
 
       case 'get_demographic_analytics': {
-        const { accountId, dateRange, timeGranularity } = params || {};
+        const { accountId, dateRange, timeGranularity, pivot } = params || {};
         const startDate = dateRange?.start || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
         const endDate = dateRange?.end || new Date().toISOString().split('T')[0];
         const granularity = timeGranularity || 'ALL';
+        const selectedPivot = pivot || 'MEMBER_COMPANY';
         
-        console.log(`[get_demographic_analytics] Starting for account ${accountId}, date range: ${startDate} to ${endDate}`);
+        console.log(`[get_demographic_analytics] Starting for account ${accountId}, pivot: ${selectedPivot}, date range: ${startDate} to ${endDate}`);
 
-        // Build analytics URL with pivot=MEMBER_COMPANY
+        // Build analytics URL with specified pivot
         const analyticsUrl = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
           `dateRange.start.day=${new Date(startDate).getDate()}&` +
           `dateRange.start.month=${new Date(startDate).getMonth() + 1}&` +
@@ -468,12 +572,12 @@ serve(async (req) => {
           `dateRange.end.month=${new Date(endDate).getMonth() + 1}&` +
           `dateRange.end.year=${new Date(endDate).getFullYear()}&` +
           `timeGranularity=${granularity === 'ALL' ? 'ALL' : granularity}&` +
-          `pivot=MEMBER_COMPANY&` +
+          `pivot=${selectedPivot}&` +
           `accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
           `fields=impressions,clicks,costInLocalCurrency,costInUsd,externalWebsiteConversions,oneClickLeads,pivotValue&` +
           `count=500`;
 
-        console.log(`[get_demographic_analytics] Fetching analytics with pivot=MEMBER_COMPANY...`);
+        console.log(`[get_demographic_analytics] Fetching analytics with pivot=${selectedPivot}...`);
         const analyticsResponse = await fetch(analyticsUrl, {
           headers: { 'Authorization': `Bearer ${accessToken}` },
         });
@@ -482,9 +586,9 @@ serve(async (req) => {
           const errorText = await analyticsResponse.text();
           console.error('[Error] Failed to fetch demographic analytics:', analyticsResponse.status, errorText);
           
-          if (analyticsResponse.status === 400 && errorText.includes('MEMBER_COMPANY')) {
+          if (analyticsResponse.status === 400) {
             return new Response(JSON.stringify({ 
-              error: 'MEMBER_COMPANY pivot may not be available for this account or requires additional permissions',
+              error: `${selectedPivot} pivot may not be available for this account or requires additional permissions`,
               details: errorText,
               elements: [] 
             }), {
@@ -498,9 +602,9 @@ serve(async (req) => {
         const analyticsData = await analyticsResponse.json();
         console.log(`[get_demographic_analytics] Received ${analyticsData.elements?.length || 0} demographic records`);
 
-        // Aggregate by company URN
-        const companyMap = new Map<string, { 
-          companyUrn: string;
+        // Aggregate by pivot value
+        const entityMap = new Map<string, { 
+          entityUrn: string;
           impressions: number; 
           clicks: number; 
           spent: number; 
@@ -509,19 +613,19 @@ serve(async (req) => {
         }>();
         
         (analyticsData.elements || []).forEach((el: any) => {
-          const companyUrn = el.pivotValue || '';
-          if (!companyUrn) return;
+          const entityUrn = el.pivotValue || '';
+          if (!entityUrn) return;
           
-          const existing = companyMap.get(companyUrn) || { 
-            companyUrn,
+          const existing = entityMap.get(entityUrn) || { 
+            entityUrn,
             impressions: 0, 
             clicks: 0, 
             spent: 0, 
             spentUsd: 0, 
             leads: 0 
           };
-          companyMap.set(companyUrn, {
-            companyUrn,
+          entityMap.set(entityUrn, {
+            entityUrn,
             impressions: existing.impressions + (el.impressions || 0),
             clicks: existing.clicks + (el.clicks || 0),
             spent: existing.spent + parseFloat(el.costInLocalCurrency || '0'),
@@ -530,14 +634,15 @@ serve(async (req) => {
           });
         });
 
-        console.log(`[get_demographic_analytics] Aggregated data for ${companyMap.size} unique companies`);
+        console.log(`[get_demographic_analytics] Aggregated data for ${entityMap.size} unique entities`);
 
-        // Resolve company URNs to names via Organization API
-        const companyUrns = Array.from(companyMap.keys());
-        const companyNames = new Map<string, string>();
+        // Resolve entity names based on pivot type
+        const entityNames = new Map<string, string>();
+        const entityUrns = Array.from(entityMap.keys());
         
-        if (companyUrns.length > 0) {
-          const companyIds = companyUrns
+        if (selectedPivot === 'MEMBER_COMPANY' && entityUrns.length > 0) {
+          // Resolve company URNs to names via Organization API
+          const companyIds = entityUrns
             .map(urn => urn.split(':').pop())
             .filter(id => id && !isNaN(Number(id)));
           
@@ -558,7 +663,7 @@ serve(async (req) => {
                   const results = orgData.results || {};
                   Object.entries(results).forEach(([id, org]: [string, any]) => {
                     if (org?.localizedName) {
-                      companyNames.set(`urn:li:organization:${id}`, org.localizedName);
+                      entityNames.set(`urn:li:organization:${id}`, org.localizedName);
                     }
                   });
                 }
@@ -567,23 +672,39 @@ serve(async (req) => {
               }
             }
           }
+        } else {
+          // For other pivots, extract human-readable name from URN or use as-is
+          // LinkedIn returns values like "urn:li:function:1" for job function, etc.
+          // We can map some common values or just extract the value part
+          entityUrns.forEach(urn => {
+            // Try to extract a readable name from the URN
+            // Format is usually: urn:li:type:value or just the value itself
+            const parts = urn.split(':');
+            if (parts.length > 1) {
+              const value = parts[parts.length - 1];
+              // For non-company pivots, the value is often already human-readable
+              // or we use the URN value
+              entityNames.set(urn, formatPivotValue(urn, selectedPivot));
+            } else {
+              entityNames.set(urn, urn || 'Unknown');
+            }
+          });
         }
 
-        console.log(`[get_demographic_analytics] Resolved ${companyNames.size} company names`);
+        console.log(`[get_demographic_analytics] Resolved ${entityNames.size} entity names`);
 
         // Build final report
         const reportElements: any[] = [];
-        companyMap.forEach((metrics, companyUrn) => {
-          const companyId = companyUrn.split(':').pop() || '';
-          const companyName = companyNames.get(companyUrn) || `Company ${companyId}`;
+        entityMap.forEach((metrics, entityUrn) => {
+          const entityName = entityNames.get(entityUrn) || extractNameFromUrn(entityUrn);
           
           const ctr = metrics.impressions > 0 ? (metrics.clicks / metrics.impressions) * 100 : 0;
           const cpc = metrics.clicks > 0 ? metrics.spent / metrics.clicks : 0;
           const cpm = metrics.impressions > 0 ? (metrics.spent / metrics.impressions) * 1000 : 0;
           
           reportElements.push({
-            companyUrn,
-            companyName,
+            entityUrn,
+            entityName,
             impressions: metrics.impressions,
             clicks: metrics.clicks,
             costInLocalCurrency: metrics.spent.toFixed(2),
@@ -597,15 +718,16 @@ serve(async (req) => {
 
         reportElements.sort((a, b) => b.impressions - a.impressions);
         
-        console.log(`[get_demographic_analytics] Complete. Total companies: ${reportElements.length}`);
+        console.log(`[get_demographic_analytics] Complete. Total entities: ${reportElements.length}`);
         
         return new Response(JSON.stringify({ 
           elements: reportElements,
           metadata: {
             accountId,
+            pivot: selectedPivot,
             dateRange: { start: startDate, end: endDate },
             timeGranularity: granularity,
-            totalCompanies: reportElements.length,
+            totalEntities: reportElements.length,
           }
         }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },

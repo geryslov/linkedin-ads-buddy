@@ -2,9 +2,9 @@ import { useState, useCallback, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 
-export interface CompanyDemographic {
-  companyUrn: string;
-  companyName: string;
+export interface DemographicItem {
+  entityUrn: string;
+  entityName: string;
   impressions: number;
   clicks: number;
   spent: number;
@@ -16,6 +16,23 @@ export interface CompanyDemographic {
 
 export type TimeGranularity = 'DAILY' | 'MONTHLY' | 'ALL';
 
+export type DemographicPivot = 
+  | 'MEMBER_COMPANY' 
+  | 'MEMBER_JOB_TITLE' 
+  | 'MEMBER_JOB_FUNCTION' 
+  | 'MEMBER_INDUSTRY' 
+  | 'MEMBER_SENIORITY' 
+  | 'MEMBER_COUNTRY';
+
+export const DEMOGRAPHIC_PIVOT_OPTIONS: { value: DemographicPivot; label: string }[] = [
+  { value: 'MEMBER_COMPANY', label: 'Company' },
+  { value: 'MEMBER_JOB_TITLE', label: 'Job Title' },
+  { value: 'MEMBER_JOB_FUNCTION', label: 'Job Function' },
+  { value: 'MEMBER_INDUSTRY', label: 'Industry' },
+  { value: 'MEMBER_SENIORITY', label: 'Seniority' },
+  { value: 'MEMBER_COUNTRY', label: 'Country' },
+];
+
 export interface TimeFrameOption {
   label: string;
   value: string;
@@ -24,10 +41,11 @@ export interface TimeFrameOption {
 }
 
 export function useDemographicReporting(accessToken: string | null) {
-  const [demographicData, setDemographicData] = useState<CompanyDemographic[]>([]);
+  const [demographicData, setDemographicData] = useState<DemographicItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [timeGranularity, setTimeGranularity] = useState<TimeGranularity>('ALL');
+  const [pivot, setPivot] = useState<DemographicPivot>('MEMBER_COMPANY');
   const [dateRange, setDateRange] = useState<{ start: string; end: string }>({
     start: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
     end: new Date().toISOString().split('T')[0],
@@ -82,7 +100,7 @@ export function useDemographicReporting(accessToken: string | null) {
     setError(null);
     
     try {
-      console.log('Fetching demographic analytics with params:', { accountId, dateRange, timeGranularity });
+      console.log('Fetching demographic analytics with params:', { accountId, dateRange, timeGranularity, pivot });
       
       const { data, error: fetchError } = await supabase.functions.invoke('linkedin-api', {
         body: { 
@@ -92,6 +110,7 @@ export function useDemographicReporting(accessToken: string | null) {
             accountId, 
             dateRange,
             timeGranularity,
+            pivot,
           }
         }
       });
@@ -107,10 +126,10 @@ export function useDemographicReporting(accessToken: string | null) {
       
       console.log('Demographic analytics response:', data);
       
-      // Map API response to CompanyDemographic interface
-      const demographicsData: CompanyDemographic[] = (data.elements || []).map((el: any) => ({
-        companyUrn: el.companyUrn || '',
-        companyName: el.companyName || 'Unknown Company',
+      // Map API response to DemographicItem interface
+      const demographicsData: DemographicItem[] = (data.elements || []).map((el: any) => ({
+        entityUrn: el.entityUrn || '',
+        entityName: el.entityName || 'Unknown',
         impressions: el.impressions || 0,
         clicks: el.clicks || 0,
         spent: parseFloat(el.costInLocalCurrency || '0'),
@@ -132,7 +151,7 @@ export function useDemographicReporting(accessToken: string | null) {
     } finally {
       setIsLoading(false);
     }
-  }, [accessToken, dateRange, timeGranularity, toast]);
+  }, [accessToken, dateRange, timeGranularity, pivot, toast]);
 
   // Calculate totals
   const totals = useMemo(() => {
@@ -161,6 +180,8 @@ export function useDemographicReporting(accessToken: string | null) {
     totals,
     timeGranularity,
     setTimeGranularity,
+    pivot,
+    setPivot,
     dateRange,
     setDateRange,
     timeFrameOptions,
