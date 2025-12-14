@@ -339,7 +339,12 @@ serve(async (req) => {
 
         // Helper: Extract name from legacy adCreativesV2 creative object
         function extractCreativeNameFromLegacy(creative: any): string | null {
-          // Try top-level 'name' field first (if present)
+          // Try creativeDscName field first (descriptive name field)
+          if (creative.creativeDscName && typeof creative.creativeDscName === 'string' && creative.creativeDscName.trim()) {
+            return creative.creativeDscName.trim();
+          }
+          
+          // Try top-level 'name' field 
           if (creative.name && typeof creative.name === 'string' && creative.name.trim()) {
             return creative.name.trim();
           }
@@ -347,6 +352,11 @@ serve(async (req) => {
           // Try nested creative content/variables
           const variables = creative.variables || {};
           const data = variables.data || {};
+          
+          // Check for creativeDscName in nested structure
+          if (data.creativeDscName && typeof data.creativeDscName === 'string' && data.creativeDscName.trim()) {
+            return data.creativeDscName.trim();
+          }
           
           // Check for sponsored content text
           if (data.com?.linkedin?.ads?.SponsoredVideoCreativeVariables?.userGeneratedContentPost) {
