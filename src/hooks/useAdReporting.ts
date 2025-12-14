@@ -3,9 +3,9 @@ import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 
 export interface AdAnalytics {
-  adId: string;
+  creativeUrn: string;
   adName: string;
-  campaignName: string;
+  campaignUrn: string;
   status: string;
   impressions: number;
   clicks: number;
@@ -18,7 +18,7 @@ export interface AdAnalytics {
 
 export interface AggregatedAdData {
   name: string;
-  campaignName: string;
+  campaignUrn: string;
   impressions: number;
   clicks: number;
   spent: number;
@@ -106,6 +106,8 @@ export function useAdReporting(accessToken: string | null) {
     setIsLoading(true);
     
     try {
+      console.log('Fetching ad analytics with params:', { accountId, dateRange, timeGranularity });
+      
       const { data, error } = await supabase.functions.invoke('linkedin-api', {
         body: { 
           action: 'get_ad_analytics', 
@@ -120,11 +122,13 @@ export function useAdReporting(accessToken: string | null) {
 
       if (error) throw error;
       
+      console.log('Ad analytics response:', data);
+      
       // Map API response to AdAnalytics interface
       const analyticsData: AdAnalytics[] = (data.elements || []).map((el: any) => ({
-        adId: el.adId || '',
-        adName: el.adName || `Ad ${el.adId}`,
-        campaignName: el.campaignName || 'Unknown Campaign',
+        creativeUrn: el.creativeUrn || '',
+        adName: el.adName || `Ad ${el.creativeUrn?.split(':').pop() || 'Unknown'}`,
+        campaignUrn: el.campaignUrn || '',
         status: el.status || 'UNKNOWN',
         impressions: el.impressions || 0,
         clicks: el.clicks || 0,
@@ -140,7 +144,7 @@ export function useAdReporting(accessToken: string | null) {
       console.error('Fetch ad analytics error:', error);
       toast({
         title: 'Error',
-        description: 'Failed to fetch ad analytics',
+        description: error.message || 'Failed to fetch ad analytics',
         variant: 'destructive',
       });
     } finally {
@@ -148,11 +152,11 @@ export function useAdReporting(accessToken: string | null) {
     }
   }, [accessToken, dateRange, timeGranularity, toast]);
 
-  // Aggregate data by ad name (in case there are duplicates)
+  // Aggregate data by ad name
   const aggregatedData = useMemo((): AggregatedAdData[] => {
     return adAnalytics.map((item) => ({
       name: item.adName,
-      campaignName: item.campaignName,
+      campaignUrn: item.campaignUrn,
       impressions: item.impressions,
       clicks: item.clicks,
       spent: item.spent,

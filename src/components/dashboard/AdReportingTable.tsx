@@ -25,7 +25,7 @@ interface AdReportingTableProps {
   isLoading: boolean;
 }
 
-type SortKey = 'name' | 'campaignName' | 'impressions' | 'clicks' | 'spent' | 'leads' | 'ctr' | 'cpc' | 'cpm';
+type SortKey = 'name' | 'campaignUrn' | 'impressions' | 'clicks' | 'spent' | 'leads' | 'ctr' | 'cpc' | 'cpm';
 type SortOrder = 'asc' | 'desc';
 type FilterType = 'all' | 'with_spend' | 'with_impressions' | 'with_clicks' | 'with_leads';
 
@@ -52,7 +52,7 @@ export function AdReportingTable({ data, isLoading }: AdReportingTableProps) {
       const query = searchQuery.toLowerCase();
       result = result.filter(item => 
         item.name.toLowerCase().includes(query) ||
-        item.campaignName.toLowerCase().includes(query)
+        item.campaignUrn.toLowerCase().includes(query)
       );
     }
 
@@ -202,7 +202,7 @@ export function AdReportingTable({ data, isLoading }: AdReportingTableProps) {
           <TableHeader>
             <TableRow className="bg-muted/30">
               <SortableHeader label="Ad Name" sortKeyName="name" />
-              <SortableHeader label="Campaign" sortKeyName="campaignName" />
+              <SortableHeader label="Campaign" sortKeyName="campaignUrn" />
               <SortableHeader label="Impressions" sortKeyName="impressions" />
               <SortableHeader label="Clicks" sortKeyName="clicks" />
               <SortableHeader label="Spent" sortKeyName="spent" />
@@ -226,8 +226,8 @@ export function AdReportingTable({ data, isLoading }: AdReportingTableProps) {
                     <TableCell className="font-medium max-w-[250px] truncate" title={row.name}>
                       {row.name}
                     </TableCell>
-                    <TableCell className="max-w-[200px] truncate" title={row.campaignName}>
-                      {row.campaignName}
+                    <TableCell className="max-w-[200px] truncate" title={row.campaignUrn}>
+                      {row.campaignUrn || '-'}
                     </TableCell>
                     <TableCell>{row.impressions.toLocaleString()}</TableCell>
                     <TableCell>{row.clicks.toLocaleString()}</TableCell>
