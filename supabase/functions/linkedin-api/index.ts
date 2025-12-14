@@ -409,6 +409,27 @@ serve(async (req) => {
             const elements = data.elements || [];
             console.log(`[Legacy API] Retrieved ${elements.length} creatives`);
             
+            // Log first 3 creatives' raw structure for debugging
+            if (elements.length > 0) {
+              console.log('[Legacy API] === SAMPLE RAW CREATIVE DATA (first 3) ===');
+              elements.slice(0, 3).forEach((creative: any, idx: number) => {
+                console.log(`[Legacy API] Creative ${idx + 1} ID: ${creative.id}`);
+                console.log(`[Legacy API] Creative ${idx + 1} Keys: ${Object.keys(creative).join(', ')}`);
+                console.log(`[Legacy API] Creative ${idx + 1} name: ${creative.name || 'MISSING'}`);
+                console.log(`[Legacy API] Creative ${idx + 1} creativeDscName: ${creative.creativeDscName || 'MISSING'}`);
+                console.log(`[Legacy API] Creative ${idx + 1} status: ${creative.status || 'MISSING'}`);
+                console.log(`[Legacy API] Creative ${idx + 1} type: ${creative.type || 'MISSING'}`);
+                if (creative.variables) {
+                  console.log(`[Legacy API] Creative ${idx + 1} variables.type: ${creative.variables.type || 'MISSING'}`);
+                  console.log(`[Legacy API] Creative ${idx + 1} variables keys: ${Object.keys(creative.variables).join(', ')}`);
+                }
+                if (creative.reference) {
+                  console.log(`[Legacy API] Creative ${idx + 1} reference: ${creative.reference}`);
+                }
+              });
+              console.log('[Legacy API] === END SAMPLE RAW CREATIVE DATA ===');
+            }
+            
             for (const creative of elements) {
               const creativeId = creative.id?.toString() || '';
               if (!creativeId) continue;
@@ -467,27 +488,56 @@ serve(async (req) => {
               if (response.ok) {
                 const data = await response.json();
                 
+                // Log raw response structure for debugging
+                if (i === 0) {
+                  console.log('[Versioned API] === RAW RESPONSE STRUCTURE ===');
+                  console.log(`[Versioned API] Response keys: ${Object.keys(data).join(', ')}`);
+                  if (data.elements && data.elements.length > 0) {
+                    const sample = data.elements[0];
+                    console.log(`[Versioned API] First element keys: ${Object.keys(sample).join(', ')}`);
+                    console.log(`[Versioned API] First element name: ${sample.name || 'MISSING'}`);
+                    console.log(`[Versioned API] First element creativeDscName: ${sample.creativeDscName || 'MISSING'}`);
+                    console.log(`[Versioned API] First element id: ${sample.id}`);
+                  }
+                  if (data.results) {
+                    const urns = Object.keys(data.results);
+                    if (urns.length > 0) {
+                      const sample = data.results[urns[0]];
+                      console.log(`[Versioned API] First result keys: ${Object.keys(sample).join(', ')}`);
+                      console.log(`[Versioned API] First result name: ${sample.name || 'MISSING'}`);
+                      console.log(`[Versioned API] First result creativeDscName: ${sample.creativeDscName || 'MISSING'}`);
+                    }
+                  }
+                  console.log('[Versioned API] === END RAW RESPONSE STRUCTURE ===');
+                }
+                
                 // Handle different response formats
                 if (data.elements) {
                   for (const creative of data.elements) {
                     const id = creative.id?.toString() || creative.id?.split(':').pop() || '';
-                    if (creative.name && id) {
-                      names.set(id, creative.name);
+                    // Try multiple name fields
+                    const name = creative.name || creative.creativeDscName || '';
+                    if (name && id) {
+                      names.set(id, name);
                     }
                   }
                 } else if (data.results) {
                   for (const urn of Object.keys(data.results)) {
                     const creative = data.results[urn];
                     const id = urn.split(':').pop() || '';
-                    if (creative.name && id) {
-                      names.set(id, creative.name);
+                    // Try multiple name fields
+                    const name = creative.name || creative.creativeDscName || '';
+                    if (name && id) {
+                      names.set(id, name);
                     }
                   }
                 }
                 
                 console.log(`[Versioned API] Batch ${Math.floor(i/batchSize) + 1}: Resolved ${names.size} names`);
               } else {
+                const errorText = await response.text();
                 console.log(`[Versioned API] Batch ${Math.floor(i/batchSize) + 1}: Failed with status ${response.status}`);
+                console.log(`[Versioned API] Error response: ${errorText.slice(0, 500)}`);
               }
             } catch (err) {
               console.error(`[Versioned API] Batch ${Math.floor(i/batchSize) + 1} error:`, err);
