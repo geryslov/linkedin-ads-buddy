@@ -319,6 +319,234 @@ serve(async (req) => {
         });
       }
 
+      case 'get_creative_report': {
+        // This action fetches ad analytics with pivot=CREATIVE and resolves creative names
+        // by batch-fetching creative metadata from the Creatives API
+        const { accountId, dateRange, timeGranularity } = params || {};
+        const startDate = dateRange?.start || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        const endDate = dateRange?.end || new Date().toISOString().split('T')[0];
+        const granularity = timeGranularity || 'ALL';
+        
+        console.log(`[get_creative_report] Starting for account ${accountId}, date range: ${startDate} to ${endDate}, granularity: ${granularity}`);
+
+        // Step 1: Fetch campaigns for the account (needed for CREATIVE pivot)
+        console.log('[Step 1] Fetching campaigns...');
+        const campaignsResponse = await fetch(
+          `https://api.linkedin.com/v2/adCampaignsV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=100`,
+          { headers: { 'Authorization': `Bearer ${accessToken}` } }
+        );
+        
+        if (!campaignsResponse.ok) {
+          const errorText = await campaignsResponse.text();
+          console.error('[Error] Failed to fetch campaigns:', campaignsResponse.status, errorText);
+          throw new Error(`Failed to fetch campaigns: ${campaignsResponse.status}`);
+        }
+        
+        const campaignsData = await campaignsResponse.json();
+        const campaignMap = new Map((campaignsData.elements || []).map((c: any) => [c.id.toString(), c.name]));
+        const campaignIds = (campaignsData.elements || []).map((c: any) => c.id.toString());
+        console.log(`[Step 1] Found ${campaignIds.length} campaigns`);
+
+        if (campaignIds.length === 0) {
+          console.log('[Warning] No campaigns found');
+          return new Response(JSON.stringify({ elements: [] }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+
+        // Step 2: Query Ad Analytics API with pivot=CREATIVE
+        console.log('[Step 2] Querying Ad Analytics with pivot=CREATIVE...');
+        const analyticsUrl = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
+          `dateRange.start.day=${new Date(startDate).getDate()}&` +
+          `dateRange.start.month=${new Date(startDate).getMonth() + 1}&` +
+          `dateRange.start.year=${new Date(startDate).getFullYear()}&` +
+          `dateRange.end.day=${new Date(endDate).getDate()}&` +
+          `dateRange.end.month=${new Date(endDate).getMonth() + 1}&` +
+          `dateRange.end.year=${new Date(endDate).getFullYear()}&` +
+          `timeGranularity=${granularity === 'ALL' ? 'ALL' : granularity}&` +
+          `pivot=CREATIVE&` +
+          `accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
+          `fields=impressions,clicks,costInLocalCurrency,costInUsd,externalWebsiteConversions,oneClickLeads,pivotValue&` +
+          `count=500&` +
+          campaignIds.slice(0, 20).map((id: string, i: number) => `campaigns[${i}]=urn:li:sponsoredCampaign:${id}`).join('&');
+
+        const analyticsResponse = await fetch(analyticsUrl, {
+          headers: { 'Authorization': `Bearer ${accessToken}` },
+        });
+        
+        if (!analyticsResponse.ok) {
+          const errorText = await analyticsResponse.text();
+          console.error('[Error] Failed to fetch analytics:', analyticsResponse.status, errorText);
+          throw new Error(`Failed to fetch analytics: ${analyticsResponse.status}`);
+        }
+        
+        const analyticsData = await analyticsResponse.json();
+        console.log(`[Step 2] Received ${analyticsData.elements?.length || 0} analytics records`);
+
+        // Aggregate analytics by creative URN
+        const analyticsMap = new Map<string, { impressions: number; clicks: number; spent: number; spentUsd: number; leads: number }>();
+        (analyticsData.elements || []).forEach((el: any) => {
+          const creativeUrn = el.pivotValue || '';
+          const creativeId = creativeUrn.split(':').pop() || '';
+          if (!creativeId) return;
+          
+          const existing = analyticsMap.get(creativeId) || { impressions: 0, clicks: 0, spent: 0, spentUsd: 0, leads: 0 };
+          analyticsMap.set(creativeId, {
+            impressions: existing.impressions + (el.impressions || 0),
+            clicks: existing.clicks + (el.clicks || 0),
+            spent: existing.spent + parseFloat(el.costInLocalCurrency || '0'),
+            spentUsd: existing.spentUsd + parseFloat(el.costInUsd || '0'),
+            leads: existing.leads + (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0),
+          });
+        });
+        console.log(`[Step 2] Aggregated ${analyticsMap.size} unique creatives with analytics`);
+
+        // Step 3: Batch fetch creative metadata from Creatives API
+        console.log('[Step 3] Batch fetching creative metadata...');
+        const creativesResponse = await fetch(
+          `https://api.linkedin.com/v2/adCreativesV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=500`,
+          { headers: { 'Authorization': `Bearer ${accessToken}` } }
+        );
+        
+        if (!creativesResponse.ok) {
+          const errorText = await creativesResponse.text();
+          console.error('[Error] Failed to fetch creatives:', creativesResponse.status, errorText);
+          throw new Error(`Failed to fetch creatives: ${creativesResponse.status}`);
+        }
+        
+        const creativesData = await creativesResponse.json();
+        console.log(`[Step 3] Fetched ${creativesData.elements?.length || 0} creative metadata records`);
+
+        // Step 4: Extract creative names from metadata
+        const creativeMetadataMap = new Map<string, { name: string; campaignId: string; campaignName: string; status: string; type: string }>();
+        (creativesData.elements || []).forEach((c: any) => {
+          const creativeId = c.id?.toString() || '';
+          const campaignUrn = c.campaign || '';
+          const campaignId = campaignUrn.split(':').pop() || '';
+          
+          let creativeName = '';
+          let creativeType = 'UNKNOWN';
+          
+          if (c.variables?.data) {
+            const variablesData = c.variables.data;
+            const dsContent = variablesData['com.linkedin.ads.DirectSponsoredContentCreativeVariables'];
+            const sponsoredUpdate = variablesData['com.linkedin.ads.SponsoredUpdateCreativeVariables'];
+            const textAd = variablesData['com.linkedin.ads.TextAdCreativeVariables'];
+            const spotlightAd = variablesData['com.linkedin.ads.SpotlightCreativeVariables'];
+            const followerAd = variablesData['com.linkedin.ads.FollowerCreativeVariables'];
+            const jobsAd = variablesData['com.linkedin.ads.JobsCreativeVariables'];
+            const videoAd = variablesData['com.linkedin.ads.VideoCreativeVariables'];
+            const carouselAd = variablesData['com.linkedin.ads.CarouselCreativeVariables'];
+            
+            if (dsContent?.name) {
+              creativeName = dsContent.name;
+              creativeType = 'SPONSORED_CONTENT';
+            } else if (dsContent?.share) {
+              creativeName = `Sponsored Content #${dsContent.share.split(':').pop() || creativeId}`;
+              creativeType = 'SPONSORED_CONTENT';
+            } else if (sponsoredUpdate?.activity) {
+              creativeName = `Sponsored Update #${sponsoredUpdate.activity.split(':').pop() || creativeId}`;
+              creativeType = 'SPONSORED_UPDATE';
+            } else if (textAd) {
+              creativeName = textAd.title || textAd.text || `Text Ad #${creativeId}`;
+              creativeType = 'TEXT_AD';
+            } else if (spotlightAd) {
+              creativeName = spotlightAd.headline || spotlightAd.ctaLabel || `Spotlight Ad #${creativeId}`;
+              creativeType = 'SPOTLIGHT_AD';
+            } else if (followerAd) {
+              creativeName = followerAd.headline || `Follower Ad #${creativeId}`;
+              creativeType = 'FOLLOWER_AD';
+            } else if (jobsAd) {
+              creativeName = jobsAd.headline || `Jobs Ad #${creativeId}`;
+              creativeType = 'JOBS_AD';
+            } else if (videoAd) {
+              creativeName = videoAd.name || videoAd.title || `Video Ad #${creativeId}`;
+              creativeType = 'VIDEO_AD';
+            } else if (carouselAd) {
+              const cardCount = carouselAd.cards?.length || 0;
+              creativeName = `Carousel Ad (${cardCount} cards) #${creativeId}`;
+              creativeType = 'CAROUSEL_AD';
+            }
+          }
+          
+          if (!creativeName) {
+            if (c.reference) {
+              const refType = c.reference.split(':')[2] || '';
+              if (refType === 'share') {
+                creativeName = `Share Ad #${c.reference.split(':').pop()}`;
+              } else if (refType === 'ugcPost') {
+                creativeName = `UGC Post Ad #${c.reference.split(':').pop()}`;
+              } else {
+                creativeName = `Creative #${creativeId}`;
+              }
+            } else {
+              creativeName = `Creative #${creativeId}`;
+            }
+          }
+          
+          const resolvedCampaignName = campaignMap.get(campaignId);
+          creativeMetadataMap.set(creativeId, {
+            name: creativeName,
+            campaignId,
+            campaignName: typeof resolvedCampaignName === 'string' ? resolvedCampaignName : `Campaign ${campaignId}`,
+            status: c.status || 'UNKNOWN',
+            type: creativeType,
+          });
+        });
+        console.log(`[Step 4] Built metadata map for ${creativeMetadataMap.size} creatives`);
+
+        // Step 5: Merge analytics with creative names
+        console.log('[Step 5] Merging analytics with creative metadata...');
+        const reportElements: any[] = [];
+        
+        analyticsMap.forEach((metrics, creativeId) => {
+          const metadata = creativeMetadataMap.get(creativeId) || {
+            name: `Creative ${creativeId}`,
+            campaignId: '',
+            campaignName: 'Unknown Campaign',
+            status: 'UNKNOWN',
+            type: 'UNKNOWN',
+          };
+          
+          const ctr = metrics.impressions > 0 ? (metrics.clicks / metrics.impressions) * 100 : 0;
+          const cpc = metrics.clicks > 0 ? metrics.spent / metrics.clicks : 0;
+          const cpm = metrics.impressions > 0 ? (metrics.spent / metrics.impressions) * 1000 : 0;
+          
+          reportElements.push({
+            creativeId,
+            creativeName: metadata.name,
+            campaignName: metadata.campaignName,
+            status: metadata.status,
+            type: metadata.type,
+            impressions: metrics.impressions,
+            clicks: metrics.clicks,
+            costInLocalCurrency: metrics.spent.toFixed(2),
+            costInUsd: metrics.spentUsd.toFixed(2),
+            leads: metrics.leads,
+            ctr: ctr.toFixed(2),
+            cpc: cpc.toFixed(2),
+            cpm: cpm.toFixed(2),
+          });
+        });
+
+        // Sort by spend descending
+        reportElements.sort((a, b) => parseFloat(b.costInLocalCurrency) - parseFloat(a.costInLocalCurrency));
+        
+        console.log(`[get_creative_report] Complete. Total creatives with data: ${reportElements.length}`);
+        
+        return new Response(JSON.stringify({ 
+          elements: reportElements,
+          metadata: {
+            accountId,
+            dateRange: { start: startDate, end: endDate },
+            timeGranularity: granularity,
+            totalCreatives: reportElements.length,
+          }
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
       case 'get_ad_analytics': {
         const { accountId, dateRange, timeGranularity } = params || {};
         const startDate = dateRange?.start || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];

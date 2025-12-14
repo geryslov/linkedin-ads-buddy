@@ -3,13 +3,15 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { RefreshCw, FileBarChart, Users, Target, Building2, PieChart, Globe } from 'lucide-react';
+import { RefreshCw, FileBarChart, Users, Target, Building2, PieChart, Globe, Megaphone } from 'lucide-react';
 import { useCompanyIntelligence, LookbackWindow } from '@/hooks/useCompanyIntelligence';
 import { useDemographicReporting, TimeFrameOption as DemoTimeFrameOption, TimeGranularity, DemographicPivot, DEMOGRAPHIC_PIVOT_OPTIONS } from '@/hooks/useDemographicReporting';
 import { useCompanyDemographic, TimeFrameOption as CompanyDemoTimeFrameOption } from '@/hooks/useCompanyDemographic';
+import { useCreativeReporting, TimeFrameOption as CreativeTimeFrameOption } from '@/hooks/useCreativeReporting';
 import { CompanyIntelligenceTable } from './CompanyIntelligenceTable';
 import { DemographicTable } from './DemographicTable';
 import { CompanyDemographicTable } from './CompanyDemographicTable';
+import { CreativeReportingTable } from './CreativeReportingTable';
 import { TimeFrameSelector } from './TimeFrameSelector';
 import { MetricCard } from './MetricCard';
 
@@ -22,13 +24,16 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
   const companyIntelligence = useCompanyIntelligence(accessToken);
   const demographicReporting = useDemographicReporting(accessToken);
   const companyDemographic = useCompanyDemographic(accessToken);
+  const creativeReporting = useCreativeReporting(accessToken);
 
   const [selectedTimeFrame, setSelectedTimeFrame] = useState('30d');
-  const [reportType, setReportType] = useState('companies');
+  const [reportType, setReportType] = useState('creatives');
 
   useEffect(() => {
     if (selectedAccount) {
-      if (reportType === 'companies') {
+      if (reportType === 'creatives') {
+        creativeReporting.fetchCreativeAnalytics(selectedAccount);
+      } else if (reportType === 'companies') {
         companyIntelligence.fetchCompanyIntelligence(selectedAccount);
       } else if (reportType === 'demographics') {
         demographicReporting.fetchDemographicAnalytics(selectedAccount);
@@ -59,6 +64,13 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
     }
   }, [companyDemographic.dateRange, companyDemographic.timeGranularity]);
 
+  // Re-fetch when time/granularity changes for creatives
+  useEffect(() => {
+    if (selectedAccount && reportType === 'creatives') {
+      creativeReporting.fetchCreativeAnalytics(selectedAccount);
+    }
+  }, [creativeReporting.dateRange, creativeReporting.timeGranularity]);
+
   const handleDemoTimeFrameChange = (option: DemoTimeFrameOption) => {
     setSelectedTimeFrame(option.value);
     demographicReporting.setTimeFrame(option);
@@ -69,9 +81,16 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
     companyDemographic.setTimeFrame(option);
   };
 
+  const handleCreativeTimeFrameChange = (option: CreativeTimeFrameOption) => {
+    setSelectedTimeFrame(option.value);
+    creativeReporting.setTimeFrame(option);
+  };
+
   const handleRefresh = () => {
     if (selectedAccount) {
-      if (reportType === 'companies') {
+      if (reportType === 'creatives') {
+        creativeReporting.fetchCreativeAnalytics(selectedAccount);
+      } else if (reportType === 'companies') {
         companyIntelligence.fetchCompanyIntelligence(selectedAccount);
       } else if (reportType === 'demographics') {
         demographicReporting.fetchDemographicAnalytics(selectedAccount);
@@ -82,9 +101,22 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
   };
 
   const isLoading = 
+    reportType === 'creatives' ? creativeReporting.isLoading :
     reportType === 'companies' ? companyIntelligence.isLoading : 
     reportType === 'demographics' ? demographicReporting.isLoading : 
     reportType === 'company_demo' ? companyDemographic.isLoading : false;
+
+  // Calculate creative totals
+  const creativeTotals = creativeReporting.totals;
+  const creativeAvgCtr = creativeTotals.impressions > 0 
+    ? ((creativeTotals.clicks / creativeTotals.impressions) * 100).toFixed(2) 
+    : '0.00';
+  const creativeAvgCpc = creativeTotals.clicks > 0 
+    ? (creativeTotals.spent / creativeTotals.clicks).toFixed(2) 
+    : '0.00';
+  const creativeAvgCpm = creativeTotals.impressions > 0 
+    ? ((creativeTotals.spent / creativeTotals.impressions) * 1000).toFixed(2) 
+    : '0.00';
 
   return (
     <div className="space-y-6">
@@ -110,6 +142,10 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
       {/* Report Type Tabs */}
       <Tabs value={reportType} onValueChange={setReportType}>
         <TabsList className="bg-muted/50">
+          <TabsTrigger value="creatives" className="gap-2">
+            <Megaphone className="h-4 w-4" />
+            Creatives
+          </TabsTrigger>
           <TabsTrigger value="companies" className="gap-2">
             <Building2 className="h-4 w-4" />
             Companies
@@ -133,6 +169,85 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
             <span className="text-xs text-muted-foreground">(Soon)</span>
           </TabsTrigger>
         </TabsList>
+
+        {/* Creatives Tab */}
+        <TabsContent value="creatives" className="space-y-6 mt-6">
+          <Card className="bg-card/50 backdrop-blur-sm border-border/50">
+            <CardContent className="pt-4">
+              <TimeFrameSelector
+                timeFrameOptions={creativeReporting.timeFrameOptions}
+                selectedTimeFrame={selectedTimeFrame}
+                onTimeFrameChange={handleCreativeTimeFrameChange}
+                timeGranularity={creativeReporting.timeGranularity as TimeGranularity}
+                onGranularityChange={(g: TimeGranularity) => creativeReporting.setTimeGranularity(g as any)}
+                dateRange={creativeReporting.dateRange}
+              />
+            </CardContent>
+          </Card>
+
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
+            <MetricCard
+              title="Impressions"
+              value={creativeTotals.impressions.toLocaleString()}
+              icon={FileBarChart}
+            />
+            <MetricCard
+              title="Clicks"
+              value={creativeTotals.clicks.toLocaleString()}
+              icon={FileBarChart}
+            />
+            <MetricCard
+              title="Spent"
+              value={`$${creativeTotals.spent.toFixed(2)}`}
+              icon={FileBarChart}
+            />
+            <MetricCard
+              title="Leads"
+              value={creativeTotals.leads.toLocaleString()}
+              icon={FileBarChart}
+            />
+            <MetricCard
+              title="CTR"
+              value={`${creativeAvgCtr}%`}
+              icon={FileBarChart}
+            />
+            <MetricCard
+              title="CPC"
+              value={`$${creativeAvgCpc}`}
+              icon={FileBarChart}
+            />
+            <MetricCard
+              title="CPM"
+              value={`$${creativeAvgCpm}`}
+              icon={FileBarChart}
+            />
+          </div>
+
+          {creativeReporting.error && (
+            <Card className="bg-destructive/10 border-destructive/30">
+              <CardContent className="pt-4">
+                <p className="text-sm text-destructive">
+                  <strong>Note:</strong> {creativeReporting.error}
+                </p>
+              </CardContent>
+            </Card>
+          )}
+
+          <Card className="bg-card/50 backdrop-blur-sm border-border/50">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Megaphone className="h-5 w-5 text-primary" />
+                Creative Performance
+              </CardTitle>
+              <CardDescription>
+                Performance metrics by creative name with campaign attribution
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <CreativeReportingTable data={creativeReporting.creativeData} isLoading={creativeReporting.isLoading} />
+            </CardContent>
+          </Card>
+        </TabsContent>
 
         {/* Companies Tab */}
         <TabsContent value="companies" className="space-y-6 mt-6">
