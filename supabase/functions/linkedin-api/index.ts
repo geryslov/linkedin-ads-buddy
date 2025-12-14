@@ -416,34 +416,185 @@ serve(async (req) => {
         const creativesData = await creativesResponse.json();
         console.log(`[Step 2] Fetched ${creativesData.elements?.length || 0} creative metadata records`);
 
-        // Build creative metadata map
+        // Collect share URNs that need resolution
+        const shareUrnsToResolve: string[] = [];
+        const creativeToShareMap = new Map<string, string>(); // creativeId -> shareUrn
+        
+        // First pass: identify share URNs that need fetching
+        (creativesData.elements || []).forEach((c: any) => {
+          const creativeId = c.id?.toString() || '';
+          if (c.variables?.data) {
+            const variablesData = c.variables.data;
+            const dsContent = variablesData['com.linkedin.ads.DirectSponsoredContentCreativeVariables'];
+            const sponsoredUpdate = variablesData['com.linkedin.ads.SponsoredUpdateCreativeVariables'];
+            
+            if (dsContent?.share) {
+              shareUrnsToResolve.push(dsContent.share);
+              creativeToShareMap.set(creativeId, dsContent.share);
+            } else if (sponsoredUpdate?.activity) {
+              shareUrnsToResolve.push(sponsoredUpdate.activity);
+              creativeToShareMap.set(creativeId, sponsoredUpdate.activity);
+            }
+          }
+        });
+        
+        console.log(`[Step 2b] Found ${shareUrnsToResolve.length} shares to resolve for post content`);
+        
+        // Batch fetch share/post content to get human-readable titles
+        const shareContentMap = new Map<string, string>(); // shareUrn -> post text/title
+        
+        if (shareUrnsToResolve.length > 0) {
+          const uniqueShareUrns = [...new Set(shareUrnsToResolve)];
+          const batchSize = 10;
+          
+          for (let i = 0; i < uniqueShareUrns.length; i += batchSize) {
+            const batch = uniqueShareUrns.slice(i, i + batchSize);
+            
+            const sharePromises = batch.map(async (shareUrn) => {
+              try {
+                // Try shares endpoint first
+                const shareId = shareUrn.split(':').pop();
+                const shareResponse = await fetch(
+                  `https://api.linkedin.com/v2/shares/${shareUrn}`,
+                  { headers: { 'Authorization': `Bearer ${accessToken}` } }
+                );
+                
+                if (shareResponse.ok) {
+                  const shareData = await shareResponse.json();
+                  // Extract text from share content
+                  let text = shareData.text?.text || '';
+                  if (!text && shareData.content?.title) {
+                    text = shareData.content.title;
+                  }
+                  if (!text && shareData.content?.description) {
+                    text = shareData.content.description;
+                  }
+                  // Truncate to reasonable length for display
+                  if (text && text.length > 60) {
+                    text = text.substring(0, 57) + '...';
+                  }
+                  return { urn: shareUrn, text: text || null };
+                }
+                
+                // Try ugcPosts endpoint as fallback (for ugcPost URNs)
+                if (shareUrn.includes('ugcPost')) {
+                  const ugcResponse = await fetch(
+                    `https://api.linkedin.com/v2/ugcPosts/${shareUrn}`,
+                    { headers: { 'Authorization': `Bearer ${accessToken}` } }
+                  );
+                  
+                  if (ugcResponse.ok) {
+                    const ugcData = await ugcResponse.json();
+                    let text = ugcData.specificContent?.['com.linkedin.ugc.ShareContent']?.shareCommentary?.text || '';
+                    if (!text) {
+                      const media = ugcData.specificContent?.['com.linkedin.ugc.ShareContent']?.media?.[0];
+                      text = media?.title?.text || media?.description?.text || '';
+                    }
+                    if (text && text.length > 60) {
+                      text = text.substring(0, 57) + '...';
+                    }
+                    return { urn: shareUrn, text: text || null };
+                  }
+                }
+                
+                return { urn: shareUrn, text: null };
+              } catch (e) {
+                console.log(`[Warning] Share lookup error for ${shareUrn}:`, e);
+                return { urn: shareUrn, text: null };
+              }
+            });
+            
+            const results = await Promise.all(sharePromises);
+            results.forEach(result => {
+              if (result.text) {
+                shareContentMap.set(result.urn, result.text);
+              }
+            });
+          }
+          console.log(`[Step 2b] Resolved ${shareContentMap.size} share texts`);
+        }
+
+        // Build creative metadata map with resolved names
         const creativeMetadataMap = new Map<string, { name: string; campaignId: string; campaignName: string; status: string; type: string }>();
         (creativesData.elements || []).forEach((c: any) => {
           const creativeId = c.id?.toString() || '';
           const campaignUrn = c.campaign || '';
           const campaignId = campaignUrn.split(':').pop() || '';
           
-          // Extract Direct Sponsored Content name from variables
           let creativeName = '';
+          let creativeType = 'UNKNOWN';
+          
           if (c.variables?.data) {
             const variablesData = c.variables.data;
             const dsContent = variablesData['com.linkedin.ads.DirectSponsoredContentCreativeVariables'];
             const sponsoredUpdate = variablesData['com.linkedin.ads.SponsoredUpdateCreativeVariables'];
             const textAd = variablesData['com.linkedin.ads.TextAdCreativeVariables'];
+            const spotlightAd = variablesData['com.linkedin.ads.SpotlightCreativeVariables'];
+            const followerAd = variablesData['com.linkedin.ads.FollowerCreativeVariables'];
+            const jobsAd = variablesData['com.linkedin.ads.JobsCreativeVariables'];
+            const videoAd = variablesData['com.linkedin.ads.VideoCreativeVariables'];
+            const carouselAd = variablesData['com.linkedin.ads.CarouselCreativeVariables'];
             
+            // Check for explicit name field first
             if (dsContent?.name) {
               creativeName = dsContent.name;
+              creativeType = 'SPONSORED_CONTENT';
             } else if (dsContent?.share) {
-              creativeName = `DSC-${dsContent.share.split(':').pop() || creativeId}`;
+              // Try to get share content text
+              const shareText = shareContentMap.get(dsContent.share);
+              if (shareText) {
+                creativeName = shareText;
+              } else {
+                creativeName = `Sponsored Content #${dsContent.share.split(':').pop() || creativeId}`;
+              }
+              creativeType = 'SPONSORED_CONTENT';
             } else if (sponsoredUpdate?.activity) {
-              creativeName = `Sponsored-${sponsoredUpdate.activity.split(':').pop() || creativeId}`;
-            } else if (textAd?.title) {
-              creativeName = textAd.title;
+              // Try to get activity content text  
+              const activityText = shareContentMap.get(sponsoredUpdate.activity);
+              if (activityText) {
+                creativeName = activityText;
+              } else {
+                creativeName = `Sponsored Update #${sponsoredUpdate.activity.split(':').pop() || creativeId}`;
+              }
+              creativeType = 'SPONSORED_UPDATE';
+            } else if (textAd) {
+              // Text ads have title and description
+              creativeName = textAd.title || textAd.text || `Text Ad #${creativeId}`;
+              creativeType = 'TEXT_AD';
+            } else if (spotlightAd) {
+              // Spotlight/Dynamic ads
+              creativeName = spotlightAd.headline || spotlightAd.ctaLabel || `Spotlight Ad #${creativeId}`;
+              creativeType = 'SPOTLIGHT_AD';
+            } else if (followerAd) {
+              creativeName = followerAd.headline || `Follower Ad #${creativeId}`;
+              creativeType = 'FOLLOWER_AD';
+            } else if (jobsAd) {
+              creativeName = jobsAd.headline || `Jobs Ad #${creativeId}`;
+              creativeType = 'JOBS_AD';
+            } else if (videoAd) {
+              creativeName = videoAd.name || videoAd.title || `Video Ad #${creativeId}`;
+              creativeType = 'VIDEO_AD';
+            } else if (carouselAd) {
+              const cardCount = carouselAd.cards?.length || 0;
+              creativeName = `Carousel Ad (${cardCount} cards) #${creativeId}`;
+              creativeType = 'CAROUSEL_AD';
             }
           }
           
+          // Fallback naming based on creative reference or type
           if (!creativeName) {
-            creativeName = c.reference?.split(':').pop() || `Creative ${creativeId}`;
+            if (c.reference) {
+              const refType = c.reference.split(':')[2] || '';
+              if (refType === 'share') {
+                creativeName = `Share Ad #${c.reference.split(':').pop()}`;
+              } else if (refType === 'ugcPost') {
+                creativeName = `UGC Post Ad #${c.reference.split(':').pop()}`;
+              } else {
+                creativeName = `Ad #${creativeId}`;
+              }
+            } else {
+              creativeName = `Ad #${creativeId}`;
+            }
           }
           
           const resolvedCampaignName = campaignMap.get(campaignId);
@@ -452,7 +603,7 @@ serve(async (req) => {
             campaignId,
             campaignName: typeof resolvedCampaignName === 'string' ? resolvedCampaignName : `Campaign ${campaignId}`,
             status: c.status || 'UNKNOWN',
-            type: c.type || 'UNKNOWN',
+            type: creativeType !== 'UNKNOWN' ? creativeType : (c.type || 'UNKNOWN'),
           });
         });
         console.log(`[Step 2] Built metadata map for ${creativeMetadataMap.size} creatives`);
