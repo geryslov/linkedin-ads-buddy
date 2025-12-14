@@ -382,6 +382,13 @@ serve(async (req) => {
         
         const analyticsData = await analyticsResponse.json();
         console.log(`[Step 2] Received ${analyticsData.elements?.length || 0} analytics records`);
+        
+        // Debug: log first analytics element if available
+        if (analyticsData.elements?.length > 0) {
+          console.log('[Step 2] Sample analytics record:', JSON.stringify(analyticsData.elements[0]));
+        } else {
+          console.log('[Step 2] No analytics records returned - will show all creatives with zero metrics');
+        }
 
         // Aggregate analytics by creative URN
         const analyticsMap = new Map<string, { impressions: number; clicks: number; spent: number; spentUsd: number; leads: number }>();
@@ -495,18 +502,13 @@ serve(async (req) => {
         });
         console.log(`[Step 4] Built metadata map for ${creativeMetadataMap.size} creatives`);
 
-        // Step 5: Merge analytics with creative names
+        // Step 5: Merge analytics with creative names - include ALL creatives from metadata
         console.log('[Step 5] Merging analytics with creative metadata...');
         const reportElements: any[] = [];
         
-        analyticsMap.forEach((metrics, creativeId) => {
-          const metadata = creativeMetadataMap.get(creativeId) || {
-            name: `Creative ${creativeId}`,
-            campaignId: '',
-            campaignName: 'Unknown Campaign',
-            status: 'UNKNOWN',
-            type: 'UNKNOWN',
-          };
+        // Include all creatives from metadata, using analytics data if available
+        creativeMetadataMap.forEach((metadata, creativeId) => {
+          const metrics = analyticsMap.get(creativeId) || { impressions: 0, clicks: 0, spent: 0, spentUsd: 0, leads: 0 };
           
           const ctr = metrics.impressions > 0 ? (metrics.clicks / metrics.impressions) * 100 : 0;
           const cpc = metrics.clicks > 0 ? metrics.spent / metrics.clicks : 0;
@@ -529,10 +531,14 @@ serve(async (req) => {
           });
         });
 
-        // Sort by spend descending
-        reportElements.sort((a, b) => parseFloat(b.costInLocalCurrency) - parseFloat(a.costInLocalCurrency));
+        // Sort by spend descending, then by impressions
+        reportElements.sort((a, b) => {
+          const spendDiff = parseFloat(b.costInLocalCurrency) - parseFloat(a.costInLocalCurrency);
+          if (spendDiff !== 0) return spendDiff;
+          return b.impressions - a.impressions;
+        });
         
-        console.log(`[get_creative_report] Complete. Total creatives with data: ${reportElements.length}`);
+        console.log(`[get_creative_report] Complete. Total creatives: ${reportElements.length}, with analytics: ${analyticsMap.size}`);
         
         return new Response(JSON.stringify({ 
           elements: reportElements,
