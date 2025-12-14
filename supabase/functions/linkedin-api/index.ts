@@ -1029,6 +1029,264 @@ serve(async (req) => {
         });
       }
 
+      case 'get_company_demographic': {
+        const { accountId, dateRange, timeGranularity } = params || {};
+        const startDate = dateRange?.start || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        const endDate = dateRange?.end || new Date().toISOString().split('T')[0];
+        const granularity = timeGranularity || 'ALL';
+        
+        console.log(`[get_company_demographic] Starting for account ${accountId}, date range: ${startDate} to ${endDate}`);
+
+        // Step 1: Fetch demographic analytics with MEMBER_COMPANY pivot
+        const analyticsUrl = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
+          `dateRange.start.day=${new Date(startDate).getDate()}&` +
+          `dateRange.start.month=${new Date(startDate).getMonth() + 1}&` +
+          `dateRange.start.year=${new Date(startDate).getFullYear()}&` +
+          `dateRange.end.day=${new Date(endDate).getDate()}&` +
+          `dateRange.end.month=${new Date(endDate).getMonth() + 1}&` +
+          `dateRange.end.year=${new Date(endDate).getFullYear()}&` +
+          `timeGranularity=${granularity === 'ALL' ? 'ALL' : granularity}&` +
+          `pivot=MEMBER_COMPANY&` +
+          `accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
+          `fields=impressions,clicks,costInLocalCurrency,costInUsd,externalWebsiteConversions,oneClickLeads,pivotValue&` +
+          `count=500`;
+
+        console.log('[get_company_demographic] Step 1: Fetching company demographic analytics...');
+        const analyticsResponse = await fetch(analyticsUrl, {
+          headers: { 'Authorization': `Bearer ${accessToken}` },
+        });
+        
+        if (!analyticsResponse.ok) {
+          const errorText = await analyticsResponse.text();
+          console.error('[Error] Failed to fetch company demographic:', analyticsResponse.status, errorText);
+          
+          return new Response(JSON.stringify({ 
+            error: 'MEMBER_COMPANY pivot may not be available for this account',
+            details: errorText,
+            elements: [] 
+          }), {
+            status: analyticsResponse.status,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+        
+        const analyticsData = await analyticsResponse.json();
+        console.log(`[get_company_demographic] Received ${analyticsData.elements?.length || 0} company records`);
+
+        // Aggregate by company URN
+        const companyMap = new Map<string, { 
+          entityUrn: string;
+          impressions: number; 
+          clicks: number; 
+          spent: number; 
+          spentUsd: number; 
+          leads: number;
+        }>();
+        
+        (analyticsData.elements || []).forEach((el: any) => {
+          const entityUrn = el.pivotValue || '';
+          if (!entityUrn) return;
+          
+          const existing = companyMap.get(entityUrn) || { 
+            entityUrn,
+            impressions: 0, 
+            clicks: 0, 
+            spent: 0, 
+            spentUsd: 0, 
+            leads: 0 
+          };
+          companyMap.set(entityUrn, {
+            entityUrn,
+            impressions: existing.impressions + (el.impressions || 0),
+            clicks: existing.clicks + (el.clicks || 0),
+            spent: existing.spent + parseFloat(el.costInLocalCurrency || '0'),
+            spentUsd: existing.spentUsd + parseFloat(el.costInUsd || '0'),
+            leads: existing.leads + (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0),
+          });
+        });
+
+        console.log(`[get_company_demographic] Aggregated data for ${companyMap.size} unique companies`);
+
+        // Step 2: Resolve company names via Organization Lookup
+        const companyNames = new Map<string, string>();
+        const companyWebsites = new Map<string, { website: string | null; linkedInUrl: string | null; status: string }>();
+        const companyUrns = Array.from(companyMap.keys());
+        
+        // Extract organization IDs from URNs
+        const orgIdToUrn = new Map<string, string>();
+        companyUrns.forEach(urn => {
+          const match = urn.match(/^urn:li:organization:(\d+)$/);
+          if (match) {
+            orgIdToUrn.set(match[1], urn);
+          }
+        });
+        
+        const orgIds = Array.from(orgIdToUrn.keys());
+        console.log(`[get_company_demographic] Step 2: Resolving ${orgIds.length} organization IDs...`);
+
+        // Batch fetch organization data
+        if (orgIds.length > 0) {
+          const batchSize = 50;
+          for (let i = 0; i < orgIds.length; i += batchSize) {
+            const batch = orgIds.slice(i, i + batchSize);
+            const idsParam = batch.map((id, idx) => `ids[${idx}]=${id}`).join('&');
+            
+            try {
+              const orgResponse = await fetch(
+                `https://api.linkedin.com/v2/organizationsLookup?${idsParam}&projection=(results*(id,localizedName,localizedWebsite,vanityName))`,
+                { headers: { 'Authorization': `Bearer ${accessToken}` } }
+              );
+              
+              if (orgResponse.ok) {
+                const orgData = await orgResponse.json();
+                const results = orgData.results || {};
+                
+                Object.entries(results).forEach(([id, org]: [string, any]) => {
+                  const urn = orgIdToUrn.get(id);
+                  if (!urn) return;
+                  
+                  if (org?.localizedName) {
+                    companyNames.set(urn, org.localizedName);
+                  }
+                  
+                  // Extract website from organization data
+                  const website = org?.localizedWebsite || null;
+                  const vanityName = org?.vanityName || null;
+                  const linkedInUrl = vanityName ? `https://www.linkedin.com/company/${vanityName}` : null;
+                  
+                  companyWebsites.set(urn, {
+                    website,
+                    linkedInUrl,
+                    status: website ? 'resolved' : (vanityName ? 'fallback' : 'unresolved'),
+                  });
+                });
+              } else {
+                console.log(`[Warning] Organization lookup batch failed: ${orgResponse.status}`);
+              }
+            } catch (e) {
+              console.log('[Warning] Organization lookup failed:', e);
+            }
+          }
+        }
+        
+        console.log(`[get_company_demographic] Resolved ${companyNames.size} company names, ${companyWebsites.size} with website info`);
+
+        // Step 3: For companies without website, try vanity name lookup
+        const unresolvedUrns = companyUrns.filter(urn => {
+          const info = companyWebsites.get(urn);
+          return !info || info.status === 'unresolved';
+        });
+        
+        if (unresolvedUrns.length > 0) {
+          console.log(`[get_company_demographic] Step 3: Attempting vanity lookup for ${unresolvedUrns.length} unresolved companies...`);
+          
+          // For each unresolved company, try to guess vanity name and look it up
+          const batchSize = 10;
+          for (let i = 0; i < Math.min(unresolvedUrns.length, 50); i += batchSize) {
+            const batch = unresolvedUrns.slice(i, i + batchSize);
+            
+            const vanityPromises = batch.map(async (urn) => {
+              const companyName = companyNames.get(urn);
+              if (!companyName) return { urn, result: null };
+              
+              // Create vanity name guess: lowercase, hyphenated, URL encoded
+              const vanityGuess = companyName
+                .toLowerCase()
+                .replace(/[^\w\s-]/g, '')
+                .replace(/\s+/g, '-')
+                .slice(0, 50);
+              
+              try {
+                const vanityResponse = await fetch(
+                  `https://api.linkedin.com/rest/organizations?q=vanityName&vanityName=${encodeURIComponent(vanityGuess)}`,
+                  { 
+                    headers: { 
+                      'Authorization': `Bearer ${accessToken}`,
+                      'LinkedIn-Version': '202411',
+                      'X-Restli-Protocol-Version': '2.0.0',
+                    } 
+                  }
+                );
+                
+                if (vanityResponse.ok) {
+                  const vanityData = await vanityResponse.json();
+                  if (vanityData.elements && vanityData.elements.length > 0) {
+                    const org = vanityData.elements[0];
+                    return {
+                      urn,
+                      result: {
+                        website: org.localizedWebsite || null,
+                        linkedInUrl: org.vanityName ? `https://www.linkedin.com/company/${org.vanityName}` : null,
+                        status: org.localizedWebsite ? 'resolved' : 'fallback',
+                      }
+                    };
+                  }
+                }
+                return { urn, result: null };
+              } catch (e) {
+                console.log(`[Warning] Vanity lookup failed for ${companyName}:`, e);
+                return { urn, result: null };
+              }
+            });
+            
+            const results = await Promise.all(vanityPromises);
+            results.forEach(({ urn, result }) => {
+              if (result) {
+                companyWebsites.set(urn, result);
+              }
+            });
+          }
+        }
+
+        // Build final report
+        const reportElements: any[] = [];
+        companyMap.forEach((metrics, entityUrn) => {
+          const entityName = companyNames.get(entityUrn) || extractNameFromUrn(entityUrn);
+          const websiteInfo = companyWebsites.get(entityUrn) || { website: null, linkedInUrl: null, status: 'unresolved' };
+          
+          const ctr = metrics.impressions > 0 ? (metrics.clicks / metrics.impressions) * 100 : 0;
+          const cpc = metrics.clicks > 0 ? metrics.spent / metrics.clicks : 0;
+          const cpm = metrics.impressions > 0 ? (metrics.spent / metrics.impressions) * 1000 : 0;
+          
+          reportElements.push({
+            entityUrn,
+            entityName,
+            website: websiteInfo.website,
+            linkedInUrl: websiteInfo.linkedInUrl,
+            enrichmentStatus: websiteInfo.status,
+            impressions: metrics.impressions,
+            clicks: metrics.clicks,
+            costInLocalCurrency: metrics.spent.toFixed(2),
+            costInUsd: metrics.spentUsd.toFixed(2),
+            leads: metrics.leads,
+            ctr: ctr.toFixed(2),
+            cpc: cpc.toFixed(2),
+            cpm: cpm.toFixed(2),
+          });
+        });
+
+        reportElements.sort((a, b) => b.impressions - a.impressions);
+        
+        const resolvedCount = reportElements.filter(r => r.enrichmentStatus === 'resolved').length;
+        const unresolvedCount = reportElements.filter(r => r.enrichmentStatus === 'unresolved').length;
+        
+        console.log(`[get_company_demographic] Complete. Total: ${reportElements.length}, Resolved: ${resolvedCount}, Unresolved: ${unresolvedCount}`);
+        
+        return new Response(JSON.stringify({ 
+          elements: reportElements,
+          metadata: {
+            accountId,
+            dateRange: { start: startDate, end: endDate },
+            timeGranularity: granularity,
+            totalCompanies: reportElements.length,
+            resolvedCount,
+            unresolvedCount,
+          }
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
       default:
         return new Response(JSON.stringify({ error: 'Unknown action' }), {
           status: 400,
