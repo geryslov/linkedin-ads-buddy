@@ -2,11 +2,14 @@ import { useEffect, useState } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { RefreshCw, FileBarChart, Image, Users, Target, Megaphone } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { RefreshCw, FileBarChart, Image, Users, Target, Megaphone, Building2 } from 'lucide-react';
 import { useCreativeReporting, TimeFrameOption } from '@/hooks/useCreativeReporting';
 import { useAdReporting, TimeFrameOption as AdTimeFrameOption } from '@/hooks/useAdReporting';
+import { useCompanyIntelligence, LookbackWindow } from '@/hooks/useCompanyIntelligence';
 import { CreativeReportingTable } from './CreativeReportingTable';
 import { AdReportingTable } from './AdReportingTable';
+import { CompanyIntelligenceTable } from './CompanyIntelligenceTable';
 import { TimeFrameSelector } from './TimeFrameSelector';
 import { MetricCard } from './MetricCard';
 
@@ -18,6 +21,7 @@ interface ReportingSectionProps {
 export function ReportingSection({ accessToken, selectedAccount }: ReportingSectionProps) {
   const creativeReporting = useCreativeReporting(accessToken);
   const adReporting = useAdReporting(accessToken);
+  const companyIntelligence = useCompanyIntelligence(accessToken);
 
   const [selectedTimeFrame, setSelectedTimeFrame] = useState('30d');
   const [reportType, setReportType] = useState('ads');
@@ -28,6 +32,8 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
         creativeReporting.fetchCreativeAnalytics(selectedAccount);
       } else if (reportType === 'ads') {
         adReporting.fetchAdAnalytics(selectedAccount);
+      } else if (reportType === 'companies') {
+        companyIntelligence.fetchCompanyIntelligence(selectedAccount);
       }
     }
   }, [selectedAccount, reportType]);
@@ -46,6 +52,13 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
     }
   }, [adReporting.dateRange, adReporting.timeGranularity]);
 
+  // Re-fetch when lookback window changes for companies
+  useEffect(() => {
+    if (selectedAccount && reportType === 'companies') {
+      companyIntelligence.fetchCompanyIntelligence(selectedAccount);
+    }
+  }, [companyIntelligence.lookbackWindow]);
+
   const handleCreativeTimeFrameChange = (option: TimeFrameOption) => {
     setSelectedTimeFrame(option.value);
     creativeReporting.setTimeFrame(option);
@@ -62,11 +75,16 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
         creativeReporting.fetchCreativeAnalytics(selectedAccount);
       } else if (reportType === 'ads') {
         adReporting.fetchAdAnalytics(selectedAccount);
+      } else if (reportType === 'companies') {
+        companyIntelligence.fetchCompanyIntelligence(selectedAccount);
       }
     }
   };
 
-  const isLoading = reportType === 'creatives' ? creativeReporting.isLoading : adReporting.isLoading;
+  const isLoading = 
+    reportType === 'creatives' ? creativeReporting.isLoading : 
+    reportType === 'ads' ? adReporting.isLoading :
+    reportType === 'companies' ? companyIntelligence.isLoading : false;
 
   // Calculate summary metrics for creatives
   const creativeTotals = creativeReporting.aggregatedData.reduce(
@@ -137,6 +155,10 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
           <TabsTrigger value="creatives" className="gap-2">
             <Image className="h-4 w-4" />
             Creatives
+          </TabsTrigger>
+          <TabsTrigger value="companies" className="gap-2">
+            <Building2 className="h-4 w-4" />
+            Companies
           </TabsTrigger>
           <TabsTrigger value="campaigns" className="gap-2" disabled>
             <Target className="h-4 w-4" />
@@ -274,6 +296,98 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
             </CardHeader>
             <CardContent>
               <CreativeReportingTable data={creativeReporting.aggregatedData} isLoading={creativeReporting.isLoading} />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Companies Tab */}
+        <TabsContent value="companies" className="space-y-6 mt-6">
+          <Card className="bg-card/50 backdrop-blur-sm border-border/50">
+            <CardContent className="pt-4">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium">Time Period:</span>
+                  <Select 
+                    value={companyIntelligence.lookbackWindow} 
+                    onValueChange={(v) => companyIntelligence.setLookbackWindow(v as LookbackWindow)}
+                  >
+                    <SelectTrigger className="w-[180px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="LAST_7_DAYS">Last 7 Days</SelectItem>
+                      <SelectItem value="LAST_30_DAYS">Last 30 Days</SelectItem>
+                      <SelectItem value="LAST_60_DAYS">Last 60 Days</SelectItem>
+                      <SelectItem value="LAST_90_DAYS">Last 90 Days</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+            <MetricCard
+              title="Paid Impressions"
+              value={companyIntelligence.totals.paidImpressions.toLocaleString()}
+              icon={FileBarChart}
+            />
+            <MetricCard
+              title="Paid Clicks"
+              value={companyIntelligence.totals.paidClicks.toLocaleString()}
+              icon={FileBarChart}
+            />
+            <MetricCard
+              title="Leads"
+              value={companyIntelligence.totals.paidLeads.toLocaleString()}
+              icon={FileBarChart}
+            />
+            <MetricCard
+              title="Paid Engagements"
+              value={companyIntelligence.totals.paidEngagements.toLocaleString()}
+              icon={FileBarChart}
+            />
+            <MetricCard
+              title="Organic Impressions"
+              value={companyIntelligence.totals.organicImpressions.toLocaleString()}
+              icon={FileBarChart}
+            />
+            <MetricCard
+              title="Organic Engagements"
+              value={companyIntelligence.totals.organicEngagements.toLocaleString()}
+              icon={FileBarChart}
+            />
+          </div>
+
+          {companyIntelligence.error && (
+            <Card className="bg-destructive/10 border-destructive/30">
+              <CardContent className="pt-4">
+                <p className="text-sm text-destructive">
+                  <strong>Note:</strong> {companyIntelligence.error}
+                </p>
+                <p className="text-xs text-muted-foreground mt-2">
+                  The Company Intelligence API requires special provisioning from LinkedIn. 
+                  Please submit a request through the LinkedIn Developer Portal if you need access.
+                </p>
+              </CardContent>
+            </Card>
+          )}
+
+          <Card className="bg-card/50 backdrop-blur-sm border-border/50">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Building2 className="h-5 w-5 text-primary" />
+                Company Engagement
+              </CardTitle>
+              <CardDescription>
+                Company-level engagement data showing which companies have interacted with your ads
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <CompanyIntelligenceTable 
+                data={companyIntelligence.companyData} 
+                isLoading={companyIntelligence.isLoading} 
+              />
             </CardContent>
           </Card>
         </TabsContent>

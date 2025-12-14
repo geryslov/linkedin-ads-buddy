@@ -451,6 +451,96 @@ serve(async (req) => {
         });
       }
 
+      case 'get_company_intelligence': {
+        const { accountId, lookbackWindow, campaignId } = params || {};
+        const lookback = lookbackWindow || 'LAST_30_DAYS';
+        
+        console.log(`[get_company_intelligence] Starting for account ${accountId}, lookback: ${lookback}`);
+
+        // Build the filterCriteria parameter
+        let filterCriteria = `(lookbackWindow:${lookback}`;
+        if (campaignId) {
+          filterCriteria += `,campaign:urn:li:sponsoredCampaign:${campaignId}`;
+        }
+        filterCriteria += ')';
+        
+        // Use REST API version with required headers
+        const baseUrl = `https://api.linkedin.com/rest/accountIntelligence`;
+        const queryParams = new URLSearchParams({
+          q: 'account',
+          account: `urn:li:sponsoredAccount:${accountId}`,
+          start: '0',
+          count: '500',
+        });
+        
+        const url = `${baseUrl}?${queryParams.toString()}&filterCriteria=${encodeURIComponent(filterCriteria)}`;
+        console.log(`[get_company_intelligence] Fetching from: ${url}`);
+        
+        const response = await fetch(url, {
+          headers: { 
+            'Authorization': `Bearer ${accessToken}`,
+            'LinkedIn-Version': '202411',
+            'X-Restli-Protocol-Version': '2.0.0',
+          },
+        });
+        
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error('[Error] Company Intelligence API failed:', response.status, errorText);
+          
+          // Check for specific permission errors
+          if (response.status === 403) {
+            return new Response(JSON.stringify({ 
+              error: 'Access denied - Company Intelligence API requires special provisioning',
+              details: errorText,
+              elements: [] 
+            }), {
+              status: 403,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+          throw new Error(`Company Intelligence API error: ${response.status} - ${errorText}`);
+        }
+        
+        const data = await response.json();
+        console.log(`[get_company_intelligence] Fetched ${data.elements?.length || 0} companies`);
+        
+        // Map and enhance the response data
+        const companies = (data.elements || []).map((company: any) => ({
+          companyName: company.companyName || 'Unknown Company',
+          companyPageUrl: company.companyPageUrl || '',
+          companyWebsite: company.companyWebsite || '',
+          engagementLevel: company.engagementLevel || 'UNKNOWN',
+          paidImpressions: company.paidImpressions || 0,
+          paidClicks: company.paidClicks || 0,
+          paidLeads: company.paidLeads || 0,
+          paidEngagements: company.paidEngagements || 0,
+          organicImpressions: company.organicImpressions || 0,
+          organicEngagements: company.organicEngagements || 0,
+          // Calculate CTR for paid
+          paidCtr: company.paidImpressions > 0 
+            ? ((company.paidClicks / company.paidImpressions) * 100).toFixed(2) 
+            : '0.00',
+        }));
+        
+        // Sort by paid impressions descending
+        companies.sort((a: any, b: any) => b.paidImpressions - a.paidImpressions);
+        
+        console.log(`[get_company_intelligence] Complete. Returning ${companies.length} companies`);
+        
+        return new Response(JSON.stringify({ 
+          elements: companies,
+          paging: data.paging || {},
+          metadata: {
+            accountId,
+            lookbackWindow: lookback,
+            totalCompanies: companies.length,
+          }
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
       default:
         return new Response(JSON.stringify({ error: 'Unknown action' }), {
           status: 400,
