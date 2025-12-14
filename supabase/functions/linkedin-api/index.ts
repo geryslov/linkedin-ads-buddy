@@ -476,18 +476,18 @@ serve(async (req) => {
           });
         });
 
-        // Step 6: Build final report
-        console.log('[Step 6] Building final report...');
+        // Step 6: Build final report - iterate over ALL creatives from metadata
+        console.log('[Step 6] Building final report from all creatives...');
         const reportElements: any[] = [];
         let creativesWithData = 0;
         let unresolvedCount = 0;
         
-        analyticsMap.forEach((metrics, creativeId) => {
+        // Iterate over creativeMetaMap (all creatives) instead of analyticsMap
+        creativeMetaMap.forEach((meta, creativeId) => {
           const urn = `urn:li:sponsoredCreative:${creativeId}`;
           let creativeName = creativeNameMap.get(urn) || creativeNameMap.get(creativeId) || '';
           
-          const meta = creativeMetaMap.get(creativeId);
-          const campaignId = meta?.campaignId || '';
+          const campaignId = meta.campaignId || '';
           const campaignName = campaignMap.get(campaignId) || 'Unknown Campaign';
           
           // Fallback name if batch lookup failed
@@ -495,6 +495,9 @@ serve(async (req) => {
             creativeName = `${campaignName} - Creative ${creativeId}`;
             unresolvedCount++;
           }
+          
+          // Get analytics data if available, otherwise use zeros
+          const metrics = analyticsMap.get(creativeId) || { impressions: 0, clicks: 0, spent: 0, spentUsd: 0, leads: 0 };
           
           if (metrics.impressions > 0 || metrics.spent > 0) {
             creativesWithData++;
@@ -508,8 +511,8 @@ serve(async (req) => {
             creativeId,
             creativeName,
             campaignName,
-            status: meta?.status || 'UNKNOWN',
-            type: meta?.type || 'UNKNOWN',
+            status: meta.status || 'UNKNOWN',
+            type: meta.type || 'UNKNOWN',
             impressions: metrics.impressions,
             clicks: metrics.clicks,
             costInLocalCurrency: metrics.spent.toFixed(2),
