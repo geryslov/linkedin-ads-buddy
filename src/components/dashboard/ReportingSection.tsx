@@ -2,9 +2,11 @@ import { useEffect, useState } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { RefreshCw, FileBarChart, Image, Users, Target } from 'lucide-react';
+import { RefreshCw, FileBarChart, Image, Users, Target, Megaphone } from 'lucide-react';
 import { useCreativeReporting, TimeFrameOption } from '@/hooks/useCreativeReporting';
+import { useAdReporting, TimeFrameOption as AdTimeFrameOption } from '@/hooks/useAdReporting';
 import { CreativeReportingTable } from './CreativeReportingTable';
+import { AdReportingTable } from './AdReportingTable';
 import { TimeFrameSelector } from './TimeFrameSelector';
 import { MetricCard } from './MetricCard';
 
@@ -15,13 +17,18 @@ interface ReportingSectionProps {
 
 export function ReportingSection({ accessToken, selectedAccount }: ReportingSectionProps) {
   const creativeReporting = useCreativeReporting(accessToken);
+  const adReporting = useAdReporting(accessToken);
 
   const [selectedTimeFrame, setSelectedTimeFrame] = useState('30d');
-  const [reportType, setReportType] = useState('creatives');
+  const [reportType, setReportType] = useState('ads');
 
   useEffect(() => {
-    if (selectedAccount && reportType === 'creatives') {
-      creativeReporting.fetchCreativeAnalytics(selectedAccount);
+    if (selectedAccount) {
+      if (reportType === 'creatives') {
+        creativeReporting.fetchCreativeAnalytics(selectedAccount);
+      } else if (reportType === 'ads') {
+        adReporting.fetchAdAnalytics(selectedAccount);
+      }
     }
   }, [selectedAccount, reportType]);
 
@@ -32,18 +39,34 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
     }
   }, [creativeReporting.dateRange, creativeReporting.timeGranularity]);
 
+  // Re-fetch when time/granularity changes for ads
+  useEffect(() => {
+    if (selectedAccount && reportType === 'ads') {
+      adReporting.fetchAdAnalytics(selectedAccount);
+    }
+  }, [adReporting.dateRange, adReporting.timeGranularity]);
+
   const handleCreativeTimeFrameChange = (option: TimeFrameOption) => {
     setSelectedTimeFrame(option.value);
     creativeReporting.setTimeFrame(option);
   };
 
+  const handleAdTimeFrameChange = (option: AdTimeFrameOption) => {
+    setSelectedTimeFrame(option.value);
+    adReporting.setTimeFrame(option);
+  };
+
   const handleRefresh = () => {
-    if (selectedAccount && reportType === 'creatives') {
-      creativeReporting.fetchCreativeAnalytics(selectedAccount);
+    if (selectedAccount) {
+      if (reportType === 'creatives') {
+        creativeReporting.fetchCreativeAnalytics(selectedAccount);
+      } else if (reportType === 'ads') {
+        adReporting.fetchAdAnalytics(selectedAccount);
+      }
     }
   };
 
-  const isLoading = creativeReporting.isLoading;
+  const isLoading = reportType === 'creatives' ? creativeReporting.isLoading : adReporting.isLoading;
 
   // Calculate summary metrics for creatives
   const creativeTotals = creativeReporting.aggregatedData.reduce(
@@ -58,6 +81,29 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
 
   const creativeAvgCtr = creativeTotals.impressions > 0 
     ? ((creativeTotals.clicks / creativeTotals.impressions) * 100).toFixed(2) 
+    : '0.00';
+
+  // Calculate summary metrics for ads
+  const adTotals = adReporting.aggregatedData.reduce(
+    (acc, item) => ({
+      impressions: acc.impressions + item.impressions,
+      clicks: acc.clicks + item.clicks,
+      spent: acc.spent + item.spent,
+      leads: acc.leads + item.leads,
+    }),
+    { impressions: 0, clicks: 0, spent: 0, leads: 0 }
+  );
+
+  const adAvgCtr = adTotals.impressions > 0 
+    ? ((adTotals.clicks / adTotals.impressions) * 100).toFixed(2) 
+    : '0.00';
+
+  const adAvgCpc = adTotals.clicks > 0 
+    ? (adTotals.spent / adTotals.clicks).toFixed(2) 
+    : '0.00';
+
+  const adAvgCpm = adTotals.impressions > 0 
+    ? ((adTotals.spent / adTotals.impressions) * 1000).toFixed(2) 
     : '0.00';
 
   return (
@@ -84,6 +130,10 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
       {/* Report Type Tabs */}
       <Tabs value={reportType} onValueChange={setReportType}>
         <TabsList className="bg-muted/50">
+          <TabsTrigger value="ads" className="gap-2">
+            <Megaphone className="h-4 w-4" />
+            Ads
+          </TabsTrigger>
           <TabsTrigger value="creatives" className="gap-2">
             <Image className="h-4 w-4" />
             Creatives
@@ -99,6 +149,75 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
             <span className="text-xs text-muted-foreground">(Soon)</span>
           </TabsTrigger>
         </TabsList>
+
+        {/* Ads Tab */}
+        <TabsContent value="ads" className="space-y-6 mt-6">
+          <Card className="bg-card/50 backdrop-blur-sm border-border/50">
+            <CardContent className="pt-4">
+              <TimeFrameSelector
+                timeFrameOptions={adReporting.timeFrameOptions}
+                selectedTimeFrame={selectedTimeFrame}
+                onTimeFrameChange={handleAdTimeFrameChange}
+                timeGranularity={adReporting.timeGranularity}
+                onGranularityChange={adReporting.setTimeGranularity}
+                dateRange={adReporting.dateRange}
+              />
+            </CardContent>
+          </Card>
+
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
+            <MetricCard
+              title="Impressions"
+              value={adTotals.impressions.toLocaleString()}
+              icon={FileBarChart}
+            />
+            <MetricCard
+              title="Clicks"
+              value={adTotals.clicks.toLocaleString()}
+              icon={FileBarChart}
+            />
+            <MetricCard
+              title="Spent"
+              value={`$${adTotals.spent.toFixed(2)}`}
+              icon={FileBarChart}
+            />
+            <MetricCard
+              title="Leads"
+              value={adTotals.leads.toLocaleString()}
+              icon={FileBarChart}
+            />
+            <MetricCard
+              title="CTR"
+              value={`${adAvgCtr}%`}
+              icon={FileBarChart}
+            />
+            <MetricCard
+              title="CPC"
+              value={`$${adAvgCpc}`}
+              icon={FileBarChart}
+            />
+            <MetricCard
+              title="CPM"
+              value={`$${adAvgCpm}`}
+              icon={FileBarChart}
+            />
+          </div>
+
+          <Card className="bg-card/50 backdrop-blur-sm border-border/50">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Megaphone className="h-5 w-5 text-primary" />
+                Ad Performance
+              </CardTitle>
+              <CardDescription>
+                Performance metrics by ad name with campaign attribution
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <AdReportingTable data={adReporting.aggregatedData} isLoading={adReporting.isLoading} />
+            </CardContent>
+          </Card>
+        </TabsContent>
 
         {/* Creatives Tab */}
         <TabsContent value="creatives" className="space-y-6 mt-6">
