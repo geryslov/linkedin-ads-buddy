@@ -401,36 +401,82 @@ serve(async (req) => {
         });
         console.log(`[Step 2] Aggregated ${analyticsMap.size} unique creatives with analytics`);
 
-        // Step 3: Batch fetch creative metadata from Creatives API
-        console.log('[Step 3] Batch fetching creative metadata...');
-        const creativesResponse = await fetch(
-          `https://api.linkedin.com/v2/adCreativesV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=500`,
-          { headers: { 'Authorization': `Bearer ${accessToken}` } }
-        );
+        // Step 3: Batch fetch creative metadata from VERSIONED Creatives API (preferred over legacy adCreativesV2)
+        console.log('[Step 3] Batch fetching creative metadata from versioned API...');
         
-        if (!creativesResponse.ok) {
-          const errorText = await creativesResponse.text();
-          console.error('[Error] Failed to fetch creatives:', creativesResponse.status, errorText);
-          throw new Error(`Failed to fetch creatives: ${creativesResponse.status}`);
+        // Try versioned API first (REST API with LinkedIn-Version header)
+        let creativesData: any = { elements: [] };
+        
+        try {
+          const versionedResponse = await fetch(
+            `https://api.linkedin.com/rest/creatives?q=search&search=(account:(values:List(urn%3Ali%3AsponsoredAccount%3A${accountId})))&count=500`,
+            { 
+              headers: { 
+                'Authorization': `Bearer ${accessToken}`,
+                'LinkedIn-Version': '202401',
+                'X-Restli-Protocol-Version': '2.0.0',
+              } 
+            }
+          );
+          
+          if (versionedResponse.ok) {
+            creativesData = await versionedResponse.json();
+            console.log(`[Step 3] Versioned API returned ${creativesData.elements?.length || 0} creatives`);
+          } else {
+            console.log(`[Step 3] Versioned API returned ${versionedResponse.status}, falling back to legacy API`);
+            // Fallback to legacy API
+            const legacyResponse = await fetch(
+              `https://api.linkedin.com/v2/adCreativesV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=500`,
+              { headers: { 'Authorization': `Bearer ${accessToken}` } }
+            );
+            if (legacyResponse.ok) {
+              creativesData = await legacyResponse.json();
+              console.log(`[Step 3] Legacy API returned ${creativesData.elements?.length || 0} creatives`);
+            } else {
+              console.error('[Step 3] Both APIs failed to fetch creatives');
+            }
+          }
+        } catch (err) {
+          console.error('[Step 3] Error fetching creatives:', err);
+          // Fallback to legacy API
+          const legacyResponse = await fetch(
+            `https://api.linkedin.com/v2/adCreativesV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=500`,
+            { headers: { 'Authorization': `Bearer ${accessToken}` } }
+          );
+          if (legacyResponse.ok) {
+            creativesData = await legacyResponse.json();
+            console.log(`[Step 3] Legacy fallback returned ${creativesData.elements?.length || 0} creatives`);
+          }
         }
-        
-        const creativesData = await creativesResponse.json();
-        console.log(`[Step 3] Fetched ${creativesData.elements?.length || 0} creative metadata records`);
 
-        // Collect share URNs that need content resolution
+        console.log(`[Step 3] Total creatives fetched: ${creativesData.elements?.length || 0}`);
+
+        // Collect share URNs and UGC post URNs that need content resolution
         const shareUrnsToFetch: Set<string> = new Set();
         const ugcPostUrnsToFetch: Set<string> = new Set();
         
         (creativesData.elements || []).forEach((c: any) => {
-          // Check reference field for share/ugcPost URNs
-          if (c.reference) {
-            if (c.reference.includes(':share:')) {
-              shareUrnsToFetch.add(c.reference);
-            } else if (c.reference.includes(':ugcPost:')) {
-              ugcPostUrnsToFetch.add(c.reference);
+          // Check reference field for share/ugcPost URNs (versioned API format)
+          const content = c.content || {};
+          
+          // Versioned API uses 'reference' in content object or at top level
+          const reference = c.reference || content.reference || '';
+          if (reference) {
+            if (reference.includes(':share:')) {
+              shareUrnsToFetch.add(reference);
+            } else if (reference.includes(':ugcPost:')) {
+              ugcPostUrnsToFetch.add(reference);
             }
           }
-          // Also check variables for share references
+          
+          // Also check for sponsored content reference in nested content types
+          if (content.spotlight?.sponsoredContentReference) {
+            const ref = content.spotlight.sponsoredContentReference;
+            if (ref.includes(':share:')) shareUrnsToFetch.add(ref);
+            if (ref.includes(':ugcPost:')) ugcPostUrnsToFetch.add(ref);
+          }
+          
+          // Legacy API format: check variables.data
           if (c.variables?.data) {
             const vars = c.variables.data;
             const sponsoredUpdate = vars['com.linkedin.ads.SponsoredUpdateCreativeVariables'];
@@ -440,93 +486,160 @@ serve(async (req) => {
           }
         });
         
-        console.log(`[Step 4] Need to fetch ${shareUrnsToFetch.size} shares and ${ugcPostUrnsToFetch.size} UGC posts for content resolution`);
+        console.log(`[Step 4] Need to fetch ${shareUrnsToFetch.size} shares and ${ugcPostUrnsToFetch.size} UGC posts`);
 
-        // Step 4: Fetch share content to get actual ad text
+        // Step 4a: Fetch share content using Posts API (more reliable than Shares API)
         const shareContentMap = new Map<string, string>();
         
-        // Batch fetch shares (LinkedIn allows fetching multiple shares at once)
         if (shareUrnsToFetch.size > 0) {
           const shareUrnArray = Array.from(shareUrnsToFetch);
-          console.log(`[Step 4a] Fetching share content for ${shareUrnArray.length} shares...`);
+          console.log(`[Step 4a] Fetching share content...`);
           
-          // Fetch shares in batches of 20
+          // Try Posts API first (versioned), then fall back to Shares API
           for (let i = 0; i < shareUrnArray.length; i += 20) {
             const batch = shareUrnArray.slice(i, i + 20);
-            const idsParam = batch.map((urn, idx) => `ids[${idx}]=${encodeURIComponent(urn)}`).join('&');
             
-            try {
-              const sharesResponse = await fetch(
-                `https://api.linkedin.com/v2/shares?${idsParam}`,
-                { headers: { 'Authorization': `Bearer ${accessToken}` } }
-              );
+            for (const urn of batch) {
+              // Extract the share ID from URN
+              const shareId = urn.split(':').pop() || '';
               
-              if (sharesResponse.ok) {
-                const sharesData = await sharesResponse.json();
-                // Process batch response (returns object with URN keys)
-                if (sharesData.results) {
-                  Object.entries(sharesData.results).forEach(([urn, share]: [string, any]) => {
-                    const text = share?.text?.text || 
-                                 share?.content?.contentEntities?.[0]?.description || 
-                                 share?.content?.title ||
-                                 share?.specificContent?.['com.linkedin.ugc.ShareContent']?.shareCommentary?.text ||
-                                 '';
-                    if (text) {
-                      // Truncate to first 80 chars for display
-                      shareContentMap.set(urn, text.substring(0, 80) + (text.length > 80 ? '...' : ''));
-                    }
-                  });
-                } else if (Array.isArray(sharesData.elements)) {
-                  // Alternative response format
-                  sharesData.elements.forEach((share: any) => {
-                    const urn = share.id || share.activity;
-                    const text = share?.text?.text || 
-                                 share?.content?.contentEntities?.[0]?.description ||
-                                 share?.content?.title || '';
-                    if (urn && text) {
-                      shareContentMap.set(urn, text.substring(0, 80) + (text.length > 80 ? '...' : ''));
-                    }
-                  });
+              try {
+                // Try Posts API (more modern and often works better)
+                const postsResponse = await fetch(
+                  `https://api.linkedin.com/rest/posts/${encodeURIComponent(urn)}`,
+                  { 
+                    headers: { 
+                      'Authorization': `Bearer ${accessToken}`,
+                      'LinkedIn-Version': '202401',
+                      'X-Restli-Protocol-Version': '2.0.0',
+                    } 
+                  }
+                );
+                
+                if (postsResponse.ok) {
+                  const post = await postsResponse.json();
+                  const text = post.commentary || post.content?.article?.title || post.content?.article?.description || '';
+                  if (text) {
+                    shareContentMap.set(urn, text.substring(0, 100) + (text.length > 100 ? '...' : ''));
+                    continue;
+                  }
                 }
-              } else {
-                console.log(`[Step 4a] Share fetch returned ${sharesResponse.status} - will use fallback names`);
+                
+                // Fallback to v2 Shares API
+                const sharesResponse = await fetch(
+                  `https://api.linkedin.com/v2/shares/${encodeURIComponent(urn)}`,
+                  { headers: { 'Authorization': `Bearer ${accessToken}` } }
+                );
+                
+                if (sharesResponse.ok) {
+                  const share = await sharesResponse.json();
+                  const text = share?.text?.text || 
+                               share?.content?.contentEntities?.[0]?.description || 
+                               share?.content?.title ||
+                               share?.specificContent?.['com.linkedin.ugc.ShareContent']?.shareCommentary?.text || '';
+                  if (text) {
+                    shareContentMap.set(urn, text.substring(0, 100) + (text.length > 100 ? '...' : ''));
+                  }
+                }
+              } catch (err) {
+                // Silent failure, will use fallback name
               }
-            } catch (err) {
-              console.log(`[Step 4a] Error fetching shares: ${err}`);
             }
           }
           console.log(`[Step 4a] Resolved ${shareContentMap.size} share contents`);
         }
 
-        // Step 5: Build creative ID → name lookup with share content enrichment
-        console.log('[Step 5] Building creative ID → name lookup with enrichment...');
+        // Step 4b: Fetch UGC post content
+        if (ugcPostUrnsToFetch.size > 0) {
+          const ugcUrnArray = Array.from(ugcPostUrnsToFetch);
+          console.log(`[Step 4b] Fetching UGC post content...`);
+          
+          for (const urn of ugcUrnArray) {
+            try {
+              const ugcResponse = await fetch(
+                `https://api.linkedin.com/v2/ugcPosts/${encodeURIComponent(urn)}`,
+                { headers: { 'Authorization': `Bearer ${accessToken}` } }
+              );
+              
+              if (ugcResponse.ok) {
+                const ugcPost = await ugcResponse.json();
+                const text = ugcPost?.specificContent?.['com.linkedin.ugc.ShareContent']?.shareCommentary?.text ||
+                             ugcPost?.text || '';
+                if (text) {
+                  shareContentMap.set(urn, text.substring(0, 100) + (text.length > 100 ? '...' : ''));
+                }
+              }
+            } catch (err) {
+              // Silent failure
+            }
+          }
+          console.log(`[Step 4b] Total resolved content: ${shareContentMap.size}`);
+        }
+
+        // Step 5: Build creative ID → name lookup with enrichment
+        console.log('[Step 5] Building creative lookup with enriched names...');
         const creativeMetadataMap = new Map<string, { name: string; campaignId: string; campaignName: string; status: string; type: string }>();
         const unresolvedCreatives: string[] = [];
         
         (creativesData.elements || []).forEach((c: any) => {
-          const creativeId = c.id?.toString() || '';
+          // Handle both versioned API (id as URN string) and legacy API (id as number)
+          let creativeId = '';
+          if (typeof c.id === 'string' && c.id.includes(':')) {
+            creativeId = c.id.split(':').pop() || '';
+          } else {
+            creativeId = c.id?.toString() || '';
+          }
+          
+          // Get campaign info
           const campaignUrn = c.campaign || '';
           const campaignId = campaignUrn.split(':').pop() || '';
           const resolvedCampaignName = campaignMap.get(campaignId) || `Campaign ${campaignId}`;
           
           let creativeName = '';
-          let creativeType = c.type || 'UNKNOWN';
-          let shareUrn = '';
+          let creativeType = 'UNKNOWN';
           
-          // Priority 1: Check for top-level 'name' field (LinkedIn's standard field)
-          if (c.name && c.name.trim()) {
+          // PRIORITY 1: Check top-level 'name' field (versioned API standard field)
+          if (c.name && typeof c.name === 'string' && c.name.trim()) {
             creativeName = c.name.trim();
+            console.log(`[Step 5] Creative ${creativeId} - found name field: "${creativeName}"`);
           }
           
-          // Priority 2: Check reference for share/ugcPost and get content
-          if (!creativeName && c.reference) {
-            shareUrn = c.reference;
-            if (shareContentMap.has(shareUrn)) {
-              creativeName = shareContentMap.get(shareUrn)!;
+          // PRIORITY 2: Check versioned API content structure for descriptive text
+          if (!creativeName && c.content) {
+            const content = c.content;
+            
+            // Determine type and extract name based on content structure
+            if (content.textAd) {
+              creativeType = 'TEXT_AD';
+              creativeName = content.textAd.title || content.textAd.text || '';
+            } else if (content.spotlight) {
+              creativeType = 'SPOTLIGHT_AD';
+              creativeName = content.spotlight.headline || content.spotlight.description || '';
+            } else if (content.follower) {
+              creativeType = 'FOLLOWER_AD';
+              creativeName = content.follower.headline || content.follower.description || '';
+            } else if (content.video) {
+              creativeType = 'VIDEO_AD';
+              creativeName = content.video.videoTitle || '';
+            }
+            
+            // Check reference for share content
+            if (!creativeName && content.reference) {
+              const ref = content.reference;
+              if (shareContentMap.has(ref)) {
+                creativeName = shareContentMap.get(ref)!;
+                creativeType = ref.includes(':ugcPost:') ? 'SPONSORED_CONTENT' : 'SPONSORED_UPDATE';
+              }
             }
           }
           
-          // Priority 3: Extract from variables.data based on creative type
+          // PRIORITY 3: Check top-level reference
+          if (!creativeName && c.reference && shareContentMap.has(c.reference)) {
+            creativeName = shareContentMap.get(c.reference)!;
+            creativeType = 'SPONSORED_CONTENT';
+          }
+          
+          // PRIORITY 4: Legacy API format - extract from variables.data
           if (!creativeName && c.variables?.data) {
             const variablesData = c.variables.data;
             const dsContent = variablesData['com.linkedin.ads.DirectSponsoredContentCreativeVariables'];
@@ -538,7 +651,6 @@ serve(async (req) => {
             const videoAd = variablesData['com.linkedin.ads.VideoCreativeVariables'];
             const carouselAd = variablesData['com.linkedin.ads.CarouselCreativeVariables'];
             const messageAd = variablesData['com.linkedin.ads.MessageCreativeVariables'];
-            const conversationAd = variablesData['com.linkedin.ads.ConversationCreativeVariables'];
             
             if (dsContent) {
               creativeType = 'SPONSORED_CONTENT';
@@ -557,50 +669,54 @@ serve(async (req) => {
               creativeName = textAd.title || textAd.text || textAd.name || '';
             } else if (spotlightAd) {
               creativeType = 'SPOTLIGHT_AD';
-              creativeName = spotlightAd.headline || spotlightAd.description || spotlightAd.ctaLabel || spotlightAd.name || '';
+              creativeName = spotlightAd.headline || spotlightAd.description || spotlightAd.ctaLabel || '';
             } else if (followerAd) {
               creativeType = 'FOLLOWER_AD';
-              creativeName = followerAd.headline || followerAd.description || followerAd.name || '';
+              creativeName = followerAd.headline || followerAd.description || '';
             } else if (jobsAd) {
               creativeType = 'JOBS_AD';
-              creativeName = jobsAd.headline || jobsAd.description || jobsAd.name || '';
+              creativeName = jobsAd.headline || jobsAd.description || '';
             } else if (videoAd) {
               creativeType = 'VIDEO_AD';
-              creativeName = videoAd.title || videoAd.description || videoAd.name || '';
+              creativeName = videoAd.title || videoAd.description || '';
             } else if (carouselAd) {
               creativeType = 'CAROUSEL_AD';
               const cardCount = carouselAd.cards?.length || 0;
               const firstCardTitle = carouselAd.cards?.[0]?.headline || '';
-              creativeName = carouselAd.name || firstCardTitle || `${cardCount} card carousel`;
+              creativeName = firstCardTitle || `${cardCount}-card carousel`;
             } else if (messageAd) {
               creativeType = 'MESSAGE_AD';
-              creativeName = messageAd.subject || messageAd.name || '';
-            } else if (conversationAd) {
-              creativeType = 'CONVERSATION_AD';
-              creativeName = conversationAd.name || '';
+              creativeName = messageAd.subject || '';
             }
           }
           
-          // Priority 4: Fallback with campaign context
+          // Use c.type if available
+          if (c.type && c.type !== 'UNKNOWN') {
+            creativeType = c.type;
+          }
+          
+          // PRIORITY 5: Campaign-contextualized fallback
           if (!creativeName) {
-            // Use campaign name as context for better identification
             const typeLabel = creativeType !== 'UNKNOWN' ? creativeType.replace(/_/g, ' ').toLowerCase() : 'creative';
             creativeName = `${resolvedCampaignName} – ${typeLabel} #${creativeId}`;
             unresolvedCreatives.push(creativeId);
           }
           
+          // Determine status - check multiple fields
+          const status = c.status || c.review?.status || c.servingStatuses?.[0] || 'UNKNOWN';
+          
           creativeMetadataMap.set(creativeId, {
             name: creativeName,
             campaignId,
             campaignName: typeof resolvedCampaignName === 'string' ? resolvedCampaignName : `Campaign ${campaignId}`,
-            status: c.status || c.servingStatuses?.[0] || 'UNKNOWN',
+            status,
             type: creativeType,
           });
         });
         
         console.log(`[Step 5] Built lookup for ${creativeMetadataMap.size} creatives`);
         if (unresolvedCreatives.length > 0) {
-          console.log(`[Warning] ${unresolvedCreatives.length} creatives have fallback names (no descriptive content found): ${unresolvedCreatives.slice(0, 10).join(', ')}${unresolvedCreatives.length > 10 ? '...' : ''}`);
+          console.log(`[Warning] ${unresolvedCreatives.length} creatives using fallback names: ${unresolvedCreatives.slice(0, 5).join(', ')}${unresolvedCreatives.length > 5 ? '...' : ''}`);
         }
 
         // Step 6: Merge analytics with creative names - include ALL creatives from metadata
