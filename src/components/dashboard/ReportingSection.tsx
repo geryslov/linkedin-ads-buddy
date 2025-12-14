@@ -12,8 +12,10 @@ import { CompanyIntelligenceTable } from './CompanyIntelligenceTable';
 import { DemographicTable } from './DemographicTable';
 import { CompanyDemographicTable } from './CompanyDemographicTable';
 import { CreativeReportingTable } from './CreativeReportingTable';
+import { CreativeNameListTable } from './CreativeNameListTable';
 import { TimeFrameSelector } from './TimeFrameSelector';
 import { MetricCard } from './MetricCard';
+import { List } from 'lucide-react';
 
 interface ReportingSectionProps {
   accessToken: string | null;
@@ -158,6 +160,10 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
             <Globe className="h-4 w-4" />
             New Company Demographic
           </TabsTrigger>
+          <TabsTrigger value="creative_names" className="gap-2">
+            <List className="h-4 w-4" />
+            Creative Names
+          </TabsTrigger>
           <TabsTrigger value="campaigns" className="gap-2" disabled>
             <Target className="h-4 w-4" />
             Campaigns
@@ -245,6 +251,24 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
             </CardHeader>
             <CardContent>
               <CreativeReportingTable data={creativeReporting.creativeData} isLoading={creativeReporting.isLoading} />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Creative Names Tab */}
+        <TabsContent value="creative_names" className="space-y-6 mt-6">
+          <Card className="bg-card/50 backdrop-blur-sm border-border/50">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <List className="h-5 w-5 text-primary" />
+                Creative Names List
+              </CardTitle>
+              <CardDescription>
+                A searchable list of all creative names in your account
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <CreativeNameListTable data={creativeReporting.creativeData} isLoading={creativeReporting.isLoading} />
             </CardContent>
           </Card>
         </TabsContent>
