@@ -460,24 +460,29 @@ serve(async (req) => {
           return creativeData;
         }
 
-        // Helper: Fetch creative names via NEW versioned Creatives API (fallback)
-        async function fetchCreativeNamesVersioned(creativeIds: string[], accountId: string, token: string): Promise<Map<string, string>> {
-          const names = new Map<string, string>();
-          if (creativeIds.length === 0) return names;
+        // Helper: Fetch ALL creatives via versioned Creatives API (PRIMARY source for names)
+        async function fetchCreativesVersioned(accountId: string, token: string): Promise<Map<string, { name: string; campaignId: string; status: string; type: string; reference: string }>> {
+          const creativeData = new Map<string, { name: string; campaignId: string; status: string; type: string; reference: string }>();
           
-          console.log(`[Versioned API] Attempting fallback for ${creativeIds.length} unresolved creatives...`);
+          console.log('[Versioned API] Fetching all creatives from REST API (primary source)...');
           
-          // Try the REST versioned API
-          const batchSize = 50;
-          for (let i = 0; i < creativeIds.length; i += batchSize) {
-            const batch = creativeIds.slice(i, i + batchSize);
+          // Use the correct endpoint format: q=search with account filter
+          const baseUrl = `https://api.linkedin.com/rest/adAccounts/${accountId}/creatives`;
+          const searchUrl = `${baseUrl}?q=search&search=(account:(values:List(urn:li:sponsoredAccount:${accountId})))&count=100`;
+          
+          let start = 0;
+          let hasMore = true;
+          const maxPages = 10; // Safety limit
+          let pageCount = 0;
+          
+          while (hasMore && pageCount < maxPages) {
+            pageCount++;
+            const pageUrl = start > 0 ? `${searchUrl}&start=${start}` : searchUrl;
             
             try {
-              // Try to fetch via versioned creatives endpoint
-              const idsParam = batch.map(id => `ids=urn:li:sponsoredCreative:${id}`).join('&');
-              const url = `https://api.linkedin.com/rest/adAccounts/${accountId}/creatives?${idsParam}`;
+              console.log(`[Versioned API] Fetching page ${pageCount} (start=${start})...`);
               
-              const response = await fetch(url, {
+              const response: Response = await fetch(pageUrl, {
                 headers: { 
                   'Authorization': `Bearer ${token}`,
                   'LinkedIn-Version': '202511',
@@ -485,67 +490,149 @@ serve(async (req) => {
                 }
               });
               
-              if (response.ok) {
-                const data = await response.json();
-                
-                // Log raw response structure for debugging
-                if (i === 0) {
-                  console.log('[Versioned API] === RAW RESPONSE STRUCTURE ===');
-                  console.log(`[Versioned API] Response keys: ${Object.keys(data).join(', ')}`);
-                  if (data.elements && data.elements.length > 0) {
-                    const sample = data.elements[0];
-                    console.log(`[Versioned API] First element keys: ${Object.keys(sample).join(', ')}`);
-                    console.log(`[Versioned API] First element name: ${sample.name || 'MISSING'}`);
-                    console.log(`[Versioned API] First element creativeDscName: ${sample.creativeDscName || 'MISSING'}`);
-                    console.log(`[Versioned API] First element id: ${sample.id}`);
-                  }
-                  if (data.results) {
-                    const urns = Object.keys(data.results);
-                    if (urns.length > 0) {
-                      const sample = data.results[urns[0]];
-                      console.log(`[Versioned API] First result keys: ${Object.keys(sample).join(', ')}`);
-                      console.log(`[Versioned API] First result name: ${sample.name || 'MISSING'}`);
-                      console.log(`[Versioned API] First result creativeDscName: ${sample.creativeDscName || 'MISSING'}`);
-                    }
-                  }
-                  console.log('[Versioned API] === END RAW RESPONSE STRUCTURE ===');
-                }
-                
-                // Handle different response formats
-                if (data.elements) {
-                  for (const creative of data.elements) {
-                    const id = creative.id?.toString() || creative.id?.split(':').pop() || '';
-                    // Try multiple name fields
-                    const name = creative.name || creative.creativeDscName || '';
-                    if (name && id) {
-                      names.set(id, name);
-                    }
-                  }
-                } else if (data.results) {
-                  for (const urn of Object.keys(data.results)) {
-                    const creative = data.results[urn];
-                    const id = urn.split(':').pop() || '';
-                    // Try multiple name fields
-                    const name = creative.name || creative.creativeDscName || '';
-                    if (name && id) {
-                      names.set(id, name);
-                    }
-                  }
-                }
-                
-                console.log(`[Versioned API] Batch ${Math.floor(i/batchSize) + 1}: Resolved ${names.size} names`);
-              } else {
+              if (!response.ok) {
                 const errorText = await response.text();
-                console.log(`[Versioned API] Batch ${Math.floor(i/batchSize) + 1}: Failed with status ${response.status}`);
+                console.log(`[Versioned API] Page ${pageCount} failed with status ${response.status}`);
                 console.log(`[Versioned API] Error response: ${errorText.slice(0, 500)}`);
+                break;
               }
+              
+              const data: any = await response.json();
+              const elements: any[] = data.elements || [];
+              
+              // Log raw response structure for first page
+              if (pageCount === 1) {
+                console.log('[Versioned API] === RAW RESPONSE STRUCTURE ===');
+                console.log(`[Versioned API] Response keys: ${Object.keys(data).join(', ')}`);
+                console.log(`[Versioned API] Elements count: ${elements.length}`);
+                if (elements.length > 0) {
+                  const sample = elements[0];
+                  console.log(`[Versioned API] First element keys: ${Object.keys(sample).join(', ')}`);
+                  console.log(`[Versioned API] First element id: ${sample.id}`);
+                  console.log(`[Versioned API] First element name: ${sample.name || 'MISSING'}`);
+                  console.log(`[Versioned API] First element status: ${sample.status || 'MISSING'}`);
+                  console.log(`[Versioned API] First element campaign: ${sample.campaign || 'MISSING'}`);
+                  if (sample.content) {
+                    console.log(`[Versioned API] First element content keys: ${Object.keys(sample.content).join(', ')}`);
+                  }
+                  if (elements.length > 1) {
+                    const sample2 = elements[1];
+                    console.log(`[Versioned API] Second element name: ${sample2.name || 'MISSING'}`);
+                  }
+                }
+                console.log('[Versioned API] === END RAW RESPONSE STRUCTURE ===');
+              }
+              
+              // Process elements - the `name` field is the canonical creative name
+              for (const creative of elements) {
+                // Extract creative ID from URN (format: urn:li:sponsoredCreative:123456)
+                const idUrn = creative.id || '';
+                const creativeId = typeof idUrn === 'string' && idUrn.includes(':') 
+                  ? idUrn.split(':').pop() || '' 
+                  : idUrn.toString();
+                
+                if (!creativeId) continue;
+                
+                // Extract campaign ID from campaign URN
+                const campaignUrn = creative.campaign || '';
+                const campaignId = typeof campaignUrn === 'string' && campaignUrn.includes(':')
+                  ? campaignUrn.split(':').pop() || ''
+                  : '';
+                
+                // The `name` field is the canonical creative name (introduced in 202410)
+                const creativeName = creative.name || '';
+                
+                // Extract reference for potential fallback (shares/ugcPosts)
+                let reference = '';
+                if (creative.content?.reference) {
+                  reference = creative.content.reference;
+                }
+                
+                // Determine creative type from content structure
+                let creativeType = 'SPONSORED_CONTENT';
+                if (creative.content) {
+                  const contentKeys = Object.keys(creative.content);
+                  if (contentKeys.includes('textAd')) creativeType = 'TEXT_AD';
+                  else if (contentKeys.includes('videoAd')) creativeType = 'VIDEO';
+                  else if (contentKeys.includes('carouselAd')) creativeType = 'CAROUSEL';
+                  else if (contentKeys.includes('messageAd')) creativeType = 'MESSAGE';
+                  else if (contentKeys.includes('conversationAd')) creativeType = 'CONVERSATION';
+                }
+                
+                creativeData.set(creativeId, {
+                  name: creativeName,
+                  campaignId,
+                  status: creative.status || 'UNKNOWN',
+                  type: creativeType,
+                  reference,
+                });
+              }
+              
+              console.log(`[Versioned API] Page ${pageCount}: Processed ${elements.length} creatives, total: ${creativeData.size}`);
+              
+              // Check for more pages
+              if (elements.length < 100) {
+                hasMore = false;
+              } else {
+                start += elements.length;
+              }
+              
             } catch (err) {
-              console.error(`[Versioned API] Batch ${Math.floor(i/batchSize) + 1} error:`, err);
+              console.error(`[Versioned API] Page ${pageCount} error:`, err);
+              break;
             }
           }
           
-          console.log(`[Versioned API] Total resolved via fallback: ${names.size}`);
-          return names;
+          const namesResolved = [...creativeData.values()].filter(v => v.name).length;
+          console.log(`[Versioned API] Total creatives: ${creativeData.size}, with names: ${namesResolved}`);
+          return creativeData;
+        }
+        
+        // Helper: Fetch post/share content to extract readable text for creatives without names
+        async function fetchShareContent(shareUrns: string[], token: string): Promise<Map<string, string>> {
+          const shareTexts = new Map<string, string>();
+          if (shareUrns.length === 0) return shareTexts;
+          
+          console.log(`[Share API] Fetching content for ${shareUrns.length} shares...`);
+          
+          for (const urn of shareUrns.slice(0, 50)) { // Limit to first 50
+            try {
+              // Determine if it's a share or ugcPost
+              const isUgc = urn.includes('ugcPost');
+              const endpoint = isUgc 
+                ? `https://api.linkedin.com/v2/ugcPosts/${encodeURIComponent(urn)}`
+                : `https://api.linkedin.com/v2/shares/${encodeURIComponent(urn)}`;
+              
+              const response: Response = await fetch(endpoint, {
+                headers: { 'Authorization': `Bearer ${token}` }
+              });
+              
+              if (response.ok) {
+                const data: any = await response.json();
+                
+                // Extract text from share/ugcPost
+                let text = '';
+                if (isUgc) {
+                  // UGC Post structure
+                  text = data.specificContent?.['com.linkedin.ugc.ShareContent']?.shareCommentary?.text || '';
+                } else {
+                  // Share structure
+                  text = data.text?.text || data.commentary || '';
+                }
+                
+                if (text) {
+                  // Truncate long text
+                  const truncated = text.length > 80 ? text.substring(0, 77) + '...' : text;
+                  shareTexts.set(urn, truncated);
+                }
+              }
+            } catch (err) {
+              console.error(`[Share API] Error fetching ${urn}:`, err);
+            }
+          }
+          
+          console.log(`[Share API] Resolved ${shareTexts.size} share texts`);
+          return shareTexts;
         }
 
         // Step 1: Fetch campaigns for campaign name resolution
@@ -573,10 +660,10 @@ serve(async (req) => {
           });
         }
 
-        // Step 2: Fetch creatives via LEGACY adCreativesV2 (primary source for metadata + names)
-        console.log('[Step 2] Fetching creative metadata via legacy adCreativesV2...');
-        const legacyCreativeData = await fetchCreativeNamesLegacy(accountId, accessToken);
-        console.log(`[Step 2] Legacy API returned ${legacyCreativeData.size} creatives`);
+        // Step 2: Fetch creatives via VERSIONED Creatives API (PRIMARY source for names)
+        console.log('[Step 2] Fetching creative metadata via versioned Creatives API (primary)...');
+        const versionedCreativeData = await fetchCreativesVersioned(accountId, accessToken);
+        console.log(`[Step 2] Versioned API returned ${versionedCreativeData.size} creatives`);
 
         // Step 3: Fetch Ad Analytics pivoted by CREATIVE
         console.log('[Step 3] Fetching analytics with pivot=CREATIVE...');
@@ -620,43 +707,43 @@ serve(async (req) => {
         });
         console.log(`[Step 4] Aggregated ${analyticsMap.size} unique creatives with analytics`);
 
-        // Step 5: Identify creatives that need fallback name resolution
-        const unresolvedCreativeIds: string[] = [];
-        legacyCreativeData.forEach((data, creativeId) => {
-          if (!data.name || data.source === 'pending') {
-            unresolvedCreativeIds.push(creativeId);
+        // Step 5: Identify creatives that need share/post resolution for names
+        const unresolvedShareUrns: string[] = [];
+        versionedCreativeData.forEach((data, creativeId) => {
+          if (!data.name && data.reference) {
+            unresolvedShareUrns.push(data.reference);
           }
         });
-        console.log(`[Step 5] ${unresolvedCreativeIds.length} creatives need fallback name resolution`);
+        console.log(`[Step 5] ${unresolvedShareUrns.length} creatives have share references for name resolution`);
 
-        // Step 6: Attempt fallback via versioned Creatives API
-        let versionedNames = new Map<string, string>();
-        if (unresolvedCreativeIds.length > 0) {
-          versionedNames = await fetchCreativeNamesVersioned(unresolvedCreativeIds, accountId, accessToken);
-          console.log(`[Step 6] Versioned API resolved ${versionedNames.size} additional names`);
+        // Step 6: Fetch share content for creatives without names (optional fallback)
+        let shareTexts = new Map<string, string>();
+        if (unresolvedShareUrns.length > 0) {
+          shareTexts = await fetchShareContent(unresolvedShareUrns, accessToken);
+          console.log(`[Step 6] Share API resolved ${shareTexts.size} share texts`);
         }
 
         // Step 7: Build final report with resolution tracking
         console.log('[Step 7] Building final report...');
         const reportElements: any[] = [];
         
-        legacyCreativeData.forEach((meta, creativeId) => {
+        versionedCreativeData.forEach((meta, creativeId) => {
           resolutionStats.total++;
           
           let creativeName = '';
           let resolutionSource = '';
           
-          // Priority 1: Legacy API name
-          if (meta.name && meta.source === 'legacy_api') {
+          // Priority 1: Versioned API name (canonical source)
+          if (meta.name) {
             creativeName = meta.name;
-            resolutionSource = 'legacy_api';
-            resolutionStats.legacyApi++;
+            resolutionSource = 'versioned_api';
+            resolutionStats.legacyApi++; // Reusing counter for versioned_api
           }
-          // Priority 2: Versioned API fallback
-          else if (versionedNames.has(creativeId)) {
-            creativeName = versionedNames.get(creativeId)!;
-            resolutionSource = 'versioned_api_fallback';
-            resolutionStats.versionedApiFallback++;
+          // Priority 2: Share/Post text fallback
+          else if (meta.reference && shareTexts.has(meta.reference)) {
+            creativeName = shareTexts.get(meta.reference)!;
+            resolutionSource = 'share_api';
+            resolutionStats.versionedApiFallback++; // Reusing counter for share_api
           }
           // Priority 3: Placeholder with campaign context
           else {
@@ -687,7 +774,7 @@ serve(async (req) => {
             ctr: ctr.toFixed(2),
             cpc: cpc.toFixed(2),
             cpm: cpm.toFixed(2),
-            _resolutionSource: resolutionSource, // Internal tracking field
+            _resolutionSource: resolutionSource,
           });
         });
 
@@ -696,8 +783,8 @@ serve(async (req) => {
         
         // Log resolution statistics
         console.log('[Resolution Stats] Creative name resolution breakdown:');
-        console.log(`  - Legacy API (adCreativesV2): ${resolutionStats.legacyApi}`);
-        console.log(`  - Versioned API fallback: ${resolutionStats.versionedApiFallback}`);
+        console.log(`  - Versioned API (name field): ${resolutionStats.legacyApi}`);
+        console.log(`  - Share/Post API fallback: ${resolutionStats.versionedApiFallback}`);
         console.log(`  - Placeholder (unresolved): ${resolutionStats.placeholder}`);
         console.log(`  - Total creatives: ${resolutionStats.total}`);
         
