@@ -25,7 +25,7 @@ interface AdReportingTableProps {
   isLoading: boolean;
 }
 
-type SortKey = 'name' | 'impressions' | 'clicks' | 'spent' | 'leads' | 'ctr';
+type SortKey = 'name' | 'impressions' | 'clicks' | 'spent' | 'leads' | 'ctr' | 'cpc' | 'cpm';
 type SortOrder = 'asc' | 'desc';
 
 type FilterType = 'all' | 'with_spend' | 'with_impressions' | 'with_clicks' | 'with_leads';
@@ -103,6 +103,14 @@ export function AdReportingTable({ data, isLoading }: AdReportingTableProps) {
 
   const totalCtr = totals.impressions > 0 
     ? ((totals.clicks / totals.impressions) * 100).toFixed(2) 
+    : '0.00';
+  
+  const totalCpc = totals.clicks > 0 
+    ? (totals.spent / totals.clicks).toFixed(2) 
+    : '0.00';
+    
+  const totalCpm = totals.impressions > 0 
+    ? ((totals.spent / totals.impressions) * 1000).toFixed(2) 
     : '0.00';
 
   const clearFilters = () => {
@@ -199,12 +207,14 @@ export function AdReportingTable({ data, isLoading }: AdReportingTableProps) {
               <SortableHeader label="Spent" sortKeyName="spent" />
               <SortableHeader label="Leads" sortKeyName="leads" />
               <SortableHeader label="CTR" sortKeyName="ctr" />
+              <SortableHeader label="CPC" sortKeyName="cpc" />
+              <SortableHeader label="CPM" sortKeyName="cpm" />
             </TableRow>
           </TableHeader>
           <TableBody>
             {sortedData.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
+            <TableRow>
+                <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
                   No ads match your filters
                 </TableCell>
               </TableRow>
@@ -220,6 +230,8 @@ export function AdReportingTable({ data, isLoading }: AdReportingTableProps) {
                     <TableCell>${row.spent.toFixed(2)}</TableCell>
                     <TableCell>{row.leads.toLocaleString()}</TableCell>
                     <TableCell>{row.ctr.toFixed(2)}%</TableCell>
+                    <TableCell>${row.cpc.toFixed(2)}</TableCell>
+                    <TableCell>${row.cpm.toFixed(2)}</TableCell>
                   </TableRow>
                 ))}
                 {/* Totals Row */}
@@ -230,6 +242,8 @@ export function AdReportingTable({ data, isLoading }: AdReportingTableProps) {
                   <TableCell>${totals.spent.toFixed(2)}</TableCell>
                   <TableCell>{totals.leads.toLocaleString()}</TableCell>
                   <TableCell>{totalCtr}%</TableCell>
+                  <TableCell>${totalCpc}</TableCell>
+                  <TableCell>${totalCpm}</TableCell>
                 </TableRow>
               </>
             )}

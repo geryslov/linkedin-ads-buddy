@@ -10,6 +10,8 @@ export interface AdAnalytics {
   spent: number;
   leads: number;
   ctr: number;
+  cpc: number;
+  cpm: number;
 }
 
 export interface AggregatedAdData {
@@ -19,6 +21,8 @@ export interface AggregatedAdData {
   spent: number;
   leads: number;
   ctr: number;
+  cpc: number;
+  cpm: number;
   count: number;
 }
 
@@ -117,15 +121,18 @@ export function useAdReporting(accessToken: string | null) {
       const analyticsData = (data.elements || []).map((el: any) => {
         const impressions = el.impressions || 0;
         const clicks = el.clicks || 0;
+        const spent = parseFloat(el.costInLocalCurrency || '0');
         
         return {
           adId: el.adId || '',
           adName: el.adName || `Ad ${el.adId}`,
           impressions,
           clicks,
-          spent: parseFloat(el.costInLocalCurrency || '0'),
-          leads: (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0),
-          ctr: impressions > 0 ? (clicks / impressions) * 100 : 0,
+          spent,
+          leads: el.leads || 0,
+          ctr: parseFloat(el.ctr || '0'),
+          cpc: parseFloat(el.cpc || '0'),
+          cpm: parseFloat(el.cpm || '0'),
         };
       });
       
@@ -163,6 +170,8 @@ export function useAdReporting(accessToken: string | null) {
           spent: item.spent,
           leads: item.leads,
           ctr: 0,
+          cpc: 0,
+          cpm: 0,
           count: 1,
         });
       }
@@ -171,6 +180,8 @@ export function useAdReporting(accessToken: string | null) {
     return Array.from(aggregation.values()).map((item) => ({
       ...item,
       ctr: item.impressions > 0 ? (item.clicks / item.impressions) * 100 : 0,
+      cpc: item.clicks > 0 ? item.spent / item.clicks : 0,
+      cpm: item.impressions > 0 ? (item.spent / item.impressions) * 1000 : 0,
     }));
   }, [adAnalytics]);
 
