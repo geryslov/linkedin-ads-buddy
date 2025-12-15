@@ -1776,6 +1776,179 @@ serve(async (req) => {
         });
       }
 
+      case 'get_account_structure': {
+        // Fetches the complete account hierarchy: Campaign Groups -> Campaigns -> Creatives
+        const { accountId } = params || {};
+        
+        console.log(`[get_account_structure] Starting for account ${accountId}`);
+        
+        // Step 1: Fetch all Campaign Groups using versioned API
+        console.log('[Step 1] Fetching campaign groups...');
+        const campaignGroupsUrl = `https://api.linkedin.com/rest/adAccounts/${accountId}/adCampaignGroups?q=search&sortOrder=DESCENDING`;
+        const campaignGroupsResponse = await fetch(campaignGroupsUrl, {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'LinkedIn-Version': '202410',
+            'X-Restli-Protocol-Version': '2.0.0',
+          },
+        });
+        
+        let campaignGroups: any[] = [];
+        if (campaignGroupsResponse.ok) {
+          const groupsData = await campaignGroupsResponse.json();
+          campaignGroups = groupsData.elements || [];
+          console.log(`[Step 1] Found ${campaignGroups.length} campaign groups`);
+        } else {
+          // Fallback to v2 API if versioned API fails
+          console.log('[Step 1] Versioned API failed, trying v2 API...');
+          const v2GroupsUrl = `https://api.linkedin.com/v2/adCampaignGroupsV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}`;
+          const v2GroupsResponse = await fetch(v2GroupsUrl, {
+            headers: { 'Authorization': `Bearer ${accessToken}` },
+          });
+          if (v2GroupsResponse.ok) {
+            const v2Data = await v2GroupsResponse.json();
+            campaignGroups = v2Data.elements || [];
+            console.log(`[Step 1] V2 API found ${campaignGroups.length} campaign groups`);
+          }
+        }
+
+        // Step 2: Fetch all Campaigns using versioned API
+        console.log('[Step 2] Fetching campaigns...');
+        const campaignsUrl = `https://api.linkedin.com/rest/adAccounts/${accountId}/adCampaigns?q=search&sortOrder=DESCENDING&count=100`;
+        const campaignsResponse = await fetch(campaignsUrl, {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'LinkedIn-Version': '202410',
+            'X-Restli-Protocol-Version': '2.0.0',
+          },
+        });
+        
+        let campaigns: any[] = [];
+        if (campaignsResponse.ok) {
+          const campaignsData = await campaignsResponse.json();
+          campaigns = campaignsData.elements || [];
+          console.log(`[Step 2] Found ${campaigns.length} campaigns`);
+        } else {
+          // Fallback to v2 API
+          console.log('[Step 2] Versioned API failed, trying v2 API...');
+          const v2CampaignsUrl = `https://api.linkedin.com/v2/adCampaignsV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=100`;
+          const v2CampaignsResponse = await fetch(v2CampaignsUrl, {
+            headers: { 'Authorization': `Bearer ${accessToken}` },
+          });
+          if (v2CampaignsResponse.ok) {
+            const v2Data = await v2CampaignsResponse.json();
+            campaigns = v2Data.elements || [];
+            console.log(`[Step 2] V2 API found ${campaigns.length} campaigns`);
+          }
+        }
+
+        // Step 3: Fetch all Creatives using versioned API
+        console.log('[Step 3] Fetching creatives...');
+        const accountUrn = `urn:li:sponsoredAccount:${accountId}`;
+        const creativesUrl = `https://api.linkedin.com/rest/creatives?q=search&search=(account:(values:List(${encodeURIComponent(accountUrn)})))&count=100`;
+        const creativesResponse = await fetch(creativesUrl, {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'LinkedIn-Version': '202410',
+            'X-Restli-Protocol-Version': '2.0.0',
+          },
+        });
+        
+        let creatives: any[] = [];
+        if (creativesResponse.ok) {
+          const creativesData = await creativesResponse.json();
+          creatives = creativesData.elements || [];
+          console.log(`[Step 3] Found ${creatives.length} creatives`);
+        } else {
+          console.log('[Step 3] Versioned creatives API returned:', creativesResponse.status);
+        }
+
+        // Step 4: Build the hierarchy
+        console.log('[Step 4] Building account structure hierarchy...');
+        
+        // Create creative lookup by campaign
+        const creativesByCampaign: Record<string, any[]> = {};
+        for (const creative of creatives) {
+          const campaignUrn = creative.campaign;
+          if (campaignUrn) {
+            const campaignId = campaignUrn.split(':').pop();
+            if (!creativesByCampaign[campaignId]) {
+              creativesByCampaign[campaignId] = [];
+            }
+            creativesByCampaign[campaignId].push({
+              id: creative.id || creative.$URN?.split(':').pop() || 'unknown',
+              name: creative.name || `Creative ${creative.id || 'Unknown'}`,
+              status: creative.status || 'UNKNOWN',
+            });
+          }
+        }
+
+        // Create campaign lookup by campaign group
+        const campaignsByGroup: Record<string, any[]> = {};
+        const ungroupedCampaigns: any[] = [];
+        
+        for (const campaign of campaigns) {
+          const campaignGroupUrn = campaign.campaignGroup;
+          const campaignId = campaign.id?.toString() || campaign.$URN?.split(':').pop() || 'unknown';
+          
+          const campaignData = {
+            id: campaignId,
+            name: campaign.name || `Campaign ${campaignId}`,
+            status: campaign.status || 'UNKNOWN',
+            type: campaign.type || campaign.objectiveType || '-',
+            creatives: creativesByCampaign[campaignId] || [],
+          };
+          
+          if (campaignGroupUrn) {
+            const groupId = campaignGroupUrn.split(':').pop();
+            if (!campaignsByGroup[groupId]) {
+              campaignsByGroup[groupId] = [];
+            }
+            campaignsByGroup[groupId].push(campaignData);
+          } else {
+            ungroupedCampaigns.push(campaignData);
+          }
+        }
+
+        // Build final structure
+        const structure: any[] = [];
+        
+        for (const group of campaignGroups) {
+          const groupId = group.id?.toString() || group.$URN?.split(':').pop() || 'unknown';
+          structure.push({
+            id: groupId,
+            name: group.name || `Campaign Group ${groupId}`,
+            status: group.status || 'UNKNOWN',
+            campaigns: campaignsByGroup[groupId] || [],
+          });
+        }
+        
+        // Add ungrouped campaigns as a pseudo-group if any exist
+        if (ungroupedCampaigns.length > 0) {
+          structure.push({
+            id: 'ungrouped',
+            name: '(Ungrouped Campaigns)',
+            status: 'ACTIVE',
+            campaigns: ungroupedCampaigns,
+          });
+        }
+
+        const totalCampaigns = structure.reduce((sum, g) => sum + (g.campaigns?.length || 0), 0);
+        const totalCreatives = structure.reduce((sum, g) => 
+          sum + (g.campaigns?.reduce((cSum: number, c: any) => cSum + (c.creatives?.length || 0), 0) || 0), 0
+        );
+        
+        console.log(`[get_account_structure] Complete. Groups: ${structure.length}, Campaigns: ${totalCampaigns}, Creatives: ${totalCreatives}`);
+
+        return new Response(JSON.stringify({
+          accountId,
+          accountName: `Account ${accountId}`,
+          campaignGroups: structure,
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
       default:
         return new Response(JSON.stringify({ error: 'Unknown action' }), {
           status: 400,
