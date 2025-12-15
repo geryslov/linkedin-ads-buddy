@@ -31,9 +31,13 @@ export function useCreativeNamesReport(accessToken: string | null) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [timeGranularity, setTimeGranularity] = useState<TimeGranularity>('ALL');
-  const [dateRange, setDateRange] = useState({
-    start: new Date(new Date().getFullYear(), 0, 1).toISOString().split('T')[0], // Jan 1 of this year
-    end: new Date().toISOString().split('T')[0]
+  const [dateRange, setDateRange] = useState(() => {
+    const now = new Date();
+    const year = now.getFullYear();
+    // Use explicit date string formatting to avoid timezone issues
+    const startStr = `${year}-01-01`;
+    const endStr = `${year}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    return { start: startStr, end: endStr };
   });
 
   const timeFrameOptions: TimeFrameOption[] = useMemo(() => {
@@ -165,9 +169,13 @@ export function useCreativeNamesReport(accessToken: string | null) {
   }, [creativeData]);
 
   const setTimeFrame = useCallback((option: TimeFrameOption) => {
+    // Format dates explicitly to avoid timezone issues with toISOString()
+    const formatDate = (d: Date) => {
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    };
     setDateRange({
-      start: option.startDate.toISOString().split('T')[0],
-      end: option.endDate.toISOString().split('T')[0]
+      start: formatDate(option.startDate),
+      end: formatDate(option.endDate)
     });
   }, []);
 
