@@ -12,15 +12,15 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { ArrowUp, ArrowDown, Search, X } from 'lucide-react';
-import { CreativeNameData } from '@/hooks/useCreativeNamesReport';
+import { ArrowUp, ArrowDown, Search, X, ChevronDown, ChevronRight } from 'lucide-react';
+import { GroupedCreativeData, CampaignCreativeData } from '@/hooks/useCreativeNamesReport';
 
 interface CreativeNamesReportTableProps {
-  data: CreativeNameData[];
+  data: GroupedCreativeData[];
   isLoading: boolean;
 }
 
-type SortKey = 'creativeName' | 'campaignName' | 'status' | 'impressions' | 'clicks' | 'spent' | 'leads' | 'ctr' | 'cpc' | 'cpm' | 'costPerLead';
+type SortKey = 'creativeName' | 'totalImpressions' | 'totalClicks' | 'totalSpent' | 'totalLeads' | 'ctr' | 'cpc' | 'cpm' | 'costPerLead';
 type SortOrder = 'asc' | 'desc';
 
 const STATUS_OPTIONS = [
@@ -41,10 +41,11 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 export function CreativeNamesReportTable({ data, isLoading }: CreativeNamesReportTableProps) {
-  const [sortKey, setSortKey] = useState<SortKey>('impressions');
+  const [sortKey, setSortKey] = useState<SortKey>('totalImpressions');
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -55,6 +56,18 @@ export function CreativeNamesReportTable({ data, isLoading }: CreativeNamesRepor
     }
   };
 
+  const toggleRow = (creativeName: string) => {
+    setExpandedRows(prev => {
+      const next = new Set(prev);
+      if (next.has(creativeName)) {
+        next.delete(creativeName);
+      } else {
+        next.add(creativeName);
+      }
+      return next;
+    });
+  };
+
   const filteredData = useMemo(() => {
     let result = [...data];
 
@@ -63,13 +76,18 @@ export function CreativeNamesReportTable({ data, isLoading }: CreativeNamesRepor
       const query = searchQuery.toLowerCase();
       result = result.filter(item =>
         item.creativeName.toLowerCase().includes(query) ||
-        item.campaignName.toLowerCase().includes(query)
+        item.campaigns.some(c => c.campaignName.toLowerCase().includes(query))
       );
     }
 
-    // Apply status filter
+    // Apply status filter at campaign level
     if (statusFilter !== 'all') {
-      result = result.filter(item => item.status === statusFilter);
+      result = result
+        .map(group => ({
+          ...group,
+          campaigns: group.campaigns.filter(c => c.status === statusFilter)
+        }))
+        .filter(group => group.campaigns.length > 0);
     }
 
     return result;
@@ -77,8 +95,29 @@ export function CreativeNamesReportTable({ data, isLoading }: CreativeNamesRepor
 
   const sortedData = useMemo(() => {
     return [...filteredData].sort((a, b) => {
-      const aVal = a[sortKey];
-      const bVal = b[sortKey];
+      let aVal: string | number;
+      let bVal: string | number;
+      
+      if (sortKey === 'creativeName') {
+        aVal = a.creativeName;
+        bVal = b.creativeName;
+      } else if (sortKey === 'totalImpressions') {
+        aVal = a.totalImpressions;
+        bVal = b.totalImpressions;
+      } else if (sortKey === 'totalClicks') {
+        aVal = a.totalClicks;
+        bVal = b.totalClicks;
+      } else if (sortKey === 'totalSpent') {
+        aVal = a.totalSpent;
+        bVal = b.totalSpent;
+      } else if (sortKey === 'totalLeads') {
+        aVal = a.totalLeads;
+        bVal = b.totalLeads;
+      } else {
+        aVal = a[sortKey];
+        bVal = b[sortKey];
+      }
+      
       const modifier = sortOrder === 'asc' ? 1 : -1;
       
       if (typeof aVal === 'string' && typeof bVal === 'string') {
@@ -88,12 +127,13 @@ export function CreativeNamesReportTable({ data, isLoading }: CreativeNamesRepor
     });
   }, [filteredData, sortKey, sortOrder]);
 
+  // Recalculate totals based on filtered data
   const totals = useMemo(() => {
-    return filteredData.reduce((acc, item) => ({
-      impressions: acc.impressions + item.impressions,
-      clicks: acc.clicks + item.clicks,
-      spent: acc.spent + item.spent,
-      leads: acc.leads + item.leads,
+    return filteredData.reduce((acc, group) => ({
+      impressions: acc.impressions + group.totalImpressions,
+      clicks: acc.clicks + group.totalClicks,
+      spent: acc.spent + group.totalSpent,
+      leads: acc.leads + group.totalLeads,
     }), { impressions: 0, clicks: 0, spent: 0, leads: 0 });
   }, [filteredData]);
 
@@ -107,7 +147,17 @@ export function CreativeNamesReportTable({ data, isLoading }: CreativeNamesRepor
     setStatusFilter('all');
   };
 
+  const expandAll = () => {
+    setExpandedRows(new Set(sortedData.map(g => g.creativeName)));
+  };
+
+  const collapseAll = () => {
+    setExpandedRows(new Set());
+  };
+
   const hasActiveFilters = searchQuery.trim() || statusFilter !== 'all';
+  const totalCreatives = data.reduce((sum, g) => sum + g.campaigns.length, 0);
+  const filteredCreatives = filteredData.reduce((sum, g) => sum + g.campaigns.length, 0);
 
   if (isLoading) {
     return (
@@ -184,11 +234,20 @@ export function CreativeNamesReportTable({ data, isLoading }: CreativeNamesRepor
             Clear filters
           </Button>
         )}
+
+        <div className="flex gap-2 ml-auto">
+          <Button variant="outline" size="sm" onClick={expandAll}>
+            Expand All
+          </Button>
+          <Button variant="outline" size="sm" onClick={collapseAll}>
+            Collapse All
+          </Button>
+        </div>
       </div>
 
       {/* Results count */}
       <div className="text-sm text-muted-foreground">
-        Showing {filteredData.length} of {data.length} creatives
+        Showing {filteredData.length} creative groups ({filteredCreatives} of {totalCreatives} creatives)
       </div>
 
       {/* Table */}
@@ -196,13 +255,13 @@ export function CreativeNamesReportTable({ data, isLoading }: CreativeNamesRepor
         <Table>
           <TableHeader>
             <TableRow className="bg-muted/30">
+              <TableHead className="w-[40px]"></TableHead>
               <SortableHeader label="Creative Name" sortKeyVal="creativeName" className="min-w-[200px]" />
-              <SortableHeader label="Campaign" sortKeyVal="campaignName" className="min-w-[150px]" />
-              <SortableHeader label="Status" sortKeyVal="status" />
-              <SortableHeader label="Impressions" sortKeyVal="impressions" />
-              <SortableHeader label="Clicks" sortKeyVal="clicks" />
-              <SortableHeader label="Spent" sortKeyVal="spent" />
-              <SortableHeader label="Leads" sortKeyVal="leads" />
+              <TableHead className="whitespace-nowrap">Campaigns</TableHead>
+              <SortableHeader label="Impressions" sortKeyVal="totalImpressions" />
+              <SortableHeader label="Clicks" sortKeyVal="totalClicks" />
+              <SortableHeader label="Spent" sortKeyVal="totalSpent" />
+              <SortableHeader label="Leads" sortKeyVal="totalLeads" />
               <SortableHeader label="CTR" sortKeyVal="ctr" />
               <SortableHeader label="CPC" sortKeyVal="cpc" />
               <SortableHeader label="CPM" sortKeyVal="cpm" />
@@ -218,35 +277,78 @@ export function CreativeNamesReportTable({ data, isLoading }: CreativeNamesRepor
               </TableRow>
             ) : (
               <>
-                {sortedData.map((row, index) => (
-                  <TableRow key={`${row.creativeId}-${index}`} className="hover:bg-muted/20">
-                    <TableCell className="font-medium max-w-[300px] truncate" title={row.creativeName}>
-                      {row.creativeName}
-                    </TableCell>
-                    <TableCell className="max-w-[200px] truncate" title={row.campaignName}>
-                      {row.campaignName}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className={STATUS_COLORS[row.status] || 'bg-muted'}>
-                        {row.status}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">{row.impressions.toLocaleString()}</TableCell>
-                    <TableCell className="text-right tabular-nums">{row.clicks.toLocaleString()}</TableCell>
-                    <TableCell className="text-right tabular-nums">${row.spent.toFixed(2)}</TableCell>
-                    <TableCell className="text-right tabular-nums">{row.leads}</TableCell>
-                    <TableCell className="text-right tabular-nums">{row.ctr.toFixed(2)}%</TableCell>
-                    <TableCell className="text-right tabular-nums">${row.cpc.toFixed(2)}</TableCell>
-                    <TableCell className="text-right tabular-nums">${row.cpm.toFixed(2)}</TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {row.costPerLead > 0 ? `$${row.costPerLead.toFixed(2)}` : '-'}
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {sortedData.map((group) => {
+                  const isExpanded = expandedRows.has(group.creativeName);
+                  return (
+                    <>
+                      {/* Parent Row - Creative Name with Aggregated Metrics */}
+                      <TableRow 
+                        key={group.creativeName} 
+                        className="hover:bg-muted/20 cursor-pointer font-medium"
+                        onClick={() => toggleRow(group.creativeName)}
+                      >
+                        <TableCell className="w-[40px] px-2">
+                          {isExpanded ? (
+                            <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                          ) : (
+                            <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                          )}
+                        </TableCell>
+                        <TableCell className="font-semibold max-w-[300px] truncate" title={group.creativeName}>
+                          {group.creativeName}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="secondary" className="text-xs">
+                            {group.campaigns.length} campaign{group.campaigns.length !== 1 ? 's' : ''}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">{group.totalImpressions.toLocaleString()}</TableCell>
+                        <TableCell className="text-right tabular-nums">{group.totalClicks.toLocaleString()}</TableCell>
+                        <TableCell className="text-right tabular-nums">${group.totalSpent.toFixed(2)}</TableCell>
+                        <TableCell className="text-right tabular-nums">{group.totalLeads}</TableCell>
+                        <TableCell className="text-right tabular-nums">{group.ctr.toFixed(2)}%</TableCell>
+                        <TableCell className="text-right tabular-nums">${group.cpc.toFixed(2)}</TableCell>
+                        <TableCell className="text-right tabular-nums">${group.cpm.toFixed(2)}</TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {group.costPerLead > 0 ? `$${group.costPerLead.toFixed(2)}` : '-'}
+                        </TableCell>
+                      </TableRow>
+                      
+                      {/* Child Rows - Individual Campaign Metrics */}
+                      {isExpanded && group.campaigns.map((campaign, idx) => (
+                        <TableRow 
+                          key={`${group.creativeName}-${campaign.creativeId}-${idx}`} 
+                          className="bg-muted/10 hover:bg-muted/20"
+                        >
+                          <TableCell className="w-[40px]"></TableCell>
+                          <TableCell className="pl-8 text-muted-foreground">
+                            <span className="text-muted-foreground/60 mr-2">↳</span>
+                            {campaign.campaignName}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className={STATUS_COLORS[campaign.status] || 'bg-muted'}>
+                              {campaign.status}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums text-muted-foreground">{campaign.impressions.toLocaleString()}</TableCell>
+                          <TableCell className="text-right tabular-nums text-muted-foreground">{campaign.clicks.toLocaleString()}</TableCell>
+                          <TableCell className="text-right tabular-nums text-muted-foreground">${campaign.spent.toFixed(2)}</TableCell>
+                          <TableCell className="text-right tabular-nums text-muted-foreground">{campaign.leads}</TableCell>
+                          <TableCell className="text-right tabular-nums text-muted-foreground">{campaign.ctr.toFixed(2)}%</TableCell>
+                          <TableCell className="text-right tabular-nums text-muted-foreground">${campaign.cpc.toFixed(2)}</TableCell>
+                          <TableCell className="text-right tabular-nums text-muted-foreground">${campaign.cpm.toFixed(2)}</TableCell>
+                          <TableCell className="text-right tabular-nums text-muted-foreground">
+                            {campaign.costPerLead > 0 ? `$${campaign.costPerLead.toFixed(2)}` : '-'}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </>
+                  );
+                })}
                 {/* Totals Row */}
                 <TableRow className="bg-muted/50 font-semibold border-t-2 border-border">
-                  <TableCell>Totals</TableCell>
                   <TableCell></TableCell>
+                  <TableCell>Totals</TableCell>
                   <TableCell></TableCell>
                   <TableCell className="text-right tabular-nums">{totals.impressions.toLocaleString()}</TableCell>
                   <TableCell className="text-right tabular-nums">{totals.clicks.toLocaleString()}</TableCell>
