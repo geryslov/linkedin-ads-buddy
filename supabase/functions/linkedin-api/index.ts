@@ -461,39 +461,39 @@ serve(async (req) => {
         }
 
         // Helper: Fetch ALL creatives via versioned Creatives API (PRIMARY source for names)
+        // Using the correct endpoint: /rest/adAccounts/{accountId}/creatives
         async function fetchCreativesVersioned(accountId: string, token: string): Promise<Map<string, { name: string; campaignId: string; status: string; type: string; reference: string }>> {
           const creativeData = new Map<string, { name: string; campaignId: string; status: string; type: string; reference: string }>();
           
-          console.log('[Versioned API] Fetching all creatives from REST API (primary source)...');
+          console.log('[Versioned Creatives API] Fetching creatives from /rest/adAccounts/{accountId}/creatives...');
           
-          // Use the correct versioned endpoint: /rest/creatives with q=search
-          const accountUrn = `urn:li:sponsoredAccount:${accountId}`;
-          const searchUrl = `https://api.linkedin.com/rest/creatives?q=search&search=(account:(values:List(${encodeURIComponent(accountUrn)})))&count=100`;
+          // Use the CORRECT versioned endpoint as per LinkedIn API documentation
+          const baseUrl = `https://api.linkedin.com/rest/adAccounts/${accountId}/creatives`;
           
           let start = 0;
           let hasMore = true;
-          const maxPages = 10; // Safety limit
+          const maxPages = 20; // Safety limit for large accounts
           let pageCount = 0;
           
           while (hasMore && pageCount < maxPages) {
             pageCount++;
-            const pageUrl = start > 0 ? `${searchUrl}&start=${start}` : searchUrl;
+            const pageUrl = start > 0 ? `${baseUrl}?start=${start}&count=100` : `${baseUrl}?count=100`;
             
             try {
-              console.log(`[Versioned API] Fetching page ${pageCount} (start=${start})...`);
+              console.log(`[Versioned Creatives API] Fetching page ${pageCount} (start=${start})...`);
               
               const response: Response = await fetch(pageUrl, {
                 headers: { 
                   'Authorization': `Bearer ${token}`,
-                  'LinkedIn-Version': '202511',
+                  'LinkedIn-Version': '202411',
                   'X-Restli-Protocol-Version': '2.0.0'
                 }
               });
               
               if (!response.ok) {
                 const errorText = await response.text();
-                console.log(`[Versioned API] Page ${pageCount} failed with status ${response.status}`);
-                console.log(`[Versioned API] Error response: ${errorText.slice(0, 500)}`);
+                console.log(`[Versioned Creatives API] Page ${pageCount} failed with status ${response.status}`);
+                console.log(`[Versioned Creatives API] Error response: ${errorText.slice(0, 500)}`);
                 break;
               }
               
@@ -502,28 +502,24 @@ serve(async (req) => {
               
               // Log raw response structure for first page
               if (pageCount === 1) {
-                console.log('[Versioned API] === RAW RESPONSE STRUCTURE ===');
-                console.log(`[Versioned API] Response keys: ${Object.keys(data).join(', ')}`);
-                console.log(`[Versioned API] Elements count: ${elements.length}`);
+                console.log('[Versioned Creatives API] === RAW RESPONSE STRUCTURE ===');
+                console.log(`[Versioned Creatives API] Response keys: ${Object.keys(data).join(', ')}`);
+                console.log(`[Versioned Creatives API] Elements count: ${elements.length}`);
                 if (elements.length > 0) {
                   const sample = elements[0];
-                  console.log(`[Versioned API] First element keys: ${Object.keys(sample).join(', ')}`);
-                  console.log(`[Versioned API] First element id: ${sample.id}`);
-                  console.log(`[Versioned API] First element name: ${sample.name || 'MISSING'}`);
-                  console.log(`[Versioned API] First element status: ${sample.status || 'MISSING'}`);
-                  console.log(`[Versioned API] First element campaign: ${sample.campaign || 'MISSING'}`);
+                  console.log(`[Versioned Creatives API] First element keys: ${Object.keys(sample).join(', ')}`);
+                  console.log(`[Versioned Creatives API] First element id: ${sample.id}`);
+                  console.log(`[Versioned Creatives API] First element name: ${sample.name || 'MISSING'}`);
+                  console.log(`[Versioned Creatives API] First element status: ${sample.status || 'MISSING'}`);
+                  console.log(`[Versioned Creatives API] First element campaign: ${sample.campaign || 'MISSING'}`);
                   if (sample.content) {
-                    console.log(`[Versioned API] First element content keys: ${Object.keys(sample.content).join(', ')}`);
-                  }
-                  if (elements.length > 1) {
-                    const sample2 = elements[1];
-                    console.log(`[Versioned API] Second element name: ${sample2.name || 'MISSING'}`);
+                    console.log(`[Versioned Creatives API] First element content keys: ${Object.keys(sample.content).join(', ')}`);
                   }
                 }
-                console.log('[Versioned API] === END RAW RESPONSE STRUCTURE ===');
+                console.log('[Versioned Creatives API] === END RAW RESPONSE STRUCTURE ===');
               }
               
-              // Process elements - the `name` field is the canonical creative name
+              // Process elements - the `name` field is the CANONICAL creative name
               for (const creative of elements) {
                 // Extract creative ID from URN (format: urn:li:sponsoredCreative:123456)
                 const idUrn = creative.id || '';
@@ -539,7 +535,7 @@ serve(async (req) => {
                   ? campaignUrn.split(':').pop() || ''
                   : '';
                 
-                // The `name` field is the canonical creative name (introduced in 202410)
+                // The `name` field is the ONLY valid source for creative names (per LinkedIn API docs)
                 const creativeName = creative.name || '';
                 
                 // Extract reference for potential fallback (shares/ugcPosts)
@@ -568,7 +564,7 @@ serve(async (req) => {
                 });
               }
               
-              console.log(`[Versioned API] Page ${pageCount}: Processed ${elements.length} creatives, total: ${creativeData.size}`);
+              console.log(`[Versioned Creatives API] Page ${pageCount}: Processed ${elements.length} creatives, total: ${creativeData.size}`);
               
               // Check for more pages
               if (elements.length < 100) {
@@ -578,13 +574,13 @@ serve(async (req) => {
               }
               
             } catch (err) {
-              console.error(`[Versioned API] Page ${pageCount} error:`, err);
+              console.error(`[Versioned Creatives API] Page ${pageCount} error:`, err);
               break;
             }
           }
           
           const namesResolved = [...creativeData.values()].filter(v => v.name).length;
-          console.log(`[Versioned API] Total creatives: ${creativeData.size}, with names: ${namesResolved}`);
+          console.log(`[Versioned Creatives API] Total creatives: ${creativeData.size}, with names: ${namesResolved}`);
           return creativeData;
         }
         
@@ -660,10 +656,11 @@ serve(async (req) => {
           });
         }
 
-        // Step 2: Fetch creatives via VERSIONED Creatives API (PRIMARY source for names)
-        console.log('[Step 2] Fetching creative metadata via versioned Creatives API (primary)...');
+        // Step 2: Fetch creatives via VERSIONED Creatives API: /rest/adAccounts/{accountId}/creatives
+        // The `name` field from this API is the ONLY valid source for creative names
+        console.log('[Step 2] Fetching creative metadata via versioned Creatives API (/rest/adAccounts/{id}/creatives)...');
         const versionedCreativeData = await fetchCreativesVersioned(accountId, accessToken);
-        console.log(`[Step 2] Versioned API returned ${versionedCreativeData.size} creatives`);
+        console.log(`[Step 2] Versioned Creatives API returned ${versionedCreativeData.size} creatives`);
 
         // Step 3: Fetch Ad Analytics pivoted by CREATIVE
         console.log('[Step 3] Fetching analytics with pivot=CREATIVE...');
