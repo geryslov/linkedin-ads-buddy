@@ -3,19 +3,20 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { RefreshCw, FileBarChart, Users, Target, Building2, PieChart, Globe, Megaphone } from 'lucide-react';
+import { RefreshCw, FileBarChart, Users, Target, Building2, PieChart, Globe, Megaphone, FolderTree, List } from 'lucide-react';
 import { useCompanyIntelligence, LookbackWindow } from '@/hooks/useCompanyIntelligence';
 import { useDemographicReporting, TimeFrameOption as DemoTimeFrameOption, TimeGranularity, DemographicPivot, DEMOGRAPHIC_PIVOT_OPTIONS } from '@/hooks/useDemographicReporting';
 import { useCompanyDemographic, TimeFrameOption as CompanyDemoTimeFrameOption } from '@/hooks/useCompanyDemographic';
 import { useCreativeReporting, TimeFrameOption as CreativeTimeFrameOption } from '@/hooks/useCreativeReporting';
+import { useAccountStructure } from '@/hooks/useAccountStructure';
 import { CompanyIntelligenceTable } from './CompanyIntelligenceTable';
 import { DemographicTable } from './DemographicTable';
 import { CompanyDemographicTable } from './CompanyDemographicTable';
 import { CreativeReportingTable } from './CreativeReportingTable';
 import { CreativeNameListTable } from './CreativeNameListTable';
+import { AccountStructureTable } from './AccountStructureTable';
 import { TimeFrameSelector } from './TimeFrameSelector';
 import { MetricCard } from './MetricCard';
-import { List } from 'lucide-react';
 
 interface ReportingSectionProps {
   accessToken: string | null;
@@ -27,6 +28,7 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
   const demographicReporting = useDemographicReporting(accessToken);
   const companyDemographic = useCompanyDemographic(accessToken);
   const creativeReporting = useCreativeReporting(accessToken);
+  const accountStructure = useAccountStructure(accessToken);
 
   const [selectedTimeFrame, setSelectedTimeFrame] = useState('30d');
   const [reportType, setReportType] = useState('creatives');
@@ -41,6 +43,8 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
         demographicReporting.fetchDemographicAnalytics(selectedAccount);
       } else if (reportType === 'company_demo') {
         companyDemographic.fetchCompanyDemographic(selectedAccount);
+      } else if (reportType === 'account_structure') {
+        accountStructure.fetchAccountStructure(selectedAccount);
       }
     }
   }, [selectedAccount, reportType]);
@@ -98,6 +102,8 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
         demographicReporting.fetchDemographicAnalytics(selectedAccount);
       } else if (reportType === 'company_demo') {
         companyDemographic.fetchCompanyDemographic(selectedAccount);
+      } else if (reportType === 'account_structure') {
+        accountStructure.fetchAccountStructure(selectedAccount);
       }
     }
   };
@@ -106,7 +112,8 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
     reportType === 'creatives' ? creativeReporting.isLoading :
     reportType === 'companies' ? companyIntelligence.isLoading : 
     reportType === 'demographics' ? demographicReporting.isLoading : 
-    reportType === 'company_demo' ? companyDemographic.isLoading : false;
+    reportType === 'company_demo' ? companyDemographic.isLoading : 
+    reportType === 'account_structure' ? accountStructure.isLoading : false;
 
   // Calculate creative totals
   const creativeTotals = creativeReporting.totals;
@@ -163,6 +170,10 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
           <TabsTrigger value="creative_names" className="gap-2">
             <List className="h-4 w-4" />
             Creative Names
+          </TabsTrigger>
+          <TabsTrigger value="account_structure" className="gap-2">
+            <FolderTree className="h-4 w-4" />
+            Account Structure
           </TabsTrigger>
           <TabsTrigger value="campaigns" className="gap-2" disabled>
             <Target className="h-4 w-4" />
@@ -560,6 +571,32 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
               <p className="text-muted-foreground">
                 Campaign-level analytics and performance tracking will be available in a future update.
               </p>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Account Structure Tab */}
+        <TabsContent value="account_structure" className="space-y-6 mt-6">
+          <Card className="bg-card/50 backdrop-blur-sm border-border/50">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <FolderTree className="h-5 w-5 text-primary" />
+                Account Hierarchy
+              </CardTitle>
+              <CardDescription>
+                View your complete account structure: Campaign Groups → Campaigns → Creatives
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {accountStructure.error && (
+                <div className="mb-4 p-3 bg-destructive/10 border border-destructive/30 rounded-md">
+                  <p className="text-sm text-destructive">{accountStructure.error}</p>
+                </div>
+              )}
+              <AccountStructureTable 
+                data={accountStructure.structure} 
+                isLoading={accountStructure.isLoading} 
+              />
             </CardContent>
           </Card>
         </TabsContent>
