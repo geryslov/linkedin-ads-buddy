@@ -1907,15 +1907,23 @@ serve(async (req) => {
         
         // Get campaign IDs to filter
         const campaignIds = [...new Set([...creativeInfoMap.values()].map(c => c.campaignId))].filter(Boolean);
-        console.log(`[Step 4] Found ${campaignIds.length} unique campaigns to query`);
+        console.log(`[Step 4] Campaign IDs to query (${campaignIds.length}):`, campaignIds.join(', '));
+        
+        if (campaignIds.length === 0) {
+          console.warn('[Step 4] WARNING: No campaign IDs found! Analytics will return zero rows.');
+        }
         
         // Aggregate analytics by creative
         const creativeMetrics = new Map<string, { impressions: number; clicks: number; spent: number; leads: number }>();
+        let totalAnalyticsRows = 0;
         
         // Batch campaigns in groups of 20 (API limit)
         const campaignBatchSize = 20;
         for (let i = 0; i < campaignIds.length; i += campaignBatchSize) {
           const campaignBatch = campaignIds.slice(i, i + campaignBatchSize);
+          const batchNum = Math.floor(i / campaignBatchSize) + 1;
+          
+          console.log(`[Step 4] Batch ${batchNum}: Querying campaigns:`, campaignBatch.join(', '));
           
           let analyticsUrl = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
             `dateRange.start.day=${startDay}&` +
@@ -1928,10 +1936,12 @@ serve(async (req) => {
             `pivot=CREATIVE&` +
             `fields=impressions,clicks,costInLocalCurrency,conversions,externalWebsiteConversions,oneClickLeads,dateRange,pivotValue`;
           
-          // Add campaigns for this batch
+          // Add campaigns for this batch - REQUIRED for pivot=CREATIVE
           campaignBatch.forEach((id, idx) => {
             analyticsUrl += `&campaigns[${idx}]=urn:li:sponsoredCampaign:${id}`;
           });
+          
+          console.log(`[Step 4] Batch ${batchNum} Analytics URL:`, analyticsUrl);
           
           try {
             const analyticsResponse = await fetch(analyticsUrl, {
@@ -1941,14 +1951,20 @@ serve(async (req) => {
             if (analyticsResponse.ok) {
               const analyticsData = await analyticsResponse.json();
               const elements = analyticsData.elements || [];
-              console.log(`[Step 4] Batch ${Math.floor(i / campaignBatchSize) + 1}: Received ${elements.length} analytics records`);
+              console.log(`[Step 4] Batch ${batchNum}: analyticsData.elements.length = ${elements.length}`);
+              totalAnalyticsRows += elements.length;
               
               for (const element of elements) {
+                // Parse pivotValue -> creativeId
                 const pivotValue = element.pivotValue;
                 const creativeId = pivotValue?.split(':').pop() || '';
                 
-                if (!creativeId) continue;
+                if (!creativeId) {
+                  console.log(`[Step 4] Skipping element with invalid pivotValue:`, pivotValue);
+                  continue;
+                }
                 
+                // Parse metrics: costInLocalCurrency -> spent, oneClickLeads + externalWebsiteConversions -> leads
                 const existing = creativeMetrics.get(creativeId) || { impressions: 0, clicks: 0, spent: 0, leads: 0 };
                 existing.impressions += element.impressions || 0;
                 existing.clicks += element.clicks || 0;
@@ -1957,14 +1973,20 @@ serve(async (req) => {
                 creativeMetrics.set(creativeId, existing);
               }
             } else {
-              console.log(`[Step 4] Batch ${Math.floor(i / campaignBatchSize) + 1} failed: ${analyticsResponse.status}`);
+              const errorText = await analyticsResponse.text();
+              console.error(`[Step 4] Batch ${batchNum} failed: ${analyticsResponse.status} - ${errorText}`);
             }
           } catch (err) {
-            console.log(`[Step 4] Batch ${Math.floor(i / campaignBatchSize) + 1} error:`, err);
+            console.error(`[Step 4] Batch ${batchNum} error:`, err);
           }
         }
         
-        console.log(`[Step 4] Total: Aggregated metrics for ${creativeMetrics.size} creatives`);
+        console.log(`[Step 4] Total analytics rows received: ${totalAnalyticsRows}`);
+        console.log(`[Step 4] Unique creatives with metrics: ${creativeMetrics.size}`);
+        
+        if (totalAnalyticsRows === 0) {
+          console.warn(`[Step 4] WARNING: Analytics API returned zero rows! Date range: ${startDate} to ${endDate}, Campaigns: ${campaignIds.length}`);
+        }
         
         // Step 5: Build final report
         console.log('[Step 5] Building final report...');
@@ -1999,17 +2021,25 @@ serve(async (req) => {
         // Sort by impressions descending
         reportElements.sort((a, b) => b.impressions - a.impressions);
         
-        console.log(`[get_creative_names_report] Complete. Total creatives: ${reportElements.length}`);
+        console.log(`[get_creative_names_report] Complete. Total creatives: ${reportElements.length}, Analytics rows: ${totalAnalyticsRows}`);
         
-        return new Response(JSON.stringify({
+        // Build response with warning if no analytics data
+        const response: any = {
           elements: reportElements,
           metadata: {
             accountId,
             dateRange: { start: startDate, end: endDate },
             timeGranularity: granularity,
             totalCreatives: reportElements.length,
+            totalAnalyticsRows,
           }
-        }), {
+        };
+        
+        if (totalAnalyticsRows === 0 && campaignIds.length > 0) {
+          response.warning = `Analytics API returned zero rows for date range ${startDate} to ${endDate}. This may indicate no ad activity during this period.`;
+        }
+        
+        return new Response(JSON.stringify(response), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
