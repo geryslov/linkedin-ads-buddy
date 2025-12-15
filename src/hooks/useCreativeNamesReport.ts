@@ -32,7 +32,7 @@ export function useCreativeNamesReport(accessToken: string | null) {
   const [error, setError] = useState<string | null>(null);
   const [timeGranularity, setTimeGranularity] = useState<TimeGranularity>('ALL');
   const [dateRange, setDateRange] = useState({
-    start: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    start: new Date(new Date().getFullYear(), 0, 1).toISOString().split('T')[0], // Jan 1 of this year
     end: new Date().toISOString().split('T')[0]
   });
 
@@ -40,6 +40,12 @@ export function useCreativeNamesReport(accessToken: string | null) {
     const now = new Date();
     
     return [
+      {
+        label: 'This Year',
+        value: 'this_year',
+        startDate: new Date(now.getFullYear(), 0, 1),
+        endDate: now
+      },
       {
         label: 'Last 7 Days',
         value: '7d',
@@ -81,6 +87,12 @@ export function useCreativeNamesReport(accessToken: string | null) {
         value: 'last_month',
         startDate: new Date(now.getFullYear(), now.getMonth() - 1, 1),
         endDate: new Date(now.getFullYear(), now.getMonth(), 0)
+      },
+      {
+        label: 'Last Year',
+        value: 'last_year',
+        startDate: new Date(now.getFullYear() - 1, 0, 1),
+        endDate: new Date(now.getFullYear() - 1, 11, 31)
       },
     ];
   }, []);

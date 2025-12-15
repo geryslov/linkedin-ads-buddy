@@ -32,7 +32,7 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
   const creativeNamesReport = useCreativeNamesReport(accessToken);
   const accountStructure = useAccountStructure(accessToken);
 
-  const [selectedTimeFrame, setSelectedTimeFrame] = useState('30d');
+  const [selectedTimeFrame, setSelectedTimeFrame] = useState('this_year');
   const [reportType, setReportType] = useState('creatives');
 
   useEffect(() => {
