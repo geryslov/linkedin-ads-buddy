@@ -1842,26 +1842,41 @@ serve(async (req) => {
           }
         }
 
-        // Step 3: Fetch all Creatives using versioned API
-        console.log('[Step 3] Fetching creatives...');
-        const accountUrn = `urn:li:sponsoredAccount:${accountId}`;
-        const creativesUrl = `https://api.linkedin.com/rest/creatives?q=search&search=(account:(values:List(${encodeURIComponent(accountUrn)})))&count=100`;
-        const creativesResponse = await fetch(creativesUrl, {
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'LinkedIn-Version': '202410',
-            'X-Restli-Protocol-Version': '2.0.0',
-          },
-        });
+        // Step 3: Fetch all Creatives for each campaign
+        console.log('[Step 3] Fetching creatives for campaigns...');
         
         let creatives: any[] = [];
-        if (creativesResponse.ok) {
-          const creativesData = await creativesResponse.json();
-          creatives = creativesData.elements || [];
-          console.log(`[Step 3] Found ${creatives.length} creatives`);
-        } else {
-          console.log('[Step 3] Versioned creatives API returned:', creativesResponse.status);
+        
+        // Fetch creatives per campaign in batches
+        const campaignIds = campaigns.map((c: any) => c.id?.toString() || c.$URN?.split(':').pop()).filter(Boolean);
+        
+        for (let i = 0; i < campaignIds.length; i += 10) {
+          const batchIds = campaignIds.slice(i, i + 10);
+          
+          for (const campaignId of batchIds) {
+            try {
+              // Use v2 API which is more reliable for creatives
+              const creativesUrl = `https://api.linkedin.com/v2/adCreativesV2?q=search&search.campaign.values[0]=urn:li:sponsoredCampaign:${campaignId}`;
+              const creativesResponse = await fetch(creativesUrl, {
+                headers: { 'Authorization': `Bearer ${accessToken}` },
+              });
+              
+              if (creativesResponse.ok) {
+                const creativesData = await creativesResponse.json();
+                const campaignCreatives = creativesData.elements || [];
+                // Add campaign reference to each creative
+                campaignCreatives.forEach((c: any) => {
+                  c._campaignId = campaignId;
+                });
+                creatives.push(...campaignCreatives);
+              }
+            } catch (err) {
+              console.log(`[Step 3] Error fetching creatives for campaign ${campaignId}:`, err);
+            }
+          }
         }
+        
+        console.log(`[Step 3] Found ${creatives.length} total creatives across ${campaignIds.length} campaigns`);
 
         // Step 4: Build the hierarchy
         console.log('[Step 4] Building account structure hierarchy...');
@@ -1869,15 +1884,25 @@ serve(async (req) => {
         // Create creative lookup by campaign
         const creativesByCampaign: Record<string, any[]> = {};
         for (const creative of creatives) {
-          const campaignUrn = creative.campaign;
-          if (campaignUrn) {
-            const campaignId = campaignUrn.split(':').pop();
+          // Use our added _campaignId or fallback to campaign URN parsing
+          const campaignId = creative._campaignId || creative.campaign?.split(':').pop();
+          if (campaignId) {
             if (!creativesByCampaign[campaignId]) {
               creativesByCampaign[campaignId] = [];
             }
+            
+            // Extract creative name from various possible locations
+            let creativeName = creative.name || creative.creativeDscName;
+            if (!creativeName) {
+              const variables = creative.variables?.data || {};
+              creativeName = variables.creativeDscName || 
+                             variables.com?.linkedin?.ads?.TextAdCreativeVariables?.title ||
+                             `Creative ${creative.id || 'Unknown'}`;
+            }
+            
             creativesByCampaign[campaignId].push({
-              id: creative.id || creative.$URN?.split(':').pop() || 'unknown',
-              name: creative.name || `Creative ${creative.id || 'Unknown'}`,
+              id: creative.id?.toString() || 'unknown',
+              name: creativeName,
               status: creative.status || 'UNKNOWN',
             });
           }
