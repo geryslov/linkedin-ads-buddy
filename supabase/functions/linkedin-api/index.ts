@@ -218,7 +218,7 @@ serve(async (req) => {
           `dateRange.end.year=${new Date(endDate).getFullYear()}&` +
           `timeGranularity=DAILY&` +
           `accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
-          `fields=impressions,clicks,costInLocalCurrency,conversions,externalWebsiteConversions`;
+          `fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads`;
         
         if (campaignIds?.length) {
           campaignIds.forEach((id: string, i: number) => {
@@ -300,7 +300,7 @@ serve(async (req) => {
           `dateRange.end.year=${new Date(endDate).getFullYear()}&` +
           `timeGranularity=${granularity}&` +
           `pivot=CREATIVE&` +
-          `fields=impressions,clicks,costInLocalCurrency,conversions,externalWebsiteConversions,oneClickLeads,dateRange,pivotValue`;
+          `fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,dateRange,pivotValue`;
 
         // Add campaigns to query (required for CREATIVE pivot)
         campaigns.slice(0, 20).forEach((id: string, i: number) => {
@@ -1934,7 +1934,7 @@ serve(async (req) => {
             `dateRange.end.year=${endYear}&` +
             `timeGranularity=${granularity}&` +
             `pivot=CREATIVE&` +
-            `fields=impressions,clicks,costInLocalCurrency,conversions,externalWebsiteConversions,oneClickLeads,dateRange,pivotValue`;
+            `fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,dateRange,pivotValue`;
           
           // Add campaigns for this batch - REQUIRED for pivot=CREATIVE
           campaignBatch.forEach((id, idx) => {
