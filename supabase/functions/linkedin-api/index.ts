@@ -1897,56 +1897,69 @@ serve(async (req) => {
         const namesResolved = [...creativeInfoMap.values()].filter(c => c.name).length;
         console.log(`[Step 3] Resolved ${namesResolved} of ${creativeInfoMap.size} creative names`);
         
-        // Step 4: Fetch analytics data for creatives
+        // Step 4: Fetch analytics data for creatives (batch campaigns since API limits to 20 per request)
         console.log('[Step 4] Fetching creative analytics...');
         
         // Get campaign IDs to filter
         const campaignIds = [...new Set([...creativeInfoMap.values()].map(c => c.campaignId))].filter(Boolean);
-        
-        let analyticsUrl = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
-          `dateRange.start.day=${new Date(startDate).getDate()}&` +
-          `dateRange.start.month=${new Date(startDate).getMonth() + 1}&` +
-          `dateRange.start.year=${new Date(startDate).getFullYear()}&` +
-          `dateRange.end.day=${new Date(endDate).getDate()}&` +
-          `dateRange.end.month=${new Date(endDate).getMonth() + 1}&` +
-          `dateRange.end.year=${new Date(endDate).getFullYear()}&` +
-          `timeGranularity=${granularity}&` +
-          `pivot=CREATIVE&` +
-          `fields=impressions,clicks,costInLocalCurrency,conversions,externalWebsiteConversions,oneClickLeads,dateRange,pivotValue`;
-        
-        // Add campaigns (limited to 20)
-        campaignIds.slice(0, 20).forEach((id, i) => {
-          analyticsUrl += `&campaigns[${i}]=urn:li:sponsoredCampaign:${id}`;
-        });
-        
-        const analyticsResponse = await fetch(analyticsUrl, {
-          headers: { 'Authorization': `Bearer ${accessToken}` }
-        });
+        console.log(`[Step 4] Found ${campaignIds.length} unique campaigns to query`);
         
         // Aggregate analytics by creative
         const creativeMetrics = new Map<string, { impressions: number; clicks: number; spent: number; leads: number }>();
         
-        if (analyticsResponse.ok) {
-          const analyticsData = await analyticsResponse.json();
-          const elements = analyticsData.elements || [];
-          console.log(`[Step 4] Received ${elements.length} analytics records`);
+        // Batch campaigns in groups of 20 (API limit)
+        const campaignBatchSize = 20;
+        for (let i = 0; i < campaignIds.length; i += campaignBatchSize) {
+          const campaignBatch = campaignIds.slice(i, i + campaignBatchSize);
           
-          for (const element of elements) {
-            const pivotValue = element.pivotValue;
-            const creativeId = pivotValue?.split(':').pop() || '';
+          let analyticsUrl = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
+            `dateRange.start.day=${new Date(startDate).getDate()}&` +
+            `dateRange.start.month=${new Date(startDate).getMonth() + 1}&` +
+            `dateRange.start.year=${new Date(startDate).getFullYear()}&` +
+            `dateRange.end.day=${new Date(endDate).getDate()}&` +
+            `dateRange.end.month=${new Date(endDate).getMonth() + 1}&` +
+            `dateRange.end.year=${new Date(endDate).getFullYear()}&` +
+            `timeGranularity=${granularity}&` +
+            `pivot=CREATIVE&` +
+            `fields=impressions,clicks,costInLocalCurrency,conversions,externalWebsiteConversions,oneClickLeads,dateRange,pivotValue`;
+          
+          // Add campaigns for this batch
+          campaignBatch.forEach((id, idx) => {
+            analyticsUrl += `&campaigns[${idx}]=urn:li:sponsoredCampaign:${id}`;
+          });
+          
+          try {
+            const analyticsResponse = await fetch(analyticsUrl, {
+              headers: { 'Authorization': `Bearer ${accessToken}` }
+            });
             
-            if (!creativeId) continue;
-            
-            const existing = creativeMetrics.get(creativeId) || { impressions: 0, clicks: 0, spent: 0, leads: 0 };
-            existing.impressions += element.impressions || 0;
-            existing.clicks += element.clicks || 0;
-            existing.spent += parseFloat(element.costInLocalCurrency || '0');
-            existing.leads += (element.oneClickLeads || 0) + (element.externalWebsiteConversions || 0);
-            creativeMetrics.set(creativeId, existing);
+            if (analyticsResponse.ok) {
+              const analyticsData = await analyticsResponse.json();
+              const elements = analyticsData.elements || [];
+              console.log(`[Step 4] Batch ${Math.floor(i / campaignBatchSize) + 1}: Received ${elements.length} analytics records`);
+              
+              for (const element of elements) {
+                const pivotValue = element.pivotValue;
+                const creativeId = pivotValue?.split(':').pop() || '';
+                
+                if (!creativeId) continue;
+                
+                const existing = creativeMetrics.get(creativeId) || { impressions: 0, clicks: 0, spent: 0, leads: 0 };
+                existing.impressions += element.impressions || 0;
+                existing.clicks += element.clicks || 0;
+                existing.spent += parseFloat(element.costInLocalCurrency || '0');
+                existing.leads += (element.oneClickLeads || 0) + (element.externalWebsiteConversions || 0);
+                creativeMetrics.set(creativeId, existing);
+              }
+            } else {
+              console.log(`[Step 4] Batch ${Math.floor(i / campaignBatchSize) + 1} failed: ${analyticsResponse.status}`);
+            }
+          } catch (err) {
+            console.log(`[Step 4] Batch ${Math.floor(i / campaignBatchSize) + 1} error:`, err);
           }
         }
         
-        console.log(`[Step 4] Aggregated metrics for ${creativeMetrics.size} creatives`);
+        console.log(`[Step 4] Total: Aggregated metrics for ${creativeMetrics.size} creatives`);
         
         // Step 5: Build final report
         console.log('[Step 5] Building final report...');
