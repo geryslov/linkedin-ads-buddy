@@ -537,8 +537,9 @@ serve(async (req) => {
               
               await Promise.all(batch.map(async (creativeId) => {
                 try {
-                  // Try versioned API for individual creative
-                  const creativeUrl = `https://api.linkedin.com/rest/adCreatives/${creativeId}`;
+                  // Use exact endpoint format: /rest/adAccounts/{accountId}/creatives/{creativeUrn}
+                  const creativeUrn = encodeURIComponent(`urn:li:sponsoredCreative:${creativeId}`);
+                  const creativeUrl = `https://api.linkedin.com/rest/adAccounts/${accountId}/creatives/${creativeUrn}`;
                   const creativeResp = await fetch(creativeUrl, {
                     headers: {
                       'Authorization': `Bearer ${token}`,
@@ -557,9 +558,11 @@ serve(async (req) => {
                         namesResolved++;
                       }
                     }
+                  } else {
+                    console.log(`[Creative Metadata] Failed to fetch creative ${creativeId}: ${creativeResp.status}`);
                   }
                 } catch (err) {
-                  // Silently continue - individual lookups may fail
+                  console.log(`[Creative Metadata] Error fetching creative ${creativeId}:`, err);
                 }
               }));
             }
