@@ -1834,6 +1834,7 @@ serve(async (req) => {
           campaignName: string;
           status: string;
           type: string;
+          reference?: string;  // urn:li:ugcPost:{id} or urn:li:share:{id}
         }
         
         const creativeInfoMap = new Map<string, CreativeInfo>();
@@ -1861,6 +1862,7 @@ serve(async (req) => {
               campaignName: campaignNames.get(campaignId) || `Campaign ${campaignId}`,
               status: creative.status || 'UNKNOWN',
               type: creativeType,
+              reference: creative.reference || '',
             });
           }
         }
@@ -1901,6 +1903,52 @@ serve(async (req) => {
         
         const namesResolved = [...creativeInfoMap.values()].filter(c => c.name).length;
         console.log(`[Step 3] Resolved ${namesResolved} of ${creativeInfoMap.size} creative names`);
+        
+        // Step 3b: Fetch post text for creatives without names (UGC Posts / Shares)
+        console.log('[Step 3b] Resolving post text for unnamed creatives...');
+        const unnamedCreatives = [...creativeInfoMap.entries()]
+          .filter(([_, info]) => !info.name && info.reference);
+        
+        let postTextResolved = 0;
+        for (const [creativeId, info] of unnamedCreatives) {
+          try {
+            if (info.reference?.includes('ugcPost')) {
+              const postId = info.reference.split(':').pop();
+              const postUrl = `https://api.linkedin.com/v2/ugcPosts/${postId}`;
+              const postResp = await fetch(postUrl, {
+                headers: { 'Authorization': `Bearer ${accessToken}` }
+              });
+              if (postResp.ok) {
+                const post = await postResp.json();
+                const text = post.specificContent?.['com.linkedin.ugc.ShareContent']
+                  ?.shareCommentary?.text || '';
+                if (text.trim()) {
+                  info.name = text.replace(/\s+/g, ' ').trim().slice(0, 80);
+                  creativeInfoMap.set(creativeId, info);
+                  postTextResolved++;
+                }
+              }
+            } else if (info.reference?.includes('share')) {
+              const shareId = info.reference.split(':').pop();
+              const shareUrl = `https://api.linkedin.com/v2/shares/${shareId}`;
+              const shareResp = await fetch(shareUrl, {
+                headers: { 'Authorization': `Bearer ${accessToken}` }
+              });
+              if (shareResp.ok) {
+                const share = await shareResp.json();
+                const text = share.text?.text || '';
+                if (text.trim()) {
+                  info.name = text.replace(/\s+/g, ' ').trim().slice(0, 80);
+                  creativeInfoMap.set(creativeId, info);
+                  postTextResolved++;
+                }
+              }
+            }
+          } catch (err) {
+            console.log(`[Step 3b] Error fetching post for creative ${creativeId}:`, err);
+          }
+        }
+        console.log(`[Step 3b] Resolved ${postTextResolved} names from post text`);
         
         // Step 4: Fetch analytics data for creatives (batch campaigns since API limits to 20 per request)
         console.log('[Step 4] Fetching creative analytics...');
@@ -2003,7 +2051,7 @@ serve(async (req) => {
           
           reportElements.push({
             creativeId,
-            creativeName: info.name || `Creative ${creativeId}`,
+            creativeName: info.name || `Sponsored Content (${info.type})`,
             campaignName: info.campaignName,
             status: info.status,
             type: info.type,
