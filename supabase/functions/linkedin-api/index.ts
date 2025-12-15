@@ -1838,6 +1838,7 @@ serve(async (req) => {
         }
         
         const creativeInfoMap = new Map<string, CreativeInfo>();
+        const referenceNameCache = new Map<string, string>();  // Cache resolved names by reference URN
         
         if (creativesResponse.ok) {
           const creativesData = await creativesResponse.json();
@@ -1904,16 +1905,24 @@ serve(async (req) => {
         const namesResolved = [...creativeInfoMap.values()].filter(c => c.name).length;
         console.log(`[Step 3] Resolved ${namesResolved} of ${creativeInfoMap.size} creative names`);
         
-        // Step 3b: Fetch post text for creatives without names (UGC Posts / Shares)
-        console.log('[Step 3b] Resolving post text for unnamed creatives...');
-        const unnamedCreatives = [...creativeInfoMap.entries()]
-          .filter(([_, info]) => !info.name && info.reference);
+        // Step 3b: Resolve post text ONCE per unique reference (for SPONSORED_CONTENT only)
+        console.log('[Step 3b] Resolving post text for unique references...');
         
-        let postTextResolved = 0;
-        for (const [creativeId, info] of unnamedCreatives) {
+        // Collect unique references from SPONSORED_CONTENT creatives without names
+        const uniqueReferences = new Set<string>();
+        for (const [_, info] of creativeInfoMap) {
+          if (!info.name && info.type === 'SPONSORED_CONTENT' && info.reference) {
+            uniqueReferences.add(info.reference);
+          }
+        }
+        
+        console.log(`[Step 3b] Found ${uniqueReferences.size} unique references to resolve`);
+        
+        // Fetch post text for each unique reference ONCE
+        for (const reference of uniqueReferences) {
           try {
-            if (info.reference?.includes('ugcPost')) {
-              const postId = info.reference.split(':').pop();
+            if (reference.includes('ugcPost')) {
+              const postId = reference.split(':').pop();
               const postUrl = `https://api.linkedin.com/v2/ugcPosts/${postId}`;
               const postResp = await fetch(postUrl, {
                 headers: { 'Authorization': `Bearer ${accessToken}` }
@@ -1923,13 +1932,12 @@ serve(async (req) => {
                 const text = post.specificContent?.['com.linkedin.ugc.ShareContent']
                   ?.shareCommentary?.text || '';
                 if (text.trim()) {
-                  info.name = text.replace(/\s+/g, ' ').trim().slice(0, 80);
-                  creativeInfoMap.set(creativeId, info);
-                  postTextResolved++;
+                  const normalizedName = text.replace(/\s+/g, ' ').trim().slice(0, 80);
+                  referenceNameCache.set(reference, normalizedName);
                 }
               }
-            } else if (info.reference?.includes('share')) {
-              const shareId = info.reference.split(':').pop();
+            } else if (reference.includes('share')) {
+              const shareId = reference.split(':').pop();
               const shareUrl = `https://api.linkedin.com/v2/shares/${shareId}`;
               const shareResp = await fetch(shareUrl, {
                 headers: { 'Authorization': `Bearer ${accessToken}` }
@@ -1938,17 +1946,32 @@ serve(async (req) => {
                 const share = await shareResp.json();
                 const text = share.text?.text || '';
                 if (text.trim()) {
-                  info.name = text.replace(/\s+/g, ' ').trim().slice(0, 80);
-                  creativeInfoMap.set(creativeId, info);
-                  postTextResolved++;
+                  const normalizedName = text.replace(/\s+/g, ' ').trim().slice(0, 80);
+                  referenceNameCache.set(reference, normalizedName);
                 }
               }
             }
           } catch (err) {
-            console.log(`[Step 3b] Error fetching post for creative ${creativeId}:`, err);
+            console.log(`[Step 3b] Error fetching reference ${reference}:`, err);
           }
         }
-        console.log(`[Step 3b] Resolved ${postTextResolved} names from post text`);
+        
+        console.log(`[Step 3b] Resolved ${referenceNameCache.size} unique post names`);
+        
+        // Step 3c: Apply cached names to ALL creatives sharing the same reference
+        let namesFromCache = 0;
+        for (const [creativeId, info] of creativeInfoMap) {
+          if (!info.name && info.type === 'SPONSORED_CONTENT' && info.reference) {
+            const cachedName = referenceNameCache.get(info.reference);
+            if (cachedName) {
+              info.name = cachedName;
+              creativeInfoMap.set(creativeId, info);
+              namesFromCache++;
+            }
+          }
+        }
+        
+        console.log(`[Step 3c] Applied cached names to ${namesFromCache} creatives`);
         
         // Step 4: Fetch analytics data for creatives (batch campaigns since API limits to 20 per request)
         console.log('[Step 4] Fetching creative analytics...');
@@ -2051,7 +2074,7 @@ serve(async (req) => {
           
           reportElements.push({
             creativeId,
-            creativeName: info.name || `Sponsored Content (${info.type})`,
+            creativeName: info.name || 'Sponsored Image Ad',
             campaignName: info.campaignName,
             status: info.status,
             type: info.type,
