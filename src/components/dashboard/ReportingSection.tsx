@@ -359,7 +359,7 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <CreativeNamesReportTable data={creativeNamesReport.creativeData} isLoading={creativeNamesReport.isLoading} />
+              <CreativeNamesReportTable data={creativeNamesReport.groupedCreativeData} isLoading={creativeNamesReport.isLoading} />
             </CardContent>
           </Card>
         </TabsContent>
