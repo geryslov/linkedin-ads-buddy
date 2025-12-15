@@ -460,127 +460,118 @@ serve(async (req) => {
           return creativeData;
         }
 
-        // Helper: Fetch ALL creatives via versioned Creatives API (PRIMARY source for names)
-        // Using the correct endpoint: /rest/adAccounts/{accountId}/creatives
+        // Helper: Fetch ALL creatives via V2 adCreativesV2 API (this works reliably)
+        // Then fetch names from individual creative lookup if needed
         async function fetchCreativesVersioned(accountId: string, token: string): Promise<Map<string, { name: string; campaignId: string; status: string; type: string; reference: string }>> {
           const creativeData = new Map<string, { name: string; campaignId: string; status: string; type: string; reference: string }>();
           
-          console.log('[Versioned Creatives API] Fetching creatives from /rest/adAccounts/{accountId}/creatives...');
+          console.log('[Creative Metadata] Fetching creatives from V2 adCreativesV2 API...');
           
-          // Use the CORRECT versioned endpoint as per LinkedIn API documentation
-          const baseUrl = `https://api.linkedin.com/rest/adAccounts/${accountId}/creatives`;
+          // Use V2 API which works reliably
+          const url = `https://api.linkedin.com/v2/adCreativesV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=500`;
           
-          let start = 0;
-          let hasMore = true;
-          const maxPages = 20; // Safety limit for large accounts
-          let pageCount = 0;
-          
-          while (hasMore && pageCount < maxPages) {
-            pageCount++;
-            const pageUrl = start > 0 ? `${baseUrl}?start=${start}&count=100` : `${baseUrl}?count=100`;
+          try {
+            const response = await fetch(url, {
+              headers: { 'Authorization': `Bearer ${token}` }
+            });
             
-            try {
-              console.log(`[Versioned Creatives API] Fetching page ${pageCount} (start=${start})...`);
-              
-              const response: Response = await fetch(pageUrl, {
-                headers: { 
-                  'Authorization': `Bearer ${token}`,
-                  'LinkedIn-Version': '202411',
-                  'X-Restli-Protocol-Version': '2.0.0'
-                }
-              });
-              
-              if (!response.ok) {
-                const errorText = await response.text();
-                console.log(`[Versioned Creatives API] Page ${pageCount} failed with status ${response.status}`);
-                console.log(`[Versioned Creatives API] Error response: ${errorText.slice(0, 500)}`);
-                break;
-              }
-              
-              const data: any = await response.json();
-              const elements: any[] = data.elements || [];
-              
-              // Log raw response structure for first page
-              if (pageCount === 1) {
-                console.log('[Versioned Creatives API] === RAW RESPONSE STRUCTURE ===');
-                console.log(`[Versioned Creatives API] Response keys: ${Object.keys(data).join(', ')}`);
-                console.log(`[Versioned Creatives API] Elements count: ${elements.length}`);
-                if (elements.length > 0) {
-                  const sample = elements[0];
-                  console.log(`[Versioned Creatives API] First element keys: ${Object.keys(sample).join(', ')}`);
-                  console.log(`[Versioned Creatives API] First element id: ${sample.id}`);
-                  console.log(`[Versioned Creatives API] First element name: ${sample.name || 'MISSING'}`);
-                  console.log(`[Versioned Creatives API] First element status: ${sample.status || 'MISSING'}`);
-                  console.log(`[Versioned Creatives API] First element campaign: ${sample.campaign || 'MISSING'}`);
-                  if (sample.content) {
-                    console.log(`[Versioned Creatives API] First element content keys: ${Object.keys(sample.content).join(', ')}`);
-                  }
-                }
-                console.log('[Versioned Creatives API] === END RAW RESPONSE STRUCTURE ===');
-              }
-              
-              // Process elements - the `name` field is the CANONICAL creative name
-              for (const creative of elements) {
-                // Extract creative ID from URN (format: urn:li:sponsoredCreative:123456)
-                const idUrn = creative.id || '';
-                const creativeId = typeof idUrn === 'string' && idUrn.includes(':') 
-                  ? idUrn.split(':').pop() || '' 
-                  : idUrn.toString();
-                
-                if (!creativeId) continue;
-                
-                // Extract campaign ID from campaign URN
-                const campaignUrn = creative.campaign || '';
-                const campaignId = typeof campaignUrn === 'string' && campaignUrn.includes(':')
-                  ? campaignUrn.split(':').pop() || ''
-                  : '';
-                
-                // The `name` field is the ONLY valid source for creative names (per LinkedIn API docs)
-                const creativeName = creative.name || '';
-                
-                // Extract reference for potential fallback (shares/ugcPosts)
-                let reference = '';
-                if (creative.content?.reference) {
-                  reference = creative.content.reference;
-                }
-                
-                // Determine creative type from content structure
-                let creativeType = 'SPONSORED_CONTENT';
-                if (creative.content) {
-                  const contentKeys = Object.keys(creative.content);
-                  if (contentKeys.includes('textAd')) creativeType = 'TEXT_AD';
-                  else if (contentKeys.includes('videoAd')) creativeType = 'VIDEO';
-                  else if (contentKeys.includes('carouselAd')) creativeType = 'CAROUSEL';
-                  else if (contentKeys.includes('messageAd')) creativeType = 'MESSAGE';
-                  else if (contentKeys.includes('conversationAd')) creativeType = 'CONVERSATION';
-                }
-                
-                creativeData.set(creativeId, {
-                  name: creativeName,
-                  campaignId,
-                  status: creative.status || 'UNKNOWN',
-                  type: creativeType,
-                  reference,
-                });
-              }
-              
-              console.log(`[Versioned Creatives API] Page ${pageCount}: Processed ${elements.length} creatives, total: ${creativeData.size}`);
-              
-              // Check for more pages
-              if (elements.length < 100) {
-                hasMore = false;
-              } else {
-                start += elements.length;
-              }
-              
-            } catch (err) {
-              console.error(`[Versioned Creatives API] Page ${pageCount} error:`, err);
-              break;
+            if (!response.ok) {
+              console.log(`[Creative Metadata] V2 API failed with status ${response.status}`);
+              return creativeData;
             }
+            
+            const data = await response.json();
+            const elements = data.elements || [];
+            console.log(`[Creative Metadata] V2 API returned ${elements.length} creatives`);
+            
+            // Log sample for debugging
+            if (elements.length > 0) {
+              console.log('[Creative Metadata] === SAMPLE CREATIVE DATA ===');
+              const sample = elements[0];
+              console.log(`[Creative Metadata] Keys: ${Object.keys(sample).join(', ')}`);
+              console.log(`[Creative Metadata] id: ${sample.id}`);
+              console.log(`[Creative Metadata] campaign: ${sample.campaign}`);
+              console.log(`[Creative Metadata] status: ${sample.status}`);
+              console.log(`[Creative Metadata] type: ${sample.type}`);
+              console.log(`[Creative Metadata] reference: ${sample.reference}`);
+              if (sample.variables) {
+                console.log(`[Creative Metadata] variables.type: ${sample.variables?.type}`);
+              }
+              console.log('[Creative Metadata] === END SAMPLE ===');
+            }
+            
+            // Collect all creative IDs to fetch names via individual lookup
+            const creativeIds: string[] = [];
+            
+            for (const creative of elements) {
+              const creativeId = creative.id?.toString() || '';
+              if (!creativeId) continue;
+              
+              creativeIds.push(creativeId);
+              
+              const campaignUrn = creative.campaign || '';
+              const campaignId = campaignUrn.split(':').pop() || '';
+              
+              let creativeType = 'SPONSORED_CONTENT';
+              if (creative.type) creativeType = creative.type;
+              else if (creative.variables?.type) creativeType = creative.variables.type;
+              
+              creativeData.set(creativeId, {
+                name: '', // Will be resolved below
+                campaignId,
+                status: creative.status || 'UNKNOWN',
+                type: creativeType,
+                reference: creative.reference || '',
+              });
+            }
+            
+            // Now fetch names using individual creative lookup via versioned API
+            // This is more reliable than batch endpoint
+            console.log(`[Creative Metadata] Fetching names for ${creativeIds.length} creatives...`);
+            
+            let namesResolved = 0;
+            const batchSize = 10;
+            
+            for (let i = 0; i < Math.min(creativeIds.length, 200); i += batchSize) {
+              const batch = creativeIds.slice(i, i + batchSize);
+              
+              await Promise.all(batch.map(async (creativeId) => {
+                try {
+                  // Try versioned API for individual creative
+                  const creativeUrl = `https://api.linkedin.com/rest/adCreatives/${creativeId}`;
+                  const creativeResp = await fetch(creativeUrl, {
+                    headers: {
+                      'Authorization': `Bearer ${token}`,
+                      'LinkedIn-Version': '202411',
+                      'X-Restli-Protocol-Version': '2.0.0'
+                    }
+                  });
+                  
+                  if (creativeResp.ok) {
+                    const creativeDetail = await creativeResp.json();
+                    if (creativeDetail.name) {
+                      const existing = creativeData.get(creativeId);
+                      if (existing) {
+                        existing.name = creativeDetail.name;
+                        creativeData.set(creativeId, existing);
+                        namesResolved++;
+                      }
+                    }
+                  }
+                } catch (err) {
+                  // Silently continue - individual lookups may fail
+                }
+              }));
+            }
+            
+            console.log(`[Creative Metadata] Resolved ${namesResolved} creative names via individual lookup`);
+            
+          } catch (err) {
+            console.error('[Creative Metadata] Error:', err);
           }
           
-          const namesResolved = [...creativeData.values()].filter(v => v.name).length;
-          console.log(`[Versioned Creatives API] Total creatives: ${creativeData.size}, with names: ${namesResolved}`);
+          const totalWithNames = [...creativeData.values()].filter(v => v.name).length;
+          console.log(`[Creative Metadata] Total creatives: ${creativeData.size}, with names: ${totalWithNames}`);
           return creativeData;
         }
         
