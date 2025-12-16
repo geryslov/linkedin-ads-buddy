@@ -3,6 +3,7 @@ import {
   Table,
   TableBody,
   TableCell,
+  TableFooter,
   TableHead,
   TableHeader,
   TableRow,
@@ -65,6 +66,22 @@ export function CompanyDemographicTable({ data, isLoading }: CompanyDemographicT
         : (bValue as number) - (aValue as number);
     });
   }, [data, searchQuery, sortField, sortDirection]);
+
+  const totals = useMemo(() => {
+    return filteredAndSortedData.reduce(
+      (acc, item) => ({
+        impressions: acc.impressions + item.impressions,
+        clicks: acc.clicks + item.clicks,
+        spent: acc.spent + item.spent,
+        leads: acc.leads + item.leads,
+      }),
+      { impressions: 0, clicks: 0, spent: 0, leads: 0 }
+    );
+  }, [filteredAndSortedData]);
+
+  const totalCtr = totals.impressions > 0 ? (totals.clicks / totals.impressions) * 100 : 0;
+  const totalCpc = totals.clicks > 0 ? totals.spent / totals.clicks : 0;
+  const totalCpm = totals.impressions > 0 ? (totals.spent / totals.impressions) * 1000 : 0;
 
   const SortButton = ({ field, children }: { field: SortField; children: React.ReactNode }) => (
     <Button
@@ -239,6 +256,35 @@ export function CompanyDemographicTable({ data, isLoading }: CompanyDemographicT
               ))
             )}
           </TableBody>
+          {filteredAndSortedData.length > 0 && (
+            <TableFooter>
+              <TableRow className="bg-muted/50 font-semibold">
+                <TableCell>Total ({filteredAndSortedData.length} companies)</TableCell>
+                <TableCell></TableCell>
+                <TableCell className="text-right tabular-nums">
+                  {totals.impressions.toLocaleString()}
+                </TableCell>
+                <TableCell className="text-right tabular-nums">
+                  {totals.clicks.toLocaleString()}
+                </TableCell>
+                <TableCell className="text-right tabular-nums">
+                  ${totals.spent.toFixed(2)}
+                </TableCell>
+                <TableCell className="text-right tabular-nums">
+                  {totals.leads.toLocaleString()}
+                </TableCell>
+                <TableCell className="text-right tabular-nums">
+                  {totalCtr.toFixed(2)}%
+                </TableCell>
+                <TableCell className="text-right tabular-nums">
+                  ${totalCpc.toFixed(2)}
+                </TableCell>
+                <TableCell className="text-right tabular-nums">
+                  ${totalCpm.toFixed(2)}
+                </TableCell>
+              </TableRow>
+            </TableFooter>
+          )}
         </Table>
       </div>
     </div>
