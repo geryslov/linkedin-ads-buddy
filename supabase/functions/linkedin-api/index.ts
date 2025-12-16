@@ -658,19 +658,31 @@ serve(async (req) => {
 
         // Step 3: Fetch Ad Analytics pivoted by CREATIVE
         console.log('[Step 3] Fetching analytics with pivot=CREATIVE...');
+        // Parse dates explicitly to avoid timezone issues
+        const startDateObj = new Date(startDate);
+        const endDateObj = new Date(endDate);
+        const startDay = startDateObj.getDate();
+        const startMonth = startDateObj.getMonth() + 1;
+        const startYear = startDateObj.getFullYear();
+        const endDay = endDateObj.getDate();
+        const endMonth = endDateObj.getMonth() + 1;
+        const endYear = endDateObj.getFullYear();
+        
+        // Use account-level query ONLY (no campaigns[] filter) for Business Manager compatibility
         const analyticsUrl = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
-          `dateRange.start.day=${new Date(startDate).getDate()}&` +
-          `dateRange.start.month=${new Date(startDate).getMonth() + 1}&` +
-          `dateRange.start.year=${new Date(startDate).getFullYear()}&` +
-          `dateRange.end.day=${new Date(endDate).getDate()}&` +
-          `dateRange.end.month=${new Date(endDate).getMonth() + 1}&` +
-          `dateRange.end.year=${new Date(endDate).getFullYear()}&` +
+          `dateRange.start.day=${startDay}&` +
+          `dateRange.start.month=${startMonth}&` +
+          `dateRange.start.year=${startYear}&` +
+          `dateRange.end.day=${endDay}&` +
+          `dateRange.end.month=${endMonth}&` +
+          `dateRange.end.year=${endYear}&` +
           `timeGranularity=${granularity}&` +
           `pivot=CREATIVE&` +
           `accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
           `fields=impressions,clicks,costInLocalCurrency,costInUsd,oneClickLeads,externalWebsiteConversions,pivotValue&` +
-          `count=500&` +
-          campaignIds.slice(0, 20).map((id, i) => `campaigns[${i}]=urn:li:sponsoredCampaign:${id}`).join('&');
+          `count=10000`;
+        
+        console.log(`[Step 3] Analytics URL: ${analyticsUrl}`);
 
         const analyticsResponse = await fetch(analyticsUrl, {
           headers: { 'Authorization': `Bearer ${accessToken}` },
