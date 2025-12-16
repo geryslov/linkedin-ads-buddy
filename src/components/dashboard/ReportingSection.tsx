@@ -3,7 +3,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { RefreshCw, FileBarChart, Users, Target, Building2, PieChart, Globe, Megaphone, FolderTree, List } from 'lucide-react';
+import { RefreshCw, FileBarChart, Users, Target, Building2, PieChart, Globe, Megaphone, FolderTree, List, Download } from 'lucide-react';
 import { useCompanyIntelligence, LookbackWindow } from '@/hooks/useCompanyIntelligence';
 import { useDemographicReporting, TimeFrameOption as DemoTimeFrameOption, TimeGranularity, DemographicPivot, DEMOGRAPHIC_PIVOT_OPTIONS } from '@/hooks/useDemographicReporting';
 import { useCompanyDemographic, TimeFrameOption as CompanyDemoTimeFrameOption } from '@/hooks/useCompanyDemographic';
@@ -18,6 +18,15 @@ import { CreativeNamesReportTable } from './CreativeNamesReportTable';
 import { AccountStructureTable } from './AccountStructureTable';
 import { TimeFrameSelector } from './TimeFrameSelector';
 import { MetricCard } from './MetricCard';
+import { useToast } from '@/hooks/use-toast';
+import { 
+  exportToCSV, 
+  creativeReportColumns, 
+  creativeNamesReportColumns, 
+  demographicReportColumns, 
+  companyDemographicColumns, 
+  companyIntelligenceColumns 
+} from '@/lib/exportUtils';
 
 interface ReportingSectionProps {
   accessToken: string | null;
@@ -31,9 +40,66 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
   const creativeReporting = useCreativeReporting(accessToken);
   const creativeNamesReport = useCreativeNamesReport(accessToken);
   const accountStructure = useAccountStructure(accessToken);
+  const { toast } = useToast();
 
   const [selectedTimeFrame, setSelectedTimeFrame] = useState('this_year');
   const [reportType, setReportType] = useState('creatives');
+
+  const handleExportCSV = () => {
+    let data: Record<string, any>[] = [];
+    let filename = '';
+    let columns: { key: string; label: string }[] = [];
+
+    switch (reportType) {
+      case 'creatives':
+        data = creativeReporting.creativeData;
+        filename = 'creative_performance';
+        columns = creativeReportColumns;
+        break;
+      case 'creative_names':
+        data = creativeNamesReport.creativeData;
+        filename = 'creative_names_report';
+        columns = creativeNamesReportColumns;
+        break;
+      case 'demographics':
+        data = demographicReporting.demographicData;
+        filename = `demographic_${demographicReporting.pivot.toLowerCase()}`;
+        columns = demographicReportColumns;
+        break;
+      case 'company_demo':
+        data = companyDemographic.companyData;
+        filename = 'company_demographic';
+        columns = companyDemographicColumns;
+        break;
+      case 'companies':
+        data = companyIntelligence.companyData;
+        filename = 'company_intelligence';
+        columns = companyIntelligenceColumns;
+        break;
+      default:
+        toast({
+          title: 'Export not available',
+          description: 'This report type does not support CSV export yet.',
+          variant: 'destructive',
+        });
+        return;
+    }
+
+    if (data.length === 0) {
+      toast({
+        title: 'No data to export',
+        description: 'Please load some data first before exporting.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    exportToCSV(data, filename, columns);
+    toast({
+      title: 'Export successful',
+      description: `${data.length} rows exported to ${filename}.csv`,
+    });
+  };
 
   useEffect(() => {
     if (selectedAccount) {
@@ -156,15 +222,26 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
             Analyze your ad performance across different dimensions
           </p>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleRefresh}
-          disabled={isLoading}
-        >
-          <RefreshCw className={`mr-2 h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleExportCSV}
+            disabled={isLoading || reportType === 'account_structure'}
+          >
+            <Download className="mr-2 h-4 w-4" />
+            Export CSV
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRefresh}
+            disabled={isLoading}
+          >
+            <RefreshCw className={`mr-2 h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {/* Report Type Tabs */}
