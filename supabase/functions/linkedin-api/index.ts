@@ -1832,12 +1832,82 @@ serve(async (req) => {
           }
         }
         
-        // Step 2: Fetch all creatives with metadata using V2 API
-        console.log('[Step 2] Fetching creatives metadata...');
-        const creativesUrl = `https://api.linkedin.com/v2/adCreativesV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=500`;
-        const creativesResponse = await fetch(creativesUrl, {
-          headers: { 'Authorization': `Bearer ${accessToken}` }
-        });
+        // Step 2: Fetch analytics FIRST to know which creatives have data
+        console.log('[Step 2] Fetching analytics to identify active creatives...');
+        
+        const analyticsUrl = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
+          `dateRange.start.day=${startDay}&` +
+          `dateRange.start.month=${startMonth}&` +
+          `dateRange.start.year=${startYear}&` +
+          `dateRange.end.day=${endDay}&` +
+          `dateRange.end.month=${endMonth}&` +
+          `dateRange.end.year=${endYear}&` +
+          `timeGranularity=${granularity}&` +
+          `pivot=CREATIVE&` +
+          `accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
+          `fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,dateRange,pivotValue&` +
+          `count=10000`;
+        
+        console.log(`[Step 2] Analytics URL:`, analyticsUrl);
+        
+        // Aggregate analytics by creative
+        const creativeMetrics = new Map<string, { impressions: number; clicks: number; spent: number; leads: number }>();
+        const creativeIdsWithData = new Set<string>();
+        let totalAnalyticsRows = 0;
+        
+        try {
+          const analyticsResponse = await fetch(analyticsUrl, {
+            headers: { 'Authorization': `Bearer ${accessToken}` }
+          });
+          
+          if (analyticsResponse.ok) {
+            const analyticsData = await analyticsResponse.json();
+            const elements = analyticsData.elements || [];
+            console.log(`[Step 2] Analytics returned ${elements.length} rows`);
+            totalAnalyticsRows = elements.length;
+            
+            for (const element of elements) {
+              const pivotValue = element.pivotValue;
+              const creativeId = pivotValue?.split(':').pop() || '';
+              
+              if (!creativeId) continue;
+              
+              creativeIdsWithData.add(creativeId);
+              const existing = creativeMetrics.get(creativeId) || { impressions: 0, clicks: 0, spent: 0, leads: 0 };
+              existing.impressions += element.impressions || 0;
+              existing.clicks += element.clicks || 0;
+              existing.spent += parseFloat(element.costInLocalCurrency || '0');
+              existing.leads += (element.oneClickLeads || 0) + (element.externalWebsiteConversions || 0);
+              creativeMetrics.set(creativeId, existing);
+            }
+          } else {
+            const errorText = await analyticsResponse.text();
+            console.error(`[Step 2] Analytics request failed: ${analyticsResponse.status} - ${errorText}`);
+          }
+        } catch (err) {
+          console.error(`[Step 2] Analytics request error:`, err);
+        }
+        
+        console.log(`[Step 2] Found ${creativeIdsWithData.size} creatives with analytics data`);
+        
+        if (totalAnalyticsRows === 0) {
+          console.warn(`[Step 2] WARNING: Analytics API returned zero rows! Date range: ${startDate} to ${endDate}`);
+          // Return empty result early
+          return new Response(JSON.stringify({
+            elements: [],
+            metadata: {
+              accountId,
+              dateRange: { start: startDate, end: endDate },
+              timeGranularity: granularity,
+              totalCreatives: 0,
+              totalAnalyticsRows: 0,
+              warning: 'No analytics data found for this date range'
+            }
+          }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+        
+        // Step 3: Fetch creative metadata ONLY for creatives with analytics data
+        console.log(`[Step 3] Fetching metadata for ${creativeIdsWithData.size} creatives with data...`);
         
         interface CreativeInfo {
           id: string;
@@ -1846,20 +1916,27 @@ serve(async (req) => {
           campaignName: string;
           status: string;
           type: string;
-          reference?: string;  // urn:li:ugcPost:{id} or urn:li:share:{id}
+          reference?: string;
         }
         
         const creativeInfoMap = new Map<string, CreativeInfo>();
-        const referenceNameCache = new Map<string, string>();  // Cache resolved names by reference URN
+        const referenceNameCache = new Map<string, string>();
+        
+        // Fetch creatives from V2 API (for basic info like campaign, status, reference)
+        const creativesUrl = `https://api.linkedin.com/v2/adCreativesV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=500`;
+        const creativesResponse = await fetch(creativesUrl, {
+          headers: { 'Authorization': `Bearer ${accessToken}` }
+        });
         
         if (creativesResponse.ok) {
           const creativesData = await creativesResponse.json();
           const creatives = creativesData.elements || [];
-          console.log(`[Step 2] Found ${creatives.length} creatives`);
+          console.log(`[Step 3] V2 API returned ${creatives.length} total creatives`);
           
+          // Only process creatives that have analytics data
           for (const creative of creatives) {
             const creativeId = creative.id?.toString() || '';
-            if (!creativeId) continue;
+            if (!creativeId || !creativeIdsWithData.has(creativeId)) continue;
             
             const campaignUrn = creative.campaign || '';
             const campaignId = campaignUrn.split(':').pop() || '';
@@ -1870,7 +1947,7 @@ serve(async (req) => {
             
             creativeInfoMap.set(creativeId, {
               id: creativeId,
-              name: '', // Will be resolved next
+              name: '',
               campaignId,
               campaignName: campaignNames.get(campaignId) || `Campaign ${campaignId}`,
               status: creative.status || 'UNKNOWN',
@@ -1880,13 +1957,15 @@ serve(async (req) => {
           }
         }
         
-        // Step 3: Fetch creative names via versioned API
-        console.log('[Step 3] Fetching creative names via versioned API...');
-        const creativeIds = [...creativeInfoMap.keys()];
+        console.log(`[Step 3] Mapped ${creativeInfoMap.size} creatives with analytics`);
+        
+        // Step 4: Fetch names via versioned API ONLY for creatives with data (much smaller set)
+        console.log(`[Step 4] Fetching names for ${creativeInfoMap.size} creatives...`);
+        const creativeIdsToFetch = [...creativeInfoMap.keys()];
         
         const batchSize = 10;
-        for (let i = 0; i < Math.min(creativeIds.length, 200); i += batchSize) {
-          const batch = creativeIds.slice(i, i + batchSize);
+        for (let i = 0; i < creativeIdsToFetch.length; i += batchSize) {
+          const batch = creativeIdsToFetch.slice(i, i + batchSize);
           
           await Promise.all(batch.map(async (creativeId) => {
             try {
@@ -1909,28 +1988,24 @@ serve(async (req) => {
                 }
               }
             } catch (err) {
-              console.log(`[Step 3] Error fetching creative ${creativeId}:`, err);
+              // Silently ignore individual fetch errors
             }
           }));
         }
         
         const namesResolved = [...creativeInfoMap.values()].filter(c => c.name).length;
-        console.log(`[Step 3] Resolved ${namesResolved} of ${creativeInfoMap.size} creative names`);
+        console.log(`[Step 4] Resolved ${namesResolved} of ${creativeInfoMap.size} creative names`);
         
-        // Step 3b: Resolve post text ONCE per unique reference (for SPONSORED_CONTENT only)
-        console.log('[Step 3b] Resolving post text for unique references...');
-        
-        // Collect unique references from SPONSORED_CONTENT creatives without names
+        // Step 5: Resolve post text for creatives without names
         const uniqueReferences = new Set<string>();
         for (const [_, info] of creativeInfoMap) {
-          if (!info.name && info.type === 'SPONSORED_CONTENT' && info.reference) {
+          if (!info.name && info.reference) {
             uniqueReferences.add(info.reference);
           }
         }
         
-        console.log(`[Step 3b] Found ${uniqueReferences.size} unique references to resolve`);
+        console.log(`[Step 5] Resolving ${uniqueReferences.size} unique post references...`);
         
-        // Fetch post text for each unique reference ONCE
         for (const reference of uniqueReferences) {
           try {
             if (reference.includes('ugcPost')) {
@@ -1941,11 +2016,9 @@ serve(async (req) => {
               });
               if (postResp.ok) {
                 const post = await postResp.json();
-                const text = post.specificContent?.['com.linkedin.ugc.ShareContent']
-                  ?.shareCommentary?.text || '';
+                const text = post.specificContent?.['com.linkedin.ugc.ShareContent']?.shareCommentary?.text || '';
                 if (text.trim()) {
-                  const normalizedName = text.replace(/\s+/g, ' ').trim().slice(0, 80);
-                  referenceNameCache.set(reference, normalizedName);
+                  referenceNameCache.set(reference, text.replace(/\s+/g, ' ').trim().slice(0, 80));
                 }
               }
             } else if (reference.includes('share')) {
@@ -1958,98 +2031,24 @@ serve(async (req) => {
                 const share = await shareResp.json();
                 const text = share.text?.text || '';
                 if (text.trim()) {
-                  const normalizedName = text.replace(/\s+/g, ' ').trim().slice(0, 80);
-                  referenceNameCache.set(reference, normalizedName);
+                  referenceNameCache.set(reference, text.replace(/\s+/g, ' ').trim().slice(0, 80));
                 }
               }
             }
           } catch (err) {
-            console.log(`[Step 3b] Error fetching reference ${reference}:`, err);
+            // Silently ignore reference fetch errors
           }
         }
         
-        console.log(`[Step 3b] Resolved ${referenceNameCache.size} unique post names`);
-        
-        // Step 3c: Apply cached names to ALL creatives sharing the same reference
-        let namesFromCache = 0;
+        // Apply cached names
         for (const [creativeId, info] of creativeInfoMap) {
-          if (!info.name && info.type === 'SPONSORED_CONTENT' && info.reference) {
+          if (!info.name && info.reference) {
             const cachedName = referenceNameCache.get(info.reference);
             if (cachedName) {
               info.name = cachedName;
               creativeInfoMap.set(creativeId, info);
-              namesFromCache++;
             }
           }
-        }
-        
-        console.log(`[Step 3c] Applied cached names to ${namesFromCache} creatives`);
-        
-        // Step 4: Fetch analytics data using account-level query (matches working get_creative_report pattern)
-        console.log('[Step 4] Fetching creative analytics using account-level query...');
-        
-        // Aggregate analytics by creative
-        const creativeMetrics = new Map<string, { impressions: number; clicks: number; spent: number; leads: number }>();
-        let totalAnalyticsRows = 0;
-        
-        // Use accounts[0] parameter instead of campaigns[] batching - this works for Business Manager access
-        const analyticsUrl = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
-          `dateRange.start.day=${startDay}&` +
-          `dateRange.start.month=${startMonth}&` +
-          `dateRange.start.year=${startYear}&` +
-          `dateRange.end.day=${endDay}&` +
-          `dateRange.end.month=${endMonth}&` +
-          `dateRange.end.year=${endYear}&` +
-          `timeGranularity=${granularity}&` +
-          `pivot=CREATIVE&` +
-          `accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
-          `fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,dateRange,pivotValue&` +
-          `count=10000`;
-        
-        console.log(`[Step 4] Analytics URL:`, analyticsUrl);
-        
-        try {
-          const analyticsResponse = await fetch(analyticsUrl, {
-            headers: { 'Authorization': `Bearer ${accessToken}` }
-          });
-          
-          if (analyticsResponse.ok) {
-            const analyticsData = await analyticsResponse.json();
-            const elements = analyticsData.elements || [];
-            console.log(`[Step 4] Analytics returned ${elements.length} rows`);
-            totalAnalyticsRows = elements.length;
-            
-            for (const element of elements) {
-              // Parse pivotValue -> creativeId
-              const pivotValue = element.pivotValue;
-              const creativeId = pivotValue?.split(':').pop() || '';
-              
-              if (!creativeId) {
-                console.log(`[Step 4] Skipping element with invalid pivotValue:`, pivotValue);
-                continue;
-              }
-              
-              // Parse metrics: costInLocalCurrency -> spent, oneClickLeads + externalWebsiteConversions -> leads
-              const existing = creativeMetrics.get(creativeId) || { impressions: 0, clicks: 0, spent: 0, leads: 0 };
-              existing.impressions += element.impressions || 0;
-              existing.clicks += element.clicks || 0;
-              existing.spent += parseFloat(element.costInLocalCurrency || '0');
-              existing.leads += (element.oneClickLeads || 0) + (element.externalWebsiteConversions || 0);
-              creativeMetrics.set(creativeId, existing);
-            }
-          } else {
-            const errorText = await analyticsResponse.text();
-            console.error(`[Step 4] Analytics request failed: ${analyticsResponse.status} - ${errorText}`);
-          }
-        } catch (err) {
-          console.error(`[Step 4] Analytics request error:`, err);
-        }
-        
-        console.log(`[Step 4] Total analytics rows received: ${totalAnalyticsRows}`);
-        console.log(`[Step 4] Unique creatives with metrics: ${creativeMetrics.size}`);
-        
-        if (totalAnalyticsRows === 0) {
-          console.warn(`[Step 4] WARNING: Analytics API returned zero rows! Date range: ${startDate} to ${endDate}`);
         }
         
         // Step 5: Build final report
