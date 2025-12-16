@@ -1540,8 +1540,7 @@ serve(async (req) => {
           `timeGranularity=${granularity === 'ALL' ? 'ALL' : granularity}&` +
           `pivot=MEMBER_COMPANY&` +
           `accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
-          `fields=impressions,clicks,costInLocalCurrency,costInUsd,externalWebsiteConversions,oneClickLeads,pivotValue&` +
-          `count=500`;
+          `fields=impressions,clicks,costInLocalCurrency,costInUsd,externalWebsiteConversions,oneClickLeads,pivotValue`;
 
         console.log('[get_company_demographic] Step 1: Fetching company demographic analytics...');
         const analyticsResponse = await fetch(analyticsUrl, {
@@ -1757,20 +1756,25 @@ serve(async (req) => {
           });
         });
 
-        reportElements.sort((a, b) => b.impressions - a.impressions);
+        // Filter out companies with all-zero metrics
+        const filteredElements = reportElements.filter(r => 
+          r.impressions > 0 || r.clicks > 0 || parseFloat(r.costInLocalCurrency) > 0 || r.leads > 0
+        );
         
-        const resolvedCount = reportElements.filter(r => r.enrichmentStatus === 'resolved').length;
-        const unresolvedCount = reportElements.filter(r => r.enrichmentStatus === 'unresolved').length;
+        filteredElements.sort((a, b) => b.impressions - a.impressions);
         
-        console.log(`[get_company_demographic] Complete. Total: ${reportElements.length}, Resolved: ${resolvedCount}, Unresolved: ${unresolvedCount}`);
+        const resolvedCount = filteredElements.filter(r => r.enrichmentStatus === 'resolved').length;
+        const unresolvedCount = filteredElements.filter(r => r.enrichmentStatus === 'unresolved').length;
+        
+        console.log(`[get_company_demographic] Complete. Total: ${filteredElements.length} (filtered from ${reportElements.length}), Resolved: ${resolvedCount}, Unresolved: ${unresolvedCount}`);
         
         return new Response(JSON.stringify({ 
-          elements: reportElements,
+          elements: filteredElements,
           metadata: {
             accountId,
             dateRange: { start: startDate, end: endDate },
             timeGranularity: granularity,
-            totalCompanies: reportElements.length,
+            totalCompanies: filteredElements.length,
             resolvedCount,
             unresolvedCount,
           }

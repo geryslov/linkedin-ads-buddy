@@ -90,8 +90,8 @@ export const demographicReportColumns = [
 ];
 
 export const companyDemographicColumns = [
-  { key: 'companyName', label: 'Company Name' },
-  { key: 'websiteUrl', label: 'Website' },
+  { key: 'entityName', label: 'Company Name' },
+  { key: 'website', label: 'Website' },
   { key: 'linkedInUrl', label: 'LinkedIn URL' },
   { key: 'impressions', label: 'Impressions' },
   { key: 'clicks', label: 'Clicks' },
