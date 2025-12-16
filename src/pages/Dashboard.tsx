@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { useLinkedInAuth } from "@/hooks/useLinkedInAuth";
 import { useLinkedInAds } from "@/hooks/useLinkedInAds";
+import { useAuth } from "@/hooks/useAuth";
+import { supabase } from "@/integrations/supabase/client";
 import { Sidebar } from "@/components/dashboard/Sidebar";
 import { AccountSelector } from "@/components/dashboard/AccountSelector";
 import { MetricCard } from "@/components/dashboard/MetricCard";
@@ -21,6 +23,7 @@ import {
 
 export default function Dashboard() {
   const { accessToken, profile, logout } = useLinkedInAuth();
+  const { isAdmin } = useAuth();
   const {
     adAccounts,
     selectedAccount,
@@ -52,6 +55,31 @@ export default function Dashboard() {
     }
   }, [selectedAccount, fetchCampaigns, fetchAnalytics, fetchAudiences]);
 
+  // Track linked account when user selects one
+  useEffect(() => {
+    const trackLinkedAccount = async () => {
+      if (!selectedAccount) return;
+      
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user) return;
+      
+      const selectedAccountData = adAccounts.find(a => a.id === selectedAccount);
+      
+      await supabase
+        .from('user_linked_accounts')
+        .upsert({
+          user_id: session.user.id,
+          account_id: selectedAccount,
+          account_name: selectedAccountData?.name || null,
+          last_accessed_at: new Date().toISOString(),
+        }, {
+          onConflict: 'user_id,account_id',
+        });
+    };
+    
+    trackLinkedAccount();
+  }, [selectedAccount, adAccounts]);
+
   const handleRefresh = () => {
     if (selectedAccount) {
       fetchCampaigns(selectedAccount);
@@ -75,6 +103,7 @@ export default function Dashboard() {
         onTabChange={setActiveTab} 
         onLogout={logout}
         profileName={profileName}
+        isAdmin={isAdmin}
       />
       
       <main className="ml-64 p-8">
