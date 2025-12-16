@@ -67,7 +67,10 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
         columns = demographicReportColumns;
         break;
       case 'company_demo':
-        data = companyDemographic.companyData;
+        // Filter to only include companies with at least one non-zero metric
+        data = companyDemographic.companyData.filter(item => 
+          item.impressions > 0 || item.clicks > 0 || item.spent > 0 || item.leads > 0
+        );
         filename = 'company_demographic';
         columns = companyDemographicColumns;
         break;
