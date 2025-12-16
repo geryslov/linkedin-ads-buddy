@@ -17,36 +17,6 @@ export interface CreativeNameData {
   costPerLead: number;
 }
 
-// Child row: individual creative in a campaign
-export interface CampaignCreativeData {
-  creativeId: string;
-  campaignName: string;
-  status: string;
-  impressions: number;
-  clicks: number;
-  spent: number;
-  leads: number;
-  ctr: number;
-  cpc: number;
-  cpm: number;
-  costPerLead: number;
-}
-
-// Parent row: grouped by creative name
-export interface GroupedCreativeData {
-  creativeName: string;
-  type: string;
-  campaigns: CampaignCreativeData[];
-  totalImpressions: number;
-  totalClicks: number;
-  totalSpent: number;
-  totalLeads: number;
-  ctr: number;
-  cpc: number;
-  cpm: number;
-  costPerLead: number;
-}
-
 export type TimeGranularity = 'DAILY' | 'MONTHLY' | 'YEARLY' | 'ALL';
 
 export interface TimeFrameOption {
@@ -64,6 +34,7 @@ export function useCreativeNamesReport(accessToken: string | null) {
   const [dateRange, setDateRange] = useState(() => {
     const now = new Date();
     const year = now.getFullYear();
+    // Use explicit date string formatting to avoid timezone issues
     const startStr = `${year}-01-01`;
     const endStr = `${year}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     return { start: startStr, end: endStr };
@@ -188,64 +159,6 @@ export function useCreativeNamesReport(accessToken: string | null) {
     }
   }, [accessToken, dateRange, timeGranularity]);
 
-  // Group creatives by name with aggregated metrics
-  const groupedCreativeData = useMemo((): GroupedCreativeData[] => {
-    const grouped = new Map<string, GroupedCreativeData>();
-    
-    for (const item of creativeData) {
-      if (!grouped.has(item.creativeName)) {
-        grouped.set(item.creativeName, {
-          creativeName: item.creativeName,
-          type: item.type,
-          campaigns: [],
-          totalImpressions: 0,
-          totalClicks: 0,
-          totalSpent: 0,
-          totalLeads: 0,
-          ctr: 0,
-          cpc: 0,
-          cpm: 0,
-          costPerLead: 0
-        });
-      }
-      
-      const group = grouped.get(item.creativeName)!;
-      group.campaigns.push({
-        creativeId: item.creativeId,
-        campaignName: item.campaignName,
-        status: item.status,
-        impressions: item.impressions,
-        clicks: item.clicks,
-        spent: item.spent,
-        leads: item.leads,
-        ctr: item.ctr,
-        cpc: item.cpc,
-        cpm: item.cpm,
-        costPerLead: item.costPerLead
-      });
-      
-      // Aggregate metrics
-      group.totalImpressions += item.impressions;
-      group.totalClicks += item.clicks;
-      group.totalSpent += item.spent;
-      group.totalLeads += item.leads;
-    }
-    
-    // Calculate derived metrics for each group
-    for (const group of grouped.values()) {
-      group.ctr = group.totalImpressions > 0 
-        ? (group.totalClicks / group.totalImpressions) * 100 : 0;
-      group.cpc = group.totalClicks > 0 
-        ? group.totalSpent / group.totalClicks : 0;
-      group.cpm = group.totalImpressions > 0 
-        ? (group.totalSpent / group.totalImpressions) * 1000 : 0;
-      group.costPerLead = group.totalLeads > 0 
-        ? group.totalSpent / group.totalLeads : 0;
-    }
-    
-    return Array.from(grouped.values());
-  }, [creativeData]);
-
   const totals = useMemo(() => {
     return creativeData.reduce((acc, item) => ({
       impressions: acc.impressions + item.impressions,
@@ -256,6 +169,7 @@ export function useCreativeNamesReport(accessToken: string | null) {
   }, [creativeData]);
 
   const setTimeFrame = useCallback((option: TimeFrameOption) => {
+    // Format dates explicitly to avoid timezone issues with toISOString()
     const formatDate = (d: Date) => {
       return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     };
@@ -267,7 +181,6 @@ export function useCreativeNamesReport(accessToken: string | null) {
 
   return {
     creativeData,
-    groupedCreativeData,
     isLoading,
     error,
     fetchCreativeNamesReport,
