@@ -8,7 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
-import { ArrowLeft, Users, Building2, Shield, RefreshCw } from 'lucide-react';
+import { ArrowLeft, Users, Building2, Shield, RefreshCw, ExternalLink } from 'lucide-react';
 import { format } from 'date-fns';
 
 export default function Admin() {
@@ -135,8 +135,9 @@ export default function Admin() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>User</TableHead>
-                    <TableHead>LinkedIn Profile ID</TableHead>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Email</TableHead>
+                    <TableHead>LinkedIn Profile</TableHead>
                     <TableHead>Signed Up</TableHead>
                     <TableHead>Last Login</TableHead>
                     <TableHead>Linked Accounts</TableHead>
@@ -146,20 +147,33 @@ export default function Admin() {
                   {users.map((user) => (
                     <TableRow key={user.id}>
                       <TableCell>
-                        <div>
-                          <p className="font-medium">
-                            {user.first_name || user.last_name 
-                              ? `${user.first_name || ''} ${user.last_name || ''}`.trim()
-                              : 'No name'}
-                          </p>
-                          <p className="text-sm text-muted-foreground">{user.email}</p>
-                        </div>
+                        <p className="font-medium">
+                          {user.first_name || user.last_name 
+                            ? `${user.first_name || ''} ${user.last_name || ''}`.trim()
+                            : 'No name'}
+                        </p>
+                      </TableCell>
+                      <TableCell>
+                        <a 
+                          href={`mailto:${user.email}`} 
+                          className="text-primary hover:underline"
+                        >
+                          {user.email}
+                        </a>
                       </TableCell>
                       <TableCell>
                         {user.linkedin_profile_id ? (
-                          <Badge variant="secondary">{user.linkedin_profile_id}</Badge>
+                          <a
+                            href={`https://www.linkedin.com/in/${user.linkedin_profile_id}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-primary hover:underline flex items-center gap-1"
+                          >
+                            View Profile
+                            <ExternalLink className="h-3 w-3" />
+                          </a>
                         ) : (
-                          <span className="text-muted-foreground">-</span>
+                          <span className="text-muted-foreground">Not connected</span>
                         )}
                       </TableCell>
                       <TableCell>
