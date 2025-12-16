@@ -87,6 +87,20 @@ export function useLinkedInAuth() {
 
       if (error) throw error;
       setProfile(data);
+
+      // Update profile with LinkedIn ID in database
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user && data?.id) {
+        await supabase
+          .from('profiles')
+          .update({ 
+            linkedin_profile_id: data.id,
+            first_name: data.localizedFirstName,
+            last_name: data.localizedLastName,
+            last_login_at: new Date().toISOString()
+          })
+          .eq('user_id', session.user.id);
+      }
     } catch (error) {
       console.error('Profile fetch error:', error);
     }

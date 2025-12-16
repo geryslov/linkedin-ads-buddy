@@ -1,5 +1,6 @@
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { useNavigate } from "react-router-dom";
 import {
   LayoutDashboard,
   Megaphone,
@@ -8,6 +9,7 @@ import {
   FileBarChart,
   LogOut,
   Linkedin,
+  Shield,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -15,6 +17,7 @@ interface SidebarProps {
   onTabChange: (tab: string) => void;
   onLogout: () => void;
   profileName?: string;
+  isAdmin?: boolean;
 }
 
 const navItems = [
@@ -25,7 +28,9 @@ const navItems = [
   { id: "reports", label: "Reports", icon: FileBarChart },
 ];
 
-export function Sidebar({ activeTab, onTabChange, onLogout, profileName }: SidebarProps) {
+export function Sidebar({ activeTab, onTabChange, onLogout, profileName, isAdmin }: SidebarProps) {
+  const navigate = useNavigate();
+  
   return (
     <aside className="fixed left-0 top-0 h-screen w-64 bg-sidebar border-r border-sidebar-border flex flex-col">
       <div className="p-6 border-b border-sidebar-border">
@@ -55,6 +60,20 @@ export function Sidebar({ activeTab, onTabChange, onLogout, profileName }: Sideb
             {item.label}
           </Button>
         ))}
+        
+        {isAdmin && (
+          <>
+            <div className="my-4 border-t border-sidebar-border" />
+            <Button
+              variant="ghost"
+              className="w-full justify-start gap-3 h-11 text-primary"
+              onClick={() => navigate('/admin')}
+            >
+              <Shield className="h-5 w-5" />
+              Admin Panel
+            </Button>
+          </>
+        )}
       </nav>
 
       <div className="p-4 border-t border-sidebar-border space-y-2">
