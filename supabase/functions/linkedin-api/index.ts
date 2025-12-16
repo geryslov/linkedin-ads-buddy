@@ -1973,90 +1973,71 @@ serve(async (req) => {
         
         console.log(`[Step 3c] Applied cached names to ${namesFromCache} creatives`);
         
-        // Step 4: Fetch analytics data for creatives (batch campaigns since API limits to 20 per request)
-        console.log('[Step 4] Fetching creative analytics...');
-        
-        // Get campaign IDs to filter
-        const campaignIds = [...new Set([...creativeInfoMap.values()].map(c => c.campaignId))].filter(Boolean);
-        console.log(`[Step 4] Campaign IDs to query (${campaignIds.length}):`, campaignIds.join(', '));
-        
-        if (campaignIds.length === 0) {
-          console.warn('[Step 4] WARNING: No campaign IDs found! Analytics will return zero rows.');
-        }
+        // Step 4: Fetch analytics data using account-level query (matches working get_creative_report pattern)
+        console.log('[Step 4] Fetching creative analytics using account-level query...');
         
         // Aggregate analytics by creative
         const creativeMetrics = new Map<string, { impressions: number; clicks: number; spent: number; leads: number }>();
         let totalAnalyticsRows = 0;
         
-        // Batch campaigns in groups of 20 (API limit)
-        const campaignBatchSize = 20;
-        for (let i = 0; i < campaignIds.length; i += campaignBatchSize) {
-          const campaignBatch = campaignIds.slice(i, i + campaignBatchSize);
-          const batchNum = Math.floor(i / campaignBatchSize) + 1;
-          
-          console.log(`[Step 4] Batch ${batchNum}: Querying campaigns:`, campaignBatch.join(', '));
-          
-          let analyticsUrl = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
-            `dateRange.start.day=${startDay}&` +
-            `dateRange.start.month=${startMonth}&` +
-            `dateRange.start.year=${startYear}&` +
-            `dateRange.end.day=${endDay}&` +
-            `dateRange.end.month=${endMonth}&` +
-            `dateRange.end.year=${endYear}&` +
-            `timeGranularity=${granularity}&` +
-            `pivot=CREATIVE&` +
-            `fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,dateRange,pivotValue`;
-          
-          // Add campaigns for this batch - REQUIRED for pivot=CREATIVE
-          campaignBatch.forEach((id, idx) => {
-            analyticsUrl += `&campaigns[${idx}]=urn:li:sponsoredCampaign:${id}`;
+        // Use accounts[0] parameter instead of campaigns[] batching - this works for Business Manager access
+        const analyticsUrl = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
+          `dateRange.start.day=${startDay}&` +
+          `dateRange.start.month=${startMonth}&` +
+          `dateRange.start.year=${startYear}&` +
+          `dateRange.end.day=${endDay}&` +
+          `dateRange.end.month=${endMonth}&` +
+          `dateRange.end.year=${endYear}&` +
+          `timeGranularity=${granularity}&` +
+          `pivot=CREATIVE&` +
+          `accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
+          `fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,dateRange,pivotValue&` +
+          `count=10000`;
+        
+        console.log(`[Step 4] Analytics URL:`, analyticsUrl);
+        
+        try {
+          const analyticsResponse = await fetch(analyticsUrl, {
+            headers: { 'Authorization': `Bearer ${accessToken}` }
           });
           
-          console.log(`[Step 4] Batch ${batchNum} Analytics URL:`, analyticsUrl);
-          
-          try {
-            const analyticsResponse = await fetch(analyticsUrl, {
-              headers: { 'Authorization': `Bearer ${accessToken}` }
-            });
+          if (analyticsResponse.ok) {
+            const analyticsData = await analyticsResponse.json();
+            const elements = analyticsData.elements || [];
+            console.log(`[Step 4] Analytics returned ${elements.length} rows`);
+            totalAnalyticsRows = elements.length;
             
-            if (analyticsResponse.ok) {
-              const analyticsData = await analyticsResponse.json();
-              const elements = analyticsData.elements || [];
-              console.log(`[Step 4] Batch ${batchNum}: analyticsData.elements.length = ${elements.length}`);
-              totalAnalyticsRows += elements.length;
+            for (const element of elements) {
+              // Parse pivotValue -> creativeId
+              const pivotValue = element.pivotValue;
+              const creativeId = pivotValue?.split(':').pop() || '';
               
-              for (const element of elements) {
-                // Parse pivotValue -> creativeId
-                const pivotValue = element.pivotValue;
-                const creativeId = pivotValue?.split(':').pop() || '';
-                
-                if (!creativeId) {
-                  console.log(`[Step 4] Skipping element with invalid pivotValue:`, pivotValue);
-                  continue;
-                }
-                
-                // Parse metrics: costInLocalCurrency -> spent, oneClickLeads + externalWebsiteConversions -> leads
-                const existing = creativeMetrics.get(creativeId) || { impressions: 0, clicks: 0, spent: 0, leads: 0 };
-                existing.impressions += element.impressions || 0;
-                existing.clicks += element.clicks || 0;
-                existing.spent += parseFloat(element.costInLocalCurrency || '0');
-                existing.leads += (element.oneClickLeads || 0) + (element.externalWebsiteConversions || 0);
-                creativeMetrics.set(creativeId, existing);
+              if (!creativeId) {
+                console.log(`[Step 4] Skipping element with invalid pivotValue:`, pivotValue);
+                continue;
               }
-            } else {
-              const errorText = await analyticsResponse.text();
-              console.error(`[Step 4] Batch ${batchNum} failed: ${analyticsResponse.status} - ${errorText}`);
+              
+              // Parse metrics: costInLocalCurrency -> spent, oneClickLeads + externalWebsiteConversions -> leads
+              const existing = creativeMetrics.get(creativeId) || { impressions: 0, clicks: 0, spent: 0, leads: 0 };
+              existing.impressions += element.impressions || 0;
+              existing.clicks += element.clicks || 0;
+              existing.spent += parseFloat(element.costInLocalCurrency || '0');
+              existing.leads += (element.oneClickLeads || 0) + (element.externalWebsiteConversions || 0);
+              creativeMetrics.set(creativeId, existing);
             }
-          } catch (err) {
-            console.error(`[Step 4] Batch ${batchNum} error:`, err);
+          } else {
+            const errorText = await analyticsResponse.text();
+            console.error(`[Step 4] Analytics request failed: ${analyticsResponse.status} - ${errorText}`);
           }
+        } catch (err) {
+          console.error(`[Step 4] Analytics request error:`, err);
         }
         
         console.log(`[Step 4] Total analytics rows received: ${totalAnalyticsRows}`);
         console.log(`[Step 4] Unique creatives with metrics: ${creativeMetrics.size}`);
         
         if (totalAnalyticsRows === 0) {
-          console.warn(`[Step 4] WARNING: Analytics API returned zero rows! Date range: ${startDate} to ${endDate}, Campaigns: ${campaignIds.length}`);
+          console.warn(`[Step 4] WARNING: Analytics API returned zero rows! Date range: ${startDate} to ${endDate}`);
         }
         
         // Step 5: Build final report
@@ -2106,7 +2087,7 @@ serve(async (req) => {
           }
         };
         
-        if (totalAnalyticsRows === 0 && campaignIds.length > 0) {
+        if (totalAnalyticsRows === 0) {
           response.warning = `Analytics API returned zero rows for date range ${startDate} to ${endDate}. This may indicate no ad activity during this period.`;
         }
         
