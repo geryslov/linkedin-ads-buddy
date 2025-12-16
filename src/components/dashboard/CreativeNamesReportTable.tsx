@@ -12,7 +12,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { ArrowUp, ArrowDown, Search, X } from 'lucide-react';
+import { ArrowUp, ArrowDown, Search, X, ChevronRight, ChevronDown } from 'lucide-react';
 import { CreativeNameData } from '@/hooks/useCreativeNamesReport';
 
 interface CreativeNamesReportTableProps {
@@ -20,7 +20,20 @@ interface CreativeNamesReportTableProps {
   isLoading: boolean;
 }
 
-type SortKey = 'creativeName' | 'campaignName' | 'status' | 'impressions' | 'clicks' | 'spent' | 'leads' | 'ctr' | 'cpc' | 'cpm' | 'costPerLead';
+interface GroupedCreative {
+  creativeName: string;
+  campaigns: CreativeNameData[];
+  impressions: number;
+  clicks: number;
+  spent: number;
+  leads: number;
+  ctr: number;
+  cpc: number;
+  cpm: number;
+  costPerLead: number;
+}
+
+type SortKey = 'creativeName' | 'impressions' | 'clicks' | 'spent' | 'leads' | 'ctr' | 'cpc' | 'cpm' | 'costPerLead';
 type SortOrder = 'asc' | 'desc';
 
 const STATUS_OPTIONS = [
@@ -45,6 +58,7 @@ export function CreativeNamesReportTable({ data, isLoading }: CreativeNamesRepor
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [expandedCreatives, setExpandedCreatives] = useState<Set<string>>(new Set());
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -53,6 +67,18 @@ export function CreativeNamesReportTable({ data, isLoading }: CreativeNamesRepor
       setSortKey(key);
       setSortOrder('desc');
     }
+  };
+
+  const toggleExpanded = (creativeName: string) => {
+    setExpandedCreatives(prev => {
+      const next = new Set(prev);
+      if (next.has(creativeName)) {
+        next.delete(creativeName);
+      } else {
+        next.add(creativeName);
+      }
+      return next;
+    });
   };
 
   const filteredData = useMemo(() => {
@@ -75,8 +101,42 @@ export function CreativeNamesReportTable({ data, isLoading }: CreativeNamesRepor
     return result;
   }, [data, searchQuery, statusFilter]);
 
+  // Group by creative name and aggregate metrics
+  const groupedData = useMemo(() => {
+    const groups = new Map<string, CreativeNameData[]>();
+    
+    filteredData.forEach(item => {
+      const existing = groups.get(item.creativeName) || [];
+      existing.push(item);
+      groups.set(item.creativeName, existing);
+    });
+
+    const aggregated: GroupedCreative[] = [];
+    groups.forEach((campaigns, creativeName) => {
+      const impressions = campaigns.reduce((sum, c) => sum + c.impressions, 0);
+      const clicks = campaigns.reduce((sum, c) => sum + c.clicks, 0);
+      const spent = campaigns.reduce((sum, c) => sum + c.spent, 0);
+      const leads = campaigns.reduce((sum, c) => sum + c.leads, 0);
+      
+      aggregated.push({
+        creativeName,
+        campaigns,
+        impressions,
+        clicks,
+        spent,
+        leads,
+        ctr: impressions > 0 ? (clicks / impressions) * 100 : 0,
+        cpc: clicks > 0 ? spent / clicks : 0,
+        cpm: impressions > 0 ? (spent / impressions) * 1000 : 0,
+        costPerLead: leads > 0 ? spent / leads : 0,
+      });
+    });
+
+    return aggregated;
+  }, [filteredData]);
+
   const sortedData = useMemo(() => {
-    return [...filteredData].sort((a, b) => {
+    return [...groupedData].sort((a, b) => {
       const aVal = a[sortKey];
       const bVal = b[sortKey];
       const modifier = sortOrder === 'asc' ? 1 : -1;
@@ -86,7 +146,7 @@ export function CreativeNamesReportTable({ data, isLoading }: CreativeNamesRepor
       }
       return ((aVal as number) - (bVal as number)) * modifier;
     });
-  }, [filteredData, sortKey, sortOrder]);
+  }, [groupedData, sortKey, sortOrder]);
 
   const totals = useMemo(() => {
     return filteredData.reduce((acc, item) => ({
@@ -188,7 +248,7 @@ export function CreativeNamesReportTable({ data, isLoading }: CreativeNamesRepor
 
       {/* Results count */}
       <div className="text-sm text-muted-foreground">
-        Showing {filteredData.length} of {data.length} creatives
+        Showing {sortedData.length} creatives across {filteredData.length} campaign entries
       </div>
 
       {/* Table */}
@@ -196,9 +256,10 @@ export function CreativeNamesReportTable({ data, isLoading }: CreativeNamesRepor
         <Table>
           <TableHeader>
             <TableRow className="bg-muted/30">
+              <TableHead className="w-8"></TableHead>
               <SortableHeader label="Creative Name" sortKeyVal="creativeName" className="min-w-[200px]" />
-              <SortableHeader label="Campaign" sortKeyVal="campaignName" className="min-w-[150px]" />
-              <SortableHeader label="Status" sortKeyVal="status" />
+              <TableHead className="min-w-[150px] font-semibold text-foreground">Campaign</TableHead>
+              <TableHead className="font-semibold text-foreground">Status</TableHead>
               <SortableHeader label="Impressions" sortKeyVal="impressions" />
               <SortableHeader label="Clicks" sortKeyVal="clicks" />
               <SortableHeader label="Spent" sortKeyVal="spent" />
@@ -212,39 +273,105 @@ export function CreativeNamesReportTable({ data, isLoading }: CreativeNamesRepor
           <TableBody>
             {sortedData.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={11} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={12} className="text-center py-8 text-muted-foreground">
                   No creatives match your filters
                 </TableCell>
               </TableRow>
             ) : (
               <>
-                {sortedData.map((row, index) => (
-                  <TableRow key={`${row.creativeId}-${index}`} className="hover:bg-muted/20">
-                    <TableCell className="font-medium max-w-[300px] truncate" title={row.creativeName}>
-                      {row.creativeName}
-                    </TableCell>
-                    <TableCell className="max-w-[200px] truncate" title={row.campaignName}>
-                      {row.campaignName}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className={STATUS_COLORS[row.status] || 'bg-muted'}>
-                        {row.status}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">{row.impressions.toLocaleString()}</TableCell>
-                    <TableCell className="text-right tabular-nums">{row.clicks.toLocaleString()}</TableCell>
-                    <TableCell className="text-right tabular-nums">${row.spent.toFixed(2)}</TableCell>
-                    <TableCell className="text-right tabular-nums">{row.leads}</TableCell>
-                    <TableCell className="text-right tabular-nums">{row.ctr.toFixed(2)}%</TableCell>
-                    <TableCell className="text-right tabular-nums">${row.cpc.toFixed(2)}</TableCell>
-                    <TableCell className="text-right tabular-nums">${row.cpm.toFixed(2)}</TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {row.costPerLead > 0 ? `$${row.costPerLead.toFixed(2)}` : '-'}
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {sortedData.map((group) => {
+                  const isExpanded = expandedCreatives.has(group.creativeName);
+                  const hasMultipleCampaigns = group.campaigns.length > 1;
+                  
+                  return (
+                    <>
+                      {/* Parent Row - Creative Name with Aggregated Metrics */}
+                      <TableRow 
+                        key={group.creativeName} 
+                        className={`hover:bg-muted/20 ${hasMultipleCampaigns ? 'cursor-pointer' : ''}`}
+                        onClick={() => hasMultipleCampaigns && toggleExpanded(group.creativeName)}
+                      >
+                        <TableCell className="w-8 px-2">
+                          {hasMultipleCampaigns && (
+                            isExpanded ? (
+                              <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                            ) : (
+                              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                            )
+                          )}
+                        </TableCell>
+                        <TableCell className="font-medium max-w-[300px] truncate" title={group.creativeName}>
+                          {group.creativeName}
+                          {hasMultipleCampaigns && (
+                            <span className="ml-2 text-xs text-muted-foreground">
+                              ({group.campaigns.length} campaigns)
+                            </span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {hasMultipleCampaigns ? (
+                            <span className="text-xs">Multiple</span>
+                          ) : (
+                            <span className="max-w-[200px] truncate block" title={group.campaigns[0]?.campaignName}>
+                              {group.campaigns[0]?.campaignName}
+                            </span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {!hasMultipleCampaigns && group.campaigns[0] && (
+                            <Badge variant="outline" className={STATUS_COLORS[group.campaigns[0].status] || 'bg-muted'}>
+                              {group.campaigns[0].status}
+                            </Badge>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums font-medium">{group.impressions.toLocaleString()}</TableCell>
+                        <TableCell className="text-right tabular-nums font-medium">{group.clicks.toLocaleString()}</TableCell>
+                        <TableCell className="text-right tabular-nums font-medium">${group.spent.toFixed(2)}</TableCell>
+                        <TableCell className="text-right tabular-nums font-medium">{group.leads}</TableCell>
+                        <TableCell className="text-right tabular-nums font-medium">{group.ctr.toFixed(2)}%</TableCell>
+                        <TableCell className="text-right tabular-nums font-medium">${group.cpc.toFixed(2)}</TableCell>
+                        <TableCell className="text-right tabular-nums font-medium">${group.cpm.toFixed(2)}</TableCell>
+                        <TableCell className="text-right tabular-nums font-medium">
+                          {group.costPerLead > 0 ? `$${group.costPerLead.toFixed(2)}` : '-'}
+                        </TableCell>
+                      </TableRow>
+
+                      {/* Child Rows - Individual Campaign Metrics */}
+                      {isExpanded && group.campaigns.map((campaign, idx) => (
+                        <TableRow 
+                          key={`${group.creativeName}-${campaign.campaignName}-${idx}`}
+                          className="bg-muted/10 hover:bg-muted/20"
+                        >
+                          <TableCell className="w-8"></TableCell>
+                          <TableCell className="pl-8 text-muted-foreground text-sm">
+                            └
+                          </TableCell>
+                          <TableCell className="max-w-[200px] truncate" title={campaign.campaignName}>
+                            {campaign.campaignName}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className={STATUS_COLORS[campaign.status] || 'bg-muted'}>
+                              {campaign.status}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums text-muted-foreground">{campaign.impressions.toLocaleString()}</TableCell>
+                          <TableCell className="text-right tabular-nums text-muted-foreground">{campaign.clicks.toLocaleString()}</TableCell>
+                          <TableCell className="text-right tabular-nums text-muted-foreground">${campaign.spent.toFixed(2)}</TableCell>
+                          <TableCell className="text-right tabular-nums text-muted-foreground">{campaign.leads}</TableCell>
+                          <TableCell className="text-right tabular-nums text-muted-foreground">{campaign.ctr.toFixed(2)}%</TableCell>
+                          <TableCell className="text-right tabular-nums text-muted-foreground">${campaign.cpc.toFixed(2)}</TableCell>
+                          <TableCell className="text-right tabular-nums text-muted-foreground">${campaign.cpm.toFixed(2)}</TableCell>
+                          <TableCell className="text-right tabular-nums text-muted-foreground">
+                            {campaign.costPerLead > 0 ? `$${campaign.costPerLead.toFixed(2)}` : '-'}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </>
+                  );
+                })}
                 {/* Totals Row */}
                 <TableRow className="bg-muted/50 font-semibold border-t-2 border-border">
+                  <TableCell></TableCell>
                   <TableCell>Totals</TableCell>
                   <TableCell></TableCell>
                   <TableCell></TableCell>
