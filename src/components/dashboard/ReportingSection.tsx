@@ -177,6 +177,39 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
     creativeNamesReport.setTimeFrame(option);
   };
 
+  // Custom date range handlers
+  const handleCreativeCustomDate = (start: Date, end: Date) => {
+    setSelectedTimeFrame('custom');
+    creativeReporting.setDateRange({
+      start: start.toISOString().split('T')[0],
+      end: end.toISOString().split('T')[0],
+    });
+  };
+
+  const handleCreativeNamesCustomDate = (start: Date, end: Date) => {
+    setSelectedTimeFrame('custom');
+    creativeNamesReport.setDateRange({
+      start: start.toISOString().split('T')[0],
+      end: end.toISOString().split('T')[0],
+    });
+  };
+
+  const handleDemoCustomDate = (start: Date, end: Date) => {
+    setSelectedTimeFrame('custom');
+    demographicReporting.setDateRange({
+      start: start.toISOString().split('T')[0],
+      end: end.toISOString().split('T')[0],
+    });
+  };
+
+  const handleCompanyDemoCustomDate = (start: Date, end: Date) => {
+    setSelectedTimeFrame('custom');
+    companyDemographic.setDateRange({
+      start: start.toISOString().split('T')[0],
+      end: end.toISOString().split('T')[0],
+    });
+  };
+
   const handleRefresh = () => {
     if (selectedAccount) {
       if (reportType === 'creatives') {
@@ -297,6 +330,7 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
                 timeGranularity={creativeReporting.timeGranularity as TimeGranularity}
                 onGranularityChange={(g: TimeGranularity) => creativeReporting.setTimeGranularity(g as any)}
                 dateRange={creativeReporting.dateRange}
+                onCustomDateChange={handleCreativeCustomDate}
               />
             </CardContent>
           </Card>
@@ -376,6 +410,7 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
                 timeGranularity={creativeNamesReport.timeGranularity as TimeGranularity}
                 onGranularityChange={(g: TimeGranularity) => creativeNamesReport.setTimeGranularity(g as any)}
                 dateRange={creativeNamesReport.dateRange}
+                onCustomDateChange={handleCreativeNamesCustomDate}
               />
             </CardContent>
           </Card>
@@ -564,6 +599,7 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
                   timeGranularity={demographicReporting.timeGranularity as TimeGranularity}
                   onGranularityChange={(g: TimeGranularity) => demographicReporting.setTimeGranularity(g as any)}
                   dateRange={demographicReporting.dateRange}
+                  onCustomDateChange={handleDemoCustomDate}
                 />
               </div>
             </CardContent>
@@ -651,6 +687,7 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
                 timeGranularity={companyDemographic.timeGranularity as TimeGranularity}
                 onGranularityChange={(g: TimeGranularity) => companyDemographic.setTimeGranularity(g as any)}
                 dateRange={companyDemographic.dateRange}
+                onCustomDateChange={handleCompanyDemoCustomDate}
               />
             </CardContent>
           </Card>
