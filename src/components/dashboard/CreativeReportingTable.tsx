@@ -10,9 +10,9 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { ArrowUpDown, ArrowUp, ArrowDown, Search, Filter, X } from 'lucide-react';
 import { CreativeData } from '@/hooks/useCreativeReporting';
+import { CreativeTypeBadge } from './CreativeTypeBadge';
 import {
   Select,
   SelectContent,
@@ -29,18 +29,6 @@ interface CreativeReportingTableProps {
 type SortKey = 'creativeName' | 'campaignName' | 'type' | 'impressions' | 'clicks' | 'spent' | 'leads' | 'ctr' | 'cpc' | 'cpm';
 type SortOrder = 'asc' | 'desc';
 type FilterType = 'all' | 'with_spend' | 'with_impressions' | 'with_clicks' | 'with_leads';
-
-const TYPE_COLORS: Record<string, string> = {
-  SPONSORED_CONTENT: 'bg-blue-500/20 text-blue-700 border-blue-300',
-  SPONSORED_UPDATE: 'bg-purple-500/20 text-purple-700 border-purple-300',
-  TEXT_AD: 'bg-green-500/20 text-green-700 border-green-300',
-  SPOTLIGHT_AD: 'bg-yellow-500/20 text-yellow-700 border-yellow-300',
-  VIDEO_AD: 'bg-red-500/20 text-red-700 border-red-300',
-  CAROUSEL_AD: 'bg-orange-500/20 text-orange-700 border-orange-300',
-  FOLLOWER_AD: 'bg-pink-500/20 text-pink-700 border-pink-300',
-  JOBS_AD: 'bg-cyan-500/20 text-cyan-700 border-cyan-300',
-  UNKNOWN: 'bg-muted text-muted-foreground border-muted',
-};
 
 export function CreativeReportingTable({ data, isLoading }: CreativeReportingTableProps) {
   const [sortKey, setSortKey] = useState<SortKey>('spent');
@@ -245,12 +233,7 @@ export function CreativeReportingTable({ data, isLoading }: CreativeReportingTab
                       {row.campaignName || '-'}
                     </TableCell>
                     <TableCell>
-                      <Badge 
-                        variant="outline" 
-                        className={`text-xs ${TYPE_COLORS[row.type] || TYPE_COLORS.UNKNOWN}`}
-                      >
-                        {row.type.replace(/_/g, ' ')}
-                      </Badge>
+                      <CreativeTypeBadge type={row.type} />
                     </TableCell>
                     <TableCell>{row.impressions.toLocaleString()}</TableCell>
                     <TableCell>{row.clicks.toLocaleString()}</TableCell>
