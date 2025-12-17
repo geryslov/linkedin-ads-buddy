@@ -14,6 +14,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ArrowUp, ArrowDown, Search, X, ChevronRight, ChevronDown } from 'lucide-react';
 import { CreativeNameData } from '@/hooks/useCreativeNamesReport';
+import { CreativeTypeBadge } from './CreativeTypeBadge';
 
 interface CreativeNamesReportTableProps {
   data: CreativeNameData[];
@@ -23,6 +24,7 @@ interface CreativeNamesReportTableProps {
 interface GroupedCreative {
   creativeName: string;
   campaigns: CreativeNameData[];
+  type: string;
   impressions: number;
   clicks: number;
   spent: number;
@@ -121,6 +123,7 @@ export function CreativeNamesReportTable({ data, isLoading }: CreativeNamesRepor
       aggregated.push({
         creativeName,
         campaigns,
+        type: campaigns[0]?.type || 'UNKNOWN',
         impressions,
         clicks,
         spent,
@@ -258,6 +261,7 @@ export function CreativeNamesReportTable({ data, isLoading }: CreativeNamesRepor
             <TableRow className="bg-muted/30">
               <TableHead className="w-8"></TableHead>
               <SortableHeader label="Creative Name" sortKeyVal="creativeName" className="min-w-[200px]" />
+              <TableHead className="font-semibold text-foreground">Type</TableHead>
               <TableHead className="min-w-[150px] font-semibold text-foreground">Campaign</TableHead>
               <TableHead className="font-semibold text-foreground">Status</TableHead>
               <SortableHeader label="Impressions" sortKeyVal="impressions" />
@@ -273,7 +277,7 @@ export function CreativeNamesReportTable({ data, isLoading }: CreativeNamesRepor
           <TableBody>
             {sortedData.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={12} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={13} className="text-center py-8 text-muted-foreground">
                   No creatives match your filters
                 </TableCell>
               </TableRow>
@@ -307,6 +311,9 @@ export function CreativeNamesReportTable({ data, isLoading }: CreativeNamesRepor
                               ({group.campaigns.length} campaigns)
                             </span>
                           )}
+                        </TableCell>
+                        <TableCell>
+                          <CreativeTypeBadge type={group.type} />
                         </TableCell>
                         <TableCell className="text-muted-foreground">
                           {hasMultipleCampaigns ? (
@@ -346,6 +353,7 @@ export function CreativeNamesReportTable({ data, isLoading }: CreativeNamesRepor
                           <TableCell className="pl-8 text-muted-foreground text-sm">
                             └
                           </TableCell>
+                          <TableCell></TableCell>
                           <TableCell className="max-w-[200px] truncate" title={campaign.campaignName}>
                             {campaign.campaignName}
                           </TableCell>
@@ -369,10 +377,10 @@ export function CreativeNamesReportTable({ data, isLoading }: CreativeNamesRepor
                     </>
                   );
                 })}
-                {/* Totals Row */}
                 <TableRow className="bg-muted/50 font-semibold border-t-2 border-border">
                   <TableCell></TableCell>
                   <TableCell>Totals</TableCell>
+                  <TableCell></TableCell>
                   <TableCell></TableCell>
                   <TableCell></TableCell>
                   <TableCell className="text-right tabular-nums">{totals.impressions.toLocaleString()}</TableCell>
