@@ -10,7 +10,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { ArrowUpDown, ArrowUp, ArrowDown, Search, Filter, X } from 'lucide-react';
+import { ArrowUpDown, ArrowUp, ArrowDown, Search, Filter, X, Layers } from 'lucide-react';
 import { CreativeData } from '@/hooks/useCreativeReporting';
 import { CreativeTypeBadge } from './CreativeTypeBadge';
 import {
@@ -30,11 +30,26 @@ type SortKey = 'creativeName' | 'campaignName' | 'type' | 'impressions' | 'click
 type SortOrder = 'asc' | 'desc';
 type FilterType = 'all' | 'with_spend' | 'with_impressions' | 'with_clicks' | 'with_leads';
 
+const CREATIVE_TYPE_OPTIONS = [
+  { value: 'all', label: 'All Types' },
+  { value: 'SPONSORED_CONTENT', label: 'Sponsored Content' },
+  { value: 'SPONSORED_UPDATE', label: 'Sponsored Update' },
+  { value: 'TEXT_AD', label: 'Text Ad' },
+  { value: 'VIDEO_AD', label: 'Video Ad' },
+  { value: 'VIDEO', label: 'Video' },
+  { value: 'CAROUSEL_AD', label: 'Carousel Ad' },
+  { value: 'CAROUSEL', label: 'Carousel' },
+  { value: 'SPOTLIGHT_AD', label: 'Spotlight Ad' },
+  { value: 'FOLLOWER_AD', label: 'Follower Ad' },
+  { value: 'JOBS_AD', label: 'Jobs Ad' },
+];
+
 export function CreativeReportingTable({ data, isLoading }: CreativeReportingTableProps) {
   const [sortKey, setSortKey] = useState<SortKey>('spent');
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<FilterType>('all');
+  const [creativeTypeFilter, setCreativeTypeFilter] = useState<string>('all');
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -74,8 +89,13 @@ export function CreativeReportingTable({ data, isLoading }: CreativeReportingTab
         break;
     }
 
+    // Apply creative type filter
+    if (creativeTypeFilter !== 'all') {
+      result = result.filter(item => item.type === creativeTypeFilter);
+    }
+
     return result;
-  }, [data, searchQuery, filterType]);
+  }, [data, searchQuery, filterType, creativeTypeFilter]);
 
   const sortedData = useMemo(() => {
     return [...filteredData].sort((a, b) => {
@@ -118,9 +138,10 @@ export function CreativeReportingTable({ data, isLoading }: CreativeReportingTab
   const clearFilters = () => {
     setSearchQuery('');
     setFilterType('all');
+    setCreativeTypeFilter('all');
   };
 
-  const hasActiveFilters = searchQuery.trim() !== '' || filterType !== 'all';
+  const hasActiveFilters = searchQuery.trim() !== '' || filterType !== 'all' || creativeTypeFilter !== 'all';
 
   if (isLoading) {
     return (
@@ -172,13 +193,24 @@ export function CreativeReportingTable({ data, isLoading }: CreativeReportingTab
             className="pl-9"
           />
         </div>
-        <Select value={filterType} onValueChange={(v) => setFilterType(v as FilterType)}>
+        <Select value={creativeTypeFilter} onValueChange={setCreativeTypeFilter}>
           <SelectTrigger className="w-full sm:w-[180px]">
+            <Layers className="h-4 w-4 mr-2" />
+            <SelectValue placeholder="Creative Type" />
+          </SelectTrigger>
+          <SelectContent>
+            {CREATIVE_TYPE_OPTIONS.map(opt => (
+              <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={filterType} onValueChange={(v) => setFilterType(v as FilterType)}>
+          <SelectTrigger className="w-full sm:w-[160px]">
             <Filter className="h-4 w-4 mr-2" />
             <SelectValue placeholder="Filter by" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All Creatives</SelectItem>
+            <SelectItem value="all">All Metrics</SelectItem>
             <SelectItem value="with_spend">With Spend</SelectItem>
             <SelectItem value="with_impressions">With Impressions</SelectItem>
             <SelectItem value="with_clicks">With Clicks</SelectItem>

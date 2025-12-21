@@ -12,7 +12,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { ArrowUp, ArrowDown, Search, X, ChevronRight, ChevronDown } from 'lucide-react';
+import { ArrowUp, ArrowDown, Search, X, ChevronRight, ChevronDown, Layers } from 'lucide-react';
 import { CreativeNameData } from '@/hooks/useCreativeNamesReport';
 import { CreativeTypeBadge } from './CreativeTypeBadge';
 
@@ -47,6 +47,20 @@ const STATUS_OPTIONS = [
   { value: 'PENDING_REVIEW', label: 'Pending Review' },
 ];
 
+const CREATIVE_TYPE_OPTIONS = [
+  { value: 'all', label: 'All Types' },
+  { value: 'SPONSORED_CONTENT', label: 'Sponsored Content' },
+  { value: 'SPONSORED_UPDATE', label: 'Sponsored Update' },
+  { value: 'TEXT_AD', label: 'Text Ad' },
+  { value: 'VIDEO_AD', label: 'Video Ad' },
+  { value: 'VIDEO', label: 'Video' },
+  { value: 'CAROUSEL_AD', label: 'Carousel Ad' },
+  { value: 'CAROUSEL', label: 'Carousel' },
+  { value: 'SPOTLIGHT_AD', label: 'Spotlight Ad' },
+  { value: 'FOLLOWER_AD', label: 'Follower Ad' },
+  { value: 'JOBS_AD', label: 'Jobs Ad' },
+];
+
 const STATUS_COLORS: Record<string, string> = {
   ACTIVE: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20',
   PAUSED: 'bg-amber-500/10 text-amber-600 border-amber-500/20',
@@ -60,6 +74,7 @@ export function CreativeNamesReportTable({ data, isLoading }: CreativeNamesRepor
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [creativeTypeFilter, setCreativeTypeFilter] = useState<string>('all');
   const [expandedCreatives, setExpandedCreatives] = useState<Set<string>>(new Set());
 
   const handleSort = (key: SortKey) => {
@@ -100,8 +115,13 @@ export function CreativeNamesReportTable({ data, isLoading }: CreativeNamesRepor
       result = result.filter(item => item.status === statusFilter);
     }
 
+    // Apply creative type filter
+    if (creativeTypeFilter !== 'all') {
+      result = result.filter(item => item.type === creativeTypeFilter);
+    }
+
     return result;
-  }, [data, searchQuery, statusFilter]);
+  }, [data, searchQuery, statusFilter, creativeTypeFilter]);
 
   // Group by creative name and aggregate metrics
   const groupedData = useMemo(() => {
@@ -168,9 +188,10 @@ export function CreativeNamesReportTable({ data, isLoading }: CreativeNamesRepor
   const clearFilters = () => {
     setSearchQuery('');
     setStatusFilter('all');
+    setCreativeTypeFilter('all');
   };
 
-  const hasActiveFilters = searchQuery.trim() || statusFilter !== 'all';
+  const hasActiveFilters = searchQuery.trim() || statusFilter !== 'all' || creativeTypeFilter !== 'all';
 
   if (isLoading) {
     return (
@@ -230,6 +251,18 @@ export function CreativeNamesReportTable({ data, isLoading }: CreativeNamesRepor
           />
         </div>
         
+        <Select value={creativeTypeFilter} onValueChange={setCreativeTypeFilter}>
+          <SelectTrigger className="w-[160px]">
+            <Layers className="h-4 w-4 mr-2" />
+            <SelectValue placeholder="Type" />
+          </SelectTrigger>
+          <SelectContent>
+            {CREATIVE_TYPE_OPTIONS.map(opt => (
+              <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
         <Select value={statusFilter} onValueChange={setStatusFilter}>
           <SelectTrigger className="w-[160px]">
             <SelectValue placeholder="Status" />
