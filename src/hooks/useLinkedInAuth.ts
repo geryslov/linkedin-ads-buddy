@@ -20,25 +20,16 @@ export function useLinkedInAuth() {
     setIsLoading(true);
     try {
       const redirectUri = `${window.location.origin}/callback`;
-      console.log('[OAuth Client] Initiating auth');
-      console.log('[OAuth Client] Current origin:', window.location.origin);
-      console.log('[OAuth Client] Redirect URI being sent:', redirectUri);
-      
       const { data, error } = await supabase.functions.invoke('linkedin-api', {
         body: { action: 'get_auth_url', params: { redirectUri } }
       });
 
-      console.log('[OAuth Client] Response from get_auth_url:', { data, error });
-
       if (error) throw error;
-      
-      console.log('[OAuth Client] Storing state:', data.state);
-      console.log('[OAuth Client] Redirecting to:', data.authUrl?.substring(0, 100) + '...');
       
       localStorage.setItem('linkedin_oauth_state', data.state);
       window.location.href = data.authUrl;
     } catch (error: any) {
-      console.error('[OAuth Client] Auth initiation error:', error);
+      console.error('Auth initiation error:', error);
       toast({
         title: 'Authentication Error',
         description: error.message || 'Failed to start authentication',
@@ -53,11 +44,6 @@ export function useLinkedInAuth() {
     setIsLoading(true);
     try {
       const redirectUri = `${window.location.origin}/callback`;
-      console.log('[OAuth Client] Exchanging token');
-      console.log('[OAuth Client] Current origin:', window.location.origin);
-      console.log('[OAuth Client] Redirect URI for exchange:', redirectUri);
-      console.log('[OAuth Client] Code (first 10 chars):', code?.substring(0, 10) + '...');
-      
       const { data, error } = await supabase.functions.invoke('linkedin-api', {
         body: { 
           action: 'exchange_token', 
@@ -65,19 +51,10 @@ export function useLinkedInAuth() {
         }
       });
 
-      console.log('[OAuth Client] Token exchange response:', { 
-        hasData: !!data, 
-        hasError: !!error,
-        dataError: data?.error,
-        dataErrorDesc: data?.error_description
-      });
-
       if (error) throw error;
       if (data.error) throw new Error(data.error_description || data.error);
 
       const token = data.access_token;
-      console.log('[OAuth Client] Token received:', !!token);
-      
       setAccessToken(token);
       localStorage.setItem('linkedin_access_token', token);
       
@@ -88,7 +65,7 @@ export function useLinkedInAuth() {
       
       return token;
     } catch (error: any) {
-      console.error('[OAuth Client] Token exchange error:', error);
+      console.error('Token exchange error:', error);
       toast({
         title: 'Authentication Failed',
         description: error.message || 'Failed to complete authentication',

@@ -11,25 +11,10 @@ export default function Callback() {
   useEffect(() => {
     const code = searchParams.get("code");
     const state = searchParams.get("state");
-    const error = searchParams.get("error");
-    const errorDescription = searchParams.get("error_description");
     const storedState = localStorage.getItem("linkedin_oauth_state");
 
-    console.log('[OAuth Callback] Page loaded');
-    console.log('[OAuth Callback] Current URL:', window.location.href);
-    console.log('[OAuth Callback] Code received:', !!code);
-    console.log('[OAuth Callback] State from URL:', state);
-    console.log('[OAuth Callback] Stored state:', storedState);
-    console.log('[OAuth Callback] States match:', state === storedState);
-    
-    if (error) {
-      console.error('[OAuth Callback] Error from LinkedIn:', error, errorDescription);
-    }
-
     if (code && state === storedState) {
-      console.log('[OAuth Callback] Proceeding with token exchange...');
       exchangeToken(code).then((token) => {
-        console.log('[OAuth Callback] Token exchange complete, token:', !!token);
         if (token) {
           navigate("/dashboard");
         } else {
@@ -37,9 +22,6 @@ export default function Callback() {
         }
       });
     } else {
-      console.log('[OAuth Callback] State mismatch or no code, redirecting to home');
-      if (!code) console.log('[OAuth Callback] No code in URL params');
-      if (state !== storedState) console.log('[OAuth Callback] State mismatch - possible CSRF or stale state');
       navigate("/");
     }
   }, [searchParams, exchangeToken, navigate]);

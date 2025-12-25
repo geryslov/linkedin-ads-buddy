@@ -19,7 +19,6 @@ import { AccountStructureTable } from './AccountStructureTable';
 import { TimeFrameSelector } from './TimeFrameSelector';
 import { MetricCard } from './MetricCard';
 import { useToast } from '@/hooks/use-toast';
-import { TargetingPanel } from '@/components/targeting';
 import { 
   exportToCSV, 
   creativeReportColumns, 
@@ -313,9 +312,10 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
             Campaigns
             <span className="text-xs text-muted-foreground">(Soon)</span>
           </TabsTrigger>
-          <TabsTrigger value="audiences" className="gap-2">
+          <TabsTrigger value="audiences" className="gap-2" disabled>
             <Users className="h-4 w-4" />
             Audiences
+            <span className="text-xs text-muted-foreground">(Soon)</span>
           </TabsTrigger>
         </TabsList>
 
@@ -799,7 +799,15 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
         </TabsContent>
 
         <TabsContent value="audiences" className="mt-6">
-          <TargetingPanel accessToken={accessToken} />
+          <Card className="bg-card/50 backdrop-blur-sm border-border/50">
+            <CardContent className="py-12 text-center">
+              <Users className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+              <h3 className="text-lg font-semibold mb-2">Audience Reports Coming Soon</h3>
+              <p className="text-muted-foreground">
+                Audience insights and segment analysis will be available in a future update.
+              </p>
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
     </div>
