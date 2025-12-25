@@ -22,8 +22,8 @@ interface TitleTestResult {
 }
 
 async function testStandardizedTitlesAccess(accessToken: string): Promise<TitleTestResult> {
-  // Build the request URL with minimal query params
-  const baseUrl = 'https://api.linkedin.com/v2/titles';
+  // Build the request URL with minimal query params - using REST API endpoint
+  const baseUrl = 'https://api.linkedin.com/rest/titles';
   const params = new URLSearchParams({
     'q': 'criteria',
     'name': 'Manager',
