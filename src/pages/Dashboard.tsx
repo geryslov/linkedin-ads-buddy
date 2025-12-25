@@ -9,6 +9,7 @@ import { MetricCard } from "@/components/dashboard/MetricCard";
 import { CampaignTable } from "@/components/dashboard/CampaignTable";
 import { AudienceCard } from "@/components/dashboard/AudienceCard";
 import { ReportingSection } from "@/components/dashboard/ReportingSection";
+import { TitlesApiTestModal } from "@/components/dashboard/TitlesApiTestModal";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { 
@@ -121,6 +122,7 @@ export default function Dashboard() {
             </p>
           </div>
           <div className="flex items-center gap-4">
+            <TitlesApiTestModal accessToken={accessToken} />
             <AccountSelector 
               accounts={adAccounts}
               selectedAccount={selectedAccount}
