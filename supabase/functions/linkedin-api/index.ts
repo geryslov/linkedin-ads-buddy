@@ -127,12 +127,19 @@ serve(async (req) => {
         const scope = 'r_liteprofile r_ads r_ads_reporting r_ads_targeting rw_ads w_member_social';
         const state = crypto.randomUUID();
         
+        console.log('[OAuth] get_auth_url called');
+        console.log('[OAuth] Redirect URI:', redirectUri);
+        console.log('[OAuth] Client ID configured:', !!LINKEDIN_CLIENT_ID);
+        console.log('[OAuth] Scope:', scope);
+        
         const authUrl = `https://www.linkedin.com/oauth/v2/authorization?` +
           `response_type=code&` +
           `client_id=${LINKEDIN_CLIENT_ID}&` +
           `redirect_uri=${encodeURIComponent(redirectUri)}&` +
           `state=${state}&` +
           `scope=${encodeURIComponent(scope)}`;
+
+        console.log('[OAuth] Generated auth URL (first 100 chars):', authUrl.substring(0, 100));
 
         return new Response(JSON.stringify({ authUrl, state }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -141,6 +148,10 @@ serve(async (req) => {
 
       case 'exchange_token': {
         const { code, redirectUri } = params;
+        
+        console.log('[OAuth] exchange_token called');
+        console.log('[OAuth] Redirect URI for token exchange:', redirectUri);
+        console.log('[OAuth] Code received (first 10 chars):', code?.substring(0, 10) + '...');
         
         const tokenResponse = await fetch('https://www.linkedin.com/oauth/v2/accessToken', {
           method: 'POST',
@@ -155,7 +166,11 @@ serve(async (req) => {
         });
 
         const tokenData = await tokenResponse.json();
-        console.log('Token exchange result:', tokenResponse.ok ? 'success' : 'failed');
+        console.log('[OAuth] Token exchange status:', tokenResponse.status);
+        console.log('[OAuth] Token exchange result:', tokenResponse.ok ? 'success' : 'failed');
+        if (!tokenResponse.ok) {
+          console.log('[OAuth] Token exchange error:', JSON.stringify(tokenData));
+        }
         
         return new Response(JSON.stringify(tokenData), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
