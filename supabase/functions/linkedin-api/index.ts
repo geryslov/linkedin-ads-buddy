@@ -124,7 +124,7 @@ serve(async (req) => {
     switch (action) {
       case 'get_auth_url': {
         const redirectUri = params?.redirectUri || `${req.headers.get('origin')}/callback`;
-        const scope = 'r_liteprofile r_ads r_ads_reporting rw_ads w_member_social';
+        const scope = 'r_liteprofile r_ads r_ads_reporting r_ads_targeting rw_ads w_member_social';
         const state = crypto.randomUUID();
         
         const authUrl = `https://www.linkedin.com/oauth/v2/authorization?` +
