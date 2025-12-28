@@ -2332,6 +2332,163 @@ serve(async (req) => {
         });
       }
 
+      case 'get_campaign_report': {
+        // Fetches campaign-level analytics with performance metrics
+        const { accountId, dateRange, timeGranularity } = params || {};
+        const startDate = dateRange?.start || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        const endDate = dateRange?.end || new Date().toISOString().split('T')[0];
+        const granularity = timeGranularity || 'ALL';
+        
+        console.log(`[get_campaign_report] Starting for account ${accountId}, date range: ${startDate} to ${endDate}`);
+        
+        // Step 1: Fetch all campaigns with their metadata
+        const campaignsUrl = `https://api.linkedin.com/v2/adCampaignsV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=200`;
+        const campaignsResponse = await fetch(campaignsUrl, {
+          headers: { 'Authorization': `Bearer ${accessToken}` }
+        });
+        
+        if (!campaignsResponse.ok) {
+          const errorText = await campaignsResponse.text();
+          console.error(`[get_campaign_report] Campaigns fetch failed:`, errorText);
+          return new Response(JSON.stringify({ error: 'Failed to fetch campaigns', details: errorText }), {
+            status: campaignsResponse.status,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+        
+        const campaignsData = await campaignsResponse.json();
+        const campaigns = campaignsData.elements || [];
+        console.log(`[get_campaign_report] Fetched ${campaigns.length} campaigns`);
+        
+        if (campaigns.length === 0) {
+          return new Response(JSON.stringify({ 
+            elements: [],
+            metadata: { accountId, dateRange: { start: startDate, end: endDate } }
+          }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+        
+        // Build campaign info map
+        const campaignInfoMap = new Map<string, any>();
+        for (const campaign of campaigns) {
+          const campaignId = campaign.id?.toString() || '';
+          campaignInfoMap.set(campaignId, {
+            id: campaignId,
+            name: campaign.name || `Campaign ${campaignId}`,
+            status: campaign.status || 'UNKNOWN',
+            type: campaign.type || 'UNKNOWN',
+            objectiveType: campaign.objectiveType || 'UNKNOWN',
+            costType: campaign.costType || 'UNKNOWN',
+            dailyBudget: campaign.dailyBudget,
+            totalBudget: campaign.totalBudget,
+          });
+        }
+        
+        // Step 2: Fetch analytics with CAMPAIGN pivot
+        const campaignIds = campaigns.map((c: any) => c.id.toString());
+        
+        // Process in batches of 20 campaigns
+        const batchSize = 20;
+        const allAnalytics: any[] = [];
+        
+        for (let i = 0; i < campaignIds.length; i += batchSize) {
+          const batchIds = campaignIds.slice(i, i + batchSize);
+          
+          let analyticsUrl = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
+            `dateRange.start.day=${new Date(startDate).getDate()}&` +
+            `dateRange.start.month=${new Date(startDate).getMonth() + 1}&` +
+            `dateRange.start.year=${new Date(startDate).getFullYear()}&` +
+            `dateRange.end.day=${new Date(endDate).getDate()}&` +
+            `dateRange.end.month=${new Date(endDate).getMonth() + 1}&` +
+            `dateRange.end.year=${new Date(endDate).getFullYear()}&` +
+            `timeGranularity=${granularity}&` +
+            `pivot=CAMPAIGN&` +
+            `fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,pivotValue`;
+          
+          batchIds.forEach((id: string, idx: number) => {
+            analyticsUrl += `&campaigns[${idx}]=urn:li:sponsoredCampaign:${id}`;
+          });
+          
+          const analyticsResponse = await fetch(analyticsUrl, {
+            headers: { 'Authorization': `Bearer ${accessToken}` }
+          });
+          
+          if (analyticsResponse.ok) {
+            const analyticsData = await analyticsResponse.json();
+            allAnalytics.push(...(analyticsData.elements || []));
+          }
+        }
+        
+        console.log(`[get_campaign_report] Fetched ${allAnalytics.length} analytics rows`);
+        
+        // Step 3: Aggregate metrics by campaign
+        const campaignMetrics = new Map<string, { impressions: number; clicks: number; spent: number; leads: number }>();
+        
+        for (const row of allAnalytics) {
+          const pivotValue = row.pivotValue || '';
+          const campaignId = pivotValue.split(':').pop() || '';
+          if (!campaignId) continue;
+          
+          const existing = campaignMetrics.get(campaignId) || { impressions: 0, clicks: 0, spent: 0, leads: 0 };
+          existing.impressions += row.impressions || 0;
+          existing.clicks += row.clicks || 0;
+          existing.spent += parseFloat(row.costInLocalCurrency || '0');
+          existing.leads += (row.oneClickLeads || 0) + (row.externalWebsiteConversions || 0);
+          campaignMetrics.set(campaignId, existing);
+        }
+        
+        // Step 4: Build final report
+        const reportElements: any[] = [];
+        
+        for (const [campaignId, info] of campaignInfoMap) {
+          const metrics = campaignMetrics.get(campaignId) || { impressions: 0, clicks: 0, spent: 0, leads: 0 };
+          
+          // Skip campaigns with no data if there's analytics data available
+          if (allAnalytics.length > 0 && metrics.impressions === 0 && metrics.spent === 0) continue;
+          
+          const ctr = metrics.impressions > 0 ? (metrics.clicks / metrics.impressions) * 100 : 0;
+          const cpc = metrics.clicks > 0 ? metrics.spent / metrics.clicks : 0;
+          const cpm = metrics.impressions > 0 ? (metrics.spent / metrics.impressions) * 1000 : 0;
+          const costPerLead = metrics.leads > 0 ? metrics.spent / metrics.leads : 0;
+          
+          reportElements.push({
+            campaignId,
+            campaignName: info.name,
+            status: info.status,
+            objectiveType: info.objectiveType,
+            costType: info.costType,
+            dailyBudget: info.dailyBudget,
+            totalBudget: info.totalBudget,
+            impressions: metrics.impressions,
+            clicks: metrics.clicks,
+            costInLocalCurrency: metrics.spent.toFixed(2),
+            leads: metrics.leads,
+            ctr: ctr.toFixed(2),
+            cpc: cpc.toFixed(2),
+            cpm: cpm.toFixed(2),
+            costPerLead: costPerLead.toFixed(2),
+          });
+        }
+        
+        // Sort by impressions descending
+        reportElements.sort((a, b) => b.impressions - a.impressions);
+        
+        console.log(`[get_campaign_report] Complete. Campaigns with data: ${reportElements.length}`);
+        
+        return new Response(JSON.stringify({
+          elements: reportElements,
+          metadata: {
+            accountId,
+            dateRange: { start: startDate, end: endDate },
+            timeGranularity: granularity,
+            totalCampaigns: reportElements.length,
+          }
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
       default:
         return new Response(JSON.stringify({ error: 'Unknown action' }), {
           status: 400,

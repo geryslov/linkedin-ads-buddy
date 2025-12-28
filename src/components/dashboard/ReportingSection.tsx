@@ -9,12 +9,14 @@ import { useDemographicReporting, TimeFrameOption as DemoTimeFrameOption, TimeGr
 import { useCompanyDemographic, TimeFrameOption as CompanyDemoTimeFrameOption } from '@/hooks/useCompanyDemographic';
 import { useCreativeReporting, TimeFrameOption as CreativeTimeFrameOption } from '@/hooks/useCreativeReporting';
 import { useCreativeNamesReport, TimeFrameOption as CreativeNamesTimeFrameOption } from '@/hooks/useCreativeNamesReport';
+import { useCampaignReporting, TimeFrameOption as CampaignTimeFrameOption } from '@/hooks/useCampaignReporting';
 import { useAccountStructure } from '@/hooks/useAccountStructure';
 import { CompanyIntelligenceTable } from './CompanyIntelligenceTable';
 import { DemographicTable } from './DemographicTable';
 import { CompanyDemographicTable } from './CompanyDemographicTable';
 import { CreativeReportingTable } from './CreativeReportingTable';
 import { CreativeNamesReportTable } from './CreativeNamesReportTable';
+import { CampaignReportingTable } from './CampaignReportingTable';
 import { AccountStructureTable } from './AccountStructureTable';
 import { TimeFrameSelector } from './TimeFrameSelector';
 import { MetricCard } from './MetricCard';
@@ -39,6 +41,7 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
   const companyDemographic = useCompanyDemographic(accessToken);
   const creativeReporting = useCreativeReporting(accessToken);
   const creativeNamesReport = useCreativeNamesReport(accessToken);
+  const campaignReporting = useCampaignReporting(accessToken);
   const accountStructure = useAccountStructure(accessToken);
   const { toast } = useToast();
 
@@ -110,6 +113,8 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
         creativeReporting.fetchCreativeAnalytics(selectedAccount);
       } else if (reportType === 'creative_names') {
         creativeNamesReport.fetchCreativeNamesReport(selectedAccount);
+      } else if (reportType === 'campaigns') {
+        campaignReporting.fetchCampaignReport(selectedAccount);
       } else if (reportType === 'companies') {
         companyIntelligence.fetchCompanyIntelligence(selectedAccount);
       } else if (reportType === 'demographics') {
@@ -157,6 +162,13 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
     }
   }, [creativeNamesReport.dateRange, creativeNamesReport.timeGranularity]);
 
+  // Re-fetch when time/granularity changes for campaigns
+  useEffect(() => {
+    if (selectedAccount && reportType === 'campaigns') {
+      campaignReporting.fetchCampaignReport(selectedAccount);
+    }
+  }, [campaignReporting.dateRange, campaignReporting.timeGranularity]);
+
   const handleDemoTimeFrameChange = (option: DemoTimeFrameOption) => {
     setSelectedTimeFrame(option.value);
     demographicReporting.setTimeFrame(option);
@@ -177,6 +189,11 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
     creativeNamesReport.setTimeFrame(option);
   };
 
+  const handleCampaignTimeFrameChange = (option: CampaignTimeFrameOption) => {
+    setSelectedTimeFrame(option.value);
+    campaignReporting.setTimeFrame(option);
+  };
+
   // Custom date range handlers
   const handleCreativeCustomDate = (start: Date, end: Date) => {
     setSelectedTimeFrame('custom');
@@ -189,6 +206,14 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
   const handleCreativeNamesCustomDate = (start: Date, end: Date) => {
     setSelectedTimeFrame('custom');
     creativeNamesReport.setDateRange({
+      start: start.toISOString().split('T')[0],
+      end: end.toISOString().split('T')[0],
+    });
+  };
+
+  const handleCampaignCustomDate = (start: Date, end: Date) => {
+    setSelectedTimeFrame('custom');
+    campaignReporting.setDateRange({
       start: start.toISOString().split('T')[0],
       end: end.toISOString().split('T')[0],
     });
@@ -216,6 +241,8 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
         creativeReporting.fetchCreativeAnalytics(selectedAccount);
       } else if (reportType === 'creative_names') {
         creativeNamesReport.fetchCreativeNamesReport(selectedAccount);
+      } else if (reportType === 'campaigns') {
+        campaignReporting.fetchCampaignReport(selectedAccount);
       } else if (reportType === 'companies') {
         companyIntelligence.fetchCompanyIntelligence(selectedAccount);
       } else if (reportType === 'demographics') {
@@ -231,6 +258,7 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
   const isLoading = 
     reportType === 'creatives' ? creativeReporting.isLoading :
     reportType === 'creative_names' ? creativeNamesReport.isLoading :
+    reportType === 'campaigns' ? campaignReporting.isLoading :
     reportType === 'companies' ? companyIntelligence.isLoading : 
     reportType === 'demographics' ? demographicReporting.isLoading : 
     reportType === 'company_demo' ? companyDemographic.isLoading : 
@@ -307,10 +335,9 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
             <FolderTree className="h-4 w-4" />
             Account Structure
           </TabsTrigger>
-          <TabsTrigger value="campaigns" className="gap-2" disabled>
+          <TabsTrigger value="campaigns" className="gap-2">
             <Target className="h-4 w-4" />
             Campaigns
-            <span className="text-xs text-muted-foreground">(Soon)</span>
           </TabsTrigger>
           <TabsTrigger value="audiences" className="gap-2" disabled>
             <Users className="h-4 w-4" />
@@ -794,6 +821,56 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
                 data={accountStructure.structure} 
                 isLoading={accountStructure.isLoading} 
               />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Campaigns Tab */}
+        <TabsContent value="campaigns" className="space-y-6 mt-6">
+          <Card className="bg-card/50 backdrop-blur-sm border-border/50">
+            <CardContent className="pt-4">
+              <TimeFrameSelector
+                timeFrameOptions={campaignReporting.timeFrameOptions}
+                selectedTimeFrame={selectedTimeFrame}
+                onTimeFrameChange={handleCampaignTimeFrameChange}
+                timeGranularity={campaignReporting.timeGranularity as TimeGranularity}
+                onGranularityChange={(g: TimeGranularity) => campaignReporting.setTimeGranularity(g as any)}
+                dateRange={campaignReporting.dateRange}
+                onCustomDateChange={handleCampaignCustomDate}
+              />
+            </CardContent>
+          </Card>
+
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
+            <MetricCard title="Impressions" value={campaignReporting.totals.impressions.toLocaleString()} icon={FileBarChart} />
+            <MetricCard title="Clicks" value={campaignReporting.totals.clicks.toLocaleString()} icon={FileBarChart} />
+            <MetricCard title="Spent" value={`$${campaignReporting.totals.spent.toFixed(2)}`} icon={FileBarChart} />
+            <MetricCard title="Leads" value={campaignReporting.totals.leads.toLocaleString()} icon={FileBarChart} />
+            <MetricCard title="CTR" value={`${campaignReporting.totals.impressions > 0 ? ((campaignReporting.totals.clicks / campaignReporting.totals.impressions) * 100).toFixed(2) : '0.00'}%`} icon={FileBarChart} />
+            <MetricCard title="CPC" value={`$${campaignReporting.totals.clicks > 0 ? (campaignReporting.totals.spent / campaignReporting.totals.clicks).toFixed(2) : '0.00'}`} icon={FileBarChart} />
+            <MetricCard title="CPM" value={`$${campaignReporting.totals.impressions > 0 ? ((campaignReporting.totals.spent / campaignReporting.totals.impressions) * 1000).toFixed(2) : '0.00'}`} icon={FileBarChart} />
+          </div>
+
+          {campaignReporting.error && (
+            <Card className="bg-destructive/10 border-destructive/30">
+              <CardContent className="pt-4">
+                <p className="text-sm text-destructive"><strong>Note:</strong> {campaignReporting.error}</p>
+              </CardContent>
+            </Card>
+          )}
+
+          <Card className="bg-card/50 backdrop-blur-sm border-border/50">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Target className="h-5 w-5 text-primary" />
+                Campaign Performance
+              </CardTitle>
+              <CardDescription>
+                Performance metrics by campaign with objective type and status filters
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <CampaignReportingTable data={campaignReporting.campaignData} isLoading={campaignReporting.isLoading} />
             </CardContent>
           </Card>
         </TabsContent>
