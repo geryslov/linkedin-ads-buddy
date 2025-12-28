@@ -135,22 +135,34 @@ export function useCreativeNamesReport(accessToken: string | null) {
 
       const elements = data?.elements || [];
       
-      const mapped: CreativeNameData[] = elements.map((item: any) => ({
-        creativeId: item.creativeId || '',
-        creativeName: item.creativeName || `Creative ${item.creativeId}`,
-        campaignName: item.campaignName || '-',
-        campaignType: item.campaignType || item.objectiveType || 'UNKNOWN',
-        status: item.status || 'UNKNOWN',
-        type: item.type || '-',
-        impressions: item.impressions || 0,
-        clicks: item.clicks || 0,
-        spent: parseFloat(item.spent) || 0,
-        leads: item.leads || 0,
-        ctr: parseFloat(item.ctr) || 0,
-        cpc: parseFloat(item.cpc) || 0,
-        cpm: parseFloat(item.cpm) || 0,
-        costPerLead: parseFloat(item.costPerLead) || 0,
-      }));
+      // Filter out creatives with no performance data and map the response
+      const mapped: CreativeNameData[] = elements
+        .filter((item: any) => {
+          const impressions = item.impressions || 0;
+          const spent = parseFloat(item.costInLocalCurrency || item.spent || '0');
+          return impressions > 0 || spent > 0;
+        })
+        .map((item: any) => {
+          const spent = parseFloat(item.costInLocalCurrency || item.spent || '0');
+          const leads = item.leads || 0;
+          
+          return {
+            creativeId: item.creativeId || '',
+            creativeName: item.creativeName || `Creative ${item.creativeId}`,
+            campaignName: item.campaignName || '-',
+            campaignType: item.campaignType || item.objectiveType || 'UNKNOWN',
+            status: item.status || 'UNKNOWN',
+            type: item.type || '-',
+            impressions: item.impressions || 0,
+            clicks: item.clicks || 0,
+            spent,
+            leads,
+            ctr: parseFloat(item.ctr || '0'),
+            cpc: parseFloat(item.cpc || '0'),
+            cpm: parseFloat(item.cpm || '0'),
+            costPerLead: leads > 0 ? spent / leads : (parseFloat(item.costPerLead) || 0),
+          };
+        });
 
       setCreativeData(mapped);
     } catch (err) {
