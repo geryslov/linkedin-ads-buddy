@@ -20,13 +20,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import {
+  PerformanceFilters,
+  MetricFilter,
+  applyMetricFilters,
+  applyCampaignTypeFilter,
+} from './PerformanceFilters';
 
 interface CreativeReportingTableProps {
   data: CreativeData[];
   isLoading: boolean;
 }
 
-type SortKey = 'creativeName' | 'campaignName' | 'type' | 'impressions' | 'clicks' | 'spent' | 'leads' | 'ctr' | 'cpc' | 'cpm';
+type SortKey = 'creativeName' | 'campaignName' | 'type' | 'impressions' | 'clicks' | 'spent' | 'leads' | 'ctr' | 'cpc' | 'cpm' | 'costPerLead';
 type SortOrder = 'asc' | 'desc';
 type FilterType = 'all' | 'with_spend' | 'with_impressions' | 'with_clicks' | 'with_leads';
 
@@ -50,6 +56,8 @@ export function CreativeReportingTable({ data, isLoading }: CreativeReportingTab
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<FilterType>('all');
   const [creativeTypeFilter, setCreativeTypeFilter] = useState<string>('all');
+  const [campaignTypeFilter, setCampaignTypeFilter] = useState<string>('all');
+  const [metricFilters, setMetricFilters] = useState<MetricFilter[]>([]);
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -94,8 +102,14 @@ export function CreativeReportingTable({ data, isLoading }: CreativeReportingTab
       result = result.filter(item => item.type === creativeTypeFilter);
     }
 
+    // Apply campaign type filter
+    result = applyCampaignTypeFilter(result, campaignTypeFilter);
+
+    // Apply performance metric filters
+    result = applyMetricFilters(result, metricFilters);
+
     return result;
-  }, [data, searchQuery, filterType, creativeTypeFilter]);
+  }, [data, searchQuery, filterType, creativeTypeFilter, campaignTypeFilter, metricFilters]);
 
   const sortedData = useMemo(() => {
     return [...filteredData].sort((a, b) => {
@@ -139,9 +153,11 @@ export function CreativeReportingTable({ data, isLoading }: CreativeReportingTab
     setSearchQuery('');
     setFilterType('all');
     setCreativeTypeFilter('all');
+    setCampaignTypeFilter('all');
+    setMetricFilters([]);
   };
 
-  const hasActiveFilters = searchQuery.trim() !== '' || filterType !== 'all' || creativeTypeFilter !== 'all';
+  const hasActiveFilters = searchQuery.trim() !== '' || filterType !== 'all' || creativeTypeFilter !== 'all' || campaignTypeFilter !== 'all' || metricFilters.length > 0;
 
   if (isLoading) {
     return (
@@ -182,6 +198,14 @@ export function CreativeReportingTable({ data, isLoading }: CreativeReportingTab
 
   return (
     <div className="space-y-4">
+      {/* Performance Filters */}
+      <PerformanceFilters
+        campaignType={campaignTypeFilter}
+        onCampaignTypeChange={setCampaignTypeFilter}
+        metricFilters={metricFilters}
+        onMetricFiltersChange={setMetricFilters}
+      />
+
       {/* Filters */}
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">

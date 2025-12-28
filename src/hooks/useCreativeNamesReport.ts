@@ -5,6 +5,7 @@ export interface CreativeNameData {
   creativeId: string;
   creativeName: string;
   campaignName: string;
+  campaignType: string;
   status: string;
   type: string;
   impressions: number;
@@ -138,6 +139,7 @@ export function useCreativeNamesReport(accessToken: string | null) {
         creativeId: item.creativeId || '',
         creativeName: item.creativeName || `Creative ${item.creativeId}`,
         campaignName: item.campaignName || '-',
+        campaignType: item.campaignType || item.objectiveType || 'UNKNOWN',
         status: item.status || 'UNKNOWN',
         type: item.type || '-',
         impressions: item.impressions || 0,

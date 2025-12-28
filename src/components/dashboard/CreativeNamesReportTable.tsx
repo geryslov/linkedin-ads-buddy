@@ -15,6 +15,12 @@ import { Button } from '@/components/ui/button';
 import { ArrowUp, ArrowDown, Search, X, ChevronRight, ChevronDown, Layers } from 'lucide-react';
 import { CreativeNameData } from '@/hooks/useCreativeNamesReport';
 import { CreativeTypeBadge } from './CreativeTypeBadge';
+import {
+  PerformanceFilters,
+  MetricFilter,
+  applyMetricFilters,
+  applyCampaignTypeFilter,
+} from './PerformanceFilters';
 
 interface CreativeNamesReportTableProps {
   data: CreativeNameData[];
@@ -24,6 +30,7 @@ interface CreativeNamesReportTableProps {
 interface GroupedCreative {
   creativeName: string;
   campaigns: CreativeNameData[];
+  campaignType: string;
   type: string;
   impressions: number;
   clicks: number;
@@ -75,6 +82,8 @@ export function CreativeNamesReportTable({ data, isLoading }: CreativeNamesRepor
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [creativeTypeFilter, setCreativeTypeFilter] = useState<string>('all');
+  const [campaignTypeFilter, setCampaignTypeFilter] = useState<string>('all');
+  const [metricFilters, setMetricFilters] = useState<MetricFilter[]>([]);
   const [expandedCreatives, setExpandedCreatives] = useState<Set<string>>(new Set());
 
   const handleSort = (key: SortKey) => {
@@ -120,8 +129,11 @@ export function CreativeNamesReportTable({ data, isLoading }: CreativeNamesRepor
       result = result.filter(item => item.type === creativeTypeFilter);
     }
 
+    // Apply campaign type filter
+    result = applyCampaignTypeFilter(result, campaignTypeFilter);
+
     return result;
-  }, [data, searchQuery, statusFilter, creativeTypeFilter]);
+  }, [data, searchQuery, statusFilter, creativeTypeFilter, campaignTypeFilter]);
 
   // Group by creative name and aggregate metrics
   const groupedData = useMemo(() => {
@@ -143,6 +155,7 @@ export function CreativeNamesReportTable({ data, isLoading }: CreativeNamesRepor
       aggregated.push({
         creativeName,
         campaigns,
+        campaignType: campaigns[0]?.campaignType || 'UNKNOWN',
         type: campaigns[0]?.type || 'UNKNOWN',
         impressions,
         clicks,
@@ -158,8 +171,13 @@ export function CreativeNamesReportTable({ data, isLoading }: CreativeNamesRepor
     return aggregated;
   }, [filteredData]);
 
+  // Apply metric filters on grouped data
+  const filteredGroupedData = useMemo(() => {
+    return applyMetricFilters(groupedData, metricFilters);
+  }, [groupedData, metricFilters]);
+
   const sortedData = useMemo(() => {
-    return [...groupedData].sort((a, b) => {
+    return [...filteredGroupedData].sort((a, b) => {
       const aVal = a[sortKey];
       const bVal = b[sortKey];
       const modifier = sortOrder === 'asc' ? 1 : -1;
@@ -169,7 +187,7 @@ export function CreativeNamesReportTable({ data, isLoading }: CreativeNamesRepor
       }
       return ((aVal as number) - (bVal as number)) * modifier;
     });
-  }, [groupedData, sortKey, sortOrder]);
+  }, [filteredGroupedData, sortKey, sortOrder]);
 
   const totals = useMemo(() => {
     return filteredData.reduce((acc, item) => ({
@@ -189,9 +207,11 @@ export function CreativeNamesReportTable({ data, isLoading }: CreativeNamesRepor
     setSearchQuery('');
     setStatusFilter('all');
     setCreativeTypeFilter('all');
+    setCampaignTypeFilter('all');
+    setMetricFilters([]);
   };
 
-  const hasActiveFilters = searchQuery.trim() || statusFilter !== 'all' || creativeTypeFilter !== 'all';
+  const hasActiveFilters = searchQuery.trim() || statusFilter !== 'all' || creativeTypeFilter !== 'all' || campaignTypeFilter !== 'all' || metricFilters.length > 0;
 
   if (isLoading) {
     return (
@@ -239,6 +259,14 @@ export function CreativeNamesReportTable({ data, isLoading }: CreativeNamesRepor
 
   return (
     <div className="space-y-4">
+      {/* Performance Filters */}
+      <PerformanceFilters
+        campaignType={campaignTypeFilter}
+        onCampaignTypeChange={setCampaignTypeFilter}
+        metricFilters={metricFilters}
+        onMetricFiltersChange={setMetricFilters}
+      />
+
       {/* Filters */}
       <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">
         <div className="relative flex-1 max-w-sm">

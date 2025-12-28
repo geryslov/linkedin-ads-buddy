@@ -6,6 +6,7 @@ export interface CreativeData {
   creativeId: string;
   creativeName: string;
   campaignName: string;
+  campaignType: string;
   status: string;
   type: string;
   impressions: number;
@@ -15,6 +16,7 @@ export interface CreativeData {
   ctr: number;
   cpc: number;
   cpm: number;
+  costPerLead: number;
 }
 
 export type TimeGranularity = 'DAILY' | 'MONTHLY' | 'YEARLY' | 'ALL';
@@ -122,20 +124,29 @@ export function useCreativeReporting(accessToken: string | null) {
       }
       
       // Map API response to CreativeData interface
-      const analyticsData: CreativeData[] = (data.elements || []).map((el: any) => ({
-        creativeId: el.creativeId || '',
-        creativeName: el.creativeName || `Creative ${el.creativeId || 'Unknown'}`,
-        campaignName: el.campaignName || 'Unknown Campaign',
-        status: el.status || 'UNKNOWN',
-        type: el.type || 'UNKNOWN',
-        impressions: el.impressions || 0,
-        clicks: el.clicks || 0,
-        spent: parseFloat(el.costInLocalCurrency || '0'),
-        leads: el.leads || 0,
-        ctr: parseFloat(el.ctr || '0'),
-        cpc: parseFloat(el.cpc || '0'),
-        cpm: parseFloat(el.cpm || '0'),
-      }));
+      const analyticsData: CreativeData[] = (data.elements || []).map((el: any) => {
+        const impressions = el.impressions || 0;
+        const clicks = el.clicks || 0;
+        const spent = parseFloat(el.costInLocalCurrency || '0');
+        const leads = el.leads || 0;
+        
+        return {
+          creativeId: el.creativeId || '',
+          creativeName: el.creativeName || `Creative ${el.creativeId || 'Unknown'}`,
+          campaignName: el.campaignName || 'Unknown Campaign',
+          campaignType: el.campaignType || el.objectiveType || 'UNKNOWN',
+          status: el.status || 'UNKNOWN',
+          type: el.type || 'UNKNOWN',
+          impressions,
+          clicks,
+          spent,
+          leads,
+          ctr: parseFloat(el.ctr || '0'),
+          cpc: parseFloat(el.cpc || '0'),
+          cpm: parseFloat(el.cpm || '0'),
+          costPerLead: leads > 0 ? spent / leads : 0,
+        };
+      });
       
       setCreativeData(analyticsData);
     } catch (err: any) {
