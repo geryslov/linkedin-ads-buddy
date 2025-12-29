@@ -34,7 +34,7 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
   const campaignReporting = useCampaignReporting(accessToken);
   const { toast } = useToast();
 
-  const [selectedTimeFrame, setSelectedTimeFrame] = useState('this_year');
+  const [selectedTimeFrame, setSelectedTimeFrame] = useState('last_7_days');
   const [reportType, setReportType] = useState('campaigns');
 
   const handleExportCSV = () => {
