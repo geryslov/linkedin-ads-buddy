@@ -1527,20 +1527,26 @@ serve(async (req) => {
         const endDate = dateRange?.end || new Date().toISOString().split('T')[0];
         const granularity = timeGranularity || 'ALL';
         
+        // Parse date strings directly to avoid timezone issues
+        const [startYear, startMonth, startDay] = startDate.split('-').map(Number);
+        const [endYear, endMonth, endDay] = endDate.split('-').map(Number);
+        
         console.log(`[get_company_demographic] Starting for account ${accountId}, date range: ${startDate} to ${endDate}, campaigns: ${campaignIds?.length || 'all'}`);
+        console.log(`[get_company_demographic] Parsed dates: start=${startYear}-${startMonth}-${startDay}, end=${endYear}-${endMonth}-${endDay}`);
 
         // Step 1: Fetch demographic analytics with MEMBER_COMPANY pivot
         let analyticsUrl = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
-          `dateRange.start.day=${new Date(startDate).getDate()}&` +
-          `dateRange.start.month=${new Date(startDate).getMonth() + 1}&` +
-          `dateRange.start.year=${new Date(startDate).getFullYear()}&` +
-          `dateRange.end.day=${new Date(endDate).getDate()}&` +
-          `dateRange.end.month=${new Date(endDate).getMonth() + 1}&` +
-          `dateRange.end.year=${new Date(endDate).getFullYear()}&` +
+          `dateRange.start.day=${startDay}&` +
+          `dateRange.start.month=${startMonth}&` +
+          `dateRange.start.year=${startYear}&` +
+          `dateRange.end.day=${endDay}&` +
+          `dateRange.end.month=${endMonth}&` +
+          `dateRange.end.year=${endYear}&` +
           `timeGranularity=${granularity === 'ALL' ? 'ALL' : granularity}&` +
           `pivot=MEMBER_COMPANY&` +
           `accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
-          `fields=impressions,clicks,costInLocalCurrency,costInUsd,externalWebsiteConversions,oneClickLeads,pivotValue`;
+          `fields=impressions,clicks,costInLocalCurrency,costInUsd,externalWebsiteConversions,oneClickLeads,pivotValue&` +
+          `count=10000`;
         
         // Add campaign filter if provided
         if (campaignIds && campaignIds.length > 0) {
