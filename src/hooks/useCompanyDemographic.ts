@@ -35,6 +35,7 @@ export function useCompanyDemographic(accessToken: string | null) {
     start: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
     end: new Date().toISOString().split('T')[0],
   });
+  const [selectedCampaignIds, setSelectedCampaignIds] = useState<string[]>([]);
   const { toast } = useToast();
 
   const timeFrameOptions: TimeFrameOption[] = useMemo(() => {
@@ -79,13 +80,15 @@ export function useCompanyDemographic(accessToken: string | null) {
     ];
   }, []);
 
-  const fetchCompanyDemographic = useCallback(async (accountId: string) => {
+  const fetchCompanyDemographic = useCallback(async (accountId: string, campaignIds?: string[]) => {
     if (!accessToken || !accountId) return;
     setIsLoading(true);
     setError(null);
     
+    const campaignsToFilter = campaignIds || selectedCampaignIds;
+    
     try {
-      console.log('Fetching company demographic with params:', { accountId, dateRange, timeGranularity });
+      console.log('Fetching company demographic with params:', { accountId, dateRange, timeGranularity, campaignIds: campaignsToFilter });
       
       const { data, error: fetchError } = await supabase.functions.invoke('linkedin-api', {
         body: { 
@@ -95,6 +98,7 @@ export function useCompanyDemographic(accessToken: string | null) {
             accountId, 
             dateRange,
             timeGranularity,
+            campaignIds: campaignsToFilter.length > 0 ? campaignsToFilter : undefined,
           }
         }
       });
@@ -136,7 +140,7 @@ export function useCompanyDemographic(accessToken: string | null) {
     } finally {
       setIsLoading(false);
     }
-  }, [accessToken, dateRange, timeGranularity, toast]);
+  }, [accessToken, dateRange, timeGranularity, selectedCampaignIds, toast]);
 
   const totals = useMemo(() => {
     return companyData.reduce(
@@ -170,6 +174,8 @@ export function useCompanyDemographic(accessToken: string | null) {
     setDateRange,
     timeFrameOptions,
     setTimeFrame,
+    selectedCampaignIds,
+    setSelectedCampaignIds,
     fetchCompanyDemographic,
   };
 }

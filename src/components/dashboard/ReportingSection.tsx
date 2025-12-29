@@ -12,6 +12,7 @@ import { DemographicTable } from './DemographicTable';
 import { CompanyDemographicTable } from './CompanyDemographicTable';
 import { CreativeNamesReportTable } from './CreativeNamesReportTable';
 import { CampaignReportingTable } from './CampaignReportingTable';
+import { CampaignMultiSelect } from './CampaignMultiSelect';
 import { TimeFrameSelector } from './TimeFrameSelector';
 import { MetricCard } from './MetricCard';
 import { useToast } from '@/hooks/use-toast';
@@ -95,6 +96,10 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
         demographicReporting.fetchDemographicAnalytics(selectedAccount);
       } else if (reportType === 'company_demo') {
         companyDemographic.fetchCompanyDemographic(selectedAccount);
+        // Also fetch campaigns for the filter if not already loaded
+        if (campaignReporting.campaignData.length === 0) {
+          campaignReporting.fetchCampaignReport(selectedAccount);
+        }
       }
     }
   }, [selectedAccount, reportType]);
@@ -106,12 +111,12 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
     }
   }, [demographicReporting.dateRange, demographicReporting.timeGranularity, demographicReporting.pivot]);
 
-  // Re-fetch when time/granularity changes for company demographics
+  // Re-fetch when time/granularity/campaigns changes for company demographics
   useEffect(() => {
     if (selectedAccount && reportType === 'company_demo') {
       companyDemographic.fetchCompanyDemographic(selectedAccount);
     }
-  }, [companyDemographic.dateRange, companyDemographic.timeGranularity]);
+  }, [companyDemographic.dateRange, companyDemographic.timeGranularity, companyDemographic.selectedCampaignIds]);
 
   // Re-fetch when time/granularity changes for creative names report
   useEffect(() => {
@@ -495,7 +500,7 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
         {/* New Company Demographic Tab */}
         <TabsContent value="company_demo" className="space-y-6 mt-6">
           <Card className="bg-card/50 backdrop-blur-sm border-border/50">
-            <CardContent className="pt-4">
+            <CardContent className="pt-4 space-y-4">
               <TimeFrameSelector
                 timeFrameOptions={companyDemographic.timeFrameOptions}
                 selectedTimeFrame={selectedTimeFrame}
@@ -505,6 +510,14 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
                 dateRange={companyDemographic.dateRange}
                 onCustomDateChange={handleCompanyDemoCustomDate}
               />
+              <div className="border-t pt-4">
+                <CampaignMultiSelect
+                  campaigns={campaignReporting.campaignData}
+                  selectedCampaignIds={companyDemographic.selectedCampaignIds}
+                  onSelectionChange={companyDemographic.setSelectedCampaignIds}
+                  isLoading={campaignReporting.isLoading}
+                />
+              </div>
             </CardContent>
           </Card>
 
