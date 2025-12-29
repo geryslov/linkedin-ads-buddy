@@ -20,16 +20,19 @@ export function MetricCard({
 }: MetricCardProps) {
   return (
     <div 
-      className="glass rounded-xl p-6 animate-slide-up"
+      className="glass rounded-xl p-4 animate-slide-up"
       style={{ animationDelay: `${delay}ms` }}
     >
-      <div className="flex items-start justify-between">
-        <div className="space-y-2">
-          <p className="text-sm text-muted-foreground font-medium">{title}</p>
-          <p className="text-3xl font-bold tracking-tight">{value}</p>
+      <div className="flex items-center gap-3">
+        <div className="p-2 rounded-lg bg-primary/10 shrink-0">
+          <Icon className="h-4 w-4 text-primary" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-xs text-muted-foreground font-medium truncate">{title}</p>
+          <p className="text-lg font-bold tracking-tight truncate">{value}</p>
           {change && (
             <p className={cn(
-              "text-sm font-medium flex items-center gap-1",
+              "text-xs font-medium flex items-center gap-1",
               changeType === "positive" && "text-success",
               changeType === "negative" && "text-destructive",
               changeType === "neutral" && "text-muted-foreground"
@@ -39,9 +42,6 @@ export function MetricCard({
               {change}
             </p>
           )}
-        </div>
-        <div className="p-3 rounded-lg bg-primary/10">
-          <Icon className="h-6 w-6 text-primary" />
         </div>
       </div>
     </div>
