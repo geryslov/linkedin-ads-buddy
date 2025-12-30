@@ -89,6 +89,33 @@ export type Database = {
         }
         Relationships: []
       }
+      title_metadata_cache: {
+        Row: {
+          created_at: string
+          function_urn: string | null
+          name: string
+          super_title_urn: string | null
+          title_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          function_urn?: string | null
+          name: string
+          super_title_urn?: string | null
+          title_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          function_urn?: string | null
+          name?: string
+          super_title_urn?: string | null
+          title_id?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       user_linked_accounts: {
         Row: {
           account_id: string
