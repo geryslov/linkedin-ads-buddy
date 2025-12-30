@@ -2690,23 +2690,23 @@ serve(async (req) => {
         urlParams.set("pivots", "List(MEMBER_JOB_FUNCTION,MEMBER_JOB_TITLE)");
         urlParams.set("timeGranularity", "ALL");
         
-        // URN must be encoded inside List()
+        // Raw URN - let URLSearchParams handle encoding once
         const accountUrn = `urn:li:sponsoredAccount:${accountId}`;
-        urlParams.set("accounts", `List(${encodeURIComponent(accountUrn)})`);
+        urlParams.set("accounts", `List(${accountUrn})`);
         
-        // dateRange object should be encoded as a single value
+        // dateRange as raw Rest.li object - URLSearchParams will encode it
         const dateRangeStr = `(start:(year:${startYear},month:${startMonth},day:${startDay}),end:(year:${endYear},month:${endMonth},day:${endDay}))`;
         urlParams.set("dateRange", dateRangeStr);
         
         urlParams.set("fields", "impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,pivotValues");
         urlParams.set("count", "15000");
         
-        // Campaign filter with encoded URNs
+        // Campaign filter - raw URNs, no manual encoding
         if (campaignIds && campaignIds.length > 0) {
-          const urns = campaignIds.slice(0, 20).map((id: string) => 
-            encodeURIComponent(`urn:li:sponsoredCampaign:${id}`)
+          const campaignUrns = campaignIds.slice(0, 20).map((id: string) => 
+            `urn:li:sponsoredCampaign:${id}`
           );
-          urlParams.set("campaigns", `List(${urns.join(",")})`);
+          urlParams.set("campaigns", `List(${campaignUrns.join(",")})`);
           console.log(`[get_job_function_titles_drilldown] Filtering by ${Math.min(campaignIds.length, 20)} campaigns`);
         }
         
@@ -2744,6 +2744,7 @@ serve(async (req) => {
             error: `LinkedIn API error: ${analyticsResponse.status}`,
             status: analyticsResponse.status,
             details: errorText,
+            requestUrl: analyticsUrl,
             jobFunction: formatPivotValue(jobFunctionUrn, 'MEMBER_JOB_FUNCTION'),
             titles: []
           }), {
