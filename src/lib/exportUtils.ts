@@ -130,3 +130,15 @@ export const jobSeniorityMatrixColumns = [
   { key: 'cpm', label: 'CPM' },
   { key: 'cpl', label: 'CPL' },
 ];
+
+export const jobTitleDrilldownColumns = [
+  { key: 'title', label: 'Job Title' },
+  { key: 'impressions', label: 'Impressions' },
+  { key: 'clicks', label: 'Clicks' },
+  { key: 'ctr', label: 'CTR (%)' },
+  { key: 'spent', label: 'Spent ($)' },
+  { key: 'leads', label: 'Leads' },
+  { key: 'cpl', label: 'CPL ($)' },
+  { key: 'cpc', label: 'CPC ($)' },
+  { key: 'cpm', label: 'CPM ($)' },
+];
