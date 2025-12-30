@@ -2682,42 +2682,69 @@ serve(async (req) => {
           });
         }
 
-        // Build campaign filter if provided
-        let campaignFilter = '';
+        // Build URL with URLSearchParams for proper encoding
+        const base = new URL("https://api.linkedin.com/rest/adAnalytics");
+        const urlParams = base.searchParams;
+        
+        urlParams.set("q", "statistics");
+        urlParams.set("pivots", "List(MEMBER_JOB_FUNCTION,MEMBER_JOB_TITLE)");
+        urlParams.set("timeGranularity", "ALL");
+        
+        // URN must be encoded inside List()
+        const accountUrn = `urn:li:sponsoredAccount:${accountId}`;
+        urlParams.set("accounts", `List(${encodeURIComponent(accountUrn)})`);
+        
+        // dateRange object should be encoded as a single value
+        const dateRangeStr = `(start:(year:${startYear},month:${startMonth},day:${startDay}),end:(year:${endYear},month:${endMonth},day:${endDay}))`;
+        urlParams.set("dateRange", dateRangeStr);
+        
+        urlParams.set("fields", "impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,pivotValues");
+        urlParams.set("count", "15000");
+        
+        // Campaign filter with encoded URNs
         if (campaignIds && campaignIds.length > 0) {
-          const campaignUrns = campaignIds.slice(0, 20).map((id: string) => `urn:li:sponsoredCampaign:${id}`).join(',');
-          campaignFilter = `&campaigns=List(${campaignUrns})`;
+          const urns = campaignIds.slice(0, 20).map((id: string) => 
+            encodeURIComponent(`urn:li:sponsoredCampaign:${id}`)
+          );
+          urlParams.set("campaigns", `List(${urns.join(",")})`);
           console.log(`[get_job_function_titles_drilldown] Filtering by ${Math.min(campaignIds.length, 20)} campaigns`);
         }
         
-        // Use Statistics Finder with multi-pivots
-        // Format dateRange as object notation per LinkedIn REST API requirements
-        const analyticsUrl = `https://api.linkedin.com/rest/adAnalytics?` +
-          `q=statistics&` +
-          `pivots=List(MEMBER_JOB_FUNCTION,MEMBER_JOB_TITLE)&` +
-          `dateRange=(start:(year:${startYear},month:${startMonth},day:${startDay}),end:(year:${endYear},month:${endMonth},day:${endDay}))&` +
-          `timeGranularity=ALL&` +
-          `accounts=List(urn:li:sponsoredAccount:${accountId})&` +
-          `fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,pivotValues` +
-          campaignFilter;
-        
+        const analyticsUrl = base.toString();
         console.log(`[get_job_function_titles_drilldown] Request URL: ${analyticsUrl}`);
         console.log(`[get_job_function_titles_drilldown] Fetching from Statistics Finder...`);
         
-        const analyticsResponse = await fetch(analyticsUrl, {
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'X-Restli-Protocol-Version': '2.0.0',
-            'LinkedIn-Version': '202511',
-          },
-        });
+        const reqHeaders = {
+          'Authorization': `Bearer ${accessToken}`,
+          'X-Restli-Protocol-Version': '2.0.0',
+          'LinkedIn-Version': '202511',
+        };
+        
+        let analyticsResponse = await fetch(analyticsUrl, { headers: reqHeaders });
+        
+        // If 414 (URI Too Long), retry with query tunneling
+        if (analyticsResponse.status === 414) {
+          console.log(`[get_job_function_titles_drilldown] URL too long (414), retrying with query tunneling...`);
+          
+          analyticsResponse = await fetch(base.origin + base.pathname, {
+            method: 'POST',
+            headers: {
+              ...reqHeaders,
+              'Content-Type': 'application/x-www-form-urlencoded',
+              'X-HTTP-Method-Override': 'GET'
+            },
+            body: urlParams.toString()
+          });
+        }
         
         if (!analyticsResponse.ok) {
           const errorText = await analyticsResponse.text();
-          console.error(`[get_job_function_titles_drilldown] Statistics API error (${analyticsResponse.status}):`, errorText);
+          console.error(`[get_job_function_titles_drilldown] Statistics API error (${analyticsResponse.status}): ${errorText}`);
           return new Response(JSON.stringify({ 
-            error: 'Title-level breakdown unavailable for this account.',
+            error: `LinkedIn API error: ${analyticsResponse.status}`,
+            status: analyticsResponse.status,
             details: errorText,
+            jobFunction: formatPivotValue(jobFunctionUrn, 'MEMBER_JOB_FUNCTION'),
             titles: []
           }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' }
