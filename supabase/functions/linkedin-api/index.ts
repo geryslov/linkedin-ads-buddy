@@ -3499,11 +3499,11 @@ serve(async (req) => {
       }
 
       case 'test_titles_api': {
-        // Test the LinkedIn Titles API access
-        // GET https://api.linkedin.com/rest/titles?q=criteria&name=Engineer
+        // Test the LinkedIn Standardized Titles API access
+        // GET https://api.linkedin.com/v2/standardizedTitles?q=criteria&name=Engineer
         console.log('[test_titles_api] Testing Titles API access...');
         
-        const titlesTestUrl = new URL('https://api.linkedin.com/rest/titles');
+        const titlesTestUrl = new URL('https://api.linkedin.com/v2/standardizedTitles');
         titlesTestUrl.searchParams.set('q', 'criteria');
         titlesTestUrl.searchParams.set('name', 'Engineer');
         
@@ -3541,15 +3541,15 @@ serve(async (req) => {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' }
           });
         } else {
+          // For 404 or other errors, treat as API not available (not a hard error)
           const errorText = await titlesTestResponse.text();
-          console.error(`[test_titles_api] Unexpected status ${statusCode}:`, errorText);
+          console.log(`[test_titles_api] Status ${statusCode} - API not available:`, errorText);
           return new Response(JSON.stringify({ 
-            success: false, 
+            success: true, 
             titlesApiEnabled: false,
-            message: `Unexpected response: ${statusCode}`,
+            message: `Titles API not available (${statusCode}). Using local classification fallback.`,
             error: errorText
           }), {
-            status: statusCode,
             headers: { ...corsHeaders, 'Content-Type': 'application/json' }
           });
         }
