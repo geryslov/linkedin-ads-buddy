@@ -2691,20 +2691,17 @@ serve(async (req) => {
         }
         
         // Use Statistics Finder with multi-pivots
+        // Format dateRange as object notation per LinkedIn REST API requirements
         const analyticsUrl = `https://api.linkedin.com/rest/adAnalytics?` +
           `q=statistics&` +
           `pivots=List(MEMBER_JOB_FUNCTION,MEMBER_JOB_TITLE)&` +
-          `dateRange.start.day=${startDay}&` +
-          `dateRange.start.month=${startMonth}&` +
-          `dateRange.start.year=${startYear}&` +
-          `dateRange.end.day=${endDay}&` +
-          `dateRange.end.month=${endMonth}&` +
-          `dateRange.end.year=${endYear}&` +
+          `dateRange=(start:(year:${startYear},month:${startMonth},day:${startDay}),end:(year:${endYear},month:${endMonth},day:${endDay}))&` +
           `timeGranularity=ALL&` +
           `accounts=List(urn:li:sponsoredAccount:${accountId})&` +
           `fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,pivotValues` +
           campaignFilter;
         
+        console.log(`[get_job_function_titles_drilldown] Request URL: ${analyticsUrl}`);
         console.log(`[get_job_function_titles_drilldown] Fetching from Statistics Finder...`);
         
         const analyticsResponse = await fetch(analyticsUrl, {
