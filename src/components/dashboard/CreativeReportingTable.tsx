@@ -32,7 +32,7 @@ interface CreativeReportingTableProps {
   isLoading: boolean;
 }
 
-type SortKey = 'creativeName' | 'campaignName' | 'type' | 'impressions' | 'clicks' | 'spent' | 'leads' | 'ctr' | 'cpc' | 'cpm' | 'costPerLead';
+type SortKey = 'creativeName' | 'campaignName' | 'type' | 'impressions' | 'clicks' | 'spent' | 'leads' | 'lgfCompletionRate' | 'ctr' | 'cpc' | 'cpm' | 'costPerLead';
 type SortOrder = 'asc' | 'desc';
 type FilterType = 'all' | 'with_spend' | 'with_impressions' | 'with_clicks' | 'with_leads';
 
@@ -131,8 +131,9 @@ export function CreativeReportingTable({ data, isLoading }: CreativeReportingTab
         clicks: acc.clicks + item.clicks,
         spent: acc.spent + item.spent,
         leads: acc.leads + item.leads,
+        lgfFormOpens: acc.lgfFormOpens + item.lgfFormOpens,
       }),
-      { impressions: 0, clicks: 0, spent: 0, leads: 0 }
+      { impressions: 0, clicks: 0, spent: 0, leads: 0, lgfFormOpens: 0 }
     ),
     [filteredData]
   );
@@ -148,6 +149,10 @@ export function CreativeReportingTable({ data, isLoading }: CreativeReportingTab
   const totalCpm = totals.impressions > 0 
     ? ((totals.spent / totals.impressions) * 1000).toFixed(2) 
     : '0.00';
+
+  const totalLgfRate = totals.lgfFormOpens > 0 
+    ? ((totals.leads / totals.lgfFormOpens) * 100).toFixed(1)
+    : '-';
 
   const clearFilters = () => {
     setSearchQuery('');
@@ -266,6 +271,7 @@ export function CreativeReportingTable({ data, isLoading }: CreativeReportingTab
               <SortableHeader label="Clicks" sortKeyName="clicks" />
               <SortableHeader label="Spent" sortKeyName="spent" />
               <SortableHeader label="Leads" sortKeyName="leads" />
+              <SortableHeader label="LGF Rate" sortKeyName="lgfCompletionRate" />
               <SortableHeader label="CTR" sortKeyName="ctr" />
               <SortableHeader label="CPC" sortKeyName="cpc" />
               <SortableHeader label="CPM" sortKeyName="cpm" />
@@ -274,7 +280,7 @@ export function CreativeReportingTable({ data, isLoading }: CreativeReportingTab
           <TableBody>
             {sortedData.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={11} className="text-center py-8 text-muted-foreground">
                   No creatives match your filters
                 </TableCell>
               </TableRow>
@@ -295,6 +301,7 @@ export function CreativeReportingTable({ data, isLoading }: CreativeReportingTab
                     <TableCell>{row.clicks.toLocaleString()}</TableCell>
                     <TableCell>${row.spent.toFixed(2)}</TableCell>
                     <TableCell>{row.leads.toLocaleString()}</TableCell>
+                    <TableCell>{row.lgfCompletionRate > 0 ? `${row.lgfCompletionRate.toFixed(1)}%` : '-'}</TableCell>
                     <TableCell>{row.ctr.toFixed(2)}%</TableCell>
                     <TableCell>${row.cpc.toFixed(2)}</TableCell>
                     <TableCell>${row.cpm.toFixed(2)}</TableCell>
@@ -309,6 +316,7 @@ export function CreativeReportingTable({ data, isLoading }: CreativeReportingTab
                   <TableCell>{totals.clicks.toLocaleString()}</TableCell>
                   <TableCell>${totals.spent.toFixed(2)}</TableCell>
                   <TableCell>{totals.leads.toLocaleString()}</TableCell>
+                  <TableCell>{totalLgfRate === '-' ? '-' : `${totalLgfRate}%`}</TableCell>
                   <TableCell>{totalCtr}%</TableCell>
                   <TableCell>${totalCpc}</TableCell>
                   <TableCell>${totalCpm}</TableCell>

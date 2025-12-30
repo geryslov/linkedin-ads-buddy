@@ -14,6 +14,8 @@ export interface CampaignData {
   clicks: number;
   spent: number;
   leads: number;
+  lgfFormOpens: number;
+  lgfCompletionRate: number;
   ctr: number;
   cpc: number;
   cpm: number;
@@ -137,6 +139,8 @@ export function useCampaignReporting(accessToken: string | null) {
         clicks: el.clicks || 0,
         spent: parseFloat(el.costInLocalCurrency || '0'),
         leads: el.leads || 0,
+        lgfFormOpens: el.lgfFormOpens || 0,
+        lgfCompletionRate: parseFloat(el.lgfCompletionRate || '0'),
         ctr: parseFloat(el.ctr || '0'),
         cpc: parseFloat(el.cpc || '0'),
         cpm: parseFloat(el.cpm || '0'),

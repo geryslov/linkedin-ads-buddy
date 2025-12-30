@@ -39,7 +39,7 @@ interface CampaignReportingTableProps {
   isLoading?: boolean;
 }
 
-type SortField = 'campaignName' | 'status' | 'objectiveType' | 'impressions' | 'clicks' | 'spent' | 'leads' | 'ctr' | 'cpc' | 'cpm' | 'costPerLead';
+type SortField = 'campaignName' | 'status' | 'objectiveType' | 'impressions' | 'clicks' | 'spent' | 'leads' | 'lgfCompletionRate' | 'ctr' | 'cpc' | 'cpm' | 'costPerLead';
 type SortDirection = 'asc' | 'desc';
 
 const STATUS_OPTIONS = [
@@ -292,6 +292,11 @@ export function CampaignReportingTable({ data, isLoading }: CampaignReportingTab
                 </Button>
               </TableHead>
               <TableHead className="text-right">
+                <Button variant="ghost" size="sm" onClick={() => handleSort('lgfCompletionRate')} className="gap-1">
+                  LGF Rate {getSortIcon('lgfCompletionRate')}
+                </Button>
+              </TableHead>
+              <TableHead className="text-right">
                 <Button variant="ghost" size="sm" onClick={() => handleSort('costPerLead')} className="gap-1">
                   CPL {getSortIcon('costPerLead')}
                 </Button>
@@ -301,7 +306,7 @@ export function CampaignReportingTable({ data, isLoading }: CampaignReportingTab
           <TableBody>
             {filteredAndSortedData.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={11} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={12} className="text-center py-8 text-muted-foreground">
                   No campaigns match the selected filters
                 </TableCell>
               </TableRow>
@@ -342,6 +347,9 @@ export function CampaignReportingTable({ data, isLoading }: CampaignReportingTab
                   </TableCell>
                   <TableCell className="text-right">
                     ${campaign.cpm.toFixed(2)}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {campaign.lgfCompletionRate > 0 ? `${campaign.lgfCompletionRate.toFixed(1)}%` : '-'}
                   </TableCell>
                   <TableCell className="text-right">
                     ${campaign.costPerLead.toFixed(2)}
