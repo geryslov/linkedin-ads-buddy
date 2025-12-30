@@ -2661,6 +2661,7 @@ serve(async (req) => {
 
       case 'get_job_titles_index': {
         // Fetches ALL job titles with metrics using stable single-pivot endpoint
+        // Then resolves title IDs to human-readable names via Standardized Titles API
         const { accountId, dateRange, campaignIds } = params || {};
         const startDate = dateRange?.start || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
         const endDate = dateRange?.end || new Date().toISOString().split('T')[0];
@@ -2712,24 +2713,41 @@ serve(async (req) => {
         const analyticsData = await analyticsResponse.json();
         console.log(`[get_job_titles_index] Received ${analyticsData.elements?.length || 0} title rows`);
         
-        // Process title data
-        const titles = (analyticsData.elements || []).map((row: any) => {
+        // Extract title IDs from pivot values
+        // Format: urn:li:title:12345 -> 12345
+        const extractTitleId = (pivotValue: string): string => {
+          if (!pivotValue) return '';
+          if (pivotValue.startsWith('urn:li:title:')) {
+            return pivotValue.split(':').pop() || '';
+          }
+          return pivotValue;
+        };
+        
+        // Build map of titleId -> metrics
+        const titleMetrics: Record<string, any> = {};
+        const titleIds: string[] = [];
+        
+        for (const row of (analyticsData.elements || [])) {
           const titleUrn = row.pivotValue || '';
-          const titleParts = titleUrn.split(':');
-          const title = titleParts[titleParts.length - 1] || 'Unknown';
+          const titleId = extractTitleId(titleUrn);
+          if (!titleId) continue;
           
           const impressions = row.impressions || 0;
           const clicks = row.clicks || 0;
           const spent = Number(row.costInLocalCurrency || 0);
           const leads = (row.oneClickLeads || 0) + (row.externalWebsiteConversions || 0);
           
+          // Skip rows with no activity
+          if (impressions === 0 && spent === 0) continue;
+          
           const ctr = impressions > 0 ? (clicks / impressions) * 100 : 0;
           const cpc = clicks > 0 ? spent / clicks : 0;
           const cpm = impressions > 0 ? (spent / impressions) * 1000 : 0;
           const cpl = leads > 0 ? spent / leads : 0;
           
-          return {
-            title,
+          titleMetrics[titleId] = {
+            titleId,
+            titleUrn,
             impressions,
             clicks,
             spent,
@@ -2739,12 +2757,169 @@ serve(async (req) => {
             cpm,
             cpl,
           };
+          titleIds.push(titleId);
+        }
+        
+        console.log(`[get_job_titles_index] Found ${titleIds.length} title IDs with activity`);
+        
+        if (titleIds.length === 0) {
+          return new Response(JSON.stringify({
+            titles: [],
+            metadata: {
+              accountId,
+              dateRange: { start: startDate, end: endDate },
+              totalTitles: 0,
+            }
+          }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+        
+        // Check DB cache for resolved title metadata
+        const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+        const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+        const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+        const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
+        
+        // Check cache for existing metadata (TTL: 30 days)
+        const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+        const { data: cachedMetadata, error: cacheError } = await supabaseAdmin
+          .from('title_metadata_cache')
+          .select('*')
+          .in('title_id', titleIds)
+          .gte('updated_at', thirtyDaysAgo);
+        
+        if (cacheError) {
+          console.error(`[get_job_titles_index] Cache lookup error:`, cacheError);
+        }
+        
+        const cachedMap = new Map<string, any>();
+        for (const row of (cachedMetadata || [])) {
+          cachedMap.set(row.title_id, row);
+        }
+        console.log(`[get_job_titles_index] Found ${cachedMap.size} cached title metadata entries`);
+        
+        // Find title IDs that need resolution
+        const uncachedIds = titleIds.filter(id => !cachedMap.has(id));
+        console.log(`[get_job_titles_index] Need to resolve ${uncachedIds.length} title IDs`);
+        
+        // Resolve uncached titles via LinkedIn Standardized Titles API
+        const newMetadata: any[] = [];
+        
+        if (uncachedIds.length > 0) {
+          // Process in batches of 50
+          const batchSize = 50;
+          
+          for (let i = 0; i < uncachedIds.length; i += batchSize) {
+            const batchIds = uncachedIds.slice(i, i + batchSize);
+            
+            // Build batch request URL for Standardized Titles API
+            // GET https://api.linkedin.com/v2/standardizedTitles?ids=List(123,456,789)
+            const idsParam = `ids=List(${batchIds.join(',')})`;
+            const titlesApiUrl = `https://api.linkedin.com/v2/standardizedTitles?${idsParam}`;
+            
+            console.log(`[get_job_titles_index] Fetching batch ${Math.floor(i/batchSize) + 1}, ${batchIds.length} titles`);
+            
+            try {
+              const titlesResponse = await fetch(titlesApiUrl, {
+                headers: { 
+                  'Authorization': `Bearer ${accessToken}`,
+                  'X-Restli-Protocol-Version': '2.0.0',
+                },
+              });
+              
+              if (titlesResponse.status === 403) {
+                console.error(`[get_job_titles_index] Titles API access denied (403)`);
+                // Return what we have with an error flag
+                return new Response(JSON.stringify({
+                  error: 'Titles API access required to resolve job title IDs to names. Please ensure your LinkedIn app has the required permissions.',
+                  titles: [],
+                  requiresTitlesApiAccess: true,
+                }), {
+                  headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+                });
+              }
+              
+              if (!titlesResponse.ok) {
+                const errorText = await titlesResponse.text();
+                console.error(`[get_job_titles_index] Titles API error (${titlesResponse.status}): ${errorText}`);
+                // Continue with cached data only
+                continue;
+              }
+              
+              const titlesData = await titlesResponse.json();
+              const results = titlesData.results || {};
+              
+              // Process each resolved title
+              for (const [titleId, titleInfo] of Object.entries(results)) {
+                if (!titleInfo) continue;
+                const info = titleInfo as any;
+                
+                // Extract name and function URN
+                const name = info.name?.localized?.en_US || info.name?.preferredLocale?.name || `Title ${titleId}`;
+                const functionUrn = info.jobFunction || null;
+                const superTitleUrn = info.superTitle || null;
+                
+                cachedMap.set(titleId, {
+                  title_id: titleId,
+                  name,
+                  function_urn: functionUrn,
+                  super_title_urn: superTitleUrn,
+                });
+                
+                newMetadata.push({
+                  title_id: titleId,
+                  name,
+                  function_urn: functionUrn,
+                  super_title_urn: superTitleUrn,
+                });
+              }
+            } catch (fetchError) {
+              console.error(`[get_job_titles_index] Titles API fetch error:`, fetchError);
+              // Continue with cached data only
+            }
+          }
+          
+          // Cache new metadata
+          if (newMetadata.length > 0) {
+            console.log(`[get_job_titles_index] Caching ${newMetadata.length} new title metadata entries`);
+            const { error: insertError } = await supabaseAdmin
+              .from('title_metadata_cache')
+              .upsert(newMetadata, { onConflict: 'title_id' });
+            
+            if (insertError) {
+              console.error(`[get_job_titles_index] Cache insert error:`, insertError);
+            }
+          }
+        }
+        
+        // Build final titles array with resolved names and metrics
+        const titles = titleIds.map(titleId => {
+          const metrics = titleMetrics[titleId];
+          const metadata = cachedMap.get(titleId);
+          
+          return {
+            titleId,
+            title: metadata?.name || `Title ID: ${titleId}`,
+            functionUrn: metadata?.function_urn || null,
+            superTitleUrn: metadata?.super_title_urn || null,
+            impressions: metrics.impressions,
+            clicks: metrics.clicks,
+            spent: metrics.spent,
+            leads: metrics.leads,
+            ctr: metrics.ctr,
+            cpc: metrics.cpc,
+            cpm: metrics.cpm,
+            cpl: metrics.cpl,
+          };
         }).filter((t: any) => t.impressions > 0 || t.spent > 0);
         
         // Sort by impressions descending
         titles.sort((a: any, b: any) => b.impressions - a.impressions);
         
-        console.log(`[get_job_titles_index] Complete. Found ${titles.length} job titles with activity`);
+        // Count how many have resolved names vs fallback
+        const resolvedCount = titles.filter(t => !t.title.startsWith('Title ID:')).length;
+        console.log(`[get_job_titles_index] Complete. ${titles.length} titles, ${resolvedCount} with resolved names`);
         
         return new Response(JSON.stringify({
           titles,
@@ -2752,6 +2927,7 @@ serve(async (req) => {
             accountId,
             dateRange: { start: startDate, end: endDate },
             totalTitles: titles.length,
+            resolvedTitles: resolvedCount,
           }
         }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }

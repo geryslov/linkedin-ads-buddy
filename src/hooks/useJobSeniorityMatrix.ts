@@ -26,7 +26,10 @@ export interface MatrixData {
 }
 
 export interface TitleData {
+  titleId: string;
   title: string;
+  functionUrn: string | null;
+  superTitleUrn: string | null;
   impressions: number;
   clicks: number;
   spent: number;
@@ -37,22 +40,11 @@ export interface TitleData {
   cpl: number;
 }
 
-export interface TitleMapping {
-  job_function_id: string;
-  job_function_label: string;
-  confidence: number;
-  method: 'rules' | 'user_override' | 'ai';
-}
-
-export interface TitleWithMapping extends TitleData {
-  mapping?: TitleMapping;
-}
-
 export interface TitleDrilldownData {
   jobFunction: string;
   jobFunctionUrn: string;
   jobFunctionId: string;
-  titles: TitleWithMapping[];
+  titles: TitleData[];
   allTitlesCount: number;
 }
 
@@ -98,9 +90,8 @@ export function useJobSeniorityMatrix(accessToken: string | null) {
   const [isTitleLoading, setIsTitleLoading] = useState(false);
   const [titleError, setTitleError] = useState<string | null>(null);
   
-  // Cache for titles index and mappings
+  // Cache for titles index (includes resolved names and functionUrn from LinkedIn API)
   const [titlesIndex, setTitlesIndex] = useState<TitleData[]>([]);
-  const [titleMappings, setTitleMappings] = useState<Record<string, TitleMapping>>({});
   const [titlesIndexDateRange, setTitlesIndexDateRange] = useState<string>('');
   
   const { toast } = useToast();
@@ -297,7 +288,7 @@ export function useJobSeniorityMatrix(accessToken: string | null) {
     return parts[parts.length - 1] || '0';
   };
 
-  // Fetch title drill-down data using new stable approach
+  // Fetch title drill-down data using resolved metadata from LinkedIn API
   const fetchTitleDrilldown = useCallback(async (accountId: string, jobFunctionUrn: string, jobFunctionLabel: string) => {
     if (!accessToken || !accountId) return;
     
@@ -331,7 +322,15 @@ export function useJobSeniorityMatrix(accessToken: string | null) {
         });
 
         if (indexError) throw indexError;
-        if (indexData.error) throw new Error(indexData.error);
+        
+        // Check for Titles API access error
+        if (indexData.requiresTitlesApiAccess) {
+          throw new Error(indexData.error || 'Titles API access required to resolve job title IDs to names.');
+        }
+        
+        if (indexData.error && !indexData.titles?.length) {
+          throw new Error(indexData.error);
+        }
         
         titles = indexData.titles || [];
         setTitlesIndex(titles);
@@ -339,42 +338,13 @@ export function useJobSeniorityMatrix(accessToken: string | null) {
         console.log('Titles index loaded:', titles.length, 'titles');
       }
       
-      // Resolve mappings for any new titles
-      const titlesToResolve = titles
-        .map(t => t.title)
-        .filter(t => !titleMappings[t]);
-      
-      if (titlesToResolve.length > 0) {
-        console.log('Resolving mappings for', titlesToResolve.length, 'new titles...');
-        
-        const { data: mappingsData, error: mappingsError } = await supabase.functions.invoke('linkedin-api', {
-          body: { 
-            action: 'resolve_titles_to_functions', 
-            accessToken,
-            params: { titles: titlesToResolve }
-          }
-        });
-
-        if (mappingsError) throw mappingsError;
-        
-        const newMappings = mappingsData.mappings || {};
-        setTitleMappings(prev => ({ ...prev, ...newMappings }));
-        console.log('Mappings resolved:', Object.keys(newMappings).length);
-        
-        // Merge with existing mappings for filtering
-        Object.assign(titleMappings, newMappings);
-      }
-      
-      // Filter titles to selected function
-      const filteredTitles: TitleWithMapping[] = titles
-        .filter(t => {
-          const mapping = titleMappings[t.title];
-          return mapping && mapping.job_function_id === jobFunctionId;
-        })
-        .map(t => ({
-          ...t,
-          mapping: titleMappings[t.title],
-        }));
+      // Filter titles by functionUrn from LinkedIn's resolved metadata
+      // functionUrn format: urn:li:function:8 -> extract "8" to compare
+      const filteredTitles = titles.filter(t => {
+        if (!t.functionUrn) return false;
+        const titleFunctionId = extractFunctionId(t.functionUrn);
+        return titleFunctionId === jobFunctionId;
+      });
       
       console.log('Filtered titles for function', jobFunctionLabel, ':', filteredTitles.length);
       
@@ -396,62 +366,7 @@ export function useJobSeniorityMatrix(accessToken: string | null) {
     } finally {
       setIsTitleLoading(false);
     }
-  }, [accessToken, dateRange, selectedCampaignIds, titlesIndex, titleMappings, titlesIndexDateRange, toast]);
-
-  // Override a title mapping
-  const overrideTitleMapping = useCallback(async (
-    title: string,
-    newFunctionId: string,
-    newFunctionLabel: string,
-    reason?: string
-  ) => {
-    try {
-      const normalizedTitle = title.toLowerCase().trim().replace(/\s+/g, ' ');
-      
-      const { data, error } = await supabase.functions.invoke('linkedin-api', {
-        body: { 
-          action: 'override_title_mapping', 
-          accessToken,
-          params: { 
-            normalizedTitle,
-            originalTitle: title,
-            newFunctionId,
-            newFunctionLabel,
-            reason,
-          }
-        }
-      });
-
-      if (error) throw error;
-      if (data.error) throw new Error(data.error);
-      
-      // Update local mappings cache
-      setTitleMappings(prev => ({
-        ...prev,
-        [title]: {
-          job_function_id: newFunctionId,
-          job_function_label: newFunctionLabel,
-          confidence: 1.0,
-          method: 'user_override',
-        },
-      }));
-      
-      toast({
-        title: 'Classification updated',
-        description: `"${title}" is now classified as ${newFunctionLabel}`,
-      });
-      
-      return true;
-    } catch (err: any) {
-      console.error('Override mapping error:', err);
-      toast({
-        title: 'Error',
-        description: err.message || 'Failed to update classification',
-        variant: 'destructive',
-      });
-      return false;
-    }
-  }, [accessToken, toast]);
+  }, [accessToken, dateRange, selectedCampaignIds, titlesIndex, titlesIndexDateRange, toast]);
 
   const closeTitleDrilldown = useCallback(() => {
     setExpandedFunction(null);
@@ -485,7 +400,6 @@ export function useJobSeniorityMatrix(accessToken: string | null) {
     titleError,
     fetchTitleDrilldown,
     closeTitleDrilldown,
-    overrideTitleMapping,
     jobFunctionOptions,
   };
 }
