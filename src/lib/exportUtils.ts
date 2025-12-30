@@ -117,3 +117,16 @@ export const accountStructureColumns = [
   { key: 'creativeName', label: 'Creative' },
   { key: 'status', label: 'Status' },
 ];
+
+export const jobSeniorityMatrixColumns = [
+  { key: 'jobFunction', label: 'Job Function' },
+  { key: 'seniority', label: 'Seniority' },
+  { key: 'impressions', label: 'Impressions' },
+  { key: 'clicks', label: 'Clicks' },
+  { key: 'spent', label: 'Spent' },
+  { key: 'leads', label: 'Leads' },
+  { key: 'ctr', label: 'CTR %' },
+  { key: 'cpc', label: 'CPC' },
+  { key: 'cpm', label: 'CPM' },
+  { key: 'cpl', label: 'CPL' },
+];
