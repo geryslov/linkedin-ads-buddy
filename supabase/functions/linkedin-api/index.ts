@@ -2659,83 +2659,50 @@ serve(async (req) => {
         });
       }
 
-      case 'get_job_function_titles_drilldown': {
-        // Fetches REAL job titles for a given job function using Statistics Finder with multi-pivots
-        const { accountId, dateRange, campaignIds, jobFunctionUrn, metric } = params || {};
+      case 'get_job_titles_index': {
+        // Fetches ALL job titles with metrics using stable single-pivot endpoint
+        const { accountId, dateRange, campaignIds } = params || {};
         const startDate = dateRange?.start || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
         const endDate = dateRange?.end || new Date().toISOString().split('T')[0];
-        const sortMetric = metric || 'impressions';
         
         // Parse date strings directly to avoid timezone issues
         const [startYear, startMonth, startDay] = startDate.split('-').map(Number);
         const [endYear, endMonth, endDay] = endDate.split('-').map(Number);
         
-        console.log(`[get_job_function_titles_drilldown] Starting for account ${accountId}, jobFunction: ${jobFunctionUrn}, date range: ${startDate} to ${endDate}`);
+        console.log(`[get_job_titles_index] Starting for account ${accountId}, date range: ${startDate} to ${endDate}`);
 
-        const jobFunctionLabel = formatPivotValue(jobFunctionUrn, 'MEMBER_JOB_FUNCTION');
-
-        // Build REST adAnalytics Statistics Finder URL (multi pivots)
-        const base = new URL("https://api.linkedin.com/rest/adAnalytics");
-        const p = base.searchParams;
-
-        p.set("q", "statistics");
-        p.set("pivots", "List(MEMBER_JOB_FUNCTION,MEMBER_JOB_TITLE)");
-        p.set("timeGranularity", "ALL");
-
-        // IMPORTANT: use accounts=List(...) not accounts[0]
-        p.set("accounts", `List(urn:li:sponsoredAccount:${accountId})`);
-
-        // IMPORTANT: dateRange must be Rest.li object syntax (unencoded here; URLSearchParams will encode once)
-        p.set(
-          "dateRange",
-          `(start:(year:${startYear},month:${startMonth},day:${startDay}),end:(year:${endYear},month:${endMonth},day:${endDay}))`
-        );
-
-        // Optional campaign filter — also Rest.li List()
+        // Build stable /v2/adAnalyticsV2 URL with single MEMBER_JOB_TITLE pivot
+        let analyticsUrl = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
+          `pivot=MEMBER_JOB_TITLE&timeGranularity=ALL&` +
+          `dateRange.start.day=${startDay}&` +
+          `dateRange.start.month=${startMonth}&` +
+          `dateRange.start.year=${startYear}&` +
+          `dateRange.end.day=${endDay}&` +
+          `dateRange.end.month=${endMonth}&` +
+          `dateRange.end.year=${endYear}&` +
+          `accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
+          `fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,pivotValue&` +
+          `count=10000`;
+        
+        // Add campaign filter if provided
         if (campaignIds?.length) {
-          const campaignUrns = campaignIds.slice(0, 20).map((id: string) => `urn:li:sponsoredCampaign:${id}`);
-          p.set("campaigns", `List(${campaignUrns.join(",")})`);
-        }
-
-        p.set("fields", "impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,pivotValues");
-        p.set("count", "15000");
-
-        const analyticsUrl = base.toString();
-        console.log(`[get_job_function_titles_drilldown] Request URL: ${analyticsUrl}`);
-        console.log(`[get_job_function_titles_drilldown] Fetching Job Titles via Statistics Finder with dual pivots...`);
-        
-        const reqHeaders = {
-          'Authorization': `Bearer ${accessToken}`,
-          'X-Restli-Protocol-Version': '2.0.0',
-          'LinkedIn-Version': '202511',
-        };
-        
-        let analyticsResponse = await fetch(analyticsUrl, { headers: reqHeaders });
-        
-        // If 414 (URI Too Long), retry with query tunneling
-        if (analyticsResponse.status === 414) {
-          console.log(`[get_job_function_titles_drilldown] URL too long (414), retrying with query tunneling...`);
-          
-          analyticsResponse = await fetch(base.origin + base.pathname, {
-            method: 'POST',
-            headers: {
-              ...reqHeaders,
-              'Content-Type': 'application/x-www-form-urlencoded',
-              'X-HTTP-Method-Override': 'GET'
-            },
-            body: p.toString()
+          campaignIds.slice(0, 20).forEach((id: string, i: number) => {
+            analyticsUrl += `&campaigns[${i}]=urn:li:sponsoredCampaign:${id}`;
           });
         }
         
+        console.log(`[get_job_titles_index] Fetching job titles...`);
+        const analyticsResponse = await fetch(analyticsUrl, {
+          headers: { 'Authorization': `Bearer ${accessToken}` },
+        });
+        
         if (!analyticsResponse.ok) {
           const errorText = await analyticsResponse.text();
-          console.error(`[get_job_function_titles_drilldown] Analytics API error (${analyticsResponse.status}): ${errorText}`);
+          console.error(`[get_job_titles_index] Analytics API error (${analyticsResponse.status}): ${errorText}`);
           return new Response(JSON.stringify({ 
             error: `LinkedIn API error: ${analyticsResponse.status}`,
             status: analyticsResponse.status,
             details: errorText,
-            requestUrl: analyticsUrl,
-            jobFunction: jobFunctionLabel,
             titles: []
           }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -2743,66 +2710,43 @@ serve(async (req) => {
         }
         
         const analyticsData = await analyticsResponse.json();
-        console.log(`[get_job_function_titles_drilldown] Received ${analyticsData.elements?.length || 0} rows from dual-pivot query`);
+        console.log(`[get_job_titles_index] Received ${analyticsData.elements?.length || 0} title rows`);
         
-        // Process job title data - dual pivot with pivotValues array
-        const titleMetrics: Record<string, { impressions: number; clicks: number; spent: number; leads: number }> = {};
-
-        for (const row of (analyticsData.elements || [])) {
-          // pivotValues contains BOTH pivots in order
-          // Need to find the function and title values
-          const pivs = row.pivotValues || [];
-
-          const fn = pivs.find((x: any) => x.pivot === "MEMBER_JOB_FUNCTION")?.value;
-          const title = pivs.find((x: any) => x.pivot === "MEMBER_JOB_TITLE")?.value;
-
-          // Filter to clicked job function
-          if (!fn || !title) continue;
-
-          // jobFunctionUrn should match what fn looks like.
-          // If jobFunctionUrn is numeric or different format, normalize before compare.
-          if (fn !== jobFunctionUrn) continue;
-
-          const existing = titleMetrics[title] || { impressions: 0, clicks: 0, spent: 0, leads: 0 };
-          existing.impressions += row.impressions || 0;
-          existing.clicks += row.clicks || 0;
-          existing.spent += Number(row.costInLocalCurrency || 0);
-          existing.leads += (row.oneClickLeads || 0) + (row.externalWebsiteConversions || 0);
-          titleMetrics[title] = existing;
-        }
-        
-        // Build results array with computed metrics
-        const titles = Object.entries(titleMetrics).map(([title, metrics]) => {
-          const ctr = metrics.impressions > 0 ? (metrics.clicks / metrics.impressions) * 100 : 0;
-          const cpc = metrics.clicks > 0 ? metrics.spent / metrics.clicks : 0;
-          const cpm = metrics.impressions > 0 ? (metrics.spent / metrics.impressions) * 1000 : 0;
-          const cpl = metrics.leads > 0 ? metrics.spent / metrics.leads : 0;
+        // Process title data
+        const titles = (analyticsData.elements || []).map((row: any) => {
+          const titleUrn = row.pivotValue || '';
+          const titleParts = titleUrn.split(':');
+          const title = titleParts[titleParts.length - 1] || 'Unknown';
+          
+          const impressions = row.impressions || 0;
+          const clicks = row.clicks || 0;
+          const spent = Number(row.costInLocalCurrency || 0);
+          const leads = (row.oneClickLeads || 0) + (row.externalWebsiteConversions || 0);
+          
+          const ctr = impressions > 0 ? (clicks / impressions) * 100 : 0;
+          const cpc = clicks > 0 ? spent / clicks : 0;
+          const cpm = impressions > 0 ? (spent / impressions) * 1000 : 0;
+          const cpl = leads > 0 ? spent / leads : 0;
           
           return {
             title,
-            impressions: metrics.impressions,
-            clicks: metrics.clicks,
-            spent: metrics.spent,
-            leads: metrics.leads,
+            impressions,
+            clicks,
+            spent,
+            leads,
             ctr,
             cpc,
             cpm,
             cpl,
           };
-        });
+        }).filter((t: any) => t.impressions > 0 || t.spent > 0);
         
-        // Sort by the selected metric descending
-        titles.sort((a, b) => {
-          const aVal = (a as any)[sortMetric] || 0;
-          const bVal = (b as any)[sortMetric] || 0;
-          return bVal - aVal;
-        });
+        // Sort by impressions descending
+        titles.sort((a: any, b: any) => b.impressions - a.impressions);
         
-        console.log(`[get_job_function_titles_drilldown] Complete. Found ${titles.length} job titles for function ${jobFunctionLabel}`);
+        console.log(`[get_job_titles_index] Complete. Found ${titles.length} job titles with activity`);
         
         return new Response(JSON.stringify({
-          jobFunction: jobFunctionLabel,
-          jobFunctionUrn,
           titles,
           metadata: {
             accountId,
@@ -2810,6 +2754,215 @@ serve(async (req) => {
             totalTitles: titles.length,
           }
         }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+      case 'resolve_titles_to_functions': {
+        // Maps job titles to job functions using DB cache + rules classifier
+        const { titles } = params || {};
+        
+        if (!titles || !Array.isArray(titles) || titles.length === 0) {
+          return new Response(JSON.stringify({ mappings: {} }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+        
+        console.log(`[resolve_titles_to_functions] Resolving ${titles.length} titles`);
+        
+        // Helper: Normalize title for consistent matching
+        const normalizeTitle = (title: string): string => {
+          return title.toLowerCase().trim().replace(/\s+/g, ' ');
+        };
+        
+        // Job function keywords for rules-based classification
+        const FUNCTION_KEYWORDS: Record<string, { id: string; keywords: string[] }> = {
+          'Accounting': { id: '1', keywords: ['accountant', 'accounting', 'bookkeeper', 'auditor', 'cpa', 'controller', 'accounts payable', 'accounts receivable'] },
+          'Administrative': { id: '2', keywords: ['administrative', 'admin', 'secretary', 'receptionist', 'office manager', 'executive assistant', 'office coordinator'] },
+          'Arts and Design': { id: '3', keywords: ['designer', 'artist', 'creative director', 'ux', 'ui', 'graphic', 'illustrator', 'art director', 'visual designer'] },
+          'Business Development': { id: '4', keywords: ['business development', 'bd', 'partnerships', 'strategic partnerships', 'alliance'] },
+          'Community & Social Services': { id: '5', keywords: ['social worker', 'community', 'nonprofit', 'counselor', 'case manager', 'outreach'] },
+          'Consulting': { id: '6', keywords: ['consultant', 'consulting', 'advisor', 'advisory'] },
+          'Education': { id: '7', keywords: ['teacher', 'professor', 'instructor', 'educator', 'tutor', 'academic', 'dean', 'principal'] },
+          'Engineering': { id: '8', keywords: ['engineer', 'developer', 'architect', 'devops', 'sre', 'software', 'backend', 'frontend', 'fullstack', 'qa engineer', 'test engineer', 'data engineer', 'ml engineer', 'platform engineer'] },
+          'Entrepreneurship': { id: '9', keywords: ['founder', 'co-founder', 'entrepreneur', 'startup'] },
+          'Finance': { id: '10', keywords: ['finance', 'financial', 'analyst', 'investment', 'portfolio', 'treasury', 'risk', 'cfo', 'financial analyst'] },
+          'Healthcare Services': { id: '11', keywords: ['nurse', 'doctor', 'physician', 'medical', 'healthcare', 'clinical', 'therapist', 'pharmacist', 'surgeon'] },
+          'Human Resources': { id: '12', keywords: ['hr', 'human resources', 'recruiter', 'talent', 'people operations', 'hrbp', 'benefits', 'compensation', 'learning and development'] },
+          'Information Technology': { id: '13', keywords: ['it', 'information technology', 'system administrator', 'network', 'helpdesk', 'support engineer', 'infrastructure', 'security analyst', 'cybersecurity'] },
+          'Legal': { id: '14', keywords: ['lawyer', 'attorney', 'legal', 'paralegal', 'counsel', 'compliance', 'contracts'] },
+          'Marketing': { id: '15', keywords: ['marketing', 'growth', 'brand', 'content', 'seo', 'demand gen', 'digital marketing', 'social media', 'performance marketing', 'cmo', 'marketing manager'] },
+          'Media & Communications': { id: '16', keywords: ['journalist', 'writer', 'editor', 'communications', 'pr', 'public relations', 'media', 'copywriter'] },
+          'Military & Protective Services': { id: '17', keywords: ['military', 'police', 'security', 'veteran', 'officer', 'guard'] },
+          'Operations': { id: '18', keywords: ['operations', 'ops', 'logistics', 'supply chain', 'warehouse', 'fulfillment', 'coo', 'operations manager'] },
+          'Product Management': { id: '19', keywords: ['product manager', 'product owner', 'product lead', 'head of product', 'vp product', 'cpo', 'product director'] },
+          'Program & Project Management': { id: '20', keywords: ['project manager', 'program manager', 'scrum master', 'pmo', 'delivery manager', 'agile coach'] },
+          'Purchasing': { id: '21', keywords: ['purchasing', 'procurement', 'buyer', 'sourcing', 'vendor management'] },
+          'Quality Assurance': { id: '22', keywords: ['quality assurance', 'qa', 'quality control', 'qc', 'testing', 'test engineer', 'quality manager'] },
+          'Real Estate': { id: '23', keywords: ['real estate', 'realtor', 'broker', 'property manager', 'leasing'] },
+          'Research': { id: '24', keywords: ['researcher', 'research', 'scientist', 'r&d', 'lab', 'phd', 'postdoc'] },
+          'Sales': { id: '25', keywords: ['sales', 'account executive', 'sdr', 'bdr', 'business development rep', 'closer', 'sales manager', 'ae', 'account manager', 'sales director', 'vp sales'] },
+          'Support': { id: '26', keywords: ['support', 'customer success', 'customer service', 'help desk', 'technical support', 'customer experience'] },
+        };
+        
+        // Rules classifier
+        const classifyTitle = (title: string): { functionId: string; functionLabel: string; confidence: number } => {
+          const lower = title.toLowerCase();
+          const scores: Record<string, number> = {};
+          
+          for (const [func, config] of Object.entries(FUNCTION_KEYWORDS)) {
+            let score = 0;
+            for (const kw of config.keywords) {
+              if (lower.includes(kw)) {
+                // Longer keywords get higher score
+                score += kw.length / 5;
+              }
+            }
+            if (score > 0) scores[func] = score;
+          }
+          
+          const sorted = Object.entries(scores).sort((a, b) => b[1] - a[1]);
+          if (sorted.length === 0) {
+            return { functionId: '0', functionLabel: 'Unknown', confidence: 0 };
+          }
+          
+          const [bestFunc, bestScore] = sorted[0];
+          const confidence = Math.min(bestScore / 3, 1);
+          
+          return {
+            functionId: FUNCTION_KEYWORDS[bestFunc].id,
+            functionLabel: bestFunc,
+            confidence: Math.round(confidence * 100) / 100,
+          };
+        };
+        
+        // Normalize all titles
+        const normalizedTitles = titles.map((t: string) => normalizeTitle(t));
+        
+        // Check DB cache for existing mappings (use service role for insert/select)
+        const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+        const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+        
+        const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+        const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
+        
+        const { data: cachedData, error: cacheError } = await supabaseAdmin
+          .from('title_function_map')
+          .select('*')
+          .in('normalized_title', normalizedTitles);
+        
+        if (cacheError) {
+          console.error(`[resolve_titles_to_functions] Cache lookup error:`, cacheError);
+        }
+        
+        const cachedMap = new Map<string, any>();
+        for (const row of (cachedData || [])) {
+          cachedMap.set(row.normalized_title, row);
+        }
+        
+        console.log(`[resolve_titles_to_functions] Found ${cachedMap.size} cached mappings`);
+        
+        // Process each title
+        const mappings: Record<string, any> = {};
+        const newMappings: any[] = [];
+        
+        for (let i = 0; i < titles.length; i++) {
+          const originalTitle = titles[i];
+          const normalized = normalizedTitles[i];
+          
+          const cached = cachedMap.get(normalized);
+          if (cached) {
+            mappings[originalTitle] = {
+              job_function_id: cached.job_function_id,
+              job_function_label: cached.job_function_label,
+              confidence: cached.confidence,
+              method: cached.method,
+            };
+          } else {
+            // Classify using rules
+            const classification = classifyTitle(originalTitle);
+            mappings[originalTitle] = {
+              job_function_id: classification.functionId,
+              job_function_label: classification.functionLabel,
+              confidence: classification.confidence,
+              method: 'rules',
+            };
+            
+            // Prepare for DB insert
+            newMappings.push({
+              normalized_title: normalized,
+              original_title: originalTitle,
+              job_function_id: classification.functionId,
+              job_function_label: classification.functionLabel,
+              confidence: classification.confidence,
+              method: 'rules',
+            });
+          }
+        }
+        
+        // Bulk insert new mappings
+        if (newMappings.length > 0) {
+          console.log(`[resolve_titles_to_functions] Inserting ${newMappings.length} new mappings`);
+          const { error: insertError } = await supabaseAdmin
+            .from('title_function_map')
+            .upsert(newMappings, { onConflict: 'normalized_title' });
+          
+          if (insertError) {
+            console.error(`[resolve_titles_to_functions] Insert error:`, insertError);
+          }
+        }
+        
+        console.log(`[resolve_titles_to_functions] Complete. Resolved ${Object.keys(mappings).length} titles`);
+        
+        return new Response(JSON.stringify({ mappings }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+      case 'override_title_mapping': {
+        // Allow users to correct title-to-function mappings
+        const { normalizedTitle, originalTitle, newFunctionId, newFunctionLabel, reason, userId } = params || {};
+        
+        if (!normalizedTitle || !newFunctionId || !newFunctionLabel) {
+          return new Response(JSON.stringify({ error: 'Missing required parameters' }), {
+            status: 400,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+        
+        console.log(`[override_title_mapping] Overriding ${normalizedTitle} to ${newFunctionLabel}`);
+        
+        const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+        const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+        
+        const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+        const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
+        
+        const { error: updateError } = await supabaseAdmin
+          .from('title_function_map')
+          .upsert({
+            normalized_title: normalizedTitle,
+            original_title: originalTitle || normalizedTitle,
+            job_function_id: newFunctionId,
+            job_function_label: newFunctionLabel,
+            confidence: 1.0,
+            method: 'user_override',
+            overridden_by: userId || null,
+            override_reason: reason || null,
+            updated_at: new Date().toISOString(),
+          }, { onConflict: 'normalized_title' });
+        
+        if (updateError) {
+          console.error(`[override_title_mapping] Update error:`, updateError);
+          return new Response(JSON.stringify({ error: updateError.message }), {
+            status: 500,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+        
+        console.log(`[override_title_mapping] Successfully overridden`);
+        
+        return new Response(JSON.stringify({ success: true }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
       }

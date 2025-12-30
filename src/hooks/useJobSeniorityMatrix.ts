@@ -37,10 +37,23 @@ export interface TitleData {
   cpl: number;
 }
 
+export interface TitleMapping {
+  job_function_id: string;
+  job_function_label: string;
+  confidence: number;
+  method: 'rules' | 'user_override' | 'ai';
+}
+
+export interface TitleWithMapping extends TitleData {
+  mapping?: TitleMapping;
+}
+
 export interface TitleDrilldownData {
   jobFunction: string;
   jobFunctionUrn: string;
-  titles: TitleData[];
+  jobFunctionId: string;
+  titles: TitleWithMapping[];
+  allTitlesCount: number;
 }
 
 export type MetricType = 'impressions' | 'clicks' | 'spent' | 'leads' | 'ctr' | 'cpc' | 'cpm' | 'cpl';
@@ -54,6 +67,19 @@ export interface TimeFrameOption {
 
 // Standard seniority order for columns
 const SENIORITY_ORDER = ['Entry', 'Senior', 'Manager', 'Director', 'VP', 'CXO', 'Partner', 'Owner', 'Training', 'Unpaid'];
+
+// Job function ID to label mapping
+const JOB_FUNCTION_MAP: Record<string, string> = {
+  '1': 'Accounting', '2': 'Administrative', '3': 'Arts and Design',
+  '4': 'Business Development', '5': 'Community & Social Services', '6': 'Consulting',
+  '7': 'Education', '8': 'Engineering', '9': 'Entrepreneurship',
+  '10': 'Finance', '11': 'Healthcare Services', '12': 'Human Resources',
+  '13': 'Information Technology', '14': 'Legal', '15': 'Marketing',
+  '16': 'Media & Communications', '17': 'Military & Protective Services', '18': 'Operations',
+  '19': 'Product Management', '20': 'Program & Project Management', '21': 'Purchasing',
+  '22': 'Quality Assurance', '23': 'Real Estate', '24': 'Research',
+  '25': 'Sales', '26': 'Support',
+};
 
 export function useJobSeniorityMatrix(accessToken: string | null) {
   const [matrixData, setMatrixData] = useState<MatrixData | null>(null);
@@ -71,6 +97,11 @@ export function useJobSeniorityMatrix(accessToken: string | null) {
   const [titleData, setTitleData] = useState<TitleDrilldownData | null>(null);
   const [isTitleLoading, setIsTitleLoading] = useState(false);
   const [titleError, setTitleError] = useState<string | null>(null);
+  
+  // Cache for titles index and mappings
+  const [titlesIndex, setTitlesIndex] = useState<TitleData[]>([]);
+  const [titleMappings, setTitleMappings] = useState<Record<string, TitleMapping>>({});
+  const [titlesIndexDateRange, setTitlesIndexDateRange] = useState<string>('');
   
   const { toast } = useToast();
 
@@ -259,9 +290,18 @@ export function useJobSeniorityMatrix(accessToken: string | null) {
     });
   }, []);
 
-  // Fetch title drill-down data
+  // Extract function ID from URN
+  const extractFunctionId = (urn: string): string => {
+    if (!urn) return '0';
+    const parts = urn.split(':');
+    return parts[parts.length - 1] || '0';
+  };
+
+  // Fetch title drill-down data using new stable approach
   const fetchTitleDrilldown = useCallback(async (accountId: string, jobFunctionUrn: string, jobFunctionLabel: string) => {
-    if (!accessToken || !accountId || !jobFunctionUrn) return;
+    if (!accessToken || !accountId) return;
+    
+    const jobFunctionId = extractFunctionId(jobFunctionUrn);
     
     setExpandedFunction(jobFunctionLabel);
     setTitleData(null);
@@ -269,34 +309,81 @@ export function useJobSeniorityMatrix(accessToken: string | null) {
     setIsTitleLoading(true);
     
     try {
-      console.log('Fetching title drill-down for:', jobFunctionLabel, jobFunctionUrn);
+      console.log('Fetching title drill-down for:', jobFunctionLabel, jobFunctionId);
       
-      const { data, error: fetchError } = await supabase.functions.invoke('linkedin-api', {
-        body: { 
-          action: 'get_job_function_titles_drilldown', 
-          accessToken,
-          params: { 
-            accountId, 
-            dateRange,
-            campaignIds: selectedCampaignIds.length > 0 ? selectedCampaignIds : undefined,
-            jobFunctionUrn,
-            metric: selectedMetric,
+      // Check if we need to refresh titles index (date range changed)
+      const currentDateRangeKey = `${dateRange.start}-${dateRange.end}-${selectedCampaignIds.join(',')}`;
+      let titles = titlesIndex;
+      
+      if (titlesIndexDateRange !== currentDateRangeKey || titles.length === 0) {
+        console.log('Fetching fresh titles index...');
+        
+        const { data: indexData, error: indexError } = await supabase.functions.invoke('linkedin-api', {
+          body: { 
+            action: 'get_job_titles_index', 
+            accessToken,
+            params: { 
+              accountId, 
+              dateRange,
+              campaignIds: selectedCampaignIds.length > 0 ? selectedCampaignIds : undefined,
+            }
           }
-        }
-      });
+        });
 
-      if (fetchError) throw fetchError;
-      
-      if (data.error) {
-        setTitleError(data.error);
-        return;
+        if (indexError) throw indexError;
+        if (indexData.error) throw new Error(indexData.error);
+        
+        titles = indexData.titles || [];
+        setTitlesIndex(titles);
+        setTitlesIndexDateRange(currentDateRangeKey);
+        console.log('Titles index loaded:', titles.length, 'titles');
       }
       
-      console.log('Title drill-down response:', data);
+      // Resolve mappings for any new titles
+      const titlesToResolve = titles
+        .map(t => t.title)
+        .filter(t => !titleMappings[t]);
+      
+      if (titlesToResolve.length > 0) {
+        console.log('Resolving mappings for', titlesToResolve.length, 'new titles...');
+        
+        const { data: mappingsData, error: mappingsError } = await supabase.functions.invoke('linkedin-api', {
+          body: { 
+            action: 'resolve_titles_to_functions', 
+            accessToken,
+            params: { titles: titlesToResolve }
+          }
+        });
+
+        if (mappingsError) throw mappingsError;
+        
+        const newMappings = mappingsData.mappings || {};
+        setTitleMappings(prev => ({ ...prev, ...newMappings }));
+        console.log('Mappings resolved:', Object.keys(newMappings).length);
+        
+        // Merge with existing mappings for filtering
+        Object.assign(titleMappings, newMappings);
+      }
+      
+      // Filter titles to selected function
+      const filteredTitles: TitleWithMapping[] = titles
+        .filter(t => {
+          const mapping = titleMappings[t.title];
+          return mapping && mapping.job_function_id === jobFunctionId;
+        })
+        .map(t => ({
+          ...t,
+          mapping: titleMappings[t.title],
+        }));
+      
+      console.log('Filtered titles for function', jobFunctionLabel, ':', filteredTitles.length);
+      
       setTitleData({
-        jobFunction: data.jobFunction,
-        jobFunctionUrn: data.jobFunctionUrn,
-        titles: data.titles || [],
+        jobFunction: jobFunctionLabel,
+        jobFunctionUrn,
+        jobFunctionId,
+        titles: filteredTitles,
+        allTitlesCount: titles.length,
       });
     } catch (err: any) {
       console.error('Fetch title drill-down error:', err);
@@ -309,13 +396,73 @@ export function useJobSeniorityMatrix(accessToken: string | null) {
     } finally {
       setIsTitleLoading(false);
     }
-  }, [accessToken, dateRange, selectedCampaignIds, selectedMetric, toast]);
+  }, [accessToken, dateRange, selectedCampaignIds, titlesIndex, titleMappings, titlesIndexDateRange, toast]);
+
+  // Override a title mapping
+  const overrideTitleMapping = useCallback(async (
+    title: string,
+    newFunctionId: string,
+    newFunctionLabel: string,
+    reason?: string
+  ) => {
+    try {
+      const normalizedTitle = title.toLowerCase().trim().replace(/\s+/g, ' ');
+      
+      const { data, error } = await supabase.functions.invoke('linkedin-api', {
+        body: { 
+          action: 'override_title_mapping', 
+          accessToken,
+          params: { 
+            normalizedTitle,
+            originalTitle: title,
+            newFunctionId,
+            newFunctionLabel,
+            reason,
+          }
+        }
+      });
+
+      if (error) throw error;
+      if (data.error) throw new Error(data.error);
+      
+      // Update local mappings cache
+      setTitleMappings(prev => ({
+        ...prev,
+        [title]: {
+          job_function_id: newFunctionId,
+          job_function_label: newFunctionLabel,
+          confidence: 1.0,
+          method: 'user_override',
+        },
+      }));
+      
+      toast({
+        title: 'Classification updated',
+        description: `"${title}" is now classified as ${newFunctionLabel}`,
+      });
+      
+      return true;
+    } catch (err: any) {
+      console.error('Override mapping error:', err);
+      toast({
+        title: 'Error',
+        description: err.message || 'Failed to update classification',
+        variant: 'destructive',
+      });
+      return false;
+    }
+  }, [accessToken, toast]);
 
   const closeTitleDrilldown = useCallback(() => {
     setExpandedFunction(null);
     setTitleData(null);
     setTitleError(null);
   }, []);
+
+  // Expose job function map for UI
+  const jobFunctionOptions = useMemo(() => 
+    Object.entries(JOB_FUNCTION_MAP).map(([id, label]) => ({ id, label })),
+  []);
 
   return {
     matrixData: matrixData ? { ...matrixData, ...recalculatedMinMax } : null,
@@ -338,5 +485,7 @@ export function useJobSeniorityMatrix(accessToken: string | null) {
     titleError,
     fetchTitleDrilldown,
     closeTitleDrilldown,
+    overrideTitleMapping,
+    jobFunctionOptions,
   };
 }
