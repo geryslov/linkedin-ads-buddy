@@ -3,7 +3,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { RefreshCw, FileBarChart, Users, Target, PieChart, Globe, List, Download, Grid3X3 } from 'lucide-react';
+import { RefreshCw, FileBarChart, Users, Target, PieChart, Globe, List, Download, Grid3X3, Settings, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
 import { useDemographicReporting, TimeFrameOption as DemoTimeFrameOption, TimeGranularity, DemographicPivot, DEMOGRAPHIC_PIVOT_OPTIONS } from '@/hooks/useDemographicReporting';
 import { useCompanyDemographic, TimeFrameOption as CompanyDemoTimeFrameOption } from '@/hooks/useCompanyDemographic';
 import { useCreativeNamesReport, TimeFrameOption as CreativeNamesTimeFrameOption } from '@/hooks/useCreativeNamesReport';
@@ -26,6 +26,7 @@ import {
   companyDemographicColumns,
   jobSeniorityMatrixColumns
 } from '@/lib/exportUtils';
+import { supabase } from '@/integrations/supabase/client';
 
 interface ReportingSectionProps {
   accessToken: string | null;
@@ -42,6 +43,11 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
 
   const [selectedTimeFrame, setSelectedTimeFrame] = useState('last_7_days');
   const [reportType, setReportType] = useState('campaigns');
+  
+  // Titles API status
+  const [titlesApiStatus, setTitlesApiStatus] = useState<'unknown' | 'enabled' | 'disabled'>('unknown');
+  const [titlesApiTesting, setTitlesApiTesting] = useState(false);
+  const [titlesApiMessage, setTitlesApiMessage] = useState<string | null>(null);
 
   const handleExportCSV = () => {
     let data: Record<string, any>[] = [];
@@ -238,6 +244,38 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
     }
   };
 
+  const handleTestTitlesApi = async () => {
+    if (!accessToken) {
+      toast({ title: 'No access token', description: 'Please connect to LinkedIn first.', variant: 'destructive' });
+      return;
+    }
+    
+    setTitlesApiTesting(true);
+    setTitlesApiMessage(null);
+    
+    try {
+      const { data, error } = await supabase.functions.invoke('linkedin-api', {
+        body: { action: 'test_titles_api', accessToken }
+      });
+      
+      if (error) {
+        setTitlesApiStatus('disabled');
+        setTitlesApiMessage(`Error: ${error.message}`);
+      } else if (data.titlesApiEnabled) {
+        setTitlesApiStatus('enabled');
+        setTitlesApiMessage(data.message);
+      } else {
+        setTitlesApiStatus('disabled');
+        setTitlesApiMessage(data.message);
+      }
+    } catch (err) {
+      setTitlesApiStatus('disabled');
+      setTitlesApiMessage(`Test failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    } finally {
+      setTitlesApiTesting(false);
+    }
+  };
+
   const isLoading = 
     reportType === 'creative_names' ? creativeNamesReport.isLoading :
     reportType === 'campaigns' ? campaignReporting.isLoading :
@@ -304,6 +342,10 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
             <Users className="h-4 w-4" />
             Audiences
             <span className="text-xs text-muted-foreground">(Soon)</span>
+          </TabsTrigger>
+          <TabsTrigger value="settings" className="gap-2">
+            <Settings className="h-4 w-4" />
+            Settings
           </TabsTrigger>
         </TabsList>
 
@@ -715,6 +757,79 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
               <p className="text-muted-foreground">
                 Audience insights and segment analysis will be available in a future update.
               </p>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Settings Tab */}
+        <TabsContent value="settings" className="space-y-6 mt-6">
+          <Card className="bg-card/50 backdrop-blur-sm border-border/50">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Settings className="h-5 w-5 text-primary" />
+                API Settings
+              </CardTitle>
+              <CardDescription>
+                Test API access and configure feature flags
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {/* Titles API Test */}
+              <div className="border rounded-lg p-4 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="font-medium">LinkedIn Titles API</h4>
+                    <p className="text-sm text-muted-foreground">
+                      Test access to the Standardized Titles API for resolving job title IDs
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    {titlesApiStatus === 'enabled' && (
+                      <span className="flex items-center gap-1 text-sm text-green-600">
+                        <CheckCircle2 className="h-4 w-4" />
+                        Enabled
+                      </span>
+                    )}
+                    {titlesApiStatus === 'disabled' && (
+                      <span className="flex items-center gap-1 text-sm text-destructive">
+                        <XCircle className="h-4 w-4" />
+                        Disabled (Using fallback)
+                      </span>
+                    )}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleTestTitlesApi}
+                      disabled={titlesApiTesting || !accessToken}
+                    >
+                      {titlesApiTesting ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Testing...
+                        </>
+                      ) : (
+                        'Test API Access'
+                      )}
+                    </Button>
+                  </div>
+                </div>
+                
+                {titlesApiMessage && (
+                  <div className={`text-sm p-3 rounded-md ${
+                    titlesApiStatus === 'enabled' 
+                      ? 'bg-green-50 text-green-800 dark:bg-green-950 dark:text-green-200' 
+                      : 'bg-muted text-muted-foreground'
+                  }`}>
+                    {titlesApiMessage}
+                  </div>
+                )}
+                
+                <div className="text-xs text-muted-foreground space-y-1">
+                  <p><strong>Endpoint:</strong> GET https://api.linkedin.com/rest/titles</p>
+                  <p><strong>Query params:</strong> q=criteria, name=Engineer</p>
+                  <p><strong>Headers:</strong> X-Restli-Protocol-Version: 2.0.0, LinkedIn-Version: 202511</p>
+                </div>
+              </div>
             </CardContent>
           </Card>
         </TabsContent>
