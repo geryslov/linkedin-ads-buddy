@@ -3498,6 +3498,63 @@ serve(async (req) => {
         });
       }
 
+      case 'test_titles_api': {
+        // Test the LinkedIn Titles API access
+        // GET https://api.linkedin.com/rest/titles?q=criteria&name=Engineer
+        console.log('[test_titles_api] Testing Titles API access...');
+        
+        const titlesTestUrl = new URL('https://api.linkedin.com/rest/titles');
+        titlesTestUrl.searchParams.set('q', 'criteria');
+        titlesTestUrl.searchParams.set('name', 'Engineer');
+        
+        const titlesTestResponse = await fetch(titlesTestUrl.toString(), {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'X-Restli-Protocol-Version': '2.0.0',
+            'LinkedIn-Version': '202511'
+          }
+        });
+        
+        const statusCode = titlesTestResponse.status;
+        console.log(`[test_titles_api] Response status: ${statusCode}`);
+        
+        if (statusCode === 200) {
+          const data = await titlesTestResponse.json();
+          console.log(`[test_titles_api] Success - found ${data.elements?.length || 0} titles`);
+          return new Response(JSON.stringify({ 
+            success: true, 
+            titlesApiEnabled: true,
+            message: 'Titles API access confirmed',
+            sampleCount: data.elements?.length || 0
+          }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        } else if (statusCode === 403) {
+          const errorText = await titlesTestResponse.text();
+          console.log(`[test_titles_api] 403 Forbidden - Titles API not accessible:`, errorText);
+          return new Response(JSON.stringify({ 
+            success: true, 
+            titlesApiEnabled: false,
+            message: 'Titles API access denied (403). Using local classification fallback.',
+            error: errorText
+          }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        } else {
+          const errorText = await titlesTestResponse.text();
+          console.error(`[test_titles_api] Unexpected status ${statusCode}:`, errorText);
+          return new Response(JSON.stringify({ 
+            success: false, 
+            titlesApiEnabled: false,
+            message: `Unexpected response: ${statusCode}`,
+            error: errorText
+          }), {
+            status: statusCode,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+      }
+
       default:
         return new Response(JSON.stringify({ error: 'Unknown action' }), {
           status: 400,
