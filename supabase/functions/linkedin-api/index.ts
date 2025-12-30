@@ -2218,13 +2218,13 @@ serve(async (req) => {
           `timeGranularity=${granularity}&` +
           `pivot=CREATIVE&` +
           `accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
-          `fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,dateRange,pivotValue&` +
+          `fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,oneClickLeadFormOpens,dateRange,pivotValue&` +
           `count=10000`;
         
         console.log(`[Step 2] Analytics URL:`, analyticsUrl);
         
         // Aggregate analytics by creative
-        const creativeMetrics = new Map<string, { impressions: number; clicks: number; spent: number; leads: number }>();
+        const creativeMetrics = new Map<string, { impressions: number; clicks: number; spent: number; leads: number; lgfFormOpens: number }>();
         const creativeIdsWithData = new Set<string>();
         let totalAnalyticsRows = 0;
         
@@ -2246,11 +2246,12 @@ serve(async (req) => {
               if (!creativeId) continue;
               
               creativeIdsWithData.add(creativeId);
-              const existing = creativeMetrics.get(creativeId) || { impressions: 0, clicks: 0, spent: 0, leads: 0 };
+              const existing = creativeMetrics.get(creativeId) || { impressions: 0, clicks: 0, spent: 0, leads: 0, lgfFormOpens: 0 };
               existing.impressions += element.impressions || 0;
               existing.clicks += element.clicks || 0;
               existing.spent += parseFloat(element.costInLocalCurrency || '0');
               existing.leads += (element.oneClickLeads || 0) + (element.externalWebsiteConversions || 0);
+              existing.lgfFormOpens += element.oneClickLeadFormOpens || 0;
               creativeMetrics.set(creativeId, existing);
             }
           } else {
@@ -2430,12 +2431,13 @@ serve(async (req) => {
         const reportElements: any[] = [];
         
         for (const [creativeId, info] of creativeInfoMap) {
-          const metrics = creativeMetrics.get(creativeId) || { impressions: 0, clicks: 0, spent: 0, leads: 0 };
+          const metrics = creativeMetrics.get(creativeId) || { impressions: 0, clicks: 0, spent: 0, leads: 0, lgfFormOpens: 0 };
           
           const ctr = metrics.impressions > 0 ? (metrics.clicks / metrics.impressions) * 100 : 0;
           const cpc = metrics.clicks > 0 ? metrics.spent / metrics.clicks : 0;
           const cpm = metrics.impressions > 0 ? (metrics.spent / metrics.impressions) * 1000 : 0;
           const costPerLead = metrics.leads > 0 ? metrics.spent / metrics.leads : 0;
+          const lgfCompletionRate = metrics.lgfFormOpens > 0 ? (metrics.leads / metrics.lgfFormOpens) * 100 : 0;
           
           reportElements.push({
             creativeId,
@@ -2447,6 +2449,8 @@ serve(async (req) => {
             clicks: metrics.clicks,
             spent: metrics.spent.toFixed(2),
             leads: metrics.leads,
+            lgfFormOpens: metrics.lgfFormOpens,
+            lgfCompletionRate: lgfCompletionRate.toFixed(2),
             ctr: ctr.toFixed(2),
             cpc: cpc.toFixed(2),
             cpm: cpm.toFixed(2),
@@ -2771,9 +2775,9 @@ serve(async (req) => {
             `dateRange.end.day=${new Date(endDate).getDate()}&` +
             `dateRange.end.month=${new Date(endDate).getMonth() + 1}&` +
             `dateRange.end.year=${new Date(endDate).getFullYear()}&` +
-            `timeGranularity=${granularity}&` +
+          `timeGranularity=${granularity}&` +
             `pivot=CAMPAIGN&` +
-            `fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,pivotValue`;
+            `fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,oneClickLeadFormOpens,pivotValue`;
           
           batchIds.forEach((id: string, idx: number) => {
             analyticsUrl += `&campaigns[${idx}]=urn:li:sponsoredCampaign:${id}`;
@@ -2837,18 +2841,19 @@ serve(async (req) => {
         }
         
         // For ALL granularity, aggregate by campaign
-        const campaignMetrics = new Map<string, { impressions: number; clicks: number; spent: number; leads: number }>();
+        const campaignMetrics = new Map<string, { impressions: number; clicks: number; spent: number; leads: number; lgfFormOpens: number }>();
         
         for (const row of allAnalytics) {
           const pivotValue = row.pivotValue || '';
           const campaignId = pivotValue.split(':').pop() || '';
           if (!campaignId) continue;
           
-          const existing = campaignMetrics.get(campaignId) || { impressions: 0, clicks: 0, spent: 0, leads: 0 };
+          const existing = campaignMetrics.get(campaignId) || { impressions: 0, clicks: 0, spent: 0, leads: 0, lgfFormOpens: 0 };
           existing.impressions += row.impressions || 0;
           existing.clicks += row.clicks || 0;
           existing.spent += parseFloat(row.costInLocalCurrency || '0');
           existing.leads += (row.oneClickLeads || 0) + (row.externalWebsiteConversions || 0);
+          existing.lgfFormOpens += row.oneClickLeadFormOpens || 0;
           campaignMetrics.set(campaignId, existing);
         }
         
@@ -2856,7 +2861,7 @@ serve(async (req) => {
         const reportElements: any[] = [];
         
         for (const [campaignId, info] of campaignInfoMap) {
-          const metrics = campaignMetrics.get(campaignId) || { impressions: 0, clicks: 0, spent: 0, leads: 0 };
+          const metrics = campaignMetrics.get(campaignId) || { impressions: 0, clicks: 0, spent: 0, leads: 0, lgfFormOpens: 0 };
           
           // Skip campaigns with no data if there's analytics data available
           if (allAnalytics.length > 0 && metrics.impressions === 0 && metrics.spent === 0) continue;
@@ -2865,6 +2870,7 @@ serve(async (req) => {
           const cpc = metrics.clicks > 0 ? metrics.spent / metrics.clicks : 0;
           const cpm = metrics.impressions > 0 ? (metrics.spent / metrics.impressions) * 1000 : 0;
           const costPerLead = metrics.leads > 0 ? metrics.spent / metrics.leads : 0;
+          const lgfCompletionRate = metrics.lgfFormOpens > 0 ? (metrics.leads / metrics.lgfFormOpens) * 100 : 0;
           
           reportElements.push({
             campaignId,
@@ -2878,6 +2884,8 @@ serve(async (req) => {
             clicks: metrics.clicks,
             costInLocalCurrency: metrics.spent.toFixed(2),
             leads: metrics.leads,
+            lgfFormOpens: metrics.lgfFormOpens,
+            lgfCompletionRate: lgfCompletionRate.toFixed(2),
             ctr: ctr.toFixed(2),
             cpc: cpc.toFixed(2),
             cpm: cpm.toFixed(2),

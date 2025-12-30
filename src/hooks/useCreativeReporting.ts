@@ -13,6 +13,8 @@ export interface CreativeData {
   clicks: number;
   spent: number;
   leads: number;
+  lgfFormOpens: number;
+  lgfCompletionRate: number;
   ctr: number;
   cpc: number;
   cpm: number;
@@ -148,6 +150,8 @@ export function useCreativeReporting(accessToken: string | null) {
             clicks,
             spent,
             leads,
+            lgfFormOpens: el.lgfFormOpens || 0,
+            lgfCompletionRate: parseFloat(el.lgfCompletionRate || '0'),
             ctr: parseFloat(el.ctr || '0'),
             cpc: parseFloat(el.cpc || '0'),
             cpm: parseFloat(el.cpm || '0'),
