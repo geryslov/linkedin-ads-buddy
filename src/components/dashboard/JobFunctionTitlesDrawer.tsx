@@ -150,14 +150,14 @@ export function JobFunctionTitlesDrawer({
         <SheetHeader className="space-y-1">
           <div className="flex items-center justify-between">
             <SheetTitle className="text-xl">
-              {data?.jobFunction || 'Job Function'} — Actual Titles
+              Job Titles — All Delivery Data
             </SheetTitle>
             <Button variant="ghost" size="icon" onClick={onClose}>
               <X className="h-4 w-4" />
             </Button>
           </div>
           <SheetDescription className="text-sm text-muted-foreground">
-            Shows titles that actually appeared in ad delivery. Low-volume titles may be suppressed by LinkedIn privacy thresholds.
+            All job titles that received impressions in this account. LinkedIn's API doesn't support filtering titles by job function.
           </SheetDescription>
         </SheetHeader>
 

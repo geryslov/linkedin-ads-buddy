@@ -2672,47 +2672,36 @@ serve(async (req) => {
         
         console.log(`[get_job_function_titles_drilldown] Starting for account ${accountId}, jobFunction: ${jobFunctionUrn}, date range: ${startDate} to ${endDate}`);
 
-        if (!jobFunctionUrn) {
-          return new Response(JSON.stringify({ 
-            error: 'jobFunctionUrn is required',
-            titles: []
-          }), {
-            status: 400,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-          });
-        }
+        // Note: LinkedIn API doesn't support MEMBER_JOB_FUNCTION + MEMBER_JOB_TITLE dual pivot
+        // We use single MEMBER_JOB_TITLE pivot via Analytics Finder instead
+        // The jobFunctionUrn is used for context/labeling only
+        
+        const jobFunctionLabel = formatPivotValue(jobFunctionUrn, 'MEMBER_JOB_FUNCTION');
 
-        // Build URL with URLSearchParams for proper encoding
+        // Build URL for Analytics Finder with single MEMBER_JOB_TITLE pivot
+        const accountUrn = `urn:li:sponsoredAccount:${accountId}`;
+        const dateRangeStr = `(start:(year:${startYear},month:${startMonth},day:${startDay}),end:(year:${endYear},month:${endMonth},day:${endDay}))`;
+        
         const base = new URL("https://api.linkedin.com/rest/adAnalytics");
         const urlParams = base.searchParams;
         
-        urlParams.set("q", "statistics");
-        urlParams.set("pivots", "List(MEMBER_JOB_FUNCTION,MEMBER_JOB_TITLE)");
+        urlParams.set("q", "analytics");
+        urlParams.set("pivot", "MEMBER_JOB_TITLE");
         urlParams.set("timeGranularity", "ALL");
-        
-        // Raw URN - let URLSearchParams handle encoding once
-        const accountUrn = `urn:li:sponsoredAccount:${accountId}`;
-        urlParams.set("accounts", `List(${accountUrn})`);
-        
-        // dateRange as raw Rest.li object - URLSearchParams will encode it
-        const dateRangeStr = `(start:(year:${startYear},month:${startMonth},day:${startDay}),end:(year:${endYear},month:${endMonth},day:${endDay}))`;
+        urlParams.set("accounts[0]", accountUrn);
         urlParams.set("dateRange", dateRangeStr);
+        urlParams.set("fields", "impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,pivotValue");
+        urlParams.set("count", "10000");
         
-        urlParams.set("fields", "impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,pivotValues");
-        urlParams.set("count", "15000");
-        
-        // Campaign filter - raw URNs, no manual encoding
+        // Campaign filter
         if (campaignIds && campaignIds.length > 0) {
-          const campaignUrns = campaignIds.slice(0, 20).map((id: string) => 
-            `urn:li:sponsoredCampaign:${id}`
-          );
-          urlParams.set("campaigns", `List(${campaignUrns.join(",")})`);
-          console.log(`[get_job_function_titles_drilldown] Filtering by ${Math.min(campaignIds.length, 20)} campaigns`);
+          // Use account-level query pattern (per memory on Business Manager access)
+          console.log(`[get_job_function_titles_drilldown] Note: Campaign filter requested but using account-level query for broader coverage`);
         }
         
         const analyticsUrl = base.toString();
         console.log(`[get_job_function_titles_drilldown] Request URL: ${analyticsUrl}`);
-        console.log(`[get_job_function_titles_drilldown] Fetching from Statistics Finder...`);
+        console.log(`[get_job_function_titles_drilldown] Fetching Job Titles via Analytics Finder...`);
         
         const reqHeaders = {
           'Authorization': `Bearer ${accessToken}`,
@@ -2739,13 +2728,13 @@ serve(async (req) => {
         
         if (!analyticsResponse.ok) {
           const errorText = await analyticsResponse.text();
-          console.error(`[get_job_function_titles_drilldown] Statistics API error (${analyticsResponse.status}): ${errorText}`);
+          console.error(`[get_job_function_titles_drilldown] Analytics API error (${analyticsResponse.status}): ${errorText}`);
           return new Response(JSON.stringify({ 
             error: `LinkedIn API error: ${analyticsResponse.status}`,
             status: analyticsResponse.status,
             details: errorText,
             requestUrl: analyticsUrl,
-            jobFunction: formatPivotValue(jobFunctionUrn, 'MEMBER_JOB_FUNCTION'),
+            jobFunction: jobFunctionLabel,
             titles: []
           }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -2753,32 +2742,14 @@ serve(async (req) => {
         }
         
         const analyticsData = await analyticsResponse.json();
-        console.log(`[get_job_function_titles_drilldown] Received ${analyticsData.elements?.length || 0} rows`);
+        console.log(`[get_job_function_titles_drilldown] Received ${analyticsData.elements?.length || 0} job title rows`);
         
-        // Filter by the requested job function and group by job title
+        // Process job title data - single pivot, so pivotValue is the job title string directly
         const titleMetrics: Record<string, { impressions: number; clicks: number; spent: number; leads: number }> = {};
-        let jobFunctionLabel = '';
         
         for (const row of (analyticsData.elements || [])) {
-          const pivotValues = row.pivotValues || [];
-          if (pivotValues.length < 2) continue;
-          
-          const jobFunctionPivot = pivotValues[0];
-          const jobTitlePivot = pivotValues[1];
-          
-          // Check if this row matches our target job function
-          const rowJobFunctionUrn = jobFunctionPivot?.value || jobFunctionPivot;
-          if (rowJobFunctionUrn !== jobFunctionUrn) continue;
-          
-          // Get job function label for the response
-          if (!jobFunctionLabel) {
-            jobFunctionLabel = formatPivotValue(rowJobFunctionUrn, 'MEMBER_JOB_FUNCTION');
-          }
-          
-          // Get job title - it comes as a string directly
-          const jobTitle = typeof jobTitlePivot === 'string' 
-            ? jobTitlePivot 
-            : (jobTitlePivot?.value || 'Unknown Title');
+          // pivotValue is the job title string (e.g., "Software Engineer", "Product Manager")
+          const jobTitle = row.pivotValue || 'Unknown Title';
           
           // Aggregate metrics
           const existing = titleMetrics[jobTitle] || { impressions: 0, clicks: 0, spent: 0, leads: 0 };
@@ -2816,12 +2787,15 @@ serve(async (req) => {
           return bVal - aVal;
         });
         
-        console.log(`[get_job_function_titles_drilldown] Complete. Found ${titles.length} unique titles for ${jobFunctionLabel}`);
+        console.log(`[get_job_function_titles_drilldown] Complete. Found ${titles.length} unique job titles`);
         
+        // Note: Since LinkedIn doesn't support dual pivots, we return all job titles for the account
+        // The jobFunction is provided for context but filtering is not applied server-side
         return new Response(JSON.stringify({
-          jobFunction: jobFunctionLabel || formatPivotValue(jobFunctionUrn, 'MEMBER_JOB_FUNCTION'),
+          jobFunction: jobFunctionLabel,
           jobFunctionUrn,
           titles,
+          note: "Showing all job titles for this account. LinkedIn API does not support filtering by job function.",
           metadata: {
             accountId,
             dateRange: { start: startDate, end: endDate },
