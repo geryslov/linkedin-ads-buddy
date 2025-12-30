@@ -207,14 +207,21 @@ export function useCampaignReporting(accessToken: string | null) {
       // Aggregate spend by date across all campaigns
       const spendByDate: Record<string, number> = {};
       (data.elements || []).forEach((el: any) => {
-        const date = el.date || el.dateRange?.start?.day ? 
-          `${el.dateRange?.start?.year}-${String(el.dateRange?.start?.month).padStart(2, '0')}-${String(el.dateRange?.start?.day).padStart(2, '0')}` : 
-          null;
+        // Parse date from LinkedIn's dateRange format: { start: { year, month, day }, end: { year, month, day } }
+        let date: string | null = null;
+        if (el.dateRange?.start) {
+          const { year, month, day } = el.dateRange.start;
+          if (year && month && day) {
+            date = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+          }
+        }
         if (date) {
           const spent = parseFloat(el.costInLocalCurrency || '0');
           spendByDate[date] = (spendByDate[date] || 0) + spent;
         }
       });
+      
+      console.log('Spend by date:', spendByDate);
       
       const dailyData = Object.entries(spendByDate).map(([date, spent]) => ({ date, spent }));
       dailyData.sort((a, b) => b.date.localeCompare(a.date)); // Sort descending by date

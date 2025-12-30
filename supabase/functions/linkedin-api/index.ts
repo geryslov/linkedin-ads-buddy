@@ -2791,7 +2791,52 @@ serve(async (req) => {
         
         console.log(`[get_campaign_report] Fetched ${allAnalytics.length} analytics rows`);
         
-        // Step 3: Aggregate metrics by campaign
+        // Step 3: Aggregate metrics - by campaign only for ALL, by campaign+date for DAILY
+        if (granularity === 'DAILY') {
+          // For DAILY granularity, return raw rows with date info for daily spend analysis
+          const dailyElements: any[] = [];
+          
+          for (const row of allAnalytics) {
+            const pivotValue = row.pivotValue || '';
+            const campaignId = pivotValue.split(':').pop() || '';
+            if (!campaignId) continue;
+            
+            const info = campaignInfoMap.get(campaignId) || {};
+            const spent = parseFloat(row.costInLocalCurrency || '0');
+            const leads = (row.oneClickLeads || 0) + (row.externalWebsiteConversions || 0);
+            
+            dailyElements.push({
+              campaignId,
+              campaignName: info.name || `Campaign ${campaignId}`,
+              status: info.status || 'UNKNOWN',
+              objectiveType: info.objectiveType || 'UNKNOWN',
+              costType: info.costType || 'UNKNOWN',
+              dailyBudget: info.dailyBudget,
+              totalBudget: info.totalBudget,
+              impressions: row.impressions || 0,
+              clicks: row.clicks || 0,
+              costInLocalCurrency: spent.toFixed(2),
+              leads,
+              dateRange: row.dateRange, // Include the date range from LinkedIn API
+            });
+          }
+          
+          console.log(`[get_campaign_report] DAILY granularity - returning ${dailyElements.length} daily rows`);
+          
+          return new Response(JSON.stringify({
+            elements: dailyElements,
+            metadata: {
+              accountId,
+              dateRange: { start: startDate, end: endDate },
+              timeGranularity: granularity,
+              totalRows: dailyElements.length,
+            }
+          }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+        
+        // For ALL granularity, aggregate by campaign
         const campaignMetrics = new Map<string, { impressions: number; clicks: number; spent: number; leads: number }>();
         
         for (const row of allAnalytics) {
