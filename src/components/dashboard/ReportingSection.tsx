@@ -3,15 +3,17 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { RefreshCw, FileBarChart, Users, Target, PieChart, Globe, List, Download } from 'lucide-react';
+import { RefreshCw, FileBarChart, Users, Target, PieChart, Globe, List, Download, Grid3X3 } from 'lucide-react';
 import { useDemographicReporting, TimeFrameOption as DemoTimeFrameOption, TimeGranularity, DemographicPivot, DEMOGRAPHIC_PIVOT_OPTIONS } from '@/hooks/useDemographicReporting';
 import { useCompanyDemographic, TimeFrameOption as CompanyDemoTimeFrameOption } from '@/hooks/useCompanyDemographic';
 import { useCreativeNamesReport, TimeFrameOption as CreativeNamesTimeFrameOption } from '@/hooks/useCreativeNamesReport';
 import { useCampaignReporting, TimeFrameOption as CampaignTimeFrameOption } from '@/hooks/useCampaignReporting';
+import { useJobSeniorityMatrix, TimeFrameOption as MatrixTimeFrameOption } from '@/hooks/useJobSeniorityMatrix';
 import { DemographicTable } from './DemographicTable';
 import { CompanyDemographicTable } from './CompanyDemographicTable';
 import { CreativeNamesReportTable } from './CreativeNamesReportTable';
 import { CampaignReportingTable } from './CampaignReportingTable';
+import { JobSeniorityMatrix } from './JobSeniorityMatrix';
 import { CampaignMultiSelect } from './CampaignMultiSelect';
 import { TimeFrameSelector } from './TimeFrameSelector';
 import { MetricCard } from './MetricCard';
@@ -20,7 +22,8 @@ import {
   exportToCSV, 
   creativeNamesReportColumns, 
   demographicReportColumns, 
-  companyDemographicColumns 
+  companyDemographicColumns,
+  jobSeniorityMatrixColumns
 } from '@/lib/exportUtils';
 
 interface ReportingSectionProps {
@@ -33,6 +36,7 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
   const companyDemographic = useCompanyDemographic(accessToken);
   const creativeNamesReport = useCreativeNamesReport(accessToken);
   const campaignReporting = useCampaignReporting(accessToken);
+  const jobSeniorityMatrix = useJobSeniorityMatrix(accessToken);
   const { toast } = useToast();
 
   const [selectedTimeFrame, setSelectedTimeFrame] = useState('last_7_days');
@@ -60,6 +64,13 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
         );
         filename = 'company_demographic';
         columns = companyDemographicColumns;
+        break;
+      case 'job_seniority':
+        if (jobSeniorityMatrix.matrixData) {
+          data = Array.from(jobSeniorityMatrix.matrixData.cells.values());
+          filename = 'job_seniority_matrix';
+          columns = jobSeniorityMatrixColumns;
+        }
         break;
       default:
         toast({
@@ -100,6 +111,12 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
         if (campaignReporting.campaignData.length === 0) {
           campaignReporting.fetchCampaignReport(selectedAccount);
         }
+      } else if (reportType === 'job_seniority') {
+        jobSeniorityMatrix.fetchMatrix(selectedAccount);
+        // Also fetch campaigns for the filter if not already loaded
+        if (campaignReporting.campaignData.length === 0) {
+          campaignReporting.fetchCampaignReport(selectedAccount);
+        }
       }
     }
   }, [selectedAccount, reportType]);
@@ -131,6 +148,13 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
       campaignReporting.fetchCampaignReport(selectedAccount);
     }
   }, [campaignReporting.dateRange, campaignReporting.timeGranularity]);
+
+  // Re-fetch when time or campaigns change for job x seniority matrix
+  useEffect(() => {
+    if (selectedAccount && reportType === 'job_seniority') {
+      jobSeniorityMatrix.fetchMatrix(selectedAccount);
+    }
+  }, [jobSeniorityMatrix.dateRange, jobSeniorityMatrix.selectedCampaignIds]);
 
   const handleDemoTimeFrameChange = (option: DemoTimeFrameOption) => {
     setSelectedTimeFrame(option.value);
@@ -184,6 +208,19 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
     });
   };
 
+  const handleMatrixTimeFrameChange = (option: MatrixTimeFrameOption) => {
+    setSelectedTimeFrame(option.value);
+    jobSeniorityMatrix.setTimeFrame(option);
+  };
+
+  const handleMatrixCustomDate = (start: Date, end: Date) => {
+    setSelectedTimeFrame('custom');
+    jobSeniorityMatrix.setDateRange({
+      start: start.toISOString().split('T')[0],
+      end: end.toISOString().split('T')[0],
+    });
+  };
+
   const handleRefresh = () => {
     if (selectedAccount) {
       if (reportType === 'creative_names') {
@@ -194,6 +231,8 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
         demographicReporting.fetchDemographicAnalytics(selectedAccount);
       } else if (reportType === 'company_demo') {
         companyDemographic.fetchCompanyDemographic(selectedAccount);
+      } else if (reportType === 'job_seniority') {
+        jobSeniorityMatrix.fetchMatrix(selectedAccount);
       }
     }
   };
@@ -202,7 +241,8 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
     reportType === 'creative_names' ? creativeNamesReport.isLoading :
     reportType === 'campaigns' ? campaignReporting.isLoading :
     reportType === 'demographics' ? demographicReporting.isLoading : 
-    reportType === 'company_demo' ? companyDemographic.isLoading : false;
+    reportType === 'company_demo' ? companyDemographic.isLoading :
+    reportType === 'job_seniority' ? jobSeniorityMatrix.isLoading : false;
 
   return (
     <div className="space-y-6">
@@ -253,7 +293,11 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
           </TabsTrigger>
           <TabsTrigger value="company_demo" className="gap-2">
             <Globe className="h-4 w-4" />
-            New Company Demographic
+            Company Demographic
+          </TabsTrigger>
+          <TabsTrigger value="job_seniority" className="gap-2">
+            <Grid3X3 className="h-4 w-4" />
+            Job × Seniority
           </TabsTrigger>
           <TabsTrigger value="audiences" className="gap-2" disabled>
             <Users className="h-4 w-4" />
@@ -583,6 +627,66 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
               <CompanyDemographicTable 
                 data={companyDemographic.companyData} 
                 isLoading={companyDemographic.isLoading}
+              />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Job x Seniority Matrix Tab */}
+        <TabsContent value="job_seniority" className="space-y-6 mt-6">
+          <Card className="bg-card/50 backdrop-blur-sm border-border/50">
+            <CardContent className="pt-4 space-y-4">
+              <TimeFrameSelector
+                timeFrameOptions={jobSeniorityMatrix.timeFrameOptions}
+                selectedTimeFrame={selectedTimeFrame}
+                onTimeFrameChange={handleMatrixTimeFrameChange}
+                timeGranularity="ALL"
+                onGranularityChange={() => {}}
+                dateRange={jobSeniorityMatrix.dateRange}
+                onCustomDateChange={handleMatrixCustomDate}
+              />
+              <div className="border-t pt-4">
+                <CampaignMultiSelect
+                  campaigns={campaignReporting.campaignData}
+                  selectedCampaignIds={jobSeniorityMatrix.selectedCampaignIds}
+                  onSelectionChange={jobSeniorityMatrix.setSelectedCampaignIds}
+                  isLoading={campaignReporting.isLoading}
+                />
+              </div>
+            </CardContent>
+          </Card>
+
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <MetricCard title="Impressions" value={jobSeniorityMatrix.totals.impressions.toLocaleString()} icon={FileBarChart} />
+            <MetricCard title="Clicks" value={jobSeniorityMatrix.totals.clicks.toLocaleString()} icon={FileBarChart} />
+            <MetricCard title="Spent" value={`$${jobSeniorityMatrix.totals.spent.toFixed(2)}`} icon={FileBarChart} />
+            <MetricCard title="Leads" value={jobSeniorityMatrix.totals.leads.toLocaleString()} icon={FileBarChart} />
+          </div>
+
+          {jobSeniorityMatrix.error && (
+            <Card className="bg-destructive/10 border-destructive/30">
+              <CardContent className="pt-4">
+                <p className="text-sm text-destructive"><strong>Note:</strong> {jobSeniorityMatrix.error}</p>
+              </CardContent>
+            </Card>
+          )}
+
+          <Card className="bg-card/50 backdrop-blur-sm border-border/50">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Grid3X3 className="h-5 w-5 text-primary" />
+                Job Function × Seniority Matrix
+              </CardTitle>
+              <CardDescription>
+                Heatmap showing performance across job functions and seniority levels
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <JobSeniorityMatrix
+                matrixData={jobSeniorityMatrix.matrixData}
+                isLoading={jobSeniorityMatrix.isLoading}
+                selectedMetric={jobSeniorityMatrix.selectedMetric}
+                onMetricChange={jobSeniorityMatrix.setSelectedMetric}
               />
             </CardContent>
           </Card>

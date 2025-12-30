@@ -2503,6 +2503,117 @@ serve(async (req) => {
         });
       }
 
+      case 'get_job_seniority_matrix': {
+        // Fetches Job Function x Seniority matrix using dual pivots
+        const { accountId, dateRange, campaignIds } = params || {};
+        const startDate = dateRange?.start || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        const endDate = dateRange?.end || new Date().toISOString().split('T')[0];
+        
+        // Parse date strings directly to avoid timezone issues
+        const [startYear, startMonth, startDay] = startDate.split('-').map(Number);
+        const [endYear, endMonth, endDay] = endDate.split('-').map(Number);
+        
+        console.log(`[get_job_seniority_matrix] Starting for account ${accountId}, date range: ${startDate} to ${endDate}`);
+        console.log(`[get_job_seniority_matrix] Parsed dates: start=${startYear}-${startMonth}-${startDay}, end=${endYear}-${endMonth}-${endDay}`);
+
+        // Use q=statistics with dual pivots
+        let analyticsUrl = `https://api.linkedin.com/v2/adAnalyticsV2?q=statistics&` +
+          `dateRange.start.day=${startDay}&` +
+          `dateRange.start.month=${startMonth}&` +
+          `dateRange.start.year=${startYear}&` +
+          `dateRange.end.day=${endDay}&` +
+          `dateRange.end.month=${endMonth}&` +
+          `dateRange.end.year=${endYear}&` +
+          `timeGranularity=ALL&` +
+          `pivots=List(MEMBER_JOB_FUNCTION,MEMBER_SENIORITY)&` +
+          `accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
+          `fields=impressions,clicks,costInLocalCurrency,costInUsd,externalWebsiteConversions,oneClickLeads,pivotValues&` +
+          `count=10000`;
+        
+        // Add campaign filter if provided
+        if (campaignIds && campaignIds.length > 0) {
+          campaignIds.slice(0, 20).forEach((id: string, idx: number) => {
+            analyticsUrl += `&campaigns[${idx}]=urn:li:sponsoredCampaign:${id}`;
+          });
+          console.log(`[get_job_seniority_matrix] Filtering by ${Math.min(campaignIds.length, 20)} campaigns`);
+        }
+        
+        console.log(`[get_job_seniority_matrix] Fetching analytics with dual pivots...`);
+        
+        const analyticsResponse = await fetch(analyticsUrl, {
+          headers: { 'Authorization': `Bearer ${accessToken}` }
+        });
+        
+        if (!analyticsResponse.ok) {
+          const errorText = await analyticsResponse.text();
+          console.error(`[get_job_seniority_matrix] Analytics API error:`, errorText);
+          return new Response(JSON.stringify({ 
+            error: `LinkedIn API error: ${analyticsResponse.status}`,
+            elements: []
+          }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+        
+        const analyticsData = await analyticsResponse.json();
+        console.log(`[get_job_seniority_matrix] Received ${analyticsData.elements?.length || 0} matrix cells`);
+        
+        // Process the dual-pivot response
+        const matrixElements: any[] = [];
+        
+        for (const row of (analyticsData.elements || [])) {
+          const pivotValues = row.pivotValues || [];
+          
+          // Extract job function and seniority from pivotValues array
+          let jobFunction = 'Unknown';
+          let seniority = 'Unknown';
+          
+          for (const pivotValue of pivotValues) {
+            if (pivotValue.includes('jobFunction')) {
+              jobFunction = formatPivotValue(pivotValue, 'MEMBER_JOB_FUNCTION');
+            } else if (pivotValue.includes('seniority')) {
+              seniority = formatPivotValue(pivotValue, 'MEMBER_SENIORITY');
+            }
+          }
+          
+          const impressions = row.impressions || 0;
+          const clicks = row.clicks || 0;
+          const spent = parseFloat(row.costInLocalCurrency || '0');
+          const leads = (row.oneClickLeads || 0) + (row.externalWebsiteConversions || 0);
+          
+          const ctr = impressions > 0 ? (clicks / impressions) * 100 : 0;
+          const cpc = clicks > 0 ? spent / clicks : 0;
+          const cpm = impressions > 0 ? (spent / impressions) * 1000 : 0;
+          const cpl = leads > 0 ? spent / leads : 0;
+          
+          matrixElements.push({
+            jobFunction,
+            seniority,
+            impressions,
+            clicks,
+            spent: spent.toFixed(2),
+            leads,
+            ctr: ctr.toFixed(2),
+            cpc: cpc.toFixed(2),
+            cpm: cpm.toFixed(2),
+            cpl: cpl.toFixed(2),
+          });
+        }
+        
+        console.log(`[get_job_seniority_matrix] Complete. Matrix cells: ${matrixElements.length}`);
+        
+        return new Response(JSON.stringify({
+          elements: matrixElements,
+          metadata: {
+            accountId,
+            dateRange: { start: startDate, end: endDate },
+            totalCells: matrixElements.length,
+          }
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
       default:
         return new Response(JSON.stringify({ error: 'Unknown action' }), {
           status: 400,
