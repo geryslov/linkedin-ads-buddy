@@ -2672,36 +2672,37 @@ serve(async (req) => {
         
         console.log(`[get_job_function_titles_drilldown] Starting for account ${accountId}, jobFunction: ${jobFunctionUrn}, date range: ${startDate} to ${endDate}`);
 
-        // Note: LinkedIn API doesn't support MEMBER_JOB_FUNCTION + MEMBER_JOB_TITLE dual pivot
-        // We use single MEMBER_JOB_TITLE pivot via Analytics Finder instead
-        // The jobFunctionUrn is used for context/labeling only
-        
         const jobFunctionLabel = formatPivotValue(jobFunctionUrn, 'MEMBER_JOB_FUNCTION');
 
-        // Build URL for Analytics Finder with single MEMBER_JOB_TITLE pivot
-        const accountUrn = `urn:li:sponsoredAccount:${accountId}`;
-        const dateRangeStr = `(start:(year:${startYear},month:${startMonth},day:${startDay}),end:(year:${endYear},month:${endMonth},day:${endDay}))`;
-        
+        // Build REST adAnalytics Statistics Finder URL (multi pivots)
         const base = new URL("https://api.linkedin.com/rest/adAnalytics");
-        const urlParams = base.searchParams;
-        
-        urlParams.set("q", "analytics");
-        urlParams.set("pivot", "MEMBER_JOB_TITLE");
-        urlParams.set("timeGranularity", "ALL");
-        urlParams.set("accounts[0]", accountUrn);
-        urlParams.set("dateRange", dateRangeStr);
-        urlParams.set("fields", "impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,pivotValue");
-        urlParams.set("count", "10000");
-        
-        // Campaign filter
-        if (campaignIds && campaignIds.length > 0) {
-          // Use account-level query pattern (per memory on Business Manager access)
-          console.log(`[get_job_function_titles_drilldown] Note: Campaign filter requested but using account-level query for broader coverage`);
+        const p = base.searchParams;
+
+        p.set("q", "statistics");
+        p.set("pivots", "List(MEMBER_JOB_FUNCTION,MEMBER_JOB_TITLE)");
+        p.set("timeGranularity", "ALL");
+
+        // IMPORTANT: use accounts=List(...) not accounts[0]
+        p.set("accounts", `List(urn:li:sponsoredAccount:${accountId})`);
+
+        // IMPORTANT: dateRange must be Rest.li object syntax (unencoded here; URLSearchParams will encode once)
+        p.set(
+          "dateRange",
+          `(start:(year:${startYear},month:${startMonth},day:${startDay}),end:(year:${endYear},month:${endMonth},day:${endDay}))`
+        );
+
+        // Optional campaign filter — also Rest.li List()
+        if (campaignIds?.length) {
+          const campaignUrns = campaignIds.slice(0, 20).map((id: string) => `urn:li:sponsoredCampaign:${id}`);
+          p.set("campaigns", `List(${campaignUrns.join(",")})`);
         }
-        
+
+        p.set("fields", "impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,pivotValues");
+        p.set("count", "15000");
+
         const analyticsUrl = base.toString();
         console.log(`[get_job_function_titles_drilldown] Request URL: ${analyticsUrl}`);
-        console.log(`[get_job_function_titles_drilldown] Fetching Job Titles via Analytics Finder...`);
+        console.log(`[get_job_function_titles_drilldown] Fetching Job Titles via Statistics Finder with dual pivots...`);
         
         const reqHeaders = {
           'Authorization': `Bearer ${accessToken}`,
@@ -2722,7 +2723,7 @@ serve(async (req) => {
               'Content-Type': 'application/x-www-form-urlencoded',
               'X-HTTP-Method-Override': 'GET'
             },
-            body: urlParams.toString()
+            body: p.toString()
           });
         }
         
@@ -2742,22 +2743,32 @@ serve(async (req) => {
         }
         
         const analyticsData = await analyticsResponse.json();
-        console.log(`[get_job_function_titles_drilldown] Received ${analyticsData.elements?.length || 0} job title rows`);
+        console.log(`[get_job_function_titles_drilldown] Received ${analyticsData.elements?.length || 0} rows from dual-pivot query`);
         
-        // Process job title data - single pivot, so pivotValue is the job title string directly
+        // Process job title data - dual pivot with pivotValues array
         const titleMetrics: Record<string, { impressions: number; clicks: number; spent: number; leads: number }> = {};
-        
+
         for (const row of (analyticsData.elements || [])) {
-          // pivotValue is the job title string (e.g., "Software Engineer", "Product Manager")
-          const jobTitle = row.pivotValue || 'Unknown Title';
-          
-          // Aggregate metrics
-          const existing = titleMetrics[jobTitle] || { impressions: 0, clicks: 0, spent: 0, leads: 0 };
+          // pivotValues contains BOTH pivots in order
+          // Need to find the function and title values
+          const pivs = row.pivotValues || [];
+
+          const fn = pivs.find((x: any) => x.pivot === "MEMBER_JOB_FUNCTION")?.value;
+          const title = pivs.find((x: any) => x.pivot === "MEMBER_JOB_TITLE")?.value;
+
+          // Filter to clicked job function
+          if (!fn || !title) continue;
+
+          // jobFunctionUrn should match what fn looks like.
+          // If jobFunctionUrn is numeric or different format, normalize before compare.
+          if (fn !== jobFunctionUrn) continue;
+
+          const existing = titleMetrics[title] || { impressions: 0, clicks: 0, spent: 0, leads: 0 };
           existing.impressions += row.impressions || 0;
           existing.clicks += row.clicks || 0;
-          existing.spent += parseFloat(row.costInLocalCurrency || '0');
+          existing.spent += Number(row.costInLocalCurrency || 0);
           existing.leads += (row.oneClickLeads || 0) + (row.externalWebsiteConversions || 0);
-          titleMetrics[jobTitle] = existing;
+          titleMetrics[title] = existing;
         }
         
         // Build results array with computed metrics
@@ -2787,15 +2798,12 @@ serve(async (req) => {
           return bVal - aVal;
         });
         
-        console.log(`[get_job_function_titles_drilldown] Complete. Found ${titles.length} unique job titles`);
+        console.log(`[get_job_function_titles_drilldown] Complete. Found ${titles.length} job titles for function ${jobFunctionLabel}`);
         
-        // Note: Since LinkedIn doesn't support dual pivots, we return all job titles for the account
-        // The jobFunction is provided for context but filtering is not applied server-side
         return new Response(JSON.stringify({
           jobFunction: jobFunctionLabel,
           jobFunctionUrn,
           titles,
-          note: "Showing all job titles for this account. LinkedIn API does not support filtering by job function.",
           metadata: {
             accountId,
             dateRange: { start: startDate, end: endDate },
