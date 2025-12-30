@@ -704,6 +704,8 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
             data={jobSeniorityMatrix.titleData}
             isLoading={jobSeniorityMatrix.isTitleLoading}
             error={jobSeniorityMatrix.titleError}
+            jobFunctionOptions={jobSeniorityMatrix.jobFunctionOptions}
+            onOverrideMapping={jobSeniorityMatrix.overrideTitleMapping}
           />
         </TabsContent>
 
