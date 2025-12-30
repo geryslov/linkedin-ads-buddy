@@ -41,6 +41,7 @@ export const METRIC_OPTIONS = [
   { value: 'cpc', label: 'CPC ($)', prefix: '$' },
   { value: 'cpm', label: 'CPM ($)', prefix: '$' },
   { value: 'costPerLead', label: 'Cost Per Lead ($)', prefix: '$' },
+  { value: 'lgfCompletionRate', label: 'LGF Completion Rate (%)', suffix: '%' },
   { value: 'impressions', label: 'Impressions', suffix: '' },
   { value: 'clicks', label: 'Clicks', suffix: '' },
   { value: 'spent', label: 'Spent ($)', prefix: '$' },
