@@ -4,6 +4,7 @@ import { useToast } from '@/hooks/use-toast';
 
 export interface MatrixCell {
   jobFunction: string;
+  jobFunctionUrn: string;
   seniority: string;
   impressions: number;
   clicks: number;
@@ -19,8 +20,27 @@ export interface MatrixData {
   rows: string[];           // Job Function labels
   columns: string[];        // Seniority labels
   cells: Map<string, MatrixCell>;  // key: "jobFunction|seniority"
+  urnMap: Map<string, string>;     // Map from jobFunction label to URN
   minValue: number;
   maxValue: number;
+}
+
+export interface TitleData {
+  title: string;
+  impressions: number;
+  clicks: number;
+  spent: number;
+  leads: number;
+  ctr: number;
+  cpc: number;
+  cpm: number;
+  cpl: number;
+}
+
+export interface TitleDrilldownData {
+  jobFunction: string;
+  jobFunctionUrn: string;
+  titles: TitleData[];
 }
 
 export type MetricType = 'impressions' | 'clicks' | 'spent' | 'leads' | 'ctr' | 'cpc' | 'cpm' | 'cpl';
@@ -45,6 +65,13 @@ export function useJobSeniorityMatrix(accessToken: string | null) {
     start: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
     end: new Date().toISOString().split('T')[0],
   });
+  
+  // Drill-down state
+  const [expandedFunction, setExpandedFunction] = useState<string | null>(null);
+  const [titleData, setTitleData] = useState<TitleDrilldownData | null>(null);
+  const [isTitleLoading, setIsTitleLoading] = useState(false);
+  const [titleError, setTitleError] = useState<string | null>(null);
+  
   const { toast } = useToast();
 
   const timeFrameOptions: TimeFrameOption[] = useMemo(() => {
@@ -123,13 +150,21 @@ export function useJobSeniorityMatrix(accessToken: string | null) {
       const cells = new Map<string, MatrixCell>();
       const rowsSet = new Set<string>();
       const columnsSet = new Set<string>();
+      const urnMap = new Map<string, string>();
       
       for (const el of (data.elements || [])) {
         const key = `${el.jobFunction}|${el.seniority}`;
         rowsSet.add(el.jobFunction);
         columnsSet.add(el.seniority);
+        
+        // Store URN mapping for drill-down
+        if (el.jobFunctionUrn) {
+          urnMap.set(el.jobFunction, el.jobFunctionUrn);
+        }
+        
         cells.set(key, {
           jobFunction: el.jobFunction,
+          jobFunctionUrn: el.jobFunctionUrn || '',
           seniority: el.seniority,
           impressions: el.impressions || 0,
           clicks: el.clicks || 0,
@@ -169,7 +204,7 @@ export function useJobSeniorityMatrix(accessToken: string | null) {
       if (minValue === Infinity) minValue = 0;
       if (maxValue === -Infinity) maxValue = 0;
 
-      setMatrixData({ rows, columns, cells, minValue, maxValue });
+      setMatrixData({ rows, columns, cells, urnMap, minValue, maxValue });
     } catch (err: any) {
       console.error('Fetch job x seniority matrix error:', err);
       setError(err.message || 'Failed to fetch matrix data');
@@ -224,6 +259,64 @@ export function useJobSeniorityMatrix(accessToken: string | null) {
     });
   }, []);
 
+  // Fetch title drill-down data
+  const fetchTitleDrilldown = useCallback(async (accountId: string, jobFunctionUrn: string, jobFunctionLabel: string) => {
+    if (!accessToken || !accountId || !jobFunctionUrn) return;
+    
+    setExpandedFunction(jobFunctionLabel);
+    setTitleData(null);
+    setTitleError(null);
+    setIsTitleLoading(true);
+    
+    try {
+      console.log('Fetching title drill-down for:', jobFunctionLabel, jobFunctionUrn);
+      
+      const { data, error: fetchError } = await supabase.functions.invoke('linkedin-api', {
+        body: { 
+          action: 'get_job_function_titles_drilldown', 
+          accessToken,
+          params: { 
+            accountId, 
+            dateRange,
+            campaignIds: selectedCampaignIds.length > 0 ? selectedCampaignIds : undefined,
+            jobFunctionUrn,
+            metric: selectedMetric,
+          }
+        }
+      });
+
+      if (fetchError) throw fetchError;
+      
+      if (data.error) {
+        setTitleError(data.error);
+        return;
+      }
+      
+      console.log('Title drill-down response:', data);
+      setTitleData({
+        jobFunction: data.jobFunction,
+        jobFunctionUrn: data.jobFunctionUrn,
+        titles: data.titles || [],
+      });
+    } catch (err: any) {
+      console.error('Fetch title drill-down error:', err);
+      setTitleError(err.message || 'Failed to fetch title data');
+      toast({
+        title: 'Error',
+        description: err.message || 'Failed to fetch title data',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsTitleLoading(false);
+    }
+  }, [accessToken, dateRange, selectedCampaignIds, selectedMetric, toast]);
+
+  const closeTitleDrilldown = useCallback(() => {
+    setExpandedFunction(null);
+    setTitleData(null);
+    setTitleError(null);
+  }, []);
+
   return {
     matrixData: matrixData ? { ...matrixData, ...recalculatedMinMax } : null,
     isLoading,
@@ -238,5 +331,12 @@ export function useJobSeniorityMatrix(accessToken: string | null) {
     timeFrameOptions,
     setTimeFrame,
     fetchMatrix,
+    // Drill-down exports
+    expandedFunction,
+    titleData,
+    isTitleLoading,
+    titleError,
+    fetchTitleDrilldown,
+    closeTitleDrilldown,
   };
 }

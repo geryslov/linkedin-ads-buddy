@@ -2569,8 +2569,8 @@ serve(async (req) => {
         
         console.log(`[get_job_seniority_matrix] Job functions: ${jobFunctionData.elements?.length || 0}, Seniorities: ${seniorityData.elements?.length || 0}`);
         
-        // Process job function data
-        const jobFunctionMetrics: Record<string, { impressions: number; clicks: number; spent: number; leads: number }> = {};
+        // Process job function data - store URNs for drill-down
+        const jobFunctionMetrics: Record<string, { impressions: number; clicks: number; spent: number; leads: number; urn: string }> = {};
         let totalImpressions = 0;
         
         for (const row of (jobFunctionData.elements || [])) {
@@ -2583,7 +2583,7 @@ serve(async (req) => {
           const leads = (row.oneClickLeads || 0) + (row.externalWebsiteConversions || 0);
           
           totalImpressions += impressions;
-          jobFunctionMetrics[jobFunction] = { impressions, clicks, spent, leads };
+          jobFunctionMetrics[jobFunction] = { impressions, clicks, spent, leads, urn: pivotValue };
         }
         
         // Process seniority data
@@ -2629,6 +2629,7 @@ serve(async (req) => {
               
               matrixElements.push({
                 jobFunction,
+                jobFunctionUrn: jfMetrics.urn,
                 seniority,
                 impressions,
                 clicks,
@@ -2652,6 +2653,154 @@ serve(async (req) => {
             dateRange: { start: startDate, end: endDate },
             totalCells: matrixElements.length,
             note: 'Matrix values are proportionally estimated from separate job function and seniority data'
+          }
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+      case 'get_job_function_titles_drilldown': {
+        // Fetches REAL job titles for a given job function using Statistics Finder with multi-pivots
+        const { accountId, dateRange, campaignIds, jobFunctionUrn, metric } = params || {};
+        const startDate = dateRange?.start || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        const endDate = dateRange?.end || new Date().toISOString().split('T')[0];
+        const sortMetric = metric || 'impressions';
+        
+        // Parse date strings directly to avoid timezone issues
+        const [startYear, startMonth, startDay] = startDate.split('-').map(Number);
+        const [endYear, endMonth, endDay] = endDate.split('-').map(Number);
+        
+        console.log(`[get_job_function_titles_drilldown] Starting for account ${accountId}, jobFunction: ${jobFunctionUrn}, date range: ${startDate} to ${endDate}`);
+
+        if (!jobFunctionUrn) {
+          return new Response(JSON.stringify({ 
+            error: 'jobFunctionUrn is required',
+            titles: []
+          }), {
+            status: 400,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+
+        // Build campaign filter if provided
+        let campaignFilter = '';
+        if (campaignIds && campaignIds.length > 0) {
+          const campaignUrns = campaignIds.slice(0, 20).map((id: string) => `urn:li:sponsoredCampaign:${id}`).join(',');
+          campaignFilter = `&campaigns=List(${campaignUrns})`;
+          console.log(`[get_job_function_titles_drilldown] Filtering by ${Math.min(campaignIds.length, 20)} campaigns`);
+        }
+        
+        // Use Statistics Finder with multi-pivots
+        const analyticsUrl = `https://api.linkedin.com/rest/adAnalytics?` +
+          `q=statistics&` +
+          `pivots=List(MEMBER_JOB_FUNCTION,MEMBER_JOB_TITLE)&` +
+          `dateRange.start.day=${startDay}&` +
+          `dateRange.start.month=${startMonth}&` +
+          `dateRange.start.year=${startYear}&` +
+          `dateRange.end.day=${endDay}&` +
+          `dateRange.end.month=${endMonth}&` +
+          `dateRange.end.year=${endYear}&` +
+          `timeGranularity=ALL&` +
+          `accounts=List(urn:li:sponsoredAccount:${accountId})&` +
+          `fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,pivotValues` +
+          campaignFilter;
+        
+        console.log(`[get_job_function_titles_drilldown] Fetching from Statistics Finder...`);
+        
+        const analyticsResponse = await fetch(analyticsUrl, {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'X-Restli-Protocol-Version': '2.0.0',
+            'LinkedIn-Version': '202511',
+          },
+        });
+        
+        if (!analyticsResponse.ok) {
+          const errorText = await analyticsResponse.text();
+          console.error(`[get_job_function_titles_drilldown] Statistics API error (${analyticsResponse.status}):`, errorText);
+          return new Response(JSON.stringify({ 
+            error: 'Title-level breakdown unavailable for this account.',
+            details: errorText,
+            titles: []
+          }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+        
+        const analyticsData = await analyticsResponse.json();
+        console.log(`[get_job_function_titles_drilldown] Received ${analyticsData.elements?.length || 0} rows`);
+        
+        // Filter by the requested job function and group by job title
+        const titleMetrics: Record<string, { impressions: number; clicks: number; spent: number; leads: number }> = {};
+        let jobFunctionLabel = '';
+        
+        for (const row of (analyticsData.elements || [])) {
+          const pivotValues = row.pivotValues || [];
+          if (pivotValues.length < 2) continue;
+          
+          const jobFunctionPivot = pivotValues[0];
+          const jobTitlePivot = pivotValues[1];
+          
+          // Check if this row matches our target job function
+          const rowJobFunctionUrn = jobFunctionPivot?.value || jobFunctionPivot;
+          if (rowJobFunctionUrn !== jobFunctionUrn) continue;
+          
+          // Get job function label for the response
+          if (!jobFunctionLabel) {
+            jobFunctionLabel = formatPivotValue(rowJobFunctionUrn, 'MEMBER_JOB_FUNCTION');
+          }
+          
+          // Get job title - it comes as a string directly
+          const jobTitle = typeof jobTitlePivot === 'string' 
+            ? jobTitlePivot 
+            : (jobTitlePivot?.value || 'Unknown Title');
+          
+          // Aggregate metrics
+          const existing = titleMetrics[jobTitle] || { impressions: 0, clicks: 0, spent: 0, leads: 0 };
+          existing.impressions += row.impressions || 0;
+          existing.clicks += row.clicks || 0;
+          existing.spent += parseFloat(row.costInLocalCurrency || '0');
+          existing.leads += (row.oneClickLeads || 0) + (row.externalWebsiteConversions || 0);
+          titleMetrics[jobTitle] = existing;
+        }
+        
+        // Build results array with computed metrics
+        const titles = Object.entries(titleMetrics).map(([title, metrics]) => {
+          const ctr = metrics.impressions > 0 ? (metrics.clicks / metrics.impressions) * 100 : 0;
+          const cpc = metrics.clicks > 0 ? metrics.spent / metrics.clicks : 0;
+          const cpm = metrics.impressions > 0 ? (metrics.spent / metrics.impressions) * 1000 : 0;
+          const cpl = metrics.leads > 0 ? metrics.spent / metrics.leads : 0;
+          
+          return {
+            title,
+            impressions: metrics.impressions,
+            clicks: metrics.clicks,
+            spent: metrics.spent,
+            leads: metrics.leads,
+            ctr,
+            cpc,
+            cpm,
+            cpl,
+          };
+        });
+        
+        // Sort by the selected metric descending
+        titles.sort((a, b) => {
+          const aVal = (a as any)[sortMetric] || 0;
+          const bVal = (b as any)[sortMetric] || 0;
+          return bVal - aVal;
+        });
+        
+        console.log(`[get_job_function_titles_drilldown] Complete. Found ${titles.length} unique titles for ${jobFunctionLabel}`);
+        
+        return new Response(JSON.stringify({
+          jobFunction: jobFunctionLabel || formatPivotValue(jobFunctionUrn, 'MEMBER_JOB_FUNCTION'),
+          jobFunctionUrn,
+          titles,
+          metadata: {
+            accountId,
+            dateRange: { start: startDate, end: endDate },
+            totalTitles: titles.length,
           }
         }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }

@@ -14,6 +14,7 @@ import { CompanyDemographicTable } from './CompanyDemographicTable';
 import { CreativeNamesReportTable } from './CreativeNamesReportTable';
 import { CampaignReportingTable } from './CampaignReportingTable';
 import { JobSeniorityMatrix } from './JobSeniorityMatrix';
+import { JobFunctionTitlesDrawer } from './JobFunctionTitlesDrawer';
 import { CampaignMultiSelect } from './CampaignMultiSelect';
 import { TimeFrameSelector } from './TimeFrameSelector';
 import { MetricCard } from './MetricCard';
@@ -687,9 +688,23 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
                 isLoading={jobSeniorityMatrix.isLoading}
                 selectedMetric={jobSeniorityMatrix.selectedMetric}
                 onMetricChange={jobSeniorityMatrix.setSelectedMetric}
+                onFunctionClick={(urn, label) => {
+                  if (selectedAccount) {
+                    jobSeniorityMatrix.fetchTitleDrilldown(selectedAccount, urn, label);
+                  }
+                }}
               />
             </CardContent>
           </Card>
+
+          {/* Job Function Titles Drawer */}
+          <JobFunctionTitlesDrawer
+            open={!!jobSeniorityMatrix.expandedFunction}
+            onClose={jobSeniorityMatrix.closeTitleDrilldown}
+            data={jobSeniorityMatrix.titleData}
+            isLoading={jobSeniorityMatrix.isTitleLoading}
+            error={jobSeniorityMatrix.titleError}
+          />
         </TabsContent>
 
         <TabsContent value="audiences" className="mt-6">

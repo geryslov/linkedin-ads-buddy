@@ -4,12 +4,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
+import { ChevronRight } from 'lucide-react';
 
 interface JobSeniorityMatrixProps {
   matrixData: MatrixData | null;
   isLoading: boolean;
   selectedMetric: MetricType;
   onMetricChange: (metric: MetricType) => void;
+  onFunctionClick?: (jobFunctionUrn: string, jobFunctionLabel: string) => void;
 }
 
 const METRIC_OPTIONS: { value: MetricType; label: string }[] = [
@@ -69,7 +71,7 @@ const formatTooltipValue = (value: number, metric: MetricType): string => {
   }
 };
 
-export function JobSeniorityMatrix({ matrixData, isLoading, selectedMetric, onMetricChange }: JobSeniorityMatrixProps) {
+export function JobSeniorityMatrix({ matrixData, isLoading, selectedMetric, onMetricChange, onFunctionClick }: JobSeniorityMatrixProps) {
   if (isLoading) {
     return (
       <div className="space-y-4">
@@ -93,7 +95,15 @@ export function JobSeniorityMatrix({ matrixData, isLoading, selectedMetric, onMe
     );
   }
 
-  const { rows, columns, cells, minValue, maxValue } = matrixData;
+  const { rows, columns, cells, urnMap, minValue, maxValue } = matrixData;
+
+  const handleRowClick = (row: string) => {
+    if (!onFunctionClick) return;
+    const urn = urnMap.get(row);
+    if (urn) {
+      onFunctionClick(urn, row);
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -115,6 +125,13 @@ export function JobSeniorityMatrix({ matrixData, isLoading, selectedMetric, onMe
         <MatrixColorLegend minValue={minValue} maxValue={maxValue} metric={selectedMetric} />
       </div>
 
+      {/* Drill-down hint */}
+      {onFunctionClick && (
+        <p className="text-xs text-muted-foreground">
+          Click a job function to see actual job titles that appeared in ad delivery.
+        </p>
+      )}
+
       {/* Matrix Grid */}
       <ScrollArea className="w-full">
         <div className="min-w-[600px]">
@@ -134,8 +151,18 @@ export function JobSeniorityMatrix({ matrixData, isLoading, selectedMetric, onMe
             <tbody>
               {rows.map(row => (
                 <tr key={row}>
-                  <td className="sticky left-0 z-10 bg-background border border-border p-2 font-medium">
-                    {row}
+                  <td 
+                    className={`sticky left-0 z-10 bg-background border border-border p-2 font-medium ${
+                      onFunctionClick ? 'cursor-pointer hover:bg-muted/50 group' : ''
+                    }`}
+                    onClick={() => handleRowClick(row)}
+                  >
+                    <div className="flex items-center gap-2">
+                      {onFunctionClick && (
+                        <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors" />
+                      )}
+                      {row}
+                    </div>
                   </td>
                   {columns.map(col => {
                     const key = `${row}|${col}`;
