@@ -825,7 +825,7 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
                 )}
                 
                 <div className="text-xs text-muted-foreground space-y-1">
-                  <p><strong>Endpoint:</strong> GET https://api.linkedin.com/rest/titles</p>
+                  <p><strong>Endpoint:</strong> GET https://api.linkedin.com/v2/standardizedTitles</p>
                   <p><strong>Query params:</strong> q=criteria, name=Engineer</p>
                   <p><strong>Headers:</strong> X-Restli-Protocol-Version: 2.0.0, LinkedIn-Version: 202511</p>
                 </div>
