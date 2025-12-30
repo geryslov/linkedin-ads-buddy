@@ -47,6 +47,48 @@ export type Database = {
         }
         Relationships: []
       }
+      title_function_map: {
+        Row: {
+          confidence: number
+          created_at: string | null
+          id: string
+          job_function_id: string
+          job_function_label: string
+          method: string
+          normalized_title: string
+          original_title: string
+          overridden_by: string | null
+          override_reason: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          confidence?: number
+          created_at?: string | null
+          id?: string
+          job_function_id: string
+          job_function_label: string
+          method?: string
+          normalized_title: string
+          original_title: string
+          overridden_by?: string | null
+          override_reason?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          confidence?: number
+          created_at?: string | null
+          id?: string
+          job_function_id?: string
+          job_function_label?: string
+          method?: string
+          normalized_title?: string
+          original_title?: string
+          overridden_by?: string | null
+          override_reason?: string | null
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
       user_linked_accounts: {
         Row: {
           account_id: string
