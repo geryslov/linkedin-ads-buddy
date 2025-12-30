@@ -164,6 +164,14 @@ export function useCampaignReporting(accessToken: string | null) {
     if (!accessToken || !accountId) return;
     
     try {
+      // Helper to format date as YYYY-MM-DD without timezone issues
+      const formatLocalDate = (d: Date) => {
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+      };
+      
       // Get today's date, then calculate 8 days ago (to get data for 7 full previous days, excluding today)
       const today = new Date();
       const eightDaysAgo = new Date(today);
@@ -174,11 +182,11 @@ export function useCampaignReporting(accessToken: string | null) {
       yesterday.setDate(today.getDate() - 1);
       
       const dailyDateRange = {
-        start: eightDaysAgo.toISOString().split('T')[0],
-        end: yesterday.toISOString().split('T')[0],
+        start: formatLocalDate(eightDaysAgo),
+        end: formatLocalDate(yesterday),
       };
       
-      console.log('Fetching daily spend data with params:', { accountId, dailyDateRange });
+      console.log('[DailySpend] Fetching with params:', { accountId, dailyDateRange });
       
       const { data, error: apiError } = await supabase.functions.invoke('linkedin-api', {
         body: { 
@@ -193,14 +201,14 @@ export function useCampaignReporting(accessToken: string | null) {
       });
 
       if (apiError) {
-        console.error('Error fetching daily spend data:', apiError);
+        console.error('[DailySpend] API error:', apiError);
         return;
       }
       
-      console.log('Daily spend response:', data);
+      console.log('[DailySpend] Response elements:', data?.elements?.length || 0);
       
       if (data.error) {
-        console.error('Daily spend API error:', data.error);
+        console.error('[DailySpend] Data error:', data.error);
         return;
       }
       
@@ -221,15 +229,15 @@ export function useCampaignReporting(accessToken: string | null) {
         }
       });
       
-      console.log('Spend by date:', spendByDate);
+      console.log('[DailySpend] Spend by date:', spendByDate);
       
       const dailyData = Object.entries(spendByDate).map(([date, spent]) => ({ date, spent }));
       dailyData.sort((a, b) => b.date.localeCompare(a.date)); // Sort descending by date
       
-      console.log('Processed daily spend data:', dailyData);
+      console.log('[DailySpend] Processed daily data:', dailyData);
       setDailySpendData(dailyData);
     } catch (err: any) {
-      console.error('Fetch daily spend error:', err);
+      console.error('[DailySpend] Fetch error:', err);
     }
   }, [accessToken]);
 
@@ -248,44 +256,43 @@ export function useCampaignReporting(accessToken: string | null) {
 
   // Calculate average daily spend for last 2 days and last 7 days
   const dailySpendAverages = useMemo(() => {
+    // Helper to format date as YYYY-MM-DD without timezone issues
+    const formatLocalDate = (d: Date) => {
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
+    
     // Today's date
     const today = new Date();
     
-    // Calculate dates for "last 2 days" (e.g., if today is Dec 30, last 2 days = Dec 28 & Dec 29)
-    const twoDaysAgo = new Date(today);
-    twoDaysAgo.setDate(today.getDate() - 2);
-    const threeDaysAgo = new Date(today);
-    threeDaysAgo.setDate(today.getDate() - 3);
-    
-    // Calculate date for 7 days ago (for last 7 days average)
-    const sevenDaysAgo = new Date(today);
-    sevenDaysAgo.setDate(today.getDate() - 7);
-    const eightDaysAgo = new Date(today);
-    eightDaysAgo.setDate(today.getDate() - 8);
-    
-    const formatDate = (d: Date) => d.toISOString().split('T')[0];
-    
-    // Last 2 days: days at -2 and -3 from today (e.g., Dec 28 and Dec 27 if today is Dec 30)
-    // Actually per user: "2 last days will be 28th and 29th" if today is 30th
-    // So -2 and -1 days from today (excluding today)
+    // Last 2 days: -2 and -1 from today (e.g., Dec 28 and Dec 29 if today is Dec 30)
     const day1 = new Date(today);
     day1.setDate(today.getDate() - 2); // 28th
     const day2 = new Date(today);
     day2.setDate(today.getDate() - 1); // 29th
     
-    const last2DaysDates = [formatDate(day1), formatDate(day2)];
+    const last2DaysDates = [formatLocalDate(day1), formatLocalDate(day2)];
     
     // Last 7 days: -7 to -1 days from today (excluding today)
     const last7DaysDates: string[] = [];
     for (let i = 7; i >= 1; i--) {
       const d = new Date(today);
       d.setDate(today.getDate() - i);
-      last7DaysDates.push(formatDate(d));
+      last7DaysDates.push(formatLocalDate(d));
     }
+    
+    console.log('[DailySpend] Available dates in data:', dailySpendData.map(d => d.date));
+    console.log('[DailySpend] Looking for last2Days:', last2DaysDates);
+    console.log('[DailySpend] Looking for last7Days:', last7DaysDates);
     
     // Calculate averages
     const last2DaysData = dailySpendData.filter(d => last2DaysDates.includes(d.date));
     const last7DaysData = dailySpendData.filter(d => last7DaysDates.includes(d.date));
+    
+    console.log('[DailySpend] Matched last2DaysData:', last2DaysData);
+    console.log('[DailySpend] Matched last7DaysData:', last7DaysData);
     
     const avgLast2Days = last2DaysData.length > 0 
       ? last2DaysData.reduce((sum, d) => sum + d.spent, 0) / last2DaysData.length 
@@ -294,6 +301,8 @@ export function useCampaignReporting(accessToken: string | null) {
     const avgLast7Days = last7DaysData.length > 0 
       ? last7DaysData.reduce((sum, d) => sum + d.spent, 0) / last7DaysData.length 
       : 0;
+    
+    console.log('[DailySpend] Averages:', { avgLast2Days, avgLast7Days });
     
     return {
       avgLast2Days,
