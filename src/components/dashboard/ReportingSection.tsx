@@ -110,6 +110,7 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
         creativeNamesReport.fetchCreativeNamesReport(selectedAccount);
       } else if (reportType === 'campaigns') {
         campaignReporting.fetchCampaignReport(selectedAccount);
+        campaignReporting.fetchDailySpendData(selectedAccount);
       } else if (reportType === 'demographics') {
         demographicReporting.fetchDemographicAnalytics(selectedAccount);
       } else if (reportType === 'company_demo') {
@@ -365,7 +366,7 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
             </CardContent>
           </Card>
 
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-5 lg:grid-cols-10 gap-4">
             <MetricCard title="Impressions" value={campaignReporting.totals.impressions.toLocaleString()} icon={FileBarChart} />
             <MetricCard title="Clicks" value={campaignReporting.totals.clicks.toLocaleString()} icon={FileBarChart} />
             <MetricCard title="Spent" value={`$${campaignReporting.totals.spent.toFixed(2)}`} icon={FileBarChart} />
@@ -373,6 +374,9 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
             <MetricCard title="CTR" value={`${campaignReporting.totals.impressions > 0 ? ((campaignReporting.totals.clicks / campaignReporting.totals.impressions) * 100).toFixed(2) : '0.00'}%`} icon={FileBarChart} />
             <MetricCard title="CPC" value={`$${campaignReporting.totals.clicks > 0 ? (campaignReporting.totals.spent / campaignReporting.totals.clicks).toFixed(2) : '0.00'}`} icon={FileBarChart} />
             <MetricCard title="CPM" value={`$${campaignReporting.totals.impressions > 0 ? ((campaignReporting.totals.spent / campaignReporting.totals.impressions) * 1000).toFixed(2) : '0.00'}`} icon={FileBarChart} />
+            <MetricCard title="CPL" value={`$${campaignReporting.totals.leads > 0 ? (campaignReporting.totals.spent / campaignReporting.totals.leads).toFixed(2) : '0.00'}`} icon={FileBarChart} />
+            <MetricCard title="Avg Daily (2d)" value={`$${campaignReporting.dailySpendAverages.avgLast2Days.toFixed(2)}`} icon={FileBarChart} />
+            <MetricCard title="Avg Daily (7d)" value={`$${campaignReporting.dailySpendAverages.avgLast7Days.toFixed(2)}`} icon={FileBarChart} />
           </div>
 
           {campaignReporting.error && (
