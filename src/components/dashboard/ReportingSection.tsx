@@ -300,7 +300,21 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
     reportType === 'campaigns' ? campaignReporting.isLoading :
     reportType === 'demographics' ? demographicReporting.isLoading : 
     reportType === 'company_demo' ? companyDemographic.isLoading :
-    reportType === 'job_seniority' ? jobSeniorityMatrix.isLoading : false;
+    reportType === 'job_seniority' ? jobSeniorityMatrix.isLoading :
+    reportType === 'lead_gen_forms' ? leadGenForms.isLoading : false;
+
+  const handleLeadGenTimeFrameChange = (option: LeadGenTimeFrameOption) => {
+    setSelectedTimeFrame(option.value);
+    leadGenForms.setTimeFrame(option);
+  };
+
+  const handleLeadGenCustomDate = (start: Date, end: Date) => {
+    setSelectedTimeFrame('custom');
+    leadGenForms.setDateRange({
+      start: start.toISOString().split('T')[0],
+      end: end.toISOString().split('T')[0],
+    });
+  };
 
   return (
     <div className="space-y-6">
@@ -783,6 +797,68 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
               <p className="text-muted-foreground">
                 Audience insights and segment analysis will be available in a future update.
               </p>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Lead Gen Forms Tab */}
+        <TabsContent value="lead_gen_forms" className="space-y-6 mt-6">
+          <Card className="bg-card/50 backdrop-blur-sm border-border/50">
+            <CardContent className="pt-4">
+              <div className="flex flex-col md:flex-row gap-4">
+                <div className="flex-1">
+                  <TimeFrameSelector
+                    timeFrameOptions={leadGenForms.timeFrameOptions}
+                    selectedTimeFrame={selectedTimeFrame}
+                    onTimeFrameChange={handleLeadGenTimeFrameChange}
+                    timeGranularity="ALL"
+                    onGranularityChange={() => {}}
+                    dateRange={leadGenForms.dateRange}
+                    onCustomDateChange={handleLeadGenCustomDate}
+                  />
+                </div>
+                <div className="w-full md:w-80">
+                  <CampaignMultiSelect
+                    campaigns={campaignReporting.campaignData}
+                    selectedCampaignIds={leadGenForms.selectedCampaignIds}
+                    onSelectionChange={leadGenForms.setSelectedCampaignIds}
+                  />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4">
+            <MetricCard title="Forms" value={leadGenForms.formsData.length.toString()} icon={ClipboardList} />
+            <MetricCard title="Leads" value={leadGenForms.totals.leads.toLocaleString()} icon={FileBarChart} />
+            <MetricCard title="Form Opens" value={leadGenForms.totals.formOpens.toLocaleString()} icon={FileBarChart} />
+            <MetricCard title="Spent" value={`$${leadGenForms.totals.spent.toFixed(2)}`} icon={FileBarChart} />
+            <MetricCard title="CPL" value={`$${leadGenForms.totals.cpl.toFixed(2)}`} icon={FileBarChart} />
+            <MetricCard title="LGF Rate" value={`${leadGenForms.totals.lgfRate.toFixed(1)}%`} icon={FileBarChart} />
+            <MetricCard title="CTR" value={`${leadGenForms.totals.ctr.toFixed(2)}%`} icon={FileBarChart} />
+            <MetricCard title="CPC" value={`$${leadGenForms.totals.cpc.toFixed(2)}`} icon={FileBarChart} />
+          </div>
+
+          {leadGenForms.error && (
+            <Card className="bg-destructive/10 border-destructive/30">
+              <CardContent className="pt-4">
+                <p className="text-sm text-destructive"><strong>Note:</strong> {leadGenForms.error}</p>
+              </CardContent>
+            </Card>
+          )}
+
+          <Card className="bg-card/50 backdrop-blur-sm border-border/50">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <ClipboardList className="h-5 w-5 text-primary" />
+                Lead Gen Form Performance
+              </CardTitle>
+              <CardDescription>
+                Performance by lead gen form with connected creatives breakdown. Click a row to expand.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <LeadGenFormsTable data={leadGenForms.formsData} isLoading={leadGenForms.isLoading} />
             </CardContent>
           </Card>
         </TabsContent>
