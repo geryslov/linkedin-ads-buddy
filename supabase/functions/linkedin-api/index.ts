@@ -3773,15 +3773,26 @@ serve(async (req) => {
         // Combine form URNs from analytics and creative metadata
         const allFormUrns = new Set([...formAnalyticsMap.keys(), ...discoveredFormUrns]);
         
+        // Try REST API first, then fallback to v2
         try {
-          const leadFormsUrl = `https://api.linkedin.com/rest/adAccounts/${accountId}/leadForms?q=account&count=500`;
-          const leadFormsResponse = await fetch(leadFormsUrl, {
+          // REST API: /rest/leadForms?q=owner&owner=urn:li:sponsoredAccount:{accountId}
+          let leadFormsUrl = `https://api.linkedin.com/rest/leadForms?q=owner&owner=urn:li:sponsoredAccount:${accountId}&count=500`;
+          let leadFormsResponse = await fetch(leadFormsUrl, {
             headers: {
               'Authorization': `Bearer ${accessToken}`,
               'LinkedIn-Version': '202511',
               'X-Restli-Protocol-Version': '2.0.0',
             },
           });
+          
+          // If REST fails, try v2 API
+          if (!leadFormsResponse.ok) {
+            console.log(`[Step 4] REST leadForms returned ${leadFormsResponse.status}, trying v2 API...`);
+            leadFormsUrl = `https://api.linkedin.com/v2/adForms?q=account&account=urn:li:sponsoredAccount:${accountId}&count=500`;
+            leadFormsResponse = await fetch(leadFormsUrl, {
+              headers: { 'Authorization': `Bearer ${accessToken}` },
+            });
+          }
           
           if (leadFormsResponse.ok) {
             const leadFormsData = await leadFormsResponse.json();
@@ -3795,7 +3806,8 @@ serve(async (req) => {
               lgfFormNames.set(formUrn, formName);
             }
           } else {
-            console.log(`[Step 4] Lead Forms API returned ${leadFormsResponse.status}`);
+            const errorText = await leadFormsResponse.text();
+            console.log(`[Step 4] Lead Forms API returned ${leadFormsResponse.status}: ${errorText.substring(0, 200)}`);
           }
         } catch (err) {
           console.log(`[Step 4] Lead Forms API error:`, err);
