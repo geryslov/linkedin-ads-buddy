@@ -3,18 +3,20 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { RefreshCw, FileBarChart, Users, Target, PieChart, Globe, List, Download, Grid3X3, Settings, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
+import { RefreshCw, FileBarChart, Users, Target, PieChart, Globe, List, Download, Grid3X3, Settings, CheckCircle2, XCircle, Loader2, ClipboardList } from 'lucide-react';
 import { useDemographicReporting, TimeFrameOption as DemoTimeFrameOption, TimeGranularity, DemographicPivot, DEMOGRAPHIC_PIVOT_OPTIONS } from '@/hooks/useDemographicReporting';
 import { useCompanyDemographic, TimeFrameOption as CompanyDemoTimeFrameOption } from '@/hooks/useCompanyDemographic';
 import { useCreativeNamesReport, TimeFrameOption as CreativeNamesTimeFrameOption } from '@/hooks/useCreativeNamesReport';
 import { useCampaignReporting, TimeFrameOption as CampaignTimeFrameOption } from '@/hooks/useCampaignReporting';
 import { useJobSeniorityMatrix, TimeFrameOption as MatrixTimeFrameOption } from '@/hooks/useJobSeniorityMatrix';
+import { useLeadGenFormsReport, TimeFrameOption as LeadGenTimeFrameOption } from '@/hooks/useLeadGenFormsReport';
 import { DemographicTable } from './DemographicTable';
 import { CompanyDemographicTable } from './CompanyDemographicTable';
 import { CreativeNamesReportTable } from './CreativeNamesReportTable';
 import { CampaignReportingTable } from './CampaignReportingTable';
 import { JobSeniorityMatrix } from './JobSeniorityMatrix';
 import { JobFunctionTitlesDrawer } from './JobFunctionTitlesDrawer';
+import { LeadGenFormsTable } from './LeadGenFormsTable';
 import { CampaignMultiSelect } from './CampaignMultiSelect';
 import { TimeFrameSelector } from './TimeFrameSelector';
 import { MetricCard } from './MetricCard';
@@ -39,6 +41,7 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
   const creativeNamesReport = useCreativeNamesReport(accessToken);
   const campaignReporting = useCampaignReporting(accessToken);
   const jobSeniorityMatrix = useJobSeniorityMatrix(accessToken);
+  const leadGenForms = useLeadGenFormsReport(accessToken);
   const { toast } = useToast();
 
   const [selectedTimeFrame, setSelectedTimeFrame] = useState('last_7_days');
@@ -125,6 +128,12 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
         if (campaignReporting.campaignData.length === 0) {
           campaignReporting.fetchCampaignReport(selectedAccount);
         }
+      } else if (reportType === 'lead_gen_forms') {
+        leadGenForms.fetchLeadGenForms(selectedAccount);
+        // Also fetch campaigns for the filter if not already loaded
+        if (campaignReporting.campaignData.length === 0) {
+          campaignReporting.fetchCampaignReport(selectedAccount);
+        }
       }
     }
   }, [selectedAccount, reportType]);
@@ -163,6 +172,13 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
       jobSeniorityMatrix.fetchMatrix(selectedAccount);
     }
   }, [jobSeniorityMatrix.dateRange, jobSeniorityMatrix.selectedCampaignIds]);
+
+  // Re-fetch when time or campaigns change for lead gen forms
+  useEffect(() => {
+    if (selectedAccount && reportType === 'lead_gen_forms') {
+      leadGenForms.fetchLeadGenForms(selectedAccount);
+    }
+  }, [leadGenForms.dateRange, leadGenForms.selectedCampaignIds]);
 
   const handleDemoTimeFrameChange = (option: DemoTimeFrameOption) => {
     setSelectedTimeFrame(option.value);
@@ -241,6 +257,8 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
         companyDemographic.fetchCompanyDemographic(selectedAccount);
       } else if (reportType === 'job_seniority') {
         jobSeniorityMatrix.fetchMatrix(selectedAccount);
+      } else if (reportType === 'lead_gen_forms') {
+        leadGenForms.fetchLeadGenForms(selectedAccount);
       }
     }
   };
@@ -338,6 +356,10 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
           <TabsTrigger value="job_seniority" className="gap-2">
             <Grid3X3 className="h-4 w-4" />
             Job × Seniority
+          </TabsTrigger>
+          <TabsTrigger value="lead_gen_forms" className="gap-2">
+            <ClipboardList className="h-4 w-4" />
+            Lead Gen Forms
           </TabsTrigger>
           <TabsTrigger value="audiences" className="gap-2" disabled>
             <Users className="h-4 w-4" />
