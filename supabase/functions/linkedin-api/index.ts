@@ -3552,102 +3552,99 @@ serve(async (req) => {
       }
 
       case 'get_lead_gen_forms': {
-        // Fetches lead gen form performance with connected creatives breakdown
+        // Analytics-first approach: Source of truth is analytics data, not creative parsing
         const { accountId, dateRange, campaignIds } = params || {};
         const startDate = dateRange?.start || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
         const endDate = dateRange?.end || new Date().toISOString().split('T')[0];
         
-        // Parse date strings directly to avoid timezone issues
         const [startYear, startMonth, startDay] = startDate.split('-').map(Number);
         const [endYear, endMonth, endDay] = endDate.split('-').map(Number);
         
         console.log(`[get_lead_gen_forms] Starting for account ${accountId}, date range: ${startDate} to ${endDate}`);
         
-        // Step 1: Fetch all creatives with their lead form associations
-        console.log('[Step 1] Fetching creatives with lead form associations...');
-        // Use the versioned API endpoint that works in other actions
-        const lgfCreativesUrl = `https://api.linkedin.com/rest/creatives?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&sortOrder=DESCENDING&count=500`;
-        const lgfCreativesResponse = await fetch(lgfCreativesUrl, {
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'LinkedIn-Version': '202511',
-            'X-Restli-Protocol-Version': '2.0.0',
-          },
-        });
+        // Debug counters
+        let totalLeads = 0;
+        let numCreativesWithLeads = 0;
+        let numFormsFromAnalytics = 0;
         
-        const creativeToForm = new Map<string, string>(); // creativeId -> leadFormUrn
-        const creativeMetadata = new Map<string, { name: string; campaignId: string }>(); 
-        const formUrns = new Set<string>();
+        // Step 1: Try pivot=LEAD_GEN_FORM first (most direct approach)
+        console.log('[Step 1] Trying pivot=LEAD_GEN_FORM...');
+        const formAnalyticsMap = new Map<string, {
+          formUrn: string;
+          impressions: number;
+          clicks: number;
+          spent: number;
+          leads: number;
+          formOpens: number;
+        }>();
         
-        if (lgfCreativesResponse.ok) {
-          const lgfCreativesData = await lgfCreativesResponse.json();
-          const creatives = lgfCreativesData.elements || [];
-          console.log(`[Step 1] Found ${creatives.length} creatives`);
-          
-          for (const creative of creatives) {
-            const creativeId = creative.id?.toString() || creative.$URN?.split(':').pop();
-            if (!creativeId) continue;
-            
-            // Extract campaign ID
-            const campaignUrn = creative.campaign || '';
-            const campaignId = campaignUrn.split(':').pop() || '';
-            
-            // Extract creative name
-            let creativeName = creative.name || `Creative ${creativeId}`;
-            
-            // Look for lead form URN in various places in the creative object
-            let leadFormUrn: string | null = null;
-            
-            // Check content object for lead gen form references
-            const content = creative.content || {};
-            
-            // Check sponsored content with lead gen form
-            if (content.sponsoredContent?.leadGenerationContext?.leadGenFormUrn) {
-              leadFormUrn = content.sponsoredContent.leadGenerationContext.leadGenFormUrn;
-            } else if (content.sponsoredContent?.share?.leadGenerationContext?.leadGenFormUrn) {
-              leadFormUrn = content.sponsoredContent.share.leadGenerationContext.leadGenFormUrn;
-            } else if (content.leadGenerationCall?.leadGenForm) {
-              leadFormUrn = content.leadGenerationCall.leadGenForm;
-            } else if (content.leadGenFormContent?.leadGenFormUrn) {
-              leadFormUrn = content.leadGenFormContent.leadGenFormUrn;
-            }
-            
-            // Check reference field for lead gen form URN
-            const reference = creative.reference || content.reference || '';
-            if (!leadFormUrn && typeof reference === 'string' && reference.includes('leadGenForm')) {
-              const formMatch = reference.match(/urn:li:leadGenForm:\d+/);
-              if (formMatch) {
-                leadFormUrn = formMatch[0];
-              }
-            }
-            
-            // Also check intendedStatus object
-            if (!leadFormUrn && creative.intendedStatus) {
-              const statusStr = JSON.stringify(creative.intendedStatus);
-              const formMatch = statusStr.match(/urn:li:leadGenForm:\d+/);
-              if (formMatch) {
-                leadFormUrn = formMatch[0];
-              }
-            }
-            
-            creativeMetadata.set(creativeId, { name: creativeName, campaignId });
-            
-            if (leadFormUrn) {
-              creativeToForm.set(creativeId, leadFormUrn);
-              formUrns.add(leadFormUrn);
-              console.log(`[Step 1] Creative ${creativeId} -> Form ${leadFormUrn}`);
-            }
-          }
-        } else {
-          const errorText = await lgfCreativesResponse.text();
-          console.error(`[Step 1] Creatives fetch failed: ${lgfCreativesResponse.status} - ${errorText.substring(0, 200)}`);
+        let lgfAnalyticsUrl = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
+          `dateRange.start.day=${startDay}&` +
+          `dateRange.start.month=${startMonth}&` +
+          `dateRange.start.year=${startYear}&` +
+          `dateRange.end.day=${endDay}&` +
+          `dateRange.end.month=${endMonth}&` +
+          `dateRange.end.year=${endYear}&` +
+          `timeGranularity=ALL&` +
+          `pivot=LEAD_GEN_FORM&` +
+          `accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
+          `fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,oneClickLeadFormOpens,pivotValue&` +
+          `count=10000`;
+        
+        if (campaignIds && campaignIds.length > 0) {
+          campaignIds.forEach((id: string, i: number) => {
+            lgfAnalyticsUrl += `&campaigns[${i}]=urn:li:sponsoredCampaign:${id}`;
+          });
         }
         
-        console.log(`[Step 1] Found ${formUrns.size} unique lead forms attached to ${creativeToForm.size} creatives`);
+        try {
+          const lgfFormResponse = await fetch(lgfAnalyticsUrl, {
+            headers: { 'Authorization': `Bearer ${accessToken}` }
+          });
+          
+          if (lgfFormResponse.ok) {
+            const lgfFormData = await lgfFormResponse.json();
+            const elements = lgfFormData.elements || [];
+            console.log(`[Step 1] LEAD_GEN_FORM pivot returned ${elements.length} rows`);
+            
+            for (const el of elements) {
+              const pivotValue = el.pivotValue || '';
+              if (!pivotValue.includes('leadGenForm')) continue;
+              
+              const leads = (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
+              formAnalyticsMap.set(pivotValue, {
+                formUrn: pivotValue,
+                impressions: el.impressions || 0,
+                clicks: el.clicks || 0,
+                spent: parseFloat(el.costInLocalCurrency || '0'),
+                leads,
+                formOpens: el.oneClickLeadFormOpens || 0,
+              });
+              totalLeads += leads;
+            }
+            numFormsFromAnalytics = formAnalyticsMap.size;
+          } else {
+            const errorText = await lgfFormResponse.text();
+            console.log(`[Step 1] LEAD_GEN_FORM pivot failed: ${lgfFormResponse.status} - ${errorText.substring(0, 200)}`);
+          }
+        } catch (err) {
+          console.log(`[Step 1] LEAD_GEN_FORM pivot error:`, err);
+        }
         
-        // Step 2: Fetch analytics by creative
+        console.log(`[Step 1] Found ${formAnalyticsMap.size} forms from LEAD_GEN_FORM pivot`);
+        
+        // Step 2: Fetch creative-level analytics (always needed for enrichment)
         console.log('[Step 2] Fetching creative-level analytics...');
-        let lgfAnalyticsUrl = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
+        const lgfCreativeAnalytics = new Map<string, {
+          creativeUrn: string;
+          impressions: number;
+          clicks: number;
+          spent: number;
+          leads: number;
+          formOpens: number;
+        }>();
+        
+        let creativeAnalyticsUrl = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
           `dateRange.start.day=${startDay}&` +
           `dateRange.start.month=${startMonth}&` +
           `dateRange.start.year=${startYear}&` +
@@ -3660,64 +3657,122 @@ serve(async (req) => {
           `fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,oneClickLeadFormOpens,pivotValue&` +
           `count=10000`;
         
-        // Add campaign filter if provided
         if (campaignIds && campaignIds.length > 0) {
           campaignIds.forEach((id: string, i: number) => {
-            lgfAnalyticsUrl += `&campaigns[${i}]=urn:li:sponsoredCampaign:${id}`;
+            creativeAnalyticsUrl += `&campaigns[${i}]=urn:li:sponsoredCampaign:${id}`;
           });
-          console.log(`[Step 2] Filtering by ${campaignIds.length} campaigns`);
         }
         
-        const lgfCreativeAnalytics = new Map<string, {
-          impressions: number;
-          clicks: number;
-          spent: number;
-          leads: number;
-          formOpens: number;
-        }>();
-        
         try {
-          const lgfAnalyticsResponse = await fetch(lgfAnalyticsUrl, {
+          const creativeResponse = await fetch(creativeAnalyticsUrl, {
             headers: { 'Authorization': `Bearer ${accessToken}` }
           });
           
-          if (lgfAnalyticsResponse.ok) {
-            const lgfAnalyticsData = await lgfAnalyticsResponse.json();
-            const elements = lgfAnalyticsData.elements || [];
-            console.log(`[Step 2] Analytics returned ${elements.length} rows`);
+          if (creativeResponse.ok) {
+            const creativeData = await creativeResponse.json();
+            const elements = creativeData.elements || [];
+            console.log(`[Step 2] CREATIVE pivot returned ${elements.length} rows`);
             
             for (const el of elements) {
               const pivotValue = el.pivotValue || '';
-              const creativeId = pivotValue.split(':').pop() || '';
-              if (!creativeId) continue;
+              const leads = (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
               
-              const existing = lgfCreativeAnalytics.get(creativeId) || {
-                impressions: 0, clicks: 0, spent: 0, leads: 0, formOpens: 0
-              };
-              
-              lgfCreativeAnalytics.set(creativeId, {
-                impressions: existing.impressions + (el.impressions || 0),
-                clicks: existing.clicks + (el.clicks || 0),
-                spent: existing.spent + parseFloat(el.costInLocalCurrency || '0'),
-                leads: existing.leads + (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0),
-                formOpens: existing.formOpens + (el.oneClickLeadFormOpens || 0),
+              lgfCreativeAnalytics.set(pivotValue, {
+                creativeUrn: pivotValue,
+                impressions: el.impressions || 0,
+                clicks: el.clicks || 0,
+                spent: parseFloat(el.costInLocalCurrency || '0'),
+                leads,
+                formOpens: el.oneClickLeadFormOpens || 0,
               });
+              
+              if (leads > 0) {
+                numCreativesWithLeads++;
+                // If LEAD_GEN_FORM pivot returned nothing, sum leads from creatives
+                if (formAnalyticsMap.size === 0) {
+                  totalLeads += leads;
+                }
+              }
             }
           } else {
-            const errorText = await lgfAnalyticsResponse.text();
-            console.error(`[Step 2] Analytics fetch failed: ${lgfAnalyticsResponse.status} - ${errorText}`);
+            const errorText = await creativeResponse.text();
+            console.error(`[Step 2] CREATIVE pivot failed: ${creativeResponse.status} - ${errorText.substring(0, 200)}`);
           }
         } catch (err) {
-          console.error(`[Step 2] Analytics error:`, err);
+          console.error(`[Step 2] CREATIVE pivot error:`, err);
         }
         
-        console.log(`[Step 2] Got analytics for ${lgfCreativeAnalytics.size} creatives`);
+        console.log(`[Step 2] Found ${lgfCreativeAnalytics.size} creatives, ${numCreativesWithLeads} with leads > 0`);
         
-        // Step 3: Try to fetch lead form names from Lead Forms API
-        console.log('[Step 3] Resolving lead form names...');
+        // Step 3: Fetch creative metadata to get names and campaign associations
+        console.log('[Step 3] Fetching creative metadata...');
+        const creativeMetadata = new Map<string, { name: string; campaignId: string; leadFormUrn?: string }>();
+        const discoveredFormUrns = new Set<string>();
+        
+        try {
+          const creativesUrl = `https://api.linkedin.com/rest/creatives?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&sortOrder=DESCENDING&count=500`;
+          const creativesResponse = await fetch(creativesUrl, {
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+              'LinkedIn-Version': '202511',
+              'X-Restli-Protocol-Version': '2.0.0',
+            },
+          });
+          
+          if (creativesResponse.ok) {
+            const creativesData = await creativesResponse.json();
+            const creatives = creativesData.elements || [];
+            console.log(`[Step 3] Found ${creatives.length} creatives from metadata API`);
+            
+            for (const creative of creatives) {
+              const creativeId = creative.id?.toString() || creative.$URN?.split(':').pop();
+              if (!creativeId) continue;
+              
+              const creativeUrn = `urn:li:sponsoredCreative:${creativeId}`;
+              const campaignUrn = creative.campaign || '';
+              const campaignId = campaignUrn.split(':').pop() || '';
+              let creativeName = creative.name || `Creative ${creativeId}`;
+              
+              // Look for lead form URN for enrichment
+              let leadFormUrn: string | undefined;
+              const content = creative.content || {};
+              
+              if (content.sponsoredContent?.leadGenerationContext?.leadGenFormUrn) {
+                leadFormUrn = content.sponsoredContent.leadGenerationContext.leadGenFormUrn;
+              } else if (content.sponsoredContent?.share?.leadGenerationContext?.leadGenFormUrn) {
+                leadFormUrn = content.sponsoredContent.share.leadGenerationContext.leadGenFormUrn;
+              } else if (content.leadGenerationCall?.leadGenForm) {
+                leadFormUrn = content.leadGenerationCall.leadGenForm;
+              } else if (content.leadGenFormContent?.leadGenFormUrn) {
+                leadFormUrn = content.leadGenFormContent.leadGenFormUrn;
+              }
+              
+              // Check reference field
+              const reference = creative.reference || content.reference || '';
+              if (!leadFormUrn && typeof reference === 'string' && reference.includes('leadGenForm')) {
+                const formMatch = reference.match(/urn:li:leadGenForm:\d+/);
+                if (formMatch) leadFormUrn = formMatch[0];
+              }
+              
+              creativeMetadata.set(creativeUrn, { name: creativeName, campaignId, leadFormUrn });
+              if (leadFormUrn) discoveredFormUrns.add(leadFormUrn);
+            }
+          } else {
+            console.log(`[Step 3] Creatives API returned ${creativesResponse.status}`);
+          }
+        } catch (err) {
+          console.log(`[Step 3] Creatives API error:`, err);
+        }
+        
+        console.log(`[Step 3] Mapped ${creativeMetadata.size} creatives, discovered ${discoveredFormUrns.size} form URNs`);
+        
+        // Step 4: Resolve form names
+        console.log('[Step 4] Resolving lead form names...');
         const lgfFormNames = new Map<string, string>();
         
-        // Try the Lead Forms API: /rest/adAccounts/{accountId}/leadForms
+        // Combine form URNs from analytics and creative metadata
+        const allFormUrns = new Set([...formAnalyticsMap.keys(), ...discoveredFormUrns]);
+        
         try {
           const leadFormsUrl = `https://api.linkedin.com/rest/adAccounts/${accountId}/leadForms?q=account&count=500`;
           const leadFormsResponse = await fetch(leadFormsUrl, {
@@ -3731,7 +3786,7 @@ serve(async (req) => {
           if (leadFormsResponse.ok) {
             const leadFormsData = await leadFormsResponse.json();
             const forms = leadFormsData.elements || [];
-            console.log(`[Step 3] Found ${forms.length} lead forms from API`);
+            console.log(`[Step 4] Found ${forms.length} lead forms from API`);
             
             for (const form of forms) {
               const formId = form.id?.toString() || form.$URN?.split(':').pop();
@@ -3740,16 +3795,19 @@ serve(async (req) => {
               lgfFormNames.set(formUrn, formName);
             }
           } else {
-            console.log(`[Step 3] Lead Forms API returned ${leadFormsResponse.status} - using ID fallback`);
+            console.log(`[Step 4] Lead Forms API returned ${leadFormsResponse.status}`);
           }
         } catch (err) {
-          console.log(`[Step 3] Lead Forms API error:`, err);
+          console.log(`[Step 4] Lead Forms API error:`, err);
         }
         
-        console.log(`[Step 3] Resolved ${lgfFormNames.size} form names`);
+        console.log(`[Step 4] Resolved ${lgfFormNames.size} form names`);
         
-        // Step 4: Build form-level aggregates with connected creatives
-        console.log('[Step 4] Aggregating by form...');
+        // Step 5: Build final form aggregates
+        console.log('[Step 5] Building form aggregates...');
+        
+        // If LEAD_GEN_FORM pivot worked, use that as the form list
+        // Otherwise, aggregate from creatives with discovered form associations
         const formAggregates = new Map<string, {
           formUrn: string;
           formName: string;
@@ -3774,14 +3832,29 @@ serve(async (req) => {
           }>;
         }>();
         
-        // Also track creatives without forms for a separate bucket
         const lgfCreativesWithoutForm: any[] = [];
         
-        for (const [creativeId, metrics] of lgfCreativeAnalytics.entries()) {
-          const formUrn = creativeToForm.get(creativeId);
-          const meta = creativeMetadata.get(creativeId) || { name: `Creative ${creativeId}`, campaignId: '' };
+        // Initialize from LEAD_GEN_FORM analytics if available
+        if (formAnalyticsMap.size > 0) {
+          for (const [formUrn, metrics] of formAnalyticsMap.entries()) {
+            formAggregates.set(formUrn, {
+              formUrn,
+              formName: lgfFormNames.get(formUrn) || `Form ${formUrn.split(':').pop()}`,
+              impressions: metrics.impressions,
+              clicks: metrics.clicks,
+              spent: metrics.spent,
+              leads: metrics.leads,
+              formOpens: metrics.formOpens,
+              creatives: [],
+            });
+          }
+        }
+        
+        // Enrich with creative data
+        for (const [creativeUrn, metrics] of lgfCreativeAnalytics.entries()) {
+          const meta = creativeMetadata.get(creativeUrn) || { name: `Creative ${creativeUrn.split(':').pop()}`, campaignId: '' };
+          const creativeId = creativeUrn.split(':').pop() || '';
           
-          // Calculate creative-level metrics
           const ctr = metrics.impressions > 0 ? (metrics.clicks / metrics.impressions) * 100 : 0;
           const cpc = metrics.clicks > 0 ? metrics.spent / metrics.clicks : 0;
           const cpl = metrics.leads > 0 ? metrics.spent / metrics.leads : 0;
@@ -3802,59 +3875,73 @@ serve(async (req) => {
             lgfRate,
           };
           
-          if (!formUrn) {
-            // Creative has lead metrics but no form association found
-            if (metrics.leads > 0 || metrics.formOpens > 0) {
-              lgfCreativesWithoutForm.push(creativeData);
+          const formUrn = meta.leadFormUrn;
+          
+          if (formUrn) {
+            // Add creative to its form
+            let formData = formAggregates.get(formUrn);
+            if (!formData) {
+              // Form wasn't in LEAD_GEN_FORM analytics but we found it via creative
+              formData = {
+                formUrn,
+                formName: lgfFormNames.get(formUrn) || `Form ${formUrn.split(':').pop()}`,
+                impressions: 0,
+                clicks: 0,
+                spent: 0,
+                leads: 0,
+                formOpens: 0,
+                creatives: [],
+              };
+              formAggregates.set(formUrn, formData);
             }
-            continue;
+            formData.creatives.push(creativeData);
+            
+            // If LEAD_GEN_FORM pivot didn't work, aggregate from creatives
+            if (numFormsFromAnalytics === 0) {
+              formData.impressions += metrics.impressions;
+              formData.clicks += metrics.clicks;
+              formData.spent += metrics.spent;
+              formData.leads += metrics.leads;
+              formData.formOpens += metrics.formOpens;
+            }
+          } else if (metrics.leads > 0 || metrics.formOpens > 0) {
+            // Creative has lead activity but no form association - put in "Unknown Form" bucket
+            lgfCreativesWithoutForm.push(creativeData);
           }
+        }
+        
+        // If we have creatives with leads but no form associations, create an "Unknown Form" bucket
+        if (lgfCreativesWithoutForm.length > 0 && formAggregates.size === 0) {
+          const unknownFormMetrics = lgfCreativesWithoutForm.reduce((acc, c) => ({
+            impressions: acc.impressions + c.impressions,
+            clicks: acc.clicks + c.clicks,
+            spent: acc.spent + c.spent,
+            leads: acc.leads + c.leads,
+            formOpens: acc.formOpens + c.formOpens,
+          }), { impressions: 0, clicks: 0, spent: 0, leads: 0, formOpens: 0 });
           
-          const existing = formAggregates.get(formUrn) || {
-            formUrn,
-            formName: lgfFormNames.get(formUrn) || `Form ${formUrn.split(':').pop()}`,
-            impressions: 0,
-            clicks: 0,
-            spent: 0,
-            leads: 0,
-            formOpens: 0,
-            creatives: [],
-          };
-          
-          existing.impressions += metrics.impressions;
-          existing.clicks += metrics.clicks;
-          existing.spent += metrics.spent;
-          existing.leads += metrics.leads;
-          existing.formOpens += metrics.formOpens;
-          existing.creatives.push(creativeData);
-          
-          formAggregates.set(formUrn, existing);
+          formAggregates.set('unknown', {
+            formUrn: 'unknown',
+            formName: 'Unknown Form (creatives with leads)',
+            ...unknownFormMetrics,
+            creatives: lgfCreativesWithoutForm,
+          });
         }
         
         // Build final array
         const lgfForms = Array.from(formAggregates.values()).map(form => {
-          // Calculate form-level derived metrics
           const ctr = form.impressions > 0 ? (form.clicks / form.impressions) * 100 : 0;
           const cpc = form.clicks > 0 ? form.spent / form.clicks : 0;
           const cpl = form.leads > 0 ? form.spent / form.leads : 0;
           const lgfRate = form.formOpens > 0 ? (form.leads / form.formOpens) * 100 : 0;
           
-          // Sort creatives by leads descending
           form.creatives.sort((a, b) => b.leads - a.leads);
           
-          return {
-            ...form,
-            ctr,
-            cpc,
-            cpl,
-            lgfRate,
-          };
+          return { ...form, ctr, cpc, cpl, lgfRate };
         });
         
-        // Sort forms by leads descending
         lgfForms.sort((a, b) => b.leads - a.leads);
         
-        // Calculate totals
         const lgfTotals = lgfForms.reduce((acc, form) => ({
           impressions: acc.impressions + form.impressions,
           clicks: acc.clicks + form.clicks,
@@ -3869,6 +3956,13 @@ serve(async (req) => {
           forms: lgfForms,
           creativesWithoutForm: lgfCreativesWithoutForm,
           totals: lgfTotals,
+          debug: {
+            totalLeads,
+            numCreativesWithLeads,
+            numFormsFromAnalytics,
+            numCreativesTotal: lgfCreativeAnalytics.size,
+            numFormsDiscoveredFromCreatives: discoveredFormUrns.size,
+          },
           metadata: {
             accountId,
             dateRange: { start: startDate, end: endDate },
