@@ -3565,8 +3565,9 @@ serve(async (req) => {
         
         // Step 1: Fetch all creatives with their lead form associations
         console.log('[Step 1] Fetching creatives with lead form associations...');
-        const creativesUrl = `https://api.linkedin.com/rest/adAccounts/${accountId}/creatives?q=search&sortOrder=DESCENDING&count=500`;
-        const creativesResponse = await fetch(creativesUrl, {
+        // Use the versioned API endpoint that works in other actions
+        const lgfCreativesUrl = `https://api.linkedin.com/rest/creatives?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&sortOrder=DESCENDING&count=500`;
+        const lgfCreativesResponse = await fetch(lgfCreativesUrl, {
           headers: {
             'Authorization': `Bearer ${accessToken}`,
             'LinkedIn-Version': '202511',
@@ -3578,9 +3579,9 @@ serve(async (req) => {
         const creativeMetadata = new Map<string, { name: string; campaignId: string }>(); 
         const formUrns = new Set<string>();
         
-        if (creativesResponse.ok) {
-          const creativesData = await creativesResponse.json();
-          const creatives = creativesData.elements || [];
+        if (lgfCreativesResponse.ok) {
+          const lgfCreativesData = await lgfCreativesResponse.json();
+          const creatives = lgfCreativesData.elements || [];
           console.log(`[Step 1] Found ${creatives.length} creatives`);
           
           for (const creative of creatives) {
@@ -3592,30 +3593,38 @@ serve(async (req) => {
             const campaignId = campaignUrn.split(':').pop() || '';
             
             // Extract creative name
-            let creativeName = creative.name || creative.creativeDetail?.name || `Creative ${creativeId}`;
+            let creativeName = creative.name || `Creative ${creativeId}`;
             
-            // Look for lead form URN in various places
+            // Look for lead form URN in various places in the creative object
             let leadFormUrn: string | null = null;
             
-            // Check creative intendedStatus or content
-            const content = creative.content || creative.creativeDetail || {};
+            // Check content object for lead gen form references
+            const content = creative.content || {};
             
-            // Check for lead gen form in sponsored content
-            if (content.leadGenerationCall?.leadGenForm) {
+            // Check sponsored content with lead gen form
+            if (content.sponsoredContent?.leadGenerationContext?.leadGenFormUrn) {
+              leadFormUrn = content.sponsoredContent.leadGenerationContext.leadGenFormUrn;
+            } else if (content.sponsoredContent?.share?.leadGenerationContext?.leadGenFormUrn) {
+              leadFormUrn = content.sponsoredContent.share.leadGenerationContext.leadGenFormUrn;
+            } else if (content.leadGenerationCall?.leadGenForm) {
               leadFormUrn = content.leadGenerationCall.leadGenForm;
             } else if (content.leadGenFormContent?.leadGenFormUrn) {
               leadFormUrn = content.leadGenFormContent.leadGenFormUrn;
-            } else if (creative.leadGenFormUrn) {
-              leadFormUrn = creative.leadGenFormUrn;
-            } else if (content.textAd?.leadGenerationCall?.leadGenForm) {
-              leadFormUrn = content.textAd.leadGenerationCall.leadGenForm;
             }
             
-            // Also check reference fields
+            // Check reference field for lead gen form URN
             const reference = creative.reference || content.reference || '';
-            if (!leadFormUrn && reference.includes('leadGenForm')) {
-              // Parse leadGenForm from reference if present
+            if (!leadFormUrn && typeof reference === 'string' && reference.includes('leadGenForm')) {
               const formMatch = reference.match(/urn:li:leadGenForm:\d+/);
+              if (formMatch) {
+                leadFormUrn = formMatch[0];
+              }
+            }
+            
+            // Also check intendedStatus object
+            if (!leadFormUrn && creative.intendedStatus) {
+              const statusStr = JSON.stringify(creative.intendedStatus);
+              const formMatch = statusStr.match(/urn:li:leadGenForm:\d+/);
               if (formMatch) {
                 leadFormUrn = formMatch[0];
               }
@@ -3626,10 +3635,12 @@ serve(async (req) => {
             if (leadFormUrn) {
               creativeToForm.set(creativeId, leadFormUrn);
               formUrns.add(leadFormUrn);
+              console.log(`[Step 1] Creative ${creativeId} -> Form ${leadFormUrn}`);
             }
           }
         } else {
-          console.error(`[Step 1] Creatives fetch failed: ${creativesResponse.status}`);
+          const errorText = await lgfCreativesResponse.text();
+          console.error(`[Step 1] Creatives fetch failed: ${lgfCreativesResponse.status} - ${errorText.substring(0, 200)}`);
         }
         
         console.log(`[Step 1] Found ${formUrns.size} unique lead forms attached to ${creativeToForm.size} creatives`);
