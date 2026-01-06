@@ -3724,6 +3724,11 @@ serve(async (req) => {
             const creatives = creativesData.elements || [];
             console.log(`[Step 3] Found ${creatives.length} creatives from metadata API`);
             
+            // Log first creative structure for debugging
+            if (creatives.length > 0) {
+              console.log(`[Step 3] Sample creative structure:`, JSON.stringify(creatives[0], null, 2).substring(0, 2000));
+            }
+            
             for (const creative of creatives) {
               const creativeId = creative.id?.toString() || creative.$URN?.split(':').pop();
               if (!creativeId) continue;
@@ -3737,14 +3742,36 @@ serve(async (req) => {
               let leadFormUrn: string | undefined;
               const content = creative.content || {};
               
-              if (content.sponsoredContent?.leadGenerationContext?.leadGenFormUrn) {
+              // Check leadgenCallToAction.destination (REST API standard field)
+              if (creative.leadgenCallToAction?.destination) {
+                const dest = creative.leadgenCallToAction.destination;
+                if (dest.includes('adForm') || dest.includes('leadGenForm')) {
+                  leadFormUrn = dest;
+                  // Normalize to leadGenForm URN if needed
+                  if (dest.includes('adForm')) {
+                    const formId = dest.split(':').pop();
+                    leadFormUrn = `urn:li:leadGenForm:${formId}`;
+                  }
+                }
+              }
+              
+              // Existing checks as fallbacks
+              if (!leadFormUrn && content.sponsoredContent?.leadGenerationContext?.leadGenFormUrn) {
                 leadFormUrn = content.sponsoredContent.leadGenerationContext.leadGenFormUrn;
-              } else if (content.sponsoredContent?.share?.leadGenerationContext?.leadGenFormUrn) {
+              } else if (!leadFormUrn && content.sponsoredContent?.share?.leadGenerationContext?.leadGenFormUrn) {
                 leadFormUrn = content.sponsoredContent.share.leadGenerationContext.leadGenFormUrn;
-              } else if (content.leadGenerationCall?.leadGenForm) {
+              } else if (!leadFormUrn && content.leadGenerationCall?.leadGenForm) {
                 leadFormUrn = content.leadGenerationCall.leadGenForm;
-              } else if (content.leadGenFormContent?.leadGenFormUrn) {
+              } else if (!leadFormUrn && content.leadGenFormContent?.leadGenFormUrn) {
                 leadFormUrn = content.leadGenFormContent.leadGenFormUrn;
+              }
+              
+              // Check direct leadGenForm field
+              if (!leadFormUrn && creative.leadGenForm) {
+                leadFormUrn = creative.leadGenForm;
+              }
+              if (!leadFormUrn && creative.call?.leadGenForm) {
+                leadFormUrn = creative.call.leadGenForm;
               }
               
               // Check reference field
@@ -3752,6 +3779,16 @@ serve(async (req) => {
               if (!leadFormUrn && typeof reference === 'string' && reference.includes('leadGenForm')) {
                 const formMatch = reference.match(/urn:li:leadGenForm:\d+/);
                 if (formMatch) leadFormUrn = formMatch[0];
+              }
+              
+              // Deep search through creative object for any form URN
+              if (!leadFormUrn) {
+                const creativeJson = JSON.stringify(creative);
+                const formMatch = creativeJson.match(/urn:li:(?:adForm|leadGenForm):(\d+)/);
+                if (formMatch) {
+                  const formId = formMatch[1];
+                  leadFormUrn = `urn:li:leadGenForm:${formId}`;
+                }
               }
               
               creativeMetadata.set(creativeUrn, { name: creativeName, campaignId, leadFormUrn });
