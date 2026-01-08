@@ -116,6 +116,10 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
         campaignReporting.fetchDailySpendData(selectedAccount);
       } else if (reportType === 'demographics') {
         demographicReporting.fetchDemographicAnalytics(selectedAccount);
+        // Also fetch campaigns for the filter if not already loaded
+        if (campaignReporting.campaignData.length === 0) {
+          campaignReporting.fetchCampaignReport(selectedAccount);
+        }
       } else if (reportType === 'company_demo') {
         companyDemographic.fetchCompanyDemographic(selectedAccount);
         // Also fetch campaigns for the filter if not already loaded
@@ -138,12 +142,12 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
     }
   }, [selectedAccount, reportType]);
 
-  // Re-fetch when time/granularity/pivot changes for demographics
+  // Re-fetch when time/granularity/pivot/campaigns changes for demographics
   useEffect(() => {
     if (selectedAccount && reportType === 'demographics') {
       demographicReporting.fetchDemographicAnalytics(selectedAccount);
     }
-  }, [demographicReporting.dateRange, demographicReporting.timeGranularity, demographicReporting.pivot]);
+  }, [demographicReporting.dateRange, demographicReporting.timeGranularity, demographicReporting.pivot, demographicReporting.selectedCampaignIds]);
 
   // Re-fetch when time/granularity/campaigns changes for company demographics
   useEffect(() => {
@@ -522,7 +526,7 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
         {/* Demographics Tab */}
         <TabsContent value="demographics" className="space-y-6 mt-6">
           <Card className="bg-card/50 backdrop-blur-sm border-border/50">
-            <CardContent className="pt-4">
+            <CardContent className="pt-4 space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center gap-4">
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-medium">Pivot By:</span>
@@ -548,6 +552,15 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
                   onGranularityChange={(g: TimeGranularity) => demographicReporting.setTimeGranularity(g as any)}
                   dateRange={demographicReporting.dateRange}
                   onCustomDateChange={handleDemoCustomDate}
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium">Filter by Campaigns:</span>
+                <CampaignMultiSelect
+                  campaigns={campaignReporting.campaignData}
+                  selectedCampaignIds={demographicReporting.selectedCampaignIds}
+                  onSelectionChange={demographicReporting.setSelectedCampaignIds}
+                  isLoading={campaignReporting.isLoading}
                 />
               </div>
             </CardContent>

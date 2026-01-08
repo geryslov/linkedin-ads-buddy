@@ -1643,13 +1643,21 @@ serve(async (req) => {
       }
 
       case 'get_demographic_analytics': {
-        const { accountId, dateRange, timeGranularity, pivot } = params || {};
+        const { accountId, dateRange, timeGranularity, pivot, campaignIds } = params || {};
         const startDate = dateRange?.start || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
         const endDate = dateRange?.end || new Date().toISOString().split('T')[0];
         const granularity = timeGranularity || 'ALL';
         const selectedPivot = pivot || 'MEMBER_COMPANY';
         
-        console.log(`[get_demographic_analytics] Starting for account ${accountId}, pivot: ${selectedPivot}, date range: ${startDate} to ${endDate}`);
+        console.log(`[get_demographic_analytics] Starting for account ${accountId}, pivot: ${selectedPivot}, date range: ${startDate} to ${endDate}, campaigns: ${campaignIds?.length || 'all'}`);
+
+        // Build campaign filter params if campaigns are specified
+        let campaignParams = '';
+        if (campaignIds && campaignIds.length > 0) {
+          campaignParams = campaignIds.map((id: string, idx: number) => 
+            `campaigns[${idx}]=urn:li:sponsoredCampaign:${id}`
+          ).join('&') + '&';
+        }
 
         // Build analytics URL with specified pivot
         const analyticsUrl = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
@@ -1661,9 +1669,10 @@ serve(async (req) => {
           `dateRange.end.year=${new Date(endDate).getFullYear()}&` +
           `timeGranularity=${granularity === 'ALL' ? 'ALL' : granularity}&` +
           `pivot=${selectedPivot}&` +
+          `${campaignParams}` +
           `accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
           `fields=impressions,clicks,costInLocalCurrency,costInUsd,externalWebsiteConversions,oneClickLeads,pivotValue&` +
-          `count=500`;
+          `count=10000`;
 
         console.log(`[get_demographic_analytics] Fetching analytics with pivot=${selectedPivot}...`);
         const analyticsResponse = await fetch(analyticsUrl, {

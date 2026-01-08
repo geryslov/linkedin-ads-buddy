@@ -50,6 +50,7 @@ export function useDemographicReporting(accessToken: string | null) {
     start: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
     end: new Date().toISOString().split('T')[0],
   });
+  const [selectedCampaignIds, setSelectedCampaignIds] = useState<string[]>([]);
   const { toast } = useToast();
 
   const timeFrameOptions: TimeFrameOption[] = useMemo(() => {
@@ -94,13 +95,15 @@ export function useDemographicReporting(accessToken: string | null) {
     ];
   }, []);
 
-  const fetchDemographicAnalytics = useCallback(async (accountId: string) => {
+  const fetchDemographicAnalytics = useCallback(async (accountId: string, campaignIds?: string[]) => {
     if (!accessToken || !accountId) return;
     setIsLoading(true);
     setError(null);
     
+    const campaignsToFilter = campaignIds || selectedCampaignIds;
+    
     try {
-      console.log('Fetching demographic analytics with params:', { accountId, dateRange, timeGranularity, pivot });
+      console.log('Fetching demographic analytics with params:', { accountId, dateRange, timeGranularity, pivot, campaignIds: campaignsToFilter });
       
       const { data, error: fetchError } = await supabase.functions.invoke('linkedin-api', {
         body: { 
@@ -111,6 +114,7 @@ export function useDemographicReporting(accessToken: string | null) {
             dateRange,
             timeGranularity,
             pivot,
+            campaignIds: campaignsToFilter.length > 0 ? campaignsToFilter : undefined,
           }
         }
       });
@@ -151,7 +155,7 @@ export function useDemographicReporting(accessToken: string | null) {
     } finally {
       setIsLoading(false);
     }
-  }, [accessToken, dateRange, timeGranularity, pivot, toast]);
+  }, [accessToken, dateRange, timeGranularity, pivot, selectedCampaignIds, toast]);
 
   // Calculate totals
   const totals = useMemo(() => {
@@ -184,6 +188,8 @@ export function useDemographicReporting(accessToken: string | null) {
     setPivot,
     dateRange,
     setDateRange,
+    selectedCampaignIds,
+    setSelectedCampaignIds,
     timeFrameOptions,
     setTimeFrame,
     fetchDemographicAnalytics,
