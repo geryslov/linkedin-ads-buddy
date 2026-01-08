@@ -2386,63 +2386,103 @@ serve(async (req) => {
         const creativeInfoMap = new Map<string, CreativeInfo>();
         const referenceNameCache = new Map<string, string>();
         
-        // Fetch creatives from V2 API (for basic info like campaign, status, reference)
-        const creativesUrl = `https://api.linkedin.com/v2/adCreativesV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=500`;
-        const creativesResponse = await fetch(creativesUrl, {
-          headers: { 'Authorization': `Bearer ${accessToken}` }
+        // Try REST API first (works better with Business Manager), fallback to V2
+        let creatives: any[] = [];
+        
+        // Try REST API for creatives
+        const restCreativesUrl = `https://api.linkedin.com/rest/creatives?q=search&search=(account:(values:List(urn:li:sponsoredAccount:${accountId})))&count=500`;
+        console.log(`[Step 3] Trying REST creatives API...`);
+        const restCreativesResponse = await fetch(restCreativesUrl, {
+          headers: { 
+            'Authorization': `Bearer ${accessToken}`,
+            'LinkedIn-Version': '202511',
+            'X-Restli-Protocol-Version': '2.0.0'
+          }
         });
         
-        if (creativesResponse.ok) {
-          const creativesData = await creativesResponse.json();
-          const creatives = creativesData.elements || [];
-          console.log(`[Step 3] V2 API returned ${creatives.length} total creatives`);
+        if (restCreativesResponse.ok) {
+          const restData = await restCreativesResponse.json();
+          creatives = restData.elements || [];
+          console.log(`[Step 3] REST API returned ${creatives.length} creatives`);
+        } else {
+          console.log(`[Step 3] REST creatives failed: ${restCreativesResponse.status}, trying V2...`);
+          // Fallback to V2 API
+          const creativesUrl = `https://api.linkedin.com/v2/adCreativesV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=500`;
+          const creativesResponse = await fetch(creativesUrl, {
+            headers: { 'Authorization': `Bearer ${accessToken}` }
+          });
           
+          if (creativesResponse.ok) {
+            const creativesData = await creativesResponse.json();
+            creatives = creativesData.elements || [];
+            console.log(`[Step 3] V2 API returned ${creatives.length} creatives`);
+          } else {
+            console.log(`[Step 3] V2 creatives API also failed: ${creativesResponse.status}`);
+          }
+        }
+        
+        if (creatives.length > 0) {
           // Debug: log a few creative IDs vs analytics IDs
-          if (creatives.length > 0 && creativeIdsWithData.size > 0) {
-            const sampleCreativeIds = creatives.slice(0, 3).map((c: any) => c.id?.toString());
+          if (creativeIdsWithData.size > 0) {
+            const sampleCreativeIds = creatives.slice(0, 3).map((c: any) => {
+              // REST API uses $URN or id field
+              const id = c.id || c.$URN?.split(':').pop() || '';
+              return String(id);
+            });
             const sampleAnalyticsIds = [...creativeIdsWithData].slice(0, 3);
-            console.log(`[Step 3] Sample creative IDs from V2: ${JSON.stringify(sampleCreativeIds)}`);
+            console.log(`[Step 3] Sample creative IDs from API: ${JSON.stringify(sampleCreativeIds)}`);
             console.log(`[Step 3] Sample creative IDs from analytics: ${JSON.stringify(sampleAnalyticsIds)}`);
           }
           
           // Build a map of all creatives by ID for matching
           const creativesByIdV2 = new Map<string, any>();
           for (const creative of creatives) {
-            const creativeId = String(creative.id || '');
+            // Handle both REST API format (id or $URN) and V2 format
+            let creativeId = '';
+            if (creative.id) {
+              // REST API returns full URN in id field: urn:li:sponsoredCreative:123
+              creativeId = String(creative.id).split(':').pop() || '';
+            } else if (creative.$URN) {
+              creativeId = creative.$URN.split(':').pop() || '';
+            }
             if (creativeId) {
               creativesByIdV2.set(creativeId, creative);
             }
           }
+          console.log(`[Step 3] Built map with ${creativesByIdV2.size} creatives`);
           
-          // Match analytics creative IDs to V2 creatives
+          // Match analytics creative IDs to creatives
           for (const analyticsCreativeId of creativeIdsWithData) {
             const normalizedId = String(analyticsCreativeId).trim();
             const creative = creativesByIdV2.get(normalizedId);
             
             if (creative) {
+              // Handle both REST API format (campaign field with URN) and V2 format
               const campaignUrn = creative.campaign || '';
               const campaignId = campaignUrn.split(':').pop() || '';
               
               let creativeType = 'SPONSORED_CONTENT';
               if (creative.type) creativeType = creative.type;
               else if (creative.variables?.type) creativeType = creative.variables.type;
+              else if (creative.intendedStatus) creativeType = 'SPONSORED_CONTENT'; // REST API indicator
               
               creativeInfoMap.set(normalizedId, {
                 id: normalizedId,
                 name: '',
                 campaignId,
                 campaignName: campaignNames.get(campaignId) || `Campaign ${campaignId}`,
-                status: creative.status || 'UNKNOWN',
+                status: creative.status || creative.intendedStatus || 'UNKNOWN',
                 type: creativeType,
-                reference: creative.reference || '',
+                reference: creative.reference || creative.content?.reference || '',
               });
             }
           }
           
-          // If still no matches, maybe the creatives are missing from V2 - create placeholders
-          if (creativeInfoMap.size === 0 && creativeIdsWithData.size > 0) {
-            console.log(`[Step 3] No V2 matches found, creating placeholders for ${creativeIdsWithData.size} creatives`);
-            for (const creativeId of creativeIdsWithData) {
+          console.log(`[Step 3] Matched ${creativeInfoMap.size} of ${creativeIdsWithData.size} creatives`);
+          
+          // Create placeholders for unmatched creatives
+          for (const creativeId of creativeIdsWithData) {
+            if (!creativeInfoMap.has(String(creativeId))) {
               creativeInfoMap.set(String(creativeId), {
                 id: String(creativeId),
                 name: '',
@@ -2455,7 +2495,7 @@ serve(async (req) => {
             }
           }
         } else {
-          console.log(`[Step 3] V2 creatives API failed: ${creativesResponse.status}`);
+          console.log(`[Step 3] No creatives returned from API, creating placeholders`);
           // Create placeholders from analytics IDs
           for (const creativeId of creativeIdsWithData) {
             creativeInfoMap.set(String(creativeId), {
