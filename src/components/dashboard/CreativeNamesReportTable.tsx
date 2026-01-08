@@ -404,62 +404,62 @@ export function CreativeNamesReportTable({ data, isLoading }: CreativeNamesRepor
                         </TableCell>
                       </TableRow>
 
-                      {/* Child Rows - Campaign Breakdown Cards */}
+                      {/* Child Rows - Campaign Breakdown */}
                       {isExpanded && (
                         <TableRow key={`${group.creativeName}-breakdown`}>
-                          <TableCell colSpan={13} className="p-0 bg-muted/5">
-                            <div className="px-6 py-4 border-l-2 border-primary/30 ml-4">
-                              <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-3">
+                          <TableCell colSpan={13} className="p-0 bg-muted/10">
+                            <div className="py-3 px-4 sm:px-8 border-l-4 border-primary/40 mx-2 my-2 rounded-r-md">
+                              <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
                                 Campaign Breakdown
                               </div>
-                              <div className="grid gap-2">
+                              <div className="space-y-2">
                                 {group.campaigns.map((campaign, idx) => (
                                   <div 
                                     key={`${group.creativeName}-${campaign.campaignName}-${idx}`}
-                                    className="bg-background rounded-lg border border-border/50 p-3 hover:border-border transition-colors"
+                                    className="bg-background rounded-lg border border-border/60 p-3 sm:p-4 hover:border-primary/30 hover:shadow-sm transition-all"
                                   >
-                                    <div className="flex items-center justify-between mb-2">
-                                      <div className="flex items-center gap-2 min-w-0 flex-1">
-                                        <span className="font-medium text-sm truncate" title={campaign.campaignName}>
-                                          {campaign.campaignName}
-                                        </span>
-                                        <Badge variant="outline" className={`shrink-0 text-xs ${STATUS_COLORS[campaign.status] || 'bg-muted'}`}>
-                                          {campaign.status}
-                                        </Badge>
-                                      </div>
+                                    {/* Campaign Header */}
+                                    <div className="flex flex-col sm:flex-row sm:items-center gap-2 mb-3 pb-2 border-b border-border/40">
+                                      <span className="font-medium text-sm break-words" title={campaign.campaignName}>
+                                        {campaign.campaignName}
+                                      </span>
+                                      <Badge variant="outline" className={`w-fit shrink-0 text-xs ${STATUS_COLORS[campaign.status] || 'bg-muted'}`}>
+                                        {campaign.status}
+                                      </Badge>
                                     </div>
-                                    <div className="grid grid-cols-4 md:grid-cols-8 gap-3 text-xs">
-                                      <div>
-                                        <div className="text-muted-foreground">Impressions</div>
-                                        <div className="font-medium tabular-nums">{campaign.impressions.toLocaleString()}</div>
+                                    {/* Metrics Grid - Responsive */}
+                                    <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-x-4 gap-y-3 text-xs">
+                                      <div className="flex flex-col">
+                                        <span className="text-muted-foreground mb-0.5">Impressions</span>
+                                        <span className="font-semibold tabular-nums text-foreground">{campaign.impressions.toLocaleString()}</span>
                                       </div>
-                                      <div>
-                                        <div className="text-muted-foreground">Clicks</div>
-                                        <div className="font-medium tabular-nums">{campaign.clicks.toLocaleString()}</div>
+                                      <div className="flex flex-col">
+                                        <span className="text-muted-foreground mb-0.5">Clicks</span>
+                                        <span className="font-semibold tabular-nums text-foreground">{campaign.clicks.toLocaleString()}</span>
                                       </div>
-                                      <div>
-                                        <div className="text-muted-foreground">Spent</div>
-                                        <div className="font-medium tabular-nums">${campaign.spent.toFixed(2)}</div>
+                                      <div className="flex flex-col">
+                                        <span className="text-muted-foreground mb-0.5">Spent</span>
+                                        <span className="font-semibold tabular-nums text-foreground">${campaign.spent.toFixed(2)}</span>
                                       </div>
-                                      <div>
-                                        <div className="text-muted-foreground">Leads</div>
-                                        <div className="font-medium tabular-nums">{campaign.leads}</div>
+                                      <div className="flex flex-col">
+                                        <span className="text-muted-foreground mb-0.5">Leads</span>
+                                        <span className="font-semibold tabular-nums text-foreground">{campaign.leads}</span>
                                       </div>
-                                      <div>
-                                        <div className="text-muted-foreground">CTR</div>
-                                        <div className="font-medium tabular-nums">{campaign.ctr.toFixed(2)}%</div>
+                                      <div className="flex flex-col">
+                                        <span className="text-muted-foreground mb-0.5">CTR</span>
+                                        <span className="font-semibold tabular-nums text-foreground">{campaign.ctr.toFixed(2)}%</span>
                                       </div>
-                                      <div>
-                                        <div className="text-muted-foreground">CPC</div>
-                                        <div className="font-medium tabular-nums">${campaign.cpc.toFixed(2)}</div>
+                                      <div className="flex flex-col">
+                                        <span className="text-muted-foreground mb-0.5">CPC</span>
+                                        <span className="font-semibold tabular-nums text-foreground">${campaign.cpc.toFixed(2)}</span>
                                       </div>
-                                      <div>
-                                        <div className="text-muted-foreground">CPM</div>
-                                        <div className="font-medium tabular-nums">${campaign.cpm.toFixed(2)}</div>
+                                      <div className="flex flex-col">
+                                        <span className="text-muted-foreground mb-0.5">CPM</span>
+                                        <span className="font-semibold tabular-nums text-foreground">${campaign.cpm.toFixed(2)}</span>
                                       </div>
-                                      <div>
-                                        <div className="text-muted-foreground">CPL</div>
-                                        <div className="font-medium tabular-nums">{campaign.costPerLead > 0 ? `$${campaign.costPerLead.toFixed(2)}` : '-'}</div>
+                                      <div className="flex flex-col">
+                                        <span className="text-muted-foreground mb-0.5">CPL</span>
+                                        <span className="font-semibold tabular-nums text-foreground">{campaign.costPerLead > 0 ? `$${campaign.costPerLead.toFixed(2)}` : '-'}</span>
                                       </div>
                                     </div>
                                   </div>
