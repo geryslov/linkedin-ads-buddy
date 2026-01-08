@@ -2386,118 +2386,96 @@ serve(async (req) => {
         const creativeInfoMap = new Map<string, CreativeInfo>();
         const referenceNameCache = new Map<string, string>();
         
-        // Try REST API first (works better with Business Manager), fallback to V2
-        let creatives: any[] = [];
+        // Fetch creatives by ID in batches (more reliable than search for specific creatives)
+        const creativeIdsArray = [...creativeIdsWithData];
+        console.log(`[Step 3] Fetching ${creativeIdsArray.length} creatives by ID...`);
         
-        // Try REST API for creatives
-        const restCreativesUrl = `https://api.linkedin.com/rest/creatives?q=search&search=(account:(values:List(urn:li:sponsoredAccount:${accountId})))&count=500`;
-        console.log(`[Step 3] Trying REST creatives API...`);
-        const restCreativesResponse = await fetch(restCreativesUrl, {
-          headers: { 
-            'Authorization': `Bearer ${accessToken}`,
-            'LinkedIn-Version': '202511',
-            'X-Restli-Protocol-Version': '2.0.0'
-          }
-        });
-        
-        if (restCreativesResponse.ok) {
-          const restData = await restCreativesResponse.json();
-          creatives = restData.elements || [];
-          console.log(`[Step 3] REST API returned ${creatives.length} creatives`);
-        } else {
-          console.log(`[Step 3] REST creatives failed: ${restCreativesResponse.status}, trying V2...`);
-          // Fallback to V2 API
-          const creativesUrl = `https://api.linkedin.com/v2/adCreativesV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=500`;
-          const creativesResponse = await fetch(creativesUrl, {
-            headers: { 'Authorization': `Bearer ${accessToken}` }
-          });
+        const batchSize = 50;
+        for (let i = 0; i < creativeIdsArray.length; i += batchSize) {
+          const batchIds = creativeIdsArray.slice(i, i + batchSize);
           
-          if (creativesResponse.ok) {
-            const creativesData = await creativesResponse.json();
-            creatives = creativesData.elements || [];
-            console.log(`[Step 3] V2 API returned ${creatives.length} creatives`);
-          } else {
-            console.log(`[Step 3] V2 creatives API also failed: ${creativesResponse.status}`);
+          // Build the ids parameter for batch GET: ids=List(urn:li:sponsoredCreative:123,urn:li:sponsoredCreative:456)
+          const idsParam = batchIds.map(id => `urn:li:sponsoredCreative:${id}`).join(',');
+          
+          // Try V2 batch GET first (more reliable for specific IDs)
+          const batchUrl = `https://api.linkedin.com/v2/adCreativesV2?ids=List(${idsParam})`;
+          
+          try {
+            const batchResponse = await fetch(batchUrl, {
+              headers: { 'Authorization': `Bearer ${accessToken}` }
+            });
+            
+            if (batchResponse.ok) {
+              const batchData = await batchResponse.json();
+              // V2 batch returns { results: { "urn:li:sponsoredCreative:123": {...}, ... } }
+              const results = batchData.results || {};
+              
+              for (const [urn, creative] of Object.entries(results)) {
+                const creativeObj = creative as any;
+                const creativeId = urn.split(':').pop() || '';
+                
+                const campaignUrn = creativeObj.campaign || '';
+                const campaignId = campaignUrn.split(':').pop() || '';
+                
+                let creativeType = 'SPONSORED_CONTENT';
+                if (creativeObj.type) creativeType = creativeObj.type;
+                else if (creativeObj.variables?.type) creativeType = creativeObj.variables.type;
+                
+                creativeInfoMap.set(creativeId, {
+                  id: creativeId,
+                  name: '',
+                  campaignId,
+                  campaignName: campaignNames.get(campaignId) || `Campaign ${campaignId}`,
+                  status: creativeObj.status || 'UNKNOWN',
+                  type: creativeType,
+                  reference: creativeObj.reference || '',
+                });
+              }
+              
+              if (i === 0) {
+                console.log(`[Step 3] First batch: fetched ${Object.keys(results).length} creatives`);
+              }
+            } else {
+              console.log(`[Step 3] Batch GET failed: ${batchResponse.status}`);
+              
+              // Try individual fetches as fallback
+              for (const creativeId of batchIds) {
+                try {
+                  const singleUrl = `https://api.linkedin.com/v2/adCreativesV2/${creativeId}`;
+                  const singleResponse = await fetch(singleUrl, {
+                    headers: { 'Authorization': `Bearer ${accessToken}` }
+                  });
+                  
+                  if (singleResponse.ok) {
+                    const creativeObj = await singleResponse.json();
+                    const campaignUrn = creativeObj.campaign || '';
+                    const campaignId = campaignUrn.split(':').pop() || '';
+                    
+                    creativeInfoMap.set(creativeId, {
+                      id: creativeId,
+                      name: '',
+                      campaignId,
+                      campaignName: campaignNames.get(campaignId) || `Campaign ${campaignId}`,
+                      status: creativeObj.status || 'UNKNOWN',
+                      type: creativeObj.type || 'SPONSORED_CONTENT',
+                      reference: creativeObj.reference || '',
+                    });
+                  }
+                } catch (err) {
+                  // Skip this creative
+                }
+              }
+            }
+          } catch (err) {
+            console.error(`[Step 3] Batch fetch error:`, err);
           }
         }
         
-        if (creatives.length > 0) {
-          // Debug: log a few creative IDs vs analytics IDs
-          if (creativeIdsWithData.size > 0) {
-            const sampleCreativeIds = creatives.slice(0, 3).map((c: any) => {
-              // REST API uses $URN or id field
-              const id = c.id || c.$URN?.split(':').pop() || '';
-              return String(id);
-            });
-            const sampleAnalyticsIds = [...creativeIdsWithData].slice(0, 3);
-            console.log(`[Step 3] Sample creative IDs from API: ${JSON.stringify(sampleCreativeIds)}`);
-            console.log(`[Step 3] Sample creative IDs from analytics: ${JSON.stringify(sampleAnalyticsIds)}`);
-          }
-          
-          // Build a map of all creatives by ID for matching
-          const creativesByIdV2 = new Map<string, any>();
-          for (const creative of creatives) {
-            // Handle both REST API format (id or $URN) and V2 format
-            let creativeId = '';
-            if (creative.id) {
-              // REST API returns full URN in id field: urn:li:sponsoredCreative:123
-              creativeId = String(creative.id).split(':').pop() || '';
-            } else if (creative.$URN) {
-              creativeId = creative.$URN.split(':').pop() || '';
-            }
-            if (creativeId) {
-              creativesByIdV2.set(creativeId, creative);
-            }
-          }
-          console.log(`[Step 3] Built map with ${creativesByIdV2.size} creatives`);
-          
-          // Match analytics creative IDs to creatives
-          for (const analyticsCreativeId of creativeIdsWithData) {
-            const normalizedId = String(analyticsCreativeId).trim();
-            const creative = creativesByIdV2.get(normalizedId);
-            
-            if (creative) {
-              // Handle both REST API format (campaign field with URN) and V2 format
-              const campaignUrn = creative.campaign || '';
-              const campaignId = campaignUrn.split(':').pop() || '';
-              
-              let creativeType = 'SPONSORED_CONTENT';
-              if (creative.type) creativeType = creative.type;
-              else if (creative.variables?.type) creativeType = creative.variables.type;
-              else if (creative.intendedStatus) creativeType = 'SPONSORED_CONTENT'; // REST API indicator
-              
-              creativeInfoMap.set(normalizedId, {
-                id: normalizedId,
-                name: '',
-                campaignId,
-                campaignName: campaignNames.get(campaignId) || `Campaign ${campaignId}`,
-                status: creative.status || creative.intendedStatus || 'UNKNOWN',
-                type: creativeType,
-                reference: creative.reference || creative.content?.reference || '',
-              });
-            }
-          }
-          
-          console.log(`[Step 3] Matched ${creativeInfoMap.size} of ${creativeIdsWithData.size} creatives`);
-          
-          // Create placeholders for unmatched creatives
-          for (const creativeId of creativeIdsWithData) {
-            if (!creativeInfoMap.has(String(creativeId))) {
-              creativeInfoMap.set(String(creativeId), {
-                id: String(creativeId),
-                name: '',
-                campaignId: '',
-                campaignName: 'Unknown Campaign',
-                status: 'UNKNOWN',
-                type: 'SPONSORED_CONTENT',
-                reference: '',
-              });
-            }
-          }
-        } else {
-          console.log(`[Step 3] No creatives returned from API, creating placeholders`);
-          // Create placeholders from analytics IDs
-          for (const creativeId of creativeIdsWithData) {
+        console.log(`[Step 3] Fetched metadata for ${creativeInfoMap.size} of ${creativeIdsArray.length} creatives`);
+        
+        // Create placeholders for any creatives we couldn't fetch
+        for (const creativeId of creativeIdsWithData) {
+          if (!creativeInfoMap.has(String(creativeId))) {
             creativeInfoMap.set(String(creativeId), {
               id: String(creativeId),
               name: '',
@@ -2516,9 +2494,9 @@ serve(async (req) => {
         console.log(`[Step 4] Fetching names for ${creativeInfoMap.size} creatives...`);
         const creativeIdsToFetch = [...creativeInfoMap.keys()];
         
-        const batchSize = 10;
-        for (let i = 0; i < creativeIdsToFetch.length; i += batchSize) {
-          const batch = creativeIdsToFetch.slice(i, i + batchSize);
+        const nameBatchSize = 10;
+        for (let i = 0; i < creativeIdsToFetch.length; i += nameBatchSize) {
+          const batch = creativeIdsToFetch.slice(i, i + nameBatchSize);
           
           await Promise.all(batch.map(async (creativeId) => {
             try {
