@@ -1675,29 +1675,63 @@ serve(async (req) => {
           `count=10000`;
 
         console.log(`[get_demographic_analytics] Fetching analytics with pivot=${selectedPivot}...`);
-        const analyticsResponse = await fetch(analyticsUrl, {
-          headers: { 'Authorization': `Bearer ${accessToken}` },
-        });
         
-        if (!analyticsResponse.ok) {
-          const errorText = await analyticsResponse.text();
-          console.error('[Error] Failed to fetch demographic analytics:', analyticsResponse.status, errorText);
+        // Paginated fetch to get all demographic records
+        let allElements: any[] = [];
+        let startOffset = 0;
+        const pageSize = 10000;
+        let hasMore = true;
+        
+        while (hasMore) {
+          const paginatedUrl = `${analyticsUrl}&start=${startOffset}`;
+          console.log(`[get_demographic_analytics] Fetching page at offset ${startOffset}...`);
           
-          if (analyticsResponse.status === 400) {
-            return new Response(JSON.stringify({ 
-              error: `${selectedPivot} pivot may not be available for this account or requires additional permissions`,
-              details: errorText,
-              elements: [] 
-            }), {
-              status: 400,
-              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-            });
+          const analyticsResponse = await fetch(paginatedUrl, {
+            headers: { 'Authorization': `Bearer ${accessToken}` },
+          });
+          
+          if (!analyticsResponse.ok) {
+            const errorText = await analyticsResponse.text();
+            console.error('[Error] Failed to fetch demographic analytics:', analyticsResponse.status, errorText);
+            
+            if (analyticsResponse.status === 400) {
+              return new Response(JSON.stringify({ 
+                error: `${selectedPivot} pivot may not be available for this account or requires additional permissions`,
+                details: errorText,
+                elements: [] 
+              }), {
+                status: 400,
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+              });
+            }
+            throw new Error(`Demographic Analytics API error: ${analyticsResponse.status}`);
           }
-          throw new Error(`Demographic Analytics API error: ${analyticsResponse.status}`);
+          
+          const analyticsData = await analyticsResponse.json();
+          const pageElements = analyticsData.elements || [];
+          allElements = allElements.concat(pageElements);
+          
+          console.log(`[get_demographic_analytics] Page returned ${pageElements.length} records, total so far: ${allElements.length}`);
+          
+          // Check if there are more pages
+          const paging = analyticsData.paging;
+          if (paging && paging.total && (startOffset + pageElements.length) < paging.total) {
+            startOffset += pageSize;
+          } else if (pageElements.length === pageSize) {
+            // No paging info but got full page, try fetching more
+            startOffset += pageSize;
+          } else {
+            hasMore = false;
+          }
+          
+          // Safety limit to prevent infinite loops
+          if (startOffset > 100000) {
+            console.log(`[get_demographic_analytics] Reached safety limit at offset ${startOffset}`);
+            hasMore = false;
+          }
         }
         
-        const analyticsData = await analyticsResponse.json();
-        console.log(`[get_demographic_analytics] Received ${analyticsData.elements?.length || 0} demographic records`);
+        console.log(`[get_demographic_analytics] Total received: ${allElements.length} demographic records`);
 
         // Aggregate by pivot value
         const entityMap = new Map<string, { 
@@ -1709,7 +1743,7 @@ serve(async (req) => {
           leads: number;
         }>();
         
-        (analyticsData.elements || []).forEach((el: any) => {
+        allElements.forEach((el: any) => {
           const entityUrn = el.pivotValue || '';
           if (!entityUrn) return;
           
