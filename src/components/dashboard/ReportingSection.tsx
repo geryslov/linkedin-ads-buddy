@@ -554,15 +554,12 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
                   onCustomDateChange={handleDemoCustomDate}
                 />
               </div>
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-medium">Filter by Campaigns:</span>
-                <CampaignMultiSelect
-                  campaigns={campaignReporting.campaignData}
-                  selectedCampaignIds={demographicReporting.selectedCampaignIds}
-                  onSelectionChange={demographicReporting.setSelectedCampaignIds}
-                  isLoading={campaignReporting.isLoading}
-                />
-              </div>
+              <CampaignMultiSelect
+                campaigns={campaignReporting.campaignData}
+                selectedCampaignIds={demographicReporting.selectedCampaignIds}
+                onSelectionChange={demographicReporting.setSelectedCampaignIds}
+                isLoading={campaignReporting.isLoading}
+              />
             </CardContent>
           </Card>
 
