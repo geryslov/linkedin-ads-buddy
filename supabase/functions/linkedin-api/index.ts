@@ -530,6 +530,7 @@ serve(async (req) => {
 
       case 'get_ad_accounts': {
         const accountsMap = new Map<string, any>();
+        const userRoles = new Map<string, { role: string; accessSource: string }>();
         
         // Step 1: Try REST adAccountUsers?q=authenticatedUser (includes Business Manager accounts)
         try {
@@ -549,47 +550,12 @@ serve(async (req) => {
             const userElements = usersData?.elements || [];
             console.log(`[get_ad_accounts] adAccountUsers returned ${userElements.length} account-user mappings`);
             
-            // Extract unique account URNs from user mappings
-            const accountUrns = [...new Set(userElements.map((el: any) => el.account).filter(Boolean))] as string[];
-            
-            if (accountUrns.length > 0) {
-              // Fetch account details for each discovered account using batch lookup
-              const urnList = accountUrns.map((urn: string) => {
-                const id = urn.split(':').pop();
-                return `urn:li:sponsoredAccount:${id}`;
-              }).join(',');
-              
-              const detailsResponse = await fetch(
-                `https://api.linkedin.com/v2/adAccountsV2?ids=List(${urnList})`,
-                { headers: { 'Authorization': `Bearer ${accessToken}` } }
-              );
-              
-              if (detailsResponse.ok) {
-                const detailsData = await detailsResponse.json();
-                const results = detailsData?.results || detailsData?.elements || {};
-                
-                // Handle both object and array responses
-                if (Array.isArray(results)) {
-                  results.forEach((acc: any) => {
-                    if (acc.id) accountsMap.set(String(acc.id), acc);
-                  });
-                } else {
-                  Object.values(results).forEach((acc: any) => {
-                    if ((acc as any).id) accountsMap.set(String((acc as any).id), acc);
-                  });
-                }
-              } else {
-                console.log(`[get_ad_accounts] Batch account details failed: ${detailsResponse.status}`);
-              }
-              
-              // Add user role information to each account
-              for (const el of userElements) {
-                const accountId = el.account?.split(':').pop();
-                if (accountId && accountsMap.has(accountId)) {
-                  const acc = accountsMap.get(accountId);
-                  acc.userRole = el.role;
-                  acc.accessSource = 'authenticatedUser';
-                }
+            // Store user role info for each account
+            for (const el of userElements) {
+              const accountUrn = el.account || '';
+              const accountId = accountUrn.split(':').pop();
+              if (accountId) {
+                userRoles.set(accountId, { role: el.role || 'UNKNOWN', accessSource: 'authenticatedUser' });
               }
             }
           } else {
@@ -599,7 +565,7 @@ serve(async (req) => {
           console.error('[get_ad_accounts] Error fetching adAccountUsers:', err);
         }
         
-        // Step 2: Also fetch via search (catches any accounts missed by first method)
+        // Step 2: Fetch all accounts via search (main discovery method)
         try {
           const searchResponse = await fetch(
             'https://api.linkedin.com/v2/adAccountsV2?q=search&search.status.values[0]=ACTIVE',
@@ -612,14 +578,45 @@ serve(async (req) => {
             console.log(`[get_ad_accounts] adAccountsV2 search returned ${searchElements.length} accounts`);
             
             for (const acc of searchElements) {
-              if (acc.id && !accountsMap.has(String(acc.id))) {
-                acc.accessSource = 'search';
-                accountsMap.set(String(acc.id), acc);
+              if (acc.id) {
+                const accId = String(acc.id);
+                const roleInfo = userRoles.get(accId);
+                acc.userRole = roleInfo?.role || 'DIRECT_ACCESS';
+                acc.accessSource = roleInfo?.accessSource || 'search';
+                accountsMap.set(accId, acc);
               }
             }
           }
         } catch (err) {
           console.error('[get_ad_accounts] Error fetching via search:', err);
+        }
+        
+        // Step 3: For any accounts in userRoles but not in search, try to fetch individually
+        const missingAccountIds = [...userRoles.keys()].filter(id => !accountsMap.has(id));
+        if (missingAccountIds.length > 0) {
+          console.log(`[get_ad_accounts] Fetching ${missingAccountIds.length} accounts not in search results...`);
+          
+          for (const accId of missingAccountIds) {
+            try {
+              const accResponse = await fetch(
+                `https://api.linkedin.com/v2/adAccountsV2/${accId}`,
+                { headers: { 'Authorization': `Bearer ${accessToken}` } }
+              );
+              
+              if (accResponse.ok) {
+                const acc = await accResponse.json();
+                if (acc && acc.status === 'ACTIVE') {
+                  const roleInfo = userRoles.get(accId);
+                  acc.userRole = roleInfo?.role || 'UNKNOWN';
+                  acc.accessSource = 'authenticatedUser';
+                  accountsMap.set(accId, acc);
+                  console.log(`[get_ad_accounts] Added Business Manager account: ${acc.name || accId}`);
+                }
+              }
+            } catch (err) {
+              // Silently continue if individual fetch fails
+            }
+          }
         }
         
         // Combine and filter for ACTIVE status
@@ -2400,26 +2397,75 @@ serve(async (req) => {
           const creatives = creativesData.elements || [];
           console.log(`[Step 3] V2 API returned ${creatives.length} total creatives`);
           
-          // Only process creatives that have analytics data
+          // Debug: log a few creative IDs vs analytics IDs
+          if (creatives.length > 0 && creativeIdsWithData.size > 0) {
+            const sampleCreativeIds = creatives.slice(0, 3).map((c: any) => c.id?.toString());
+            const sampleAnalyticsIds = [...creativeIdsWithData].slice(0, 3);
+            console.log(`[Step 3] Sample creative IDs from V2: ${JSON.stringify(sampleCreativeIds)}`);
+            console.log(`[Step 3] Sample creative IDs from analytics: ${JSON.stringify(sampleAnalyticsIds)}`);
+          }
+          
+          // Build a map of all creatives by ID for matching
+          const creativesByIdV2 = new Map<string, any>();
           for (const creative of creatives) {
-            const creativeId = creative.id?.toString() || '';
-            if (!creativeId || !creativeIdsWithData.has(creativeId)) continue;
+            const creativeId = String(creative.id || '');
+            if (creativeId) {
+              creativesByIdV2.set(creativeId, creative);
+            }
+          }
+          
+          // Match analytics creative IDs to V2 creatives
+          for (const analyticsCreativeId of creativeIdsWithData) {
+            const normalizedId = String(analyticsCreativeId).trim();
+            const creative = creativesByIdV2.get(normalizedId);
             
-            const campaignUrn = creative.campaign || '';
-            const campaignId = campaignUrn.split(':').pop() || '';
-            
-            let creativeType = 'SPONSORED_CONTENT';
-            if (creative.type) creativeType = creative.type;
-            else if (creative.variables?.type) creativeType = creative.variables.type;
-            
-            creativeInfoMap.set(creativeId, {
-              id: creativeId,
+            if (creative) {
+              const campaignUrn = creative.campaign || '';
+              const campaignId = campaignUrn.split(':').pop() || '';
+              
+              let creativeType = 'SPONSORED_CONTENT';
+              if (creative.type) creativeType = creative.type;
+              else if (creative.variables?.type) creativeType = creative.variables.type;
+              
+              creativeInfoMap.set(normalizedId, {
+                id: normalizedId,
+                name: '',
+                campaignId,
+                campaignName: campaignNames.get(campaignId) || `Campaign ${campaignId}`,
+                status: creative.status || 'UNKNOWN',
+                type: creativeType,
+                reference: creative.reference || '',
+              });
+            }
+          }
+          
+          // If still no matches, maybe the creatives are missing from V2 - create placeholders
+          if (creativeInfoMap.size === 0 && creativeIdsWithData.size > 0) {
+            console.log(`[Step 3] No V2 matches found, creating placeholders for ${creativeIdsWithData.size} creatives`);
+            for (const creativeId of creativeIdsWithData) {
+              creativeInfoMap.set(String(creativeId), {
+                id: String(creativeId),
+                name: '',
+                campaignId: '',
+                campaignName: 'Unknown Campaign',
+                status: 'UNKNOWN',
+                type: 'SPONSORED_CONTENT',
+                reference: '',
+              });
+            }
+          }
+        } else {
+          console.log(`[Step 3] V2 creatives API failed: ${creativesResponse.status}`);
+          // Create placeholders from analytics IDs
+          for (const creativeId of creativeIdsWithData) {
+            creativeInfoMap.set(String(creativeId), {
+              id: String(creativeId),
               name: '',
-              campaignId,
-              campaignName: campaignNames.get(campaignId) || `Campaign ${campaignId}`,
-              status: creative.status || 'UNKNOWN',
-              type: creativeType,
-              reference: creative.reference || '',
+              campaignId: '',
+              campaignName: 'Unknown Campaign',
+              status: 'UNKNOWN',
+              type: 'SPONSORED_CONTENT',
+              reference: '',
             });
           }
         }
