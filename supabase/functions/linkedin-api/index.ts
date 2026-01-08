@@ -2853,24 +2853,43 @@ serve(async (req) => {
         
         console.log(`[get_campaign_report] Starting for account ${accountId}, date range: ${startDate} to ${endDate}`);
         
-        // Step 1: Fetch all campaigns with their metadata
-        const campaignsUrl = `https://api.linkedin.com/v2/adCampaignsV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=200`;
-        const campaignsResponse = await fetch(campaignsUrl, {
-          headers: { 'Authorization': `Bearer ${accessToken}` }
-        });
+        // Step 1: Fetch ALL campaigns with pagination
+        const allCampaigns: any[] = [];
+        let campaignsStart = 0;
+        const campaignsPageSize = 500;
+        let hasMoreCampaigns = true;
         
-        if (!campaignsResponse.ok) {
-          const errorText = await campaignsResponse.text();
-          console.error(`[get_campaign_report] Campaigns fetch failed:`, errorText);
-          return new Response(JSON.stringify({ error: 'Failed to fetch campaigns', details: errorText }), {
-            status: campaignsResponse.status,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        while (hasMoreCampaigns) {
+          const campaignsUrl = `https://api.linkedin.com/v2/adCampaignsV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=${campaignsPageSize}&start=${campaignsStart}`;
+          const campaignsResponse = await fetch(campaignsUrl, {
+            headers: { 'Authorization': `Bearer ${accessToken}` }
           });
+          
+          if (!campaignsResponse.ok) {
+            const errorText = await campaignsResponse.text();
+            console.error(`[get_campaign_report] Campaigns fetch failed:`, errorText);
+            return new Response(JSON.stringify({ error: 'Failed to fetch campaigns', details: errorText }), {
+              status: campaignsResponse.status,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+            });
+          }
+          
+          const campaignsData = await campaignsResponse.json();
+          const pageCampaigns = campaignsData.elements || [];
+          allCampaigns.push(...pageCampaigns);
+          
+          console.log(`[get_campaign_report] Fetched ${pageCampaigns.length} campaigns (total: ${allCampaigns.length})`);
+          
+          // Check if there are more pages
+          if (pageCampaigns.length < campaignsPageSize) {
+            hasMoreCampaigns = false;
+          } else {
+            campaignsStart += campaignsPageSize;
+          }
         }
         
-        const campaignsData = await campaignsResponse.json();
-        const campaigns = campaignsData.elements || [];
-        console.log(`[get_campaign_report] Fetched ${campaigns.length} campaigns`);
+        const campaigns = allCampaigns;
+        console.log(`[get_campaign_report] Total campaigns fetched: ${campaigns.length}`);
         
         if (campaigns.length === 0) {
           return new Response(JSON.stringify({ 
@@ -2897,39 +2916,36 @@ serve(async (req) => {
           });
         }
         
-        // Step 2: Fetch analytics with CAMPAIGN pivot
-        const campaignIds = campaigns.map((c: any) => c.id.toString());
+        // Step 2: Fetch analytics with CAMPAIGN pivot using account-level query
+        // Use account-level query pattern for Business Manager compatibility
+        const startDateObj = new Date(startDate);
+        const endDateObj = new Date(endDate);
         
-        // Process in batches of 20 campaigns
-        const batchSize = 20;
-        const allAnalytics: any[] = [];
-        
-        for (let i = 0; i < campaignIds.length; i += batchSize) {
-          const batchIds = campaignIds.slice(i, i + batchSize);
-          
-          let analyticsUrl = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
-            `dateRange.start.day=${new Date(startDate).getDate()}&` +
-            `dateRange.start.month=${new Date(startDate).getMonth() + 1}&` +
-            `dateRange.start.year=${new Date(startDate).getFullYear()}&` +
-            `dateRange.end.day=${new Date(endDate).getDate()}&` +
-            `dateRange.end.month=${new Date(endDate).getMonth() + 1}&` +
-            `dateRange.end.year=${new Date(endDate).getFullYear()}&` +
+        const analyticsUrl = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
+          `dateRange.start.day=${startDateObj.getDate()}&` +
+          `dateRange.start.month=${startDateObj.getMonth() + 1}&` +
+          `dateRange.start.year=${startDateObj.getFullYear()}&` +
+          `dateRange.end.day=${endDateObj.getDate()}&` +
+          `dateRange.end.month=${endDateObj.getMonth() + 1}&` +
+          `dateRange.end.year=${endDateObj.getFullYear()}&` +
           `timeGranularity=${granularity}&` +
-            `pivot=CAMPAIGN&` +
-            `fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,oneClickLeadFormOpens,pivotValue`;
-          
-          batchIds.forEach((id: string, idx: number) => {
-            analyticsUrl += `&campaigns[${idx}]=urn:li:sponsoredCampaign:${id}`;
-          });
-          
-          const analyticsResponse = await fetch(analyticsUrl, {
-            headers: { 'Authorization': `Bearer ${accessToken}` }
-          });
-          
-          if (analyticsResponse.ok) {
-            const analyticsData = await analyticsResponse.json();
-            allAnalytics.push(...(analyticsData.elements || []));
-          }
+          `pivot=CAMPAIGN&` +
+          `accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
+          `fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,oneClickLeadFormOpens,pivotValue,dateRange`;
+        
+        console.log(`[get_campaign_report] Analytics URL (account-level):`, analyticsUrl);
+        
+        const analyticsResponse = await fetch(analyticsUrl, {
+          headers: { 'Authorization': `Bearer ${accessToken}` }
+        });
+        
+        const allAnalytics: any[] = [];
+        if (analyticsResponse.ok) {
+          const analyticsData = await analyticsResponse.json();
+          allAnalytics.push(...(analyticsData.elements || []));
+        } else {
+          const errText = await analyticsResponse.text();
+          console.error(`[get_campaign_report] Analytics fetch failed: ${analyticsResponse.status}`, errText);
         }
         
         console.log(`[get_campaign_report] Fetched ${allAnalytics.length} analytics rows`);
