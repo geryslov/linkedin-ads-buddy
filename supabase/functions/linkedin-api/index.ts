@@ -529,14 +529,107 @@ serve(async (req) => {
       }
 
       case 'get_ad_accounts': {
-        const accountsResponse = await fetch(
-          'https://api.linkedin.com/v2/adAccountsV2?q=search&search.status.values[0]=ACTIVE',
-          { headers: { 'Authorization': `Bearer ${accessToken}` } }
-        );
-        const accounts = await accountsResponse.json();
-        console.log('Ad accounts fetched:', accounts.elements?.length || 0);
+        const accountsMap = new Map<string, any>();
         
-        return new Response(JSON.stringify(accounts), {
+        // Step 1: Try REST adAccountUsers?q=authenticatedUser (includes Business Manager accounts)
+        try {
+          const usersResponse = await fetch(
+            'https://api.linkedin.com/rest/adAccountUsers?q=authenticatedUser',
+            {
+              headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'LinkedIn-Version': '202511',
+                'X-Restli-Protocol-Version': '2.0.0',
+              },
+            }
+          );
+          
+          if (usersResponse.ok) {
+            const usersData = await usersResponse.json();
+            const userElements = usersData?.elements || [];
+            console.log(`[get_ad_accounts] adAccountUsers returned ${userElements.length} account-user mappings`);
+            
+            // Extract unique account URNs from user mappings
+            const accountUrns = [...new Set(userElements.map((el: any) => el.account).filter(Boolean))] as string[];
+            
+            if (accountUrns.length > 0) {
+              // Fetch account details for each discovered account using batch lookup
+              const urnList = accountUrns.map((urn: string) => {
+                const id = urn.split(':').pop();
+                return `urn:li:sponsoredAccount:${id}`;
+              }).join(',');
+              
+              const detailsResponse = await fetch(
+                `https://api.linkedin.com/v2/adAccountsV2?ids=List(${urnList})`,
+                { headers: { 'Authorization': `Bearer ${accessToken}` } }
+              );
+              
+              if (detailsResponse.ok) {
+                const detailsData = await detailsResponse.json();
+                const results = detailsData?.results || detailsData?.elements || {};
+                
+                // Handle both object and array responses
+                if (Array.isArray(results)) {
+                  results.forEach((acc: any) => {
+                    if (acc.id) accountsMap.set(String(acc.id), acc);
+                  });
+                } else {
+                  Object.values(results).forEach((acc: any) => {
+                    if ((acc as any).id) accountsMap.set(String((acc as any).id), acc);
+                  });
+                }
+              } else {
+                console.log(`[get_ad_accounts] Batch account details failed: ${detailsResponse.status}`);
+              }
+              
+              // Add user role information to each account
+              for (const el of userElements) {
+                const accountId = el.account?.split(':').pop();
+                if (accountId && accountsMap.has(accountId)) {
+                  const acc = accountsMap.get(accountId);
+                  acc.userRole = el.role;
+                  acc.accessSource = 'authenticatedUser';
+                }
+              }
+            }
+          } else {
+            console.log(`[get_ad_accounts] adAccountUsers failed: ${usersResponse.status}`);
+          }
+        } catch (err) {
+          console.error('[get_ad_accounts] Error fetching adAccountUsers:', err);
+        }
+        
+        // Step 2: Also fetch via search (catches any accounts missed by first method)
+        try {
+          const searchResponse = await fetch(
+            'https://api.linkedin.com/v2/adAccountsV2?q=search&search.status.values[0]=ACTIVE',
+            { headers: { 'Authorization': `Bearer ${accessToken}` } }
+          );
+          
+          if (searchResponse.ok) {
+            const searchData = await searchResponse.json();
+            const searchElements = searchData?.elements || [];
+            console.log(`[get_ad_accounts] adAccountsV2 search returned ${searchElements.length} accounts`);
+            
+            for (const acc of searchElements) {
+              if (acc.id && !accountsMap.has(String(acc.id))) {
+                acc.accessSource = 'search';
+                accountsMap.set(String(acc.id), acc);
+              }
+            }
+          }
+        } catch (err) {
+          console.error('[get_ad_accounts] Error fetching via search:', err);
+        }
+        
+        // Combine and filter for ACTIVE status
+        const allAccounts = Array.from(accountsMap.values()).filter(
+          (acc: any) => acc.status === 'ACTIVE'
+        );
+        
+        console.log(`[get_ad_accounts] Total unique accounts: ${allAccounts.length}`);
+        
+        return new Response(JSON.stringify({ elements: allAccounts }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
