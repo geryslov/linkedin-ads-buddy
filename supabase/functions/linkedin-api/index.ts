@@ -2045,26 +2045,60 @@ serve(async (req) => {
         }
 
         console.log('[get_company_demographic] Step 1: Fetching company demographic analytics...');
-        const analyticsResponse = await fetch(analyticsUrl, {
-          headers: { 'Authorization': `Bearer ${accessToken}` },
-        });
         
-        if (!analyticsResponse.ok) {
-          const errorText = await analyticsResponse.text();
-          console.error('[Error] Failed to fetch company demographic:', analyticsResponse.status, errorText);
+        // Paginated fetch to get all company demographic records
+        let allElements: any[] = [];
+        let startOffset = 0;
+        const pageSize = 10000;
+        let hasMore = true;
+        
+        while (hasMore) {
+          const paginatedUrl = `${analyticsUrl}&start=${startOffset}`;
+          console.log(`[get_company_demographic] Fetching page at offset ${startOffset}...`);
           
-          return new Response(JSON.stringify({ 
-            error: 'MEMBER_COMPANY pivot may not be available for this account',
-            details: errorText,
-            elements: [] 
-          }), {
-            status: analyticsResponse.status,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          const analyticsResponse = await fetch(paginatedUrl, {
+            headers: { 'Authorization': `Bearer ${accessToken}` },
           });
+          
+          if (!analyticsResponse.ok) {
+            const errorText = await analyticsResponse.text();
+            console.error('[Error] Failed to fetch company demographic:', analyticsResponse.status, errorText);
+            
+            return new Response(JSON.stringify({ 
+              error: 'MEMBER_COMPANY pivot may not be available for this account',
+              details: errorText,
+              elements: [] 
+            }), {
+              status: analyticsResponse.status,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+          
+          const analyticsData = await analyticsResponse.json();
+          const pageElements = analyticsData.elements || [];
+          allElements = allElements.concat(pageElements);
+          
+          console.log(`[get_company_demographic] Page returned ${pageElements.length} records, total so far: ${allElements.length}`);
+          
+          // Check if there are more pages
+          const paging = analyticsData.paging;
+          if (paging && paging.total && (startOffset + pageElements.length) < paging.total) {
+            startOffset += pageSize;
+          } else if (pageElements.length === pageSize) {
+            // No paging info but got full page, try fetching more
+            startOffset += pageSize;
+          } else {
+            hasMore = false;
+          }
+          
+          // Safety limit to prevent infinite loops
+          if (startOffset > 100000) {
+            console.log(`[get_company_demographic] Reached safety limit at offset ${startOffset}`);
+            hasMore = false;
+          }
         }
         
-        const analyticsData = await analyticsResponse.json();
-        console.log(`[get_company_demographic] Received ${analyticsData.elements?.length || 0} company records`);
+        console.log(`[get_company_demographic] Total received: ${allElements.length} company records`);
 
         // Aggregate by company URN
         const companyMap = new Map<string, { 
@@ -2076,7 +2110,7 @@ serve(async (req) => {
           leads: number;
         }>();
         
-        (analyticsData.elements || []).forEach((el: any) => {
+        allElements.forEach((el: any) => {
           const entityUrn = el.pivotValue || '';
           if (!entityUrn) return;
           
