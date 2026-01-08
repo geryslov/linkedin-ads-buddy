@@ -1,12 +1,4 @@
-import { useState, useMemo } from 'react';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
+import { useState, useMemo, Fragment } from 'react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -110,7 +102,6 @@ export function CreativeNamesReportTable({ data, isLoading }: CreativeNamesRepor
   const filteredData = useMemo(() => {
     let result = [...data];
 
-    // Apply search filter
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
       result = result.filter(item =>
@@ -119,23 +110,19 @@ export function CreativeNamesReportTable({ data, isLoading }: CreativeNamesRepor
       );
     }
 
-    // Apply status filter
     if (statusFilter !== 'all') {
       result = result.filter(item => item.status === statusFilter);
     }
 
-    // Apply creative type filter
     if (creativeTypeFilter !== 'all') {
       result = result.filter(item => item.type === creativeTypeFilter);
     }
 
-    // Apply campaign type filter
     result = applyCampaignTypeFilter(result, campaignTypeFilter);
 
     return result;
   }, [data, searchQuery, statusFilter, creativeTypeFilter, campaignTypeFilter]);
 
-  // Group by creative name and aggregate metrics
   const groupedData = useMemo(() => {
     const groups = new Map<string, CreativeNameData[]>();
     
@@ -171,7 +158,6 @@ export function CreativeNamesReportTable({ data, isLoading }: CreativeNamesRepor
     return aggregated;
   }, [filteredData]);
 
-  // Apply metric filters on grouped data
   const filteredGroupedData = useMemo(() => {
     return applyMetricFilters(groupedData, metricFilters);
   }, [groupedData, metricFilters]);
@@ -231,31 +217,14 @@ export function CreativeNamesReportTable({ data, isLoading }: CreativeNamesRepor
     );
   }
 
-  const SortableHeader = ({ 
-    label, 
-    sortKeyVal, 
-    className = '' 
-  }: { 
-    label: string; 
-    sortKeyVal: SortKey; 
-    className?: string; 
-  }) => (
-    <TableHead
-      className={`cursor-pointer hover:bg-muted/50 transition-colors whitespace-nowrap ${className}`}
-      onClick={() => handleSort(sortKeyVal)}
-    >
-      <div className="flex items-center gap-1 font-semibold text-foreground">
-        {label}
-        {sortKey === sortKeyVal && (
-          sortOrder === 'desc' ? (
-            <ArrowDown className="h-3 w-3 text-primary" />
-          ) : (
-            <ArrowUp className="h-3 w-3 text-primary" />
-          )
-        )}
-      </div>
-    </TableHead>
-  );
+  const SortIcon = ({ columnKey }: { columnKey: SortKey }) => {
+    if (sortKey !== columnKey) return null;
+    return sortOrder === 'desc' ? (
+      <ArrowDown className="h-3 w-3 text-primary shrink-0" />
+    ) : (
+      <ArrowUp className="h-3 w-3 text-primary shrink-0" />
+    );
+  };
 
   return (
     <div className="space-y-4">
@@ -268,11 +237,11 @@ export function CreativeNamesReportTable({ data, isLoading }: CreativeNamesRepor
       />
 
       {/* Filters */}
-      <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">
-        <div className="relative flex-1 max-w-sm">
+      <div className="flex flex-wrap gap-3 items-center">
+        <div className="relative flex-1 min-w-[200px] max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Search by creative or campaign name..."
+            placeholder="Search creative or campaign..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="pl-9"
@@ -280,8 +249,8 @@ export function CreativeNamesReportTable({ data, isLoading }: CreativeNamesRepor
         </div>
         
         <Select value={creativeTypeFilter} onValueChange={setCreativeTypeFilter}>
-          <SelectTrigger className="w-[160px]">
-            <Layers className="h-4 w-4 mr-2" />
+          <SelectTrigger className="w-[150px]">
+            <Layers className="h-4 w-4 mr-2 shrink-0" />
             <SelectValue placeholder="Type" />
           </SelectTrigger>
           <SelectContent>
@@ -292,7 +261,7 @@ export function CreativeNamesReportTable({ data, isLoading }: CreativeNamesRepor
         </Select>
 
         <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-[160px]">
+          <SelectTrigger className="w-[140px]">
             <SelectValue placeholder="Status" />
           </SelectTrigger>
           <SelectContent>
@@ -305,160 +274,242 @@ export function CreativeNamesReportTable({ data, isLoading }: CreativeNamesRepor
         {hasActiveFilters && (
           <Button variant="ghost" size="sm" onClick={clearFilters} className="gap-1">
             <X className="h-3 w-3" />
-            Clear filters
+            Clear
           </Button>
         )}
       </div>
 
       {/* Results count */}
       <div className="text-sm text-muted-foreground">
-        Showing {sortedData.length} creatives across {filteredData.length} campaign entries
+        {sortedData.length} creatives • {filteredData.length} campaign entries
       </div>
 
-      {/* Table */}
-      <div className="rounded-md border border-border/50 overflow-x-auto">
-        <Table>
-          <TableHeader>
-            <TableRow className="bg-muted/30">
-              <TableHead className="w-8"></TableHead>
-              <SortableHeader label="Creative Name" sortKeyVal="creativeName" className="min-w-[200px]" />
-              <TableHead className="font-semibold text-foreground">Type</TableHead>
-              <TableHead className="min-w-[150px] font-semibold text-foreground">Campaign</TableHead>
-              <TableHead className="font-semibold text-foreground">Status</TableHead>
-              <SortableHeader label="Impressions" sortKeyVal="impressions" />
-              <SortableHeader label="Clicks" sortKeyVal="clicks" />
-              <SortableHeader label="Spent" sortKeyVal="spent" />
-              <SortableHeader label="Leads" sortKeyVal="leads" />
-              <SortableHeader label="CTR" sortKeyVal="ctr" />
-              <SortableHeader label="CPC" sortKeyVal="cpc" />
-              <SortableHeader label="CPM" sortKeyVal="cpm" />
-              <SortableHeader label="CPL" sortKeyVal="costPerLead" />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {sortedData.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={13} className="text-center py-8 text-muted-foreground">
-                  No creatives match your filters
-                </TableCell>
-              </TableRow>
-            ) : (
-              <>
-                {sortedData.map((group) => {
+      {/* Table Container */}
+      <div className="border border-border rounded-lg overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            {/* Header */}
+            <thead className="bg-muted/40 border-b border-border">
+              <tr>
+                <th className="w-10 p-3"></th>
+                <th 
+                  className="text-left p-3 font-semibold cursor-pointer hover:bg-muted/60 transition-colors min-w-[250px]"
+                  onClick={() => handleSort('creativeName')}
+                >
+                  <div className="flex items-center gap-1">
+                    Creative Name
+                    <SortIcon columnKey="creativeName" />
+                  </div>
+                </th>
+                <th className="text-left p-3 font-semibold min-w-[100px]">Type</th>
+                <th className="text-left p-3 font-semibold min-w-[140px]">Campaign</th>
+                <th className="text-left p-3 font-semibold min-w-[90px]">Status</th>
+                <th 
+                  className="text-right p-3 font-semibold cursor-pointer hover:bg-muted/60 transition-colors min-w-[100px]"
+                  onClick={() => handleSort('impressions')}
+                >
+                  <div className="flex items-center justify-end gap-1">
+                    Impr.
+                    <SortIcon columnKey="impressions" />
+                  </div>
+                </th>
+                <th 
+                  className="text-right p-3 font-semibold cursor-pointer hover:bg-muted/60 transition-colors min-w-[80px]"
+                  onClick={() => handleSort('clicks')}
+                >
+                  <div className="flex items-center justify-end gap-1">
+                    Clicks
+                    <SortIcon columnKey="clicks" />
+                  </div>
+                </th>
+                <th 
+                  className="text-right p-3 font-semibold cursor-pointer hover:bg-muted/60 transition-colors min-w-[90px]"
+                  onClick={() => handleSort('spent')}
+                >
+                  <div className="flex items-center justify-end gap-1">
+                    Spent
+                    <SortIcon columnKey="spent" />
+                  </div>
+                </th>
+                <th 
+                  className="text-right p-3 font-semibold cursor-pointer hover:bg-muted/60 transition-colors min-w-[70px]"
+                  onClick={() => handleSort('leads')}
+                >
+                  <div className="flex items-center justify-end gap-1">
+                    Leads
+                    <SortIcon columnKey="leads" />
+                  </div>
+                </th>
+                <th 
+                  className="text-right p-3 font-semibold cursor-pointer hover:bg-muted/60 transition-colors min-w-[70px]"
+                  onClick={() => handleSort('ctr')}
+                >
+                  <div className="flex items-center justify-end gap-1">
+                    CTR
+                    <SortIcon columnKey="ctr" />
+                  </div>
+                </th>
+                <th 
+                  className="text-right p-3 font-semibold cursor-pointer hover:bg-muted/60 transition-colors min-w-[70px]"
+                  onClick={() => handleSort('cpc')}
+                >
+                  <div className="flex items-center justify-end gap-1">
+                    CPC
+                    <SortIcon columnKey="cpc" />
+                  </div>
+                </th>
+                <th 
+                  className="text-right p-3 font-semibold cursor-pointer hover:bg-muted/60 transition-colors min-w-[70px]"
+                  onClick={() => handleSort('cpm')}
+                >
+                  <div className="flex items-center justify-end gap-1">
+                    CPM
+                    <SortIcon columnKey="cpm" />
+                  </div>
+                </th>
+                <th 
+                  className="text-right p-3 font-semibold cursor-pointer hover:bg-muted/60 transition-colors min-w-[70px]"
+                  onClick={() => handleSort('costPerLead')}
+                >
+                  <div className="flex items-center justify-end gap-1">
+                    CPL
+                    <SortIcon columnKey="costPerLead" />
+                  </div>
+                </th>
+              </tr>
+            </thead>
+
+            {/* Body */}
+            <tbody className="divide-y divide-border/50">
+              {sortedData.length === 0 ? (
+                <tr>
+                  <td colSpan={13} className="text-center py-12 text-muted-foreground">
+                    No creatives match your filters
+                  </td>
+                </tr>
+              ) : (
+                sortedData.map((group) => {
                   const isExpanded = expandedCreatives.has(group.creativeName);
                   const hasMultipleCampaigns = group.campaigns.length > 1;
                   
                   return (
-                    <>
-                      {/* Parent Row - Creative Name with Aggregated Metrics */}
-                      <TableRow 
-                        key={group.creativeName} 
-                        className={`hover:bg-muted/20 ${hasMultipleCampaigns ? 'cursor-pointer' : ''}`}
+                    <Fragment key={group.creativeName}>
+                      {/* Parent Row */}
+                      <tr 
+                        className={`hover:bg-muted/30 transition-colors ${hasMultipleCampaigns ? 'cursor-pointer' : ''}`}
                         onClick={() => hasMultipleCampaigns && toggleExpanded(group.creativeName)}
                       >
-                        <TableCell className="w-8 px-2">
+                        <td className="p-3 text-center">
                           {hasMultipleCampaigns && (
                             isExpanded ? (
-                              <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                              <ChevronDown className="h-4 w-4 text-muted-foreground mx-auto" />
                             ) : (
-                              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                              <ChevronRight className="h-4 w-4 text-muted-foreground mx-auto" />
                             )
                           )}
-                        </TableCell>
-                        <TableCell className="font-medium max-w-[300px] truncate" title={group.creativeName}>
-                          {group.creativeName}
-                          {hasMultipleCampaigns && (
-                            <span className="ml-2 text-xs text-muted-foreground">
-                              ({group.campaigns.length} campaigns)
+                        </td>
+                        <td className="p-3">
+                          <div className="flex flex-col gap-0.5">
+                            <span className="font-medium truncate max-w-[300px]" title={group.creativeName}>
+                              {group.creativeName}
                             </span>
-                          )}
-                        </TableCell>
-                        <TableCell>
+                            {hasMultipleCampaigns && (
+                              <span className="text-xs text-muted-foreground">
+                                {group.campaigns.length} campaigns
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="p-3">
                           <CreativeTypeBadge type={group.type} />
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">
+                        </td>
+                        <td className="p-3 text-muted-foreground">
                           {hasMultipleCampaigns ? (
-                            <span className="text-xs">Multiple</span>
+                            <span className="text-xs italic">Multiple</span>
                           ) : (
-                            <span className="max-w-[200px] truncate block" title={group.campaigns[0]?.campaignName}>
+                            <span className="truncate block max-w-[180px]" title={group.campaigns[0]?.campaignName}>
                               {group.campaigns[0]?.campaignName}
                             </span>
                           )}
-                        </TableCell>
-                        <TableCell>
+                        </td>
+                        <td className="p-3">
                           {!hasMultipleCampaigns && group.campaigns[0] && (
-                            <Badge variant="outline" className={STATUS_COLORS[group.campaigns[0].status] || 'bg-muted'}>
+                            <Badge variant="outline" className={`text-xs ${STATUS_COLORS[group.campaigns[0].status] || 'bg-muted'}`}>
                               {group.campaigns[0].status}
                             </Badge>
                           )}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums font-medium">{group.impressions.toLocaleString()}</TableCell>
-                        <TableCell className="text-right tabular-nums font-medium">{group.clicks.toLocaleString()}</TableCell>
-                        <TableCell className="text-right tabular-nums font-medium">${group.spent.toFixed(2)}</TableCell>
-                        <TableCell className="text-right tabular-nums font-medium">{group.leads}</TableCell>
-                        <TableCell className="text-right tabular-nums font-medium">{group.ctr.toFixed(2)}%</TableCell>
-                        <TableCell className="text-right tabular-nums font-medium">${group.cpc.toFixed(2)}</TableCell>
-                        <TableCell className="text-right tabular-nums font-medium">${group.cpm.toFixed(2)}</TableCell>
-                        <TableCell className="text-right tabular-nums font-medium">
+                        </td>
+                        <td className="p-3 text-right tabular-nums font-medium">{group.impressions.toLocaleString()}</td>
+                        <td className="p-3 text-right tabular-nums font-medium">{group.clicks.toLocaleString()}</td>
+                        <td className="p-3 text-right tabular-nums font-medium">${group.spent.toFixed(2)}</td>
+                        <td className="p-3 text-right tabular-nums font-medium">{group.leads}</td>
+                        <td className="p-3 text-right tabular-nums font-medium">{group.ctr.toFixed(2)}%</td>
+                        <td className="p-3 text-right tabular-nums font-medium">${group.cpc.toFixed(2)}</td>
+                        <td className="p-3 text-right tabular-nums font-medium">${group.cpm.toFixed(2)}</td>
+                        <td className="p-3 text-right tabular-nums font-medium">
                           {group.costPerLead > 0 ? `$${group.costPerLead.toFixed(2)}` : '-'}
-                        </TableCell>
-                      </TableRow>
+                        </td>
+                      </tr>
 
-                      {/* Child Rows - Campaign Breakdown as table rows */}
+                      {/* Expanded Campaign Rows */}
                       {isExpanded && group.campaigns.map((campaign, idx) => (
-                        <TableRow 
-                          key={`${group.creativeName}-${campaign.campaignName}-${idx}`}
-                          className="bg-muted/5 hover:bg-muted/15 border-l-2 border-l-primary/30"
+                        <tr 
+                          key={`${group.creativeName}-campaign-${idx}`}
+                          className="bg-primary/[0.02] border-l-2 border-l-primary/40"
                         >
-                          <TableCell className="w-8 px-2"></TableCell>
-                          <TableCell className="pl-8">
-                            <span className="text-sm text-muted-foreground" title={campaign.campaignName}>
-                              ↳ {campaign.campaignName}
-                            </span>
-                          </TableCell>
-                          <TableCell></TableCell>
-                          <TableCell></TableCell>
-                          <TableCell>
-                            <Badge variant="outline" className={`text-xs ${STATUS_COLORS[campaign.status] || 'bg-muted'}`}>
-                              {campaign.status}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className="text-right tabular-nums text-muted-foreground">{campaign.impressions.toLocaleString()}</TableCell>
-                          <TableCell className="text-right tabular-nums text-muted-foreground">{campaign.clicks.toLocaleString()}</TableCell>
-                          <TableCell className="text-right tabular-nums text-muted-foreground">${campaign.spent.toFixed(2)}</TableCell>
-                          <TableCell className="text-right tabular-nums text-muted-foreground">{campaign.leads}</TableCell>
-                          <TableCell className="text-right tabular-nums text-muted-foreground">{campaign.ctr.toFixed(2)}%</TableCell>
-                          <TableCell className="text-right tabular-nums text-muted-foreground">${campaign.cpc.toFixed(2)}</TableCell>
-                          <TableCell className="text-right tabular-nums text-muted-foreground">${campaign.cpm.toFixed(2)}</TableCell>
-                          <TableCell className="text-right tabular-nums text-muted-foreground">
+                          <td className="p-3"></td>
+                          <td className="p-3 pl-8" colSpan={3}>
+                            <div className="flex items-center gap-3">
+                              <span className="text-muted-foreground">↳</span>
+                              <span className="truncate max-w-[350px]" title={campaign.campaignName}>
+                                {campaign.campaignName}
+                              </span>
+                              <Badge variant="outline" className={`text-xs shrink-0 ${STATUS_COLORS[campaign.status] || 'bg-muted'}`}>
+                                {campaign.status}
+                              </Badge>
+                            </div>
+                          </td>
+                          <td className="p-3"></td>
+                          <td className="p-3 text-right tabular-nums text-muted-foreground">{campaign.impressions.toLocaleString()}</td>
+                          <td className="p-3 text-right tabular-nums text-muted-foreground">{campaign.clicks.toLocaleString()}</td>
+                          <td className="p-3 text-right tabular-nums text-muted-foreground">${campaign.spent.toFixed(2)}</td>
+                          <td className="p-3 text-right tabular-nums text-muted-foreground">{campaign.leads}</td>
+                          <td className="p-3 text-right tabular-nums text-muted-foreground">{campaign.ctr.toFixed(2)}%</td>
+                          <td className="p-3 text-right tabular-nums text-muted-foreground">${campaign.cpc.toFixed(2)}</td>
+                          <td className="p-3 text-right tabular-nums text-muted-foreground">${campaign.cpm.toFixed(2)}</td>
+                          <td className="p-3 text-right tabular-nums text-muted-foreground">
                             {campaign.costPerLead > 0 ? `$${campaign.costPerLead.toFixed(2)}` : '-'}
-                          </TableCell>
-                        </TableRow>
+                          </td>
+                        </tr>
                       ))}
-                    </>
+                    </Fragment>
                   );
-                })}
-                <TableRow className="bg-muted/50 font-semibold border-t-2 border-border">
-                  <TableCell></TableCell>
-                  <TableCell>Totals</TableCell>
-                  <TableCell></TableCell>
-                  <TableCell></TableCell>
-                  <TableCell></TableCell>
-                  <TableCell className="text-right tabular-nums">{totals.impressions.toLocaleString()}</TableCell>
-                  <TableCell className="text-right tabular-nums">{totals.clicks.toLocaleString()}</TableCell>
-                  <TableCell className="text-right tabular-nums">${totals.spent.toFixed(2)}</TableCell>
-                  <TableCell className="text-right tabular-nums">{totals.leads}</TableCell>
-                  <TableCell className="text-right tabular-nums">{totalCtr.toFixed(2)}%</TableCell>
-                  <TableCell className="text-right tabular-nums">${totalCpc.toFixed(2)}</TableCell>
-                  <TableCell className="text-right tabular-nums">${totalCpm.toFixed(2)}</TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {totalCostPerLead > 0 ? `$${totalCostPerLead.toFixed(2)}` : '-'}
-                  </TableCell>
-                </TableRow>
-              </>
-            )}
-          </TableBody>
-        </Table>
+                })
+              )}
+            </tbody>
+
+            {/* Footer Totals */}
+            <tfoot className="bg-muted/50 border-t-2 border-border font-semibold">
+              <tr>
+                <td className="p-3"></td>
+                <td className="p-3">Totals</td>
+                <td className="p-3"></td>
+                <td className="p-3"></td>
+                <td className="p-3"></td>
+                <td className="p-3 text-right tabular-nums">{totals.impressions.toLocaleString()}</td>
+                <td className="p-3 text-right tabular-nums">{totals.clicks.toLocaleString()}</td>
+                <td className="p-3 text-right tabular-nums">${totals.spent.toFixed(2)}</td>
+                <td className="p-3 text-right tabular-nums">{totals.leads}</td>
+                <td className="p-3 text-right tabular-nums">{totalCtr.toFixed(2)}%</td>
+                <td className="p-3 text-right tabular-nums">${totalCpc.toFixed(2)}</td>
+                <td className="p-3 text-right tabular-nums">${totalCpm.toFixed(2)}</td>
+                <td className="p-3 text-right tabular-nums">
+                  {totalCostPerLead > 0 ? `$${totalCostPerLead.toFixed(2)}` : '-'}
+                </td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
       </div>
     </div>
   );
