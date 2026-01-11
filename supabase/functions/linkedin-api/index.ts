@@ -4421,6 +4421,10 @@ serve(async (req) => {
         const searchData = await searchResponse.json();
         console.log(`[search_job_titles] Typeahead returned ${searchData.elements?.length || 0} results`);
         
+        // Log a sample of URN formats to debug super title detection
+        const sampleUrns = (searchData.elements || []).slice(0, 5).map((el: any) => el.urn || el.entity || 'no-urn');
+        console.log(`[search_job_titles] Sample URNs: ${JSON.stringify(sampleUrns)}`);
+        
         // Parse the adTargetingEntities response - initial pass
         const parsedTitles = (searchData.elements || []).map((el: any) => {
           // URN format: urn:li:title:123 or urn:li:adTargetingEntity:...
