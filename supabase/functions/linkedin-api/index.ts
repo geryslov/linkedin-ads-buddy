@@ -4332,6 +4332,130 @@ serve(async (req) => {
         }
       }
 
+      case 'search_job_titles': {
+        // Search for targetable job titles using LinkedIn's adTargetingEntities typeahead API
+        const { query, accountId } = params;
+        
+        if (!query || query.trim().length < 2) {
+          return new Response(JSON.stringify({ 
+            titles: [],
+            message: 'Query must be at least 2 characters'
+          }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+
+        console.log(`[search_job_titles] Searching for: "${query}"`);
+        
+        // Use the adTargetingEntities typeahead API for job titles
+        // The facet for job titles is "titles"
+        const searchParams = new URLSearchParams({
+          q: 'typeahead',
+          facet: 'urn:li:adTargetingFacet:titles',
+          query: query.trim(),
+          count: '50',
+        });
+        
+        const searchUrl = `https://api.linkedin.com/rest/adTargetingEntities?${searchParams.toString()}`;
+        console.log(`[search_job_titles] API URL: ${searchUrl}`);
+        
+        const searchResponse = await fetch(searchUrl, {
+          headers: { 
+            'Authorization': `Bearer ${accessToken}`,
+            'X-Restli-Protocol-Version': '2.0.0',
+            'LinkedIn-Version': '202511',
+          },
+        });
+        
+        if (!searchResponse.ok) {
+          const errorText = await searchResponse.text();
+          console.error(`[search_job_titles] Error ${searchResponse.status}:`, errorText);
+          
+          // Try fallback to standardizedTitles endpoint
+          console.log('[search_job_titles] Trying standardizedTitles fallback...');
+          const fallbackParams = new URLSearchParams({
+            q: 'criteria',
+            name: query.trim(),
+          });
+          
+          const fallbackUrl = `https://api.linkedin.com/v2/standardizedTitles?${fallbackParams.toString()}`;
+          const fallbackResponse = await fetch(fallbackUrl, {
+            headers: { 
+              'Authorization': `Bearer ${accessToken}`,
+              'X-Restli-Protocol-Version': '2.0.0',
+            },
+          });
+          
+          if (!fallbackResponse.ok) {
+            const fallbackError = await fallbackResponse.text();
+            console.error(`[search_job_titles] Fallback also failed ${fallbackResponse.status}:`, fallbackError);
+            return new Response(JSON.stringify({ 
+              error: 'Job title search not available',
+              details: errorText,
+              titles: []
+            }), {
+              status: searchResponse.status,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+            });
+          }
+          
+          const fallbackData = await fallbackResponse.json();
+          console.log(`[search_job_titles] Fallback returned ${fallbackData.elements?.length || 0} results`);
+          
+          const titles = (fallbackData.elements || []).map((el: any) => ({
+            id: el.id,
+            urn: `urn:li:title:${el.id}`,
+            name: el.name?.localized?.en_US || el.name?.localized?.[Object.keys(el.name?.localized || {})[0]] || `Title ${el.id}`,
+            targetable: true, // Assume targetable if returned by API
+          }));
+          
+          return new Response(JSON.stringify({ 
+            titles,
+            source: 'standardizedTitles',
+            count: titles.length
+          }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+        
+        const searchData = await searchResponse.json();
+        console.log(`[search_job_titles] Typeahead returned ${searchData.elements?.length || 0} results`);
+        
+        // Parse the adTargetingEntities response
+        const titles = (searchData.elements || []).map((el: any) => {
+          // URN format: urn:li:title:123 or urn:li:adTargetingEntity:...
+          const urn = el.urn || el.entity || '';
+          const name = el.name?.localized?.en_US || 
+                       el.name?.localized?.[Object.keys(el.name?.localized || {})[0]] ||
+                       el.displayName ||
+                       el.name ||
+                       'Unknown Title';
+          
+          // Extract numeric ID from URN if present
+          let id = '';
+          const titleMatch = urn.match(/urn:li:title:(\d+)/);
+          if (titleMatch) {
+            id = titleMatch[1];
+          }
+          
+          return {
+            id,
+            urn,
+            name: typeof name === 'string' ? name : JSON.stringify(name),
+            targetable: true, // All returned results are targetable
+            facetUrn: el.facetUrn || 'urn:li:adTargetingFacet:titles',
+          };
+        });
+        
+        return new Response(JSON.stringify({ 
+          titles,
+          source: 'adTargetingEntities',
+          count: titles.length
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
       default:
         return new Response(JSON.stringify({ error: 'Unknown action' }), {
           status: 400,
