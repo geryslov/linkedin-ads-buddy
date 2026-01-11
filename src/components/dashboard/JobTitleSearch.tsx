@@ -56,8 +56,10 @@ export function JobTitleSearch({ accessToken, selectedAccount }: JobTitleSearchP
         body: {
           action: 'search_job_titles',
           accessToken,
-          query: query.trim(),
-          accountId: selectedAccount,
+          params: {
+            query: query.trim(),
+            accountId: selectedAccount,
+          },
         },
       });
 
