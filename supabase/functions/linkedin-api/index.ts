@@ -4517,47 +4517,38 @@ serve(async (req) => {
               }
             }
             
-            // Now resolve super title names if we have any
+            // Build super title names from typeahead results first
+            // Super titles in typeahead results already have their correct names
+            const superTitleNamesFromTypeahead: Record<string, string> = {};
+            (parsedTitles as ParsedTitle[]).forEach((title: ParsedTitle) => {
+              if (title.isSuperTitle && title.urn) {
+                superTitleNamesFromTypeahead[title.urn] = title.name;
+                console.log(`[search_job_titles] Cached super title from typeahead: ${title.urn} = "${title.name}"`);
+              }
+            });
+
+            // Now resolve super title names for standard titles
             const uniqueSuperTitleUrns = [...new Set(Object.values(superTitleMetadata).map(s => s.urn))];
             if (uniqueSuperTitleUrns.length > 0) {
-              // Extract IDs and fetch super title names
-              const superTitleIdsToFetch = uniqueSuperTitleUrns
-                .map(urn => {
-                  const match = urn.match(/:(\d+)$/);
-                  return match ? match[1] : null;
-                })
-                .filter(Boolean);
+              console.log(`[search_job_titles] Need to resolve ${uniqueSuperTitleUrns.length} super title names`);
               
-              if (superTitleIdsToFetch.length > 0) {
-                const superTitleIdsParam = `ids=List(${superTitleIdsToFetch.join(',')})`;
-                const superTitlesUrl = `https://api.linkedin.com/v2/standardizedTitles?${superTitleIdsParam}`;
-                
-                const superTitlesResponse = await fetch(superTitlesUrl, {
-                  headers: { 
-                    'Authorization': `Bearer ${accessToken}`,
-                    'X-Restli-Protocol-Version': '2.0.0',
-                  },
-                });
-                
-                if (superTitlesResponse.ok) {
-                  const superTitlesData = await superTitlesResponse.json();
-                  const superResults = superTitlesData.results || {};
-                  
-                  // Create a lookup from URN to name
-                  const superTitleNames: Record<string, string> = {};
-                  for (const [stId, stData] of Object.entries(superResults)) {
-                    const data = stData as any;
-                    const name = data.name?.localized?.en_US || 
-                                 data.name?.localized?.[Object.keys(data.name?.localized || {})[0]] ||
-                                 `Super Title ${stId}`;
-                    superTitleNames[`urn:li:superTitle:${stId}`] = name;
-                  }
-                  
-                  // Update our metadata with names
-                  for (const titleId of Object.keys(superTitleMetadata)) {
-                    const urn = superTitleMetadata[titleId].urn;
-                    superTitleMetadata[titleId].name = superTitleNames[urn] || superTitleNames[urn.replace('superTitle', 'title')] || 'Unknown Category';
-                  }
+              // First, try to match from typeahead cache
+              for (const titleId of Object.keys(superTitleMetadata)) {
+                const urn = superTitleMetadata[titleId].urn;
+                if (superTitleNamesFromTypeahead[urn]) {
+                  superTitleMetadata[titleId].name = superTitleNamesFromTypeahead[urn];
+                  console.log(`[search_job_titles] Resolved from typeahead: ${urn} = "${superTitleNamesFromTypeahead[urn]}"`);
+                }
+              }
+              
+              // For any unresolved super titles, we cannot use standardizedTitles API
+              // because it returns regular titles, not super titles (different ID space)
+              // Leave name empty - we won't show incorrect data
+              for (const titleId of Object.keys(superTitleMetadata)) {
+                if (!superTitleMetadata[titleId].name) {
+                  const urn = superTitleMetadata[titleId].urn;
+                  superTitleMetadata[titleId].name = '';
+                  console.log(`[search_job_titles] Could not resolve super title: ${urn} (no API endpoint available)`);
                 }
               }
             }
