@@ -3,7 +3,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { RefreshCw, FileBarChart, Users, Target, PieChart, Globe, List, Download, Grid3X3, Settings, CheckCircle2, XCircle, Loader2, ClipboardList } from 'lucide-react';
+import { RefreshCw, FileBarChart, Users, Target, PieChart, Globe, List, Download, Grid3X3, Settings, CheckCircle2, XCircle, Loader2, ClipboardList, Search } from 'lucide-react';
 import { useDemographicReporting, TimeFrameOption as DemoTimeFrameOption, TimeGranularity, DemographicPivot, DEMOGRAPHIC_PIVOT_OPTIONS } from '@/hooks/useDemographicReporting';
 import { useCompanyDemographic, TimeFrameOption as CompanyDemoTimeFrameOption } from '@/hooks/useCompanyDemographic';
 import { useCreativeNamesReport, TimeFrameOption as CreativeNamesTimeFrameOption } from '@/hooks/useCreativeNamesReport';
@@ -18,6 +18,7 @@ import { JobSeniorityMatrix } from './JobSeniorityMatrix';
 import { JobFunctionTitlesDrawer } from './JobFunctionTitlesDrawer';
 import { LeadGenFormsTable } from './LeadGenFormsTable';
 import { CampaignMultiSelect } from './CampaignMultiSelect';
+import { JobTitleSearch } from './JobTitleSearch';
 import { TimeFrameSelector } from './TimeFrameSelector';
 import { MetricCard } from './MetricCard';
 import { useToast } from '@/hooks/use-toast';
@@ -378,6 +379,10 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
           <TabsTrigger value="lead_gen_forms" className="gap-2">
             <ClipboardList className="h-4 w-4" />
             Lead Gen Forms
+          </TabsTrigger>
+          <TabsTrigger value="title_search" className="gap-2">
+            <Search className="h-4 w-4" />
+            Title Search
           </TabsTrigger>
           <TabsTrigger value="audiences" className="gap-2" disabled>
             <Users className="h-4 w-4" />
@@ -871,6 +876,11 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
               <LeadGenFormsTable data={leadGenForms.formsData} isLoading={leadGenForms.isLoading} />
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* Job Title Search Tab */}
+        <TabsContent value="title_search" className="space-y-6 mt-6">
+          <JobTitleSearch accessToken={accessToken} selectedAccount={selectedAccount} />
         </TabsContent>
 
         {/* Settings Tab */}
