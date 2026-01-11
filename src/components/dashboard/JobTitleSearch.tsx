@@ -3,7 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, Search, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Loader2, Search, CheckCircle2, AlertCircle, Crown, Tag } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 
@@ -13,6 +13,11 @@ interface JobTitle {
   name: string;
   targetable: boolean;
   facetUrn?: string;
+  isSuperTitle?: boolean;
+  parentSuperTitle?: {
+    urn: string;
+    name: string;
+  } | null;
 }
 
 interface JobTitleSearchProps {
@@ -161,12 +166,23 @@ export function JobTitleSearch({ accessToken, selectedAccount }: JobTitleSearchP
               {results.map((title, index) => (
                 <div 
                   key={title.urn || index} 
-                  className="p-3 hover:bg-muted/50 transition-colors"
+                  className={`p-3 hover:bg-muted/50 transition-colors ${title.isSuperTitle ? 'bg-primary/5' : ''}`}
                 >
                   <div className="flex items-center justify-between gap-4">
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-medium truncate">{title.name}</span>
+                        {title.isSuperTitle ? (
+                          <Badge variant="secondary" className="flex items-center gap-1 bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
+                            <Crown className="h-3 w-3" />
+                            Super Title
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="flex items-center gap-1 text-muted-foreground">
+                            <Tag className="h-3 w-3" />
+                            Standard
+                          </Badge>
+                        )}
                         {title.targetable && (
                           <Badge variant="default" className="flex items-center gap-1 bg-green-600 hover:bg-green-700">
                             <CheckCircle2 className="h-3 w-3" />
@@ -177,6 +193,12 @@ export function JobTitleSearch({ accessToken, selectedAccount }: JobTitleSearchP
                       <div className="text-xs text-muted-foreground mt-1 font-mono truncate">
                         {title.urn || `ID: ${title.id}`}
                       </div>
+                      {title.parentSuperTitle && title.parentSuperTitle.name && (
+                        <div className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
+                          <Crown className="h-3 w-3 text-purple-500" />
+                          <span>Parent: <span className="font-medium text-foreground">{title.parentSuperTitle.name}</span></span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>

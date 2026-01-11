@@ -4421,8 +4421,8 @@ serve(async (req) => {
         const searchData = await searchResponse.json();
         console.log(`[search_job_titles] Typeahead returned ${searchData.elements?.length || 0} results`);
         
-        // Parse the adTargetingEntities response
-        const titles = (searchData.elements || []).map((el: any) => {
+        // Parse the adTargetingEntities response - initial pass
+        const parsedTitles = (searchData.elements || []).map((el: any) => {
           // URN format: urn:li:title:123 or urn:li:adTargetingEntity:...
           const urn = el.urn || el.entity || '';
           const name = el.name?.localized?.en_US || 
@@ -4434,9 +4434,16 @@ serve(async (req) => {
           // Extract numeric ID from URN if present
           let id = '';
           const titleMatch = urn.match(/urn:li:title:(\d+)/);
+          const superTitleMatch = urn.match(/urn:li:superTitle:(\d+)/);
+          
           if (titleMatch) {
             id = titleMatch[1];
+          } else if (superTitleMatch) {
+            id = superTitleMatch[1];
           }
+          
+          // Check if this is a super title based on URN format
+          const isSuperTitle = urn.includes(':superTitle:');
           
           return {
             id,
@@ -4444,8 +4451,127 @@ serve(async (req) => {
             name: typeof name === 'string' ? name : JSON.stringify(name),
             targetable: true, // All returned results are targetable
             facetUrn: el.facetUrn || 'urn:li:adTargetingFacet:titles',
+            isSuperTitle,
+            parentSuperTitle: null as { urn: string; name: string } | null,
           };
         });
+        
+        // Define type for parsed titles
+        type ParsedTitle = {
+          id: string;
+          urn: string;
+          name: string;
+          targetable: boolean;
+          facetUrn: string;
+          isSuperTitle: boolean;
+          parentSuperTitle: { urn: string; name: string } | null;
+        };
+        
+        // For standard titles, try to fetch super title metadata
+        const standardTitleIds = (parsedTitles as ParsedTitle[])
+          .filter((t: ParsedTitle) => !t.isSuperTitle && t.id)
+          .map((t: ParsedTitle) => t.id);
+        
+        let superTitleMetadata: Record<string, { urn: string; name: string }> = {};
+        
+        if (standardTitleIds.length > 0) {
+          try {
+            // Batch fetch metadata from standardizedTitles API
+            const batchSize = 50;
+            for (let i = 0; i < standardTitleIds.length; i += batchSize) {
+              const batchIds = standardTitleIds.slice(i, i + batchSize);
+              const idsParam = `ids=List(${batchIds.join(',')})`;
+              const metadataUrl = `https://api.linkedin.com/v2/standardizedTitles?${idsParam}`;
+              
+              console.log(`[search_job_titles] Fetching metadata for ${batchIds.length} titles`);
+              
+              const metadataResponse = await fetch(metadataUrl, {
+                headers: { 
+                  'Authorization': `Bearer ${accessToken}`,
+                  'X-Restli-Protocol-Version': '2.0.0',
+                },
+              });
+              
+              if (metadataResponse.ok) {
+                const metadataData = await metadataResponse.json();
+                const results = metadataData.results || {};
+                
+                for (const [titleId, titleData] of Object.entries(results)) {
+                  const data = titleData as any;
+                  if (data.superTitle) {
+                    // superTitle is a URN like "urn:li:superTitle:407"
+                    const superTitleUrn = data.superTitle;
+                    const superTitleIdMatch = superTitleUrn.match(/:(\d+)$/);
+                    
+                    if (superTitleIdMatch) {
+                      // Store the mapping - we'll resolve names in a second pass
+                      superTitleMetadata[titleId] = {
+                        urn: superTitleUrn,
+                        name: '', // Will be resolved below
+                      };
+                    }
+                  }
+                }
+              } else {
+                console.log(`[search_job_titles] Metadata fetch returned ${metadataResponse.status} - skipping super title detection`);
+              }
+            }
+            
+            // Now resolve super title names if we have any
+            const uniqueSuperTitleUrns = [...new Set(Object.values(superTitleMetadata).map(s => s.urn))];
+            if (uniqueSuperTitleUrns.length > 0) {
+              // Extract IDs and fetch super title names
+              const superTitleIdsToFetch = uniqueSuperTitleUrns
+                .map(urn => {
+                  const match = urn.match(/:(\d+)$/);
+                  return match ? match[1] : null;
+                })
+                .filter(Boolean);
+              
+              if (superTitleIdsToFetch.length > 0) {
+                const superTitleIdsParam = `ids=List(${superTitleIdsToFetch.join(',')})`;
+                const superTitlesUrl = `https://api.linkedin.com/v2/standardizedTitles?${superTitleIdsParam}`;
+                
+                const superTitlesResponse = await fetch(superTitlesUrl, {
+                  headers: { 
+                    'Authorization': `Bearer ${accessToken}`,
+                    'X-Restli-Protocol-Version': '2.0.0',
+                  },
+                });
+                
+                if (superTitlesResponse.ok) {
+                  const superTitlesData = await superTitlesResponse.json();
+                  const superResults = superTitlesData.results || {};
+                  
+                  // Create a lookup from URN to name
+                  const superTitleNames: Record<string, string> = {};
+                  for (const [stId, stData] of Object.entries(superResults)) {
+                    const data = stData as any;
+                    const name = data.name?.localized?.en_US || 
+                                 data.name?.localized?.[Object.keys(data.name?.localized || {})[0]] ||
+                                 `Super Title ${stId}`;
+                    superTitleNames[`urn:li:superTitle:${stId}`] = name;
+                  }
+                  
+                  // Update our metadata with names
+                  for (const titleId of Object.keys(superTitleMetadata)) {
+                    const urn = superTitleMetadata[titleId].urn;
+                    superTitleMetadata[titleId].name = superTitleNames[urn] || superTitleNames[urn.replace('superTitle', 'title')] || 'Unknown Category';
+                  }
+                }
+              }
+            }
+          } catch (metadataError) {
+            console.log('[search_job_titles] Error fetching super title metadata:', metadataError);
+            // Continue without super title info
+          }
+        }
+        
+        // Enhance titles with parent super title info
+        const titles = (parsedTitles as ParsedTitle[]).map((title: ParsedTitle) => ({
+          ...title,
+          parentSuperTitle: superTitleMetadata[title.id] || null,
+        }));
         
         return new Response(JSON.stringify({ 
           titles,
