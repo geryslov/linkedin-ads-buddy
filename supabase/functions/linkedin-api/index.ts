@@ -4500,37 +4500,45 @@ serve(async (req) => {
                 const metadataData = await metadataResponse.json();
                 const results = metadataData.results || {};
                 
-                // Debug: log sample keys from API response
-                const sampleKeys = Object.keys(results).slice(0, 3);
-                console.log(`[search_job_titles] API result keys sample: ${JSON.stringify(sampleKeys)}`);
+                // Debug: log ALL keys from API response
+                const allKeys = Object.keys(results);
+                console.log(`[search_job_titles] Requested IDs: ${JSON.stringify(batchIds)}`);
+                console.log(`[search_job_titles] API returned ${allKeys.length} results with keys: ${JSON.stringify(allKeys)}`);
                 
                 for (const [titleId, titleData] of Object.entries(results)) {
                   const data = titleData as any;
+                  const normalizedTitleId = titleId.replace(/^urn:li:title:/, '');
+                  const wasRequested = batchIds.includes(normalizedTitleId) || batchIds.includes(titleId);
+                  
+                  console.log(`[search_job_titles] Result key="${titleId}", normalized="${normalizedTitleId}", wasRequested=${wasRequested}, hasSuperTitle=${!!data.superTitle}`);
+                  
                   if (data.superTitle) {
                     // superTitle is a URN like "urn:li:superTitle:407"
                     const superTitleUrn = data.superTitle;
                     const superTitleIdMatch = superTitleUrn.match(/:(\d+)$/);
                     
                     if (superTitleIdMatch) {
-                      // Normalize key - extract numeric ID from URN if present
-                      // API might return "urn:li:title:12345" as key, but we need "12345"
-                      const normalizedTitleId = titleId.replace(/^urn:li:title:/, '');
-                      
-                      // Store the mapping - we'll resolve names in a second pass
-                      superTitleMetadata[normalizedTitleId] = {
-                        urn: superTitleUrn,
-                        name: '', // Will be resolved below
-                      };
-                      console.log(`[search_job_titles] Stored mapping: "${normalizedTitleId}" -> ${superTitleUrn}`);
+                      // ONLY store if this was actually a requested ID
+                      if (wasRequested) {
+                        superTitleMetadata[normalizedTitleId] = {
+                          urn: superTitleUrn,
+                          name: '', // Will be resolved below
+                        };
+                        console.log(`[search_job_titles] ✓ Stored: title "${normalizedTitleId}" -> parent ${superTitleUrn}`);
+                      } else {
+                        console.log(`[search_job_titles] ✗ Skipped unrequested result: "${normalizedTitleId}"`);
+                      }
                     }
+                  } else {
+                    console.log(`[search_job_titles] Title "${normalizedTitleId}" has no superTitle field`);
                   }
                 }
                 
                 // Debug: show what we stored vs what title.id values look like
-                const storedKeys = Object.keys(superTitleMetadata).slice(0, 3);
-                const titleIds = (parsedTitles as ParsedTitle[]).slice(0, 3).map((t: ParsedTitle) => t.id);
-                console.log(`[search_job_titles] Stored metadata keys: ${JSON.stringify(storedKeys)}`);
-                console.log(`[search_job_titles] Title IDs for lookup: ${JSON.stringify(titleIds)}`);
+                const storedKeys = Object.keys(superTitleMetadata);
+                const titleIds = (parsedTitles as ParsedTitle[]).slice(0, 5).map((t: ParsedTitle) => t.id);
+                console.log(`[search_job_titles] Final stored metadata keys: ${JSON.stringify(storedKeys)}`);
+                console.log(`[search_job_titles] Title IDs that need lookup: ${JSON.stringify(titleIds)}`);
               } else {
                 console.log(`[search_job_titles] Metadata fetch returned ${metadataResponse.status} - skipping super title detection`);
               }
