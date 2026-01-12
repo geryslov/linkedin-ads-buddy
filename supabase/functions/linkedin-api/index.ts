@@ -4500,6 +4500,10 @@ serve(async (req) => {
                 const metadataData = await metadataResponse.json();
                 const results = metadataData.results || {};
                 
+                // Debug: log sample keys from API response
+                const sampleKeys = Object.keys(results).slice(0, 3);
+                console.log(`[search_job_titles] API result keys sample: ${JSON.stringify(sampleKeys)}`);
+                
                 for (const [titleId, titleData] of Object.entries(results)) {
                   const data = titleData as any;
                   if (data.superTitle) {
@@ -4508,14 +4512,25 @@ serve(async (req) => {
                     const superTitleIdMatch = superTitleUrn.match(/:(\d+)$/);
                     
                     if (superTitleIdMatch) {
+                      // Normalize key - extract numeric ID from URN if present
+                      // API might return "urn:li:title:12345" as key, but we need "12345"
+                      const normalizedTitleId = titleId.replace(/^urn:li:title:/, '');
+                      
                       // Store the mapping - we'll resolve names in a second pass
-                      superTitleMetadata[titleId] = {
+                      superTitleMetadata[normalizedTitleId] = {
                         urn: superTitleUrn,
                         name: '', // Will be resolved below
                       };
+                      console.log(`[search_job_titles] Stored mapping: "${normalizedTitleId}" -> ${superTitleUrn}`);
                     }
                   }
                 }
+                
+                // Debug: show what we stored vs what title.id values look like
+                const storedKeys = Object.keys(superTitleMetadata).slice(0, 3);
+                const titleIds = (parsedTitles as ParsedTitle[]).slice(0, 3).map((t: ParsedTitle) => t.id);
+                console.log(`[search_job_titles] Stored metadata keys: ${JSON.stringify(storedKeys)}`);
+                console.log(`[search_job_titles] Title IDs for lookup: ${JSON.stringify(titleIds)}`);
               } else {
                 console.log(`[search_job_titles] Metadata fetch returned ${metadataResponse.status} - skipping super title detection`);
               }
