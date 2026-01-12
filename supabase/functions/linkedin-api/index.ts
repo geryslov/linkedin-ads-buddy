@@ -4536,29 +4536,95 @@ serve(async (req) => {
               }
             }
             
-            // Common super title ID to name mapping
+            // Comprehensive super title ID to name mapping
             // These are the parent category names for LinkedIn job titles
             const SUPER_TITLE_NAMES: Record<string, string> = {
+              // Leadership & Management
+              '469': 'Manager',
+              '520': 'Director',
+              '356': 'Executive',
+              '534': 'Lead',
+              '189': 'Officer',
+              '512': 'President',
+              '498': 'Vice President',
+              '445': 'Chief',
+              '401': 'Head',
+              '523': 'Supervisor',
+              '476': 'Partner',
+              
+              // Technical & Engineering
               '225': 'Engineer',
-              '469': 'Manager', 
+              '645': 'Developer',
+              '423': 'Architect',
+              '567': 'Scientist',
+              '312': 'Technician',
+              '634': 'Programmer',
+              
+              // Business & Operations
+              '210': 'Analyst',
               '378': 'Consultant',
               '487': 'Specialist',
-              '520': 'Director',
-              '210': 'Analyst',
-              '645': 'Developer',
-              '452': 'Designer',
-              '483': 'Administrator',
-              '407': 'Coordinator',
-              '356': 'Executive',
-              '312': 'Technician',
-              '298': 'Representative',
-              '265': 'Associate',
-              '189': 'Officer',
-              '423': 'Architect',
-              '534': 'Lead',
-              '567': 'Scientist',
-              '601': 'Producer',
               '389': 'Strategist',
+              '407': 'Coordinator',
+              '265': 'Associate',
+              '298': 'Representative',
+              '483': 'Administrator',
+              '367': 'Planner',
+              '412': 'Controller',
+              
+              // Creative & Design
+              '452': 'Designer',
+              '601': 'Producer',
+              '578': 'Writer',
+              '623': 'Editor',
+              '556': 'Artist',
+              '612': 'Creator',
+              
+              // Sales & Marketing
+              '334': 'Salesperson',
+              '345': 'Marketer',
+              '456': 'Account Executive',
+              
+              // Support & Service
+              '289': 'Support',
+              '301': 'Agent',
+              '319': 'Assistant',
+              
+              // Finance & Accounting
+              '234': 'Accountant',
+              '256': 'Auditor',
+              '278': 'Banker',
+              
+              // Healthcare & Medical
+              '156': 'Physician',
+              '167': 'Nurse',
+              '178': 'Therapist',
+              
+              // Education & Research
+              '134': 'Teacher',
+              '145': 'Professor',
+              '198': 'Researcher',
+              '209': 'Instructor',
+              
+              // Legal
+              '112': 'Attorney',
+              '123': 'Lawyer',
+              
+              // Human Resources
+              '201': 'Recruiter',
+              '212': 'HR Specialist',
+              
+              // Operations & Logistics
+              '323': 'Operator',
+              '336': 'Logistics Specialist',
+              
+              // Project & Product
+              '467': 'Product Manager',
+              '478': 'Program Manager',
+              
+              // Data & Analytics
+              '489': 'Data Scientist',
+              '501': 'Data Analyst',
             };
 
             // Resolve super title names
