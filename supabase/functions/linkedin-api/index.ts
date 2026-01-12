@@ -4513,11 +4513,43 @@ serve(async (req) => {
                   console.log(`[search_job_titles] Result key="${titleId}", normalized="${normalizedTitleId}", wasRequested=${wasRequested}, hasSuperTitle=${!!data.superTitle}`);
                   
                   if (data.superTitle) {
-                    // superTitle is a URN like "urn:li:superTitle:407"
-                    const superTitleUrn = data.superTitle;
-                    const superTitleIdMatch = superTitleUrn.match(/:(\d+)$/);
+                    // Debug: log the actual superTitle value to understand its format
+                    console.log(`[search_job_titles] Title "${normalizedTitleId}" superTitle value:`, JSON.stringify(data.superTitle));
                     
-                    if (superTitleIdMatch) {
+                    // Handle multiple superTitle formats
+                    let superTitleUrn: string | null = null;
+                    let superTitleId: string | null = null;
+                    
+                    if (typeof data.superTitle === 'string') {
+                      // Format: "urn:li:superTitle:407" or just "407"
+                      superTitleUrn = data.superTitle;
+                      const idMatch = data.superTitle.match(/:(\d+)$/);
+                      if (idMatch) {
+                        superTitleId = idMatch[1];
+                      } else if (/^\d+$/.test(data.superTitle)) {
+                        superTitleId = data.superTitle;
+                        superTitleUrn = `urn:li:superTitle:${data.superTitle}`;
+                      }
+                    } else if (typeof data.superTitle === 'object' && data.superTitle !== null) {
+                      // Format: { id: "407", ... } or { urn: "urn:li:superTitle:407", ... }
+                      console.log(`[search_job_titles] superTitle is object with keys: ${Object.keys(data.superTitle).join(', ')}`);
+                      if (data.superTitle.urn) {
+                        superTitleUrn = data.superTitle.urn;
+                        const idMatch = data.superTitle.urn.match(/:(\d+)$/);
+                        if (idMatch) superTitleId = idMatch[1];
+                      } else if (data.superTitle.id) {
+                        superTitleId = String(data.superTitle.id);
+                        superTitleUrn = `urn:li:superTitle:${superTitleId}`;
+                      }
+                    } else if (typeof data.superTitle === 'number') {
+                      // Format: 407 (numeric)
+                      superTitleId = String(data.superTitle);
+                      superTitleUrn = `urn:li:superTitle:${superTitleId}`;
+                    }
+                    
+                    console.log(`[search_job_titles] Parsed: superTitleUrn="${superTitleUrn}", superTitleId="${superTitleId}"`);
+                    
+                    if (superTitleUrn && superTitleId) {
                       // ONLY store if this was actually a requested ID
                       if (wasRequested) {
                         superTitleMetadata[normalizedTitleId] = {
@@ -4528,6 +4560,8 @@ serve(async (req) => {
                       } else {
                         console.log(`[search_job_titles] ✗ Skipped unrequested result: "${normalizedTitleId}"`);
                       }
+                    } else {
+                      console.log(`[search_job_titles] ✗ Could not parse superTitle for "${normalizedTitleId}"`);
                     }
                   } else {
                     console.log(`[search_job_titles] Title "${normalizedTitleId}" has no superTitle field`);
