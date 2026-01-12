@@ -4425,8 +4425,26 @@ serve(async (req) => {
         const sampleUrns = (searchData.elements || []).slice(0, 5).map((el: any) => el.urn || el.entity || 'no-urn');
         console.log(`[search_job_titles] Sample URNs: ${JSON.stringify(sampleUrns)}`);
         
-        // Parse the adTargetingEntities response - initial pass
-        const parsedTitles = (searchData.elements || []).map((el: any) => {
+        // DIAGNOSTIC: Log first typeahead element to see what fields are available
+        if (searchData.elements?.length > 0) {
+          console.log('[search_job_titles] TYPEAHEAD_SAMPLE:', JSON.stringify(searchData.elements[0], null, 2));
+        }
+        
+        // Define type for parsed titles - includes superTitleId for proper parent resolution
+        type ParsedTitle = {
+          id: string;
+          urn: string;
+          name: string;
+          targetable: boolean;
+          facetUrn: string;
+          isSuperTitle: boolean;
+          superTitleId: string | null;
+          superTitleUrn: string | null;
+          parentSuperTitle: { urn: string; name: string } | null;
+        };
+        
+        // Parse the adTargetingEntities response - extract parent references from typeahead
+        const parsedTitles: ParsedTitle[] = (searchData.elements || []).map((el: any) => {
           // URN format: urn:li:title:123 or urn:li:adTargetingEntity:...
           const urn = el.urn || el.entity || '';
           const name = el.name?.localized?.en_US || 
@@ -4438,16 +4456,46 @@ serve(async (req) => {
           // Extract numeric ID from URN if present
           let id = '';
           const titleMatch = urn.match(/urn:li:title:(\d+)/);
-          const superTitleMatch = urn.match(/urn:li:superTitle:(\d+)/);
+          const superTitleMatchUrn = urn.match(/urn:li:superTitle:(\d+)/);
           
           if (titleMatch) {
             id = titleMatch[1];
-          } else if (superTitleMatch) {
-            id = superTitleMatch[1];
+          } else if (superTitleMatchUrn) {
+            id = superTitleMatchUrn[1];
           }
           
           // Check if this is a super title based on URN format
           const isSuperTitle = urn.includes(':superTitle:');
+          
+          // IMPORTANT: Extract parent super title reference from typeahead payload
+          // LinkedIn may return this in various fields
+          const superTitleRef = el.superTitleUrn || el.superTitle || el.parentSuperTitle || el.parent || null;
+          let superTitleUrn: string | null = null;
+          let superTitleId: string | null = null;
+          
+          if (superTitleRef) {
+            if (typeof superTitleRef === 'string') {
+              superTitleUrn = superTitleRef;
+              const idMatch = superTitleRef.match(/:(\d+)$/);
+              if (idMatch) {
+                superTitleId = idMatch[1];
+              } else if (/^\d+$/.test(superTitleRef)) {
+                superTitleId = superTitleRef;
+                superTitleUrn = `urn:li:superTitle:${superTitleRef}`;
+              }
+            } else if (typeof superTitleRef === 'object' && superTitleRef !== null) {
+              superTitleUrn = superTitleRef.urn || superTitleRef.entityUrn || null;
+              superTitleId = superTitleRef.id ? String(superTitleRef.id) : 
+                             (superTitleUrn?.match(/:(\d+)$/)?.[1] || null);
+            } else if (typeof superTitleRef === 'number') {
+              superTitleId = String(superTitleRef);
+              superTitleUrn = `urn:li:superTitle:${superTitleId}`;
+            }
+            
+            if (superTitleId) {
+              console.log(`[search_job_titles] Typeahead element "${name}" has parent from payload: superTitleId=${superTitleId}`);
+            }
+          }
           
           return {
             id,
@@ -4456,27 +4504,110 @@ serve(async (req) => {
             targetable: true, // All returned results are targetable
             facetUrn: el.facetUrn || 'urn:li:adTargetingFacet:titles',
             isSuperTitle,
-            parentSuperTitle: null as { urn: string; name: string } | null,
+            superTitleId,
+            superTitleUrn,
+            parentSuperTitle: null,
           };
         });
-        
-        // Define type for parsed titles
-        type ParsedTitle = {
-          id: string;
-          urn: string;
-          name: string;
-          targetable: boolean;
-          facetUrn: string;
-          isSuperTitle: boolean;
-          parentSuperTitle: { urn: string; name: string } | null;
-        };
         
         // For standard titles, try to fetch super title metadata
         const standardTitleIds = (parsedTitles as ParsedTitle[])
           .filter((t: ParsedTitle) => !t.isSuperTitle && t.id)
           .map((t: ParsedTitle) => t.id);
         
-        let superTitleMetadata: Record<string, { urn: string; name: string }> = {};
+        // Extended type to include _superTitleId for internal resolution
+        let superTitleMetadata: Record<string, { urn: string; name: string; _superTitleId?: string }> = {};
+        
+        // Comprehensive super title ID to name mapping
+        // These are the parent category names for LinkedIn job titles
+        const SUPER_TITLE_NAMES: Record<string, string> = {
+          // Leadership & Management
+          '469': 'Manager',
+          '520': 'Director',
+          '356': 'Executive',
+          '534': 'Lead',
+          '189': 'Officer',
+          '512': 'President',
+          '498': 'Vice President',
+          '445': 'Chief',
+          '401': 'Head',
+          '523': 'Supervisor',
+          '476': 'Partner',
+          
+          // Technical & Engineering
+          '225': 'Engineer',
+          '645': 'Developer',
+          '423': 'Architect',
+          '567': 'Scientist',
+          '312': 'Technician',
+          '634': 'Programmer',
+          
+          // Business & Operations
+          '210': 'Analyst',
+          '378': 'Consultant',
+          '487': 'Specialist',
+          '389': 'Strategist',
+          '407': 'Coordinator',
+          '265': 'Associate',
+          '298': 'Representative',
+          '483': 'Administrator',
+          '367': 'Planner',
+          '412': 'Controller',
+          
+          // Creative & Design
+          '452': 'Designer',
+          '601': 'Producer',
+          '578': 'Writer',
+          '623': 'Editor',
+          '556': 'Artist',
+          '612': 'Creator',
+          
+          // Sales & Marketing
+          '334': 'Salesperson',
+          '345': 'Marketer',
+          '456': 'Account Executive',
+          
+          // Support & Service
+          '289': 'Support',
+          '301': 'Agent',
+          '319': 'Assistant',
+          
+          // Finance & Accounting
+          '234': 'Accountant',
+          '256': 'Auditor',
+          '278': 'Banker',
+          
+          // Healthcare & Medical
+          '156': 'Physician',
+          '167': 'Nurse',
+          '178': 'Therapist',
+          
+          // Education & Research
+          '134': 'Teacher',
+          '145': 'Professor',
+          '198': 'Researcher',
+          '209': 'Instructor',
+          
+          // Legal
+          '112': 'Attorney',
+          '123': 'Lawyer',
+          
+          // Human Resources
+          '201': 'Recruiter',
+          '212': 'HR Specialist',
+          
+          // Operations & Logistics
+          '323': 'Operator',
+          '336': 'Logistics Specialist',
+          
+          // Project & Product
+          '467': 'Product Manager',
+          '478': 'Program Manager',
+          
+          // Data & Analytics
+          '489': 'Data Scientist',
+          '501': 'Data Analyst',
+        };
         
         if (standardTitleIds.length > 0) {
           try {
@@ -4552,11 +4683,14 @@ serve(async (req) => {
                     if (superTitleUrn && superTitleId) {
                       // ONLY store if this was actually a requested ID
                       if (wasRequested) {
+                        // KEY FIX: Store mapping from TITLE ID to its SUPER TITLE ID
+                        // This allows us to look up by title.id and get the correct parent
                         superTitleMetadata[normalizedTitleId] = {
                           urn: superTitleUrn,
-                          name: '', // Will be resolved below
+                          name: '', // Will be resolved below using superTitleId
+                          _superTitleId: superTitleId, // Store for name resolution
                         };
-                        console.log(`[search_job_titles] ✓ Stored: title "${normalizedTitleId}" -> parent ${superTitleUrn}`);
+                        console.log(`[search_job_titles] ✓ Stored: title "${normalizedTitleId}" -> superTitleId "${superTitleId}" (${superTitleUrn})`);
                       } else {
                         console.log(`[search_job_titles] ✗ Skipped unrequested result: "${normalizedTitleId}"`);
                       }
@@ -4578,112 +4712,20 @@ serve(async (req) => {
               }
             }
             
-            // Comprehensive super title ID to name mapping
-            // These are the parent category names for LinkedIn job titles
-            const SUPER_TITLE_NAMES: Record<string, string> = {
-              // Leadership & Management
-              '469': 'Manager',
-              '520': 'Director',
-              '356': 'Executive',
-              '534': 'Lead',
-              '189': 'Officer',
-              '512': 'President',
-              '498': 'Vice President',
-              '445': 'Chief',
-              '401': 'Head',
-              '523': 'Supervisor',
-              '476': 'Partner',
+            // Resolve super title names using the stored _superTitleId
+            const entriesWithSuperTitle = Object.entries(superTitleMetadata).filter(([_, v]) => (v as any)._superTitleId);
+            if (entriesWithSuperTitle.length > 0) {
+              console.log(`[search_job_titles] Resolving names for ${entriesWithSuperTitle.length} super titles`);
               
-              // Technical & Engineering
-              '225': 'Engineer',
-              '645': 'Developer',
-              '423': 'Architect',
-              '567': 'Scientist',
-              '312': 'Technician',
-              '634': 'Programmer',
-              
-              // Business & Operations
-              '210': 'Analyst',
-              '378': 'Consultant',
-              '487': 'Specialist',
-              '389': 'Strategist',
-              '407': 'Coordinator',
-              '265': 'Associate',
-              '298': 'Representative',
-              '483': 'Administrator',
-              '367': 'Planner',
-              '412': 'Controller',
-              
-              // Creative & Design
-              '452': 'Designer',
-              '601': 'Producer',
-              '578': 'Writer',
-              '623': 'Editor',
-              '556': 'Artist',
-              '612': 'Creator',
-              
-              // Sales & Marketing
-              '334': 'Salesperson',
-              '345': 'Marketer',
-              '456': 'Account Executive',
-              
-              // Support & Service
-              '289': 'Support',
-              '301': 'Agent',
-              '319': 'Assistant',
-              
-              // Finance & Accounting
-              '234': 'Accountant',
-              '256': 'Auditor',
-              '278': 'Banker',
-              
-              // Healthcare & Medical
-              '156': 'Physician',
-              '167': 'Nurse',
-              '178': 'Therapist',
-              
-              // Education & Research
-              '134': 'Teacher',
-              '145': 'Professor',
-              '198': 'Researcher',
-              '209': 'Instructor',
-              
-              // Legal
-              '112': 'Attorney',
-              '123': 'Lawyer',
-              
-              // Human Resources
-              '201': 'Recruiter',
-              '212': 'HR Specialist',
-              
-              // Operations & Logistics
-              '323': 'Operator',
-              '336': 'Logistics Specialist',
-              
-              // Project & Product
-              '467': 'Product Manager',
-              '478': 'Program Manager',
-              
-              // Data & Analytics
-              '489': 'Data Scientist',
-              '501': 'Data Analyst',
-            };
-
-            // Resolve super title names
-            const uniqueSuperTitleUrns = [...new Set(Object.values(superTitleMetadata).map(s => s.urn))];
-            if (uniqueSuperTitleUrns.length > 0) {
-              console.log(`[search_job_titles] Need to resolve ${uniqueSuperTitleUrns.length} super title names`);
-              
-              for (const titleId of Object.keys(superTitleMetadata)) {
-                const urn = superTitleMetadata[titleId].urn;
-                const idMatch = urn.match(/:(\d+)$/);
-                if (idMatch && SUPER_TITLE_NAMES[idMatch[1]]) {
-                  superTitleMetadata[titleId].name = SUPER_TITLE_NAMES[idMatch[1]];
-                  console.log(`[search_job_titles] Resolved super title: ${urn} = "${SUPER_TITLE_NAMES[idMatch[1]]}"`);
+              for (const [titleId, metadata] of entriesWithSuperTitle) {
+                const superTitleId = (metadata as any)._superTitleId;
+                if (superTitleId && SUPER_TITLE_NAMES[superTitleId]) {
+                  superTitleMetadata[titleId].name = SUPER_TITLE_NAMES[superTitleId];
+                  console.log(`[search_job_titles] ✓ Resolved: title "${titleId}" -> superTitleId "${superTitleId}" = "${SUPER_TITLE_NAMES[superTitleId]}"`);
                 } else {
                   // For unknown super titles, leave empty - UI will not display
                   superTitleMetadata[titleId].name = '';
-                  console.log(`[search_job_titles] Unknown super title ID: ${urn}`);
+                  console.log(`[search_job_titles] ✗ Unknown super title ID: "${superTitleId}" for title "${titleId}"`);
                 }
               }
             }
@@ -4694,10 +4736,34 @@ serve(async (req) => {
         }
         
         // Enhance titles with parent super title info
-        const titles = (parsedTitles as ParsedTitle[]).map((title: ParsedTitle) => ({
-          ...title,
-          parentSuperTitle: superTitleMetadata[title.id] || null,
-        }));
+        // Priority: 1) API metadata lookup, 2) Typeahead payload, 3) null
+        const titles = parsedTitles.map((title: ParsedTitle) => {
+          // First try: lookup from standardizedTitles API response
+          let parentSuperTitle = superTitleMetadata[title.id] || null;
+          
+          // Second try: if no API result but typeahead had parent info, use hardcoded names
+          if (!parentSuperTitle && title.superTitleId) {
+            const name = SUPER_TITLE_NAMES[title.superTitleId] || '';
+            if (name) {
+              parentSuperTitle = {
+                urn: title.superTitleUrn || `urn:li:superTitle:${title.superTitleId}`,
+                name,
+              };
+              console.log(`[search_job_titles] Fallback: title "${title.name}" -> parent "${name}" from typeahead superTitleId`);
+            }
+          }
+          
+          // Clean up internal field before returning
+          if (parentSuperTitle && (parentSuperTitle as any)._superTitleId) {
+            const { _superTitleId, ...clean } = parentSuperTitle as any;
+            parentSuperTitle = clean;
+          }
+          
+          return {
+            ...title,
+            parentSuperTitle,
+          };
+        });
         
         return new Response(JSON.stringify({ 
           titles,
