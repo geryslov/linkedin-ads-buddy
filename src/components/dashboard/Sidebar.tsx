@@ -10,6 +10,7 @@ import {
   LogOut,
   Linkedin,
   Shield,
+  Wallet,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -22,6 +23,7 @@ interface SidebarProps {
 
 const navItems = [
   { id: "overview", label: "Overview", icon: LayoutDashboard },
+  { id: "accounts", label: "Accounts", icon: Wallet },
   { id: "campaigns", label: "Campaigns", icon: Megaphone },
   { id: "audiences", label: "Audiences", icon: Users },
   { id: "analytics", label: "Analytics", icon: BarChart3 },
