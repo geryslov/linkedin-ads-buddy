@@ -113,19 +113,28 @@ export default function Auth() {
               </Button>
             </form>
           ) : (
-            <Button
-              type="button"
-              className="w-full"
-              onClick={initiateAuth}
-              disabled={isLoading}
-            >
-              {isLoading ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <Linkedin className="mr-2 h-4 w-4" />
-              )}
-              Continue with LinkedIn
-            </Button>
+            <>
+              <Button
+                type="button"
+                className="w-full"
+                onClick={initiateAuth}
+                disabled={isLoading}
+              >
+                {isLoading ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Linkedin className="mr-2 h-4 w-4" />
+                )}
+                Continue with LinkedIn
+              </Button>
+              <button
+                type="button"
+                onClick={() => navigate('/auth?mode=email')}
+                className="mt-3 text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Test environment login
+              </button>
+            </>
           )}
         </CardContent>
       </Card>
