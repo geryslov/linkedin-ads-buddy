@@ -68,15 +68,11 @@ export function useAccountBudgets(): UseAccountBudgetsReturn {
     setError(null);
     
     try {
-      // First try getSession, if null try refreshSession
-      let { data: { session } } = await supabase.auth.getSession();
+      // Use getUser() for reliable server-side validation
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
       
-      if (!session) {
-        const { data: refreshData } = await supabase.auth.refreshSession();
-        session = refreshData.session;
-      }
-      
-      if (!session?.user) {
+      if (userError || !user) {
+        console.error('Auth error:', userError);
         throw new Error('Not authenticated. Please log in again.');
       }
       
@@ -85,7 +81,7 @@ export function useAccountBudgets(): UseAccountBudgetsReturn {
       const { error: upsertError } = await supabase
         .from('account_budgets')
         .upsert({
-          user_id: session.user.id,
+          user_id: user.id,
           account_id: accountId,
           month: monthKey,
           budget_amount: budgetAmount,
