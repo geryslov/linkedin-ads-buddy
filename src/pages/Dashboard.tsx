@@ -9,6 +9,7 @@ import { MetricCard } from "@/components/dashboard/MetricCard";
 import { CampaignTable } from "@/components/dashboard/CampaignTable";
 import { AudienceCard } from "@/components/dashboard/AudienceCard";
 import { ReportingSection } from "@/components/dashboard/ReportingSection";
+import { AccountsOverview } from "@/components/dashboard/AccountsOverview";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { 
@@ -111,6 +112,7 @@ export default function Dashboard() {
           <div>
             <h1 className="text-3xl font-bold mb-1">
               {activeTab === "overview" && "Dashboard Overview"}
+              {activeTab === "accounts" && "Accounts & Budgets"}
               {activeTab === "campaigns" && "Campaign Management"}
               {activeTab === "audiences" && "Audience Insights"}
               {activeTab === "analytics" && "Analytics & Reports"}
@@ -298,6 +300,13 @@ export default function Dashboard() {
           <ReportingSection 
             accessToken={accessToken} 
             selectedAccount={selectedAccount}
+          />
+        )}
+
+        {activeTab === "accounts" && (
+          <AccountsOverview 
+            accessToken={accessToken}
+            adAccounts={adAccounts}
           />
         )}
       </main>
