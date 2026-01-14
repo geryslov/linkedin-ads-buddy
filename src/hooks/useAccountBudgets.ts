@@ -85,7 +85,15 @@ export function useAccountBudgets(): UseAccountBudgetsReturn {
           onConflict: 'user_id,account_id,month',
         });
       
-      if (upsertError) throw upsertError;
+      if (upsertError) {
+        console.error('Upsert error details:', {
+          code: upsertError.code,
+          message: upsertError.message,
+          details: upsertError.details,
+          hint: upsertError.hint,
+        });
+        throw upsertError;
+      }
       
       // Refresh budgets
       await fetchBudgets(month);
