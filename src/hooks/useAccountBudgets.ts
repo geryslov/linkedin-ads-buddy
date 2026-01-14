@@ -68,8 +68,17 @@ export function useAccountBudgets(): UseAccountBudgetsReturn {
     setError(null);
     
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.user) throw new Error('Not authenticated');
+      // First try getSession, if null try refreshSession
+      let { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) {
+        const { data: refreshData } = await supabase.auth.refreshSession();
+        session = refreshData.session;
+      }
+      
+      if (!session?.user) {
+        throw new Error('Not authenticated. Please log in again.');
+      }
       
       const monthKey = getMonthKey(month);
       
