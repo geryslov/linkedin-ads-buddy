@@ -6,8 +6,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, Mail, Lock, User } from 'lucide-react';
+import { useLinkedInAuth } from '@/hooks/useLinkedInAuth';
+import { Loader2, Mail, Lock, User, Linkedin } from 'lucide-react';
 import { z } from 'zod';
+import { Separator } from '@/components/ui/separator';
 
 const emailSchema = z.string().email('Please enter a valid email address');
 const passwordSchema = z.string().min(6, 'Password must be at least 6 characters');
@@ -22,6 +24,7 @@ export default function Auth() {
   const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { initiateAuth, isLoading: isLinkedInLoading } = useLinkedInAuth();
 
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
@@ -187,6 +190,30 @@ export default function Auth() {
               {isLogin ? 'Sign In' : 'Create Account'}
             </Button>
           </form>
+          
+          <div className="relative my-6">
+            <div className="absolute inset-0 flex items-center">
+              <Separator className="w-full" />
+            </div>
+            <div className="relative flex justify-center text-xs uppercase">
+              <span className="bg-card px-2 text-muted-foreground">Or continue with</span>
+            </div>
+          </div>
+          
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full"
+            onClick={initiateAuth}
+            disabled={isLinkedInLoading}
+          >
+            {isLinkedInLoading ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Linkedin className="mr-2 h-4 w-4" />
+            )}
+            Continue with LinkedIn
+          </Button>
           
           <div className="mt-6 text-center text-sm">
             <span className="text-muted-foreground">
