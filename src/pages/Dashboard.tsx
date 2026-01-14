@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { useLinkedInAuth } from "@/hooks/useLinkedInAuth";
 import { useLinkedInAds } from "@/hooks/useLinkedInAds";
 import { useAuth } from "@/hooks/useAuth";
@@ -25,7 +24,7 @@ import {
 
 export default function Dashboard() {
   const { accessToken, profile, logout } = useLinkedInAuth();
-  const { isAdmin, session, isLoading: authLoading } = useAuth();
+  const { isAdmin } = useAuth();
   const {
     adAccounts,
     selectedAccount,
@@ -42,14 +41,6 @@ export default function Dashboard() {
   } = useLinkedInAds(accessToken);
 
   const [activeTab, setActiveTab] = useState("overview");
-  const navigate = useNavigate();
-  
-  // Redirect to auth if not logged in with Supabase
-  useEffect(() => {
-    if (!authLoading && !session) {
-      navigate('/auth');
-    }
-  }, [authLoading, session, navigate]);
 
   useEffect(() => {
     if (accessToken) {
@@ -105,15 +96,6 @@ export default function Dashboard() {
   const profileName = profile 
     ? `${profile.localizedFirstName} ${profile.localizedLastName}` 
     : undefined;
-
-  // Show loading while checking auth
-  if (authLoading) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <Skeleton className="h-8 w-32" />
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen bg-background">

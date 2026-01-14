@@ -68,20 +68,15 @@ export function useAccountBudgets(): UseAccountBudgetsReturn {
     setError(null);
     
     try {
-      // Use getUser() for reliable server-side validation
-      const { data: { user }, error: userError } = await supabase.auth.getUser();
-      
-      if (userError || !user) {
-        console.error('Auth error:', userError);
-        throw new Error('Not authenticated. Please log in again.');
-      }
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user) throw new Error('Not authenticated');
       
       const monthKey = getMonthKey(month);
       
       const { error: upsertError } = await supabase
         .from('account_budgets')
         .upsert({
-          user_id: user.id,
+          user_id: session.user.id,
           account_id: accountId,
           month: monthKey,
           budget_amount: budgetAmount,
@@ -90,15 +85,7 @@ export function useAccountBudgets(): UseAccountBudgetsReturn {
           onConflict: 'user_id,account_id,month',
         });
       
-      if (upsertError) {
-        console.error('Upsert error details:', {
-          code: upsertError.code,
-          message: upsertError.message,
-          details: upsertError.details,
-          hint: upsertError.hint,
-        });
-        throw upsertError;
-      }
+      if (upsertError) throw upsertError;
       
       // Refresh budgets
       await fetchBudgets(month);
