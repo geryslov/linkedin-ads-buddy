@@ -1,1 +1,7 @@
 project_id = "bxoxefmenvlxiubynuay"
+
+[functions.linkedin-api]
+verify_jwt = false
+
+[functions.create-test-user]
+verify_jwt = false
