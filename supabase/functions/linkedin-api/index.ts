@@ -4854,6 +4854,144 @@ serve(async (req) => {
         });
       }
 
+      case 'update_campaign_targeting': {
+        const { campaignId, accountId, titleUrns, skillUrns, mode } = params;
+        
+        if (!campaignId || !accountId) {
+          return new Response(JSON.stringify({ 
+            success: false, 
+            message: 'Campaign ID and Account ID are required' 
+          }), {
+            status: 400,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+        
+        console.log(`[update_campaign_targeting] Campaign: ${campaignId}, Mode: ${mode}`);
+        console.log(`[update_campaign_targeting] Titles: ${titleUrns?.length || 0}, Skills: ${skillUrns?.length || 0}`);
+        
+        try {
+          // First, get current campaign targeting criteria if appending
+          let existingTargeting: any = null;
+          
+          if (mode === 'append') {
+            const campaignUrl = `https://api.linkedin.com/v2/adCampaignsV2/${campaignId}`;
+            const campaignResponse = await fetch(campaignUrl, {
+              headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'X-Restli-Protocol-Version': '2.0.0',
+                'LinkedIn-Version': '202511',
+              }
+            });
+            
+            if (campaignResponse.ok) {
+              const campaignData = await campaignResponse.json();
+              existingTargeting = campaignData.targetingCriteria || {};
+              console.log('[update_campaign_targeting] Existing targeting:', JSON.stringify(existingTargeting));
+            } else {
+              console.log(`[update_campaign_targeting] Could not fetch campaign: ${campaignResponse.status}`);
+            }
+          }
+          
+          // Build targeting criteria
+          // LinkedIn uses 'include' and 'exclude' with facets
+          const include: any = {};
+          
+          // If appending, start with existing includes
+          if (mode === 'append' && existingTargeting?.include) {
+            Object.assign(include, existingTargeting.include);
+          }
+          
+          // Add titles if provided
+          if (titleUrns && titleUrns.length > 0) {
+            // LinkedIn uses 'urn:li:adTargetingFacet:titles' for job titles
+            const existingTitles = include['urn:li:adTargetingFacet:titles'] || [];
+            const newTitles = titleUrns.filter((urn: string) => !existingTitles.includes(urn));
+            include['urn:li:adTargetingFacet:titles'] = mode === 'append' 
+              ? [...existingTitles, ...newTitles]
+              : titleUrns;
+            console.log(`[update_campaign_targeting] Final titles: ${include['urn:li:adTargetingFacet:titles'].length}`);
+          }
+          
+          // Add skills if provided
+          if (skillUrns && skillUrns.length > 0) {
+            // LinkedIn uses 'urn:li:adTargetingFacet:skills' for skills
+            const existingSkills = include['urn:li:adTargetingFacet:skills'] || [];
+            const newSkills = skillUrns.filter((urn: string) => !existingSkills.includes(urn));
+            include['urn:li:adTargetingFacet:skills'] = mode === 'append'
+              ? [...existingSkills, ...newSkills]
+              : skillUrns;
+            console.log(`[update_campaign_targeting] Final skills: ${include['urn:li:adTargetingFacet:skills'].length}`);
+          }
+          
+          // Build the targeting criteria update payload
+          const targetingCriteria: any = { include };
+          
+          // Keep existing exclude if appending
+          if (mode === 'append' && existingTargeting?.exclude) {
+            targetingCriteria.exclude = existingTargeting.exclude;
+          }
+          
+          // Perform PATCH update
+          const updateUrl = `https://api.linkedin.com/v2/adCampaignsV2/${campaignId}`;
+          const updatePayload = {
+            patch: {
+              $set: {
+                targetingCriteria
+              }
+            }
+          };
+          
+          console.log('[update_campaign_targeting] Update payload:', JSON.stringify(updatePayload, null, 2));
+          
+          const updateResponse = await fetch(updateUrl, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+              'Content-Type': 'application/json',
+              'X-Restli-Method': 'partial_update',
+              'X-Restli-Protocol-Version': '2.0.0',
+              'LinkedIn-Version': '202511',
+            },
+            body: JSON.stringify(updatePayload)
+          });
+          
+          if (updateResponse.ok) {
+            console.log('[update_campaign_targeting] Success!');
+            return new Response(JSON.stringify({ 
+              success: true,
+              message: `Targeting ${mode === 'append' ? 'appended' : 'replaced'} successfully`,
+              titlesAdded: titleUrns?.length || 0,
+              skillsAdded: skillUrns?.length || 0,
+            }), {
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+            });
+          } else {
+            const errorText = await updateResponse.text();
+            console.log(`[update_campaign_targeting] Failed: ${updateResponse.status} - ${errorText}`);
+            
+            // Parse LinkedIn API error
+            let errorMessage = `Update failed: ${updateResponse.status}`;
+            try {
+              const errorJson = JSON.parse(errorText);
+              errorMessage = errorJson.message || errorJson.error || errorMessage;
+            } catch {}
+            
+            return new Response(JSON.stringify({ 
+              success: false,
+              message: errorMessage,
+              status: updateResponse.status
+            }), {
+              status: updateResponse.status,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+            });
+          }
+        } catch (updateError) {
+          console.error('[update_campaign_targeting] Error:', updateError);
+          throw updateError;
+        }
+      }
+
       default:
         return new Response(JSON.stringify({ error: 'Unknown action' }), {
           status: 400,
