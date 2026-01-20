@@ -4774,6 +4774,86 @@ serve(async (req) => {
         });
       }
 
+      case 'search_skills': {
+        const { query } = params;
+        
+        if (!query || query.trim().length < 2) {
+          return new Response(JSON.stringify({ 
+            skills: [],
+            message: 'Query must be at least 2 characters'
+          }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+        
+        console.log(`[search_skills] Searching for skills matching "${query}"`);
+        
+        // Use adTargetingEntities typeahead API with skills facet
+        const searchParams = new URLSearchParams({
+          q: 'typeahead',
+          facet: 'urn:li:adTargetingFacet:skills',
+          query: query.trim(),
+          count: '50',
+        });
+        
+        const searchUrl = `https://api.linkedin.com/rest/adTargetingEntities?${searchParams}`;
+        console.log(`[search_skills] Calling API: ${searchUrl}`);
+        
+        const searchResponse = await fetch(searchUrl, {
+          headers: { 
+            'Authorization': `Bearer ${accessToken}`,
+            'X-Restli-Protocol-Version': '2.0.0',
+            'LinkedIn-Version': '202511',
+          },
+        });
+        
+        if (!searchResponse.ok) {
+          const errorText = await searchResponse.text();
+          console.error(`[search_skills] API error ${searchResponse.status}:`, errorText);
+          return new Response(JSON.stringify({ 
+            error: `LinkedIn API error: ${searchResponse.status}`,
+            details: errorText
+          }), { 
+            status: searchResponse.status,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+          });
+        }
+        
+        const searchData = await searchResponse.json();
+        console.log(`[search_skills] Typeahead returned ${searchData.elements?.length || 0} results`);
+        
+        // Parse the adTargetingEntities response
+        const skills = (searchData.elements || []).map((el: any) => {
+          const urn = el.urn || el.entity || '';
+          const name = el.name?.localized?.en_US || 
+                       el.name?.localized?.[Object.keys(el.name?.localized || {})[0]] ||
+                       el.displayName ||
+                       el.name ||
+                       'Unknown Skill';
+          
+          // Extract numeric ID from URN (urn:li:skill:123)
+          let id = '';
+          const skillMatch = urn.match(/urn:li:skill:(\d+)/);
+          if (skillMatch) {
+            id = skillMatch[1];
+          }
+          
+          return {
+            id,
+            urn,
+            name: typeof name === 'string' ? name : JSON.stringify(name),
+            targetable: true, // All returned results are targetable
+            facetUrn: el.facetUrn || 'urn:li:adTargetingFacet:skills',
+          };
+        });
+        
+        return new Response(JSON.stringify({ 
+          skills,
+          source: 'adTargetingEntities',
+          count: skills.length
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
       default:
         return new Response(JSON.stringify({ error: 'Unknown action' }), {
           status: 400,
