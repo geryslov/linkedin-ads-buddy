@@ -381,9 +381,9 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
             <ClipboardList className="h-4 w-4" />
             Lead Gen Forms
           </TabsTrigger>
-          <TabsTrigger value="title_search" className="gap-2">
+          <TabsTrigger value="targeting_tools" className="gap-2">
             <Search className="h-4 w-4" />
-            Title Search
+            Targeting Tools
           </TabsTrigger>
           <TabsTrigger value="audiences" className="gap-2" disabled>
             <Users className="h-4 w-4" />
@@ -879,9 +879,18 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
           </Card>
         </TabsContent>
 
-        {/* Job Title Search Tab */}
-        <TabsContent value="title_search" className="space-y-6 mt-6">
-          <JobTitleSearch accessToken={accessToken} selectedAccount={selectedAccount} />
+        {/* Targeting Tools Tab */}
+        <TabsContent value="targeting_tools" className="space-y-6 mt-6">
+          <div className="space-y-2 mb-6">
+            <h3 className="text-lg font-semibold">Targeting Discovery Tools</h3>
+            <p className="text-sm text-muted-foreground">
+              Search and verify LinkedIn targeting entities for your ad campaigns
+            </p>
+          </div>
+          <div className="grid gap-6 md:grid-cols-2">
+            <JobTitleSearch accessToken={accessToken} selectedAccount={selectedAccount} />
+            <SkillSearch accessToken={accessToken} selectedAccount={selectedAccount} />
+          </div>
         </TabsContent>
 
         {/* Settings Tab */}
@@ -956,8 +965,6 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
             </CardContent>
           </Card>
 
-          {/* Skills Targeting Search */}
-          <SkillSearch accessToken={accessToken} selectedAccount={selectedAccount} />
         </TabsContent>
       </Tabs>
     </div>
