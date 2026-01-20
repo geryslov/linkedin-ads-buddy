@@ -19,6 +19,7 @@ import { JobFunctionTitlesDrawer } from './JobFunctionTitlesDrawer';
 import { LeadGenFormsTable } from './LeadGenFormsTable';
 import { CampaignMultiSelect } from './CampaignMultiSelect';
 import { JobTitleSearch } from './JobTitleSearch';
+import { SkillSearch } from './SkillSearch';
 import { TimeFrameSelector } from './TimeFrameSelector';
 import { MetricCard } from './MetricCard';
 import { useToast } from '@/hooks/use-toast';
@@ -954,6 +955,9 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
               </div>
             </CardContent>
           </Card>
+
+          {/* Skills Targeting Search */}
+          <SkillSearch accessToken={accessToken} selectedAccount={selectedAccount} />
         </TabsContent>
       </Tabs>
     </div>
