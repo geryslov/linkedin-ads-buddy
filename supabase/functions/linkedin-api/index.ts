@@ -4897,23 +4897,13 @@ serve(async (req) => {
           let targetingCriteria: any;
           
           if (mode === 'replace') {
-            // For replace mode: build fresh targeting with only the new titles/skills
-            // Keep existing non-title/skill facets (locations, staff ranges, etc.)
-            const existingAndClauses: any[] = existingTargeting?.include?.and || [];
-            
-            // Filter out existing title and skill facets
-            const preservedClauses = existingAndClauses.filter((clause: any) => {
-              if (!clause.or) return true;
-              const keys = Object.keys(clause.or);
-              return !keys.some(k => 
-                k === 'urn:li:adTargetingFacet:titles' || 
-                k === 'urn:li:adTargetingFacet:skills'
-              );
-            });
+            // REPLACE MODE: Remove ALL existing targeting and add ONLY what's selected
+            // This completely replaces the campaign's targeting criteria
+            const newAndClauses: any[] = [];
             
             // Add new title facet if provided
             if (titleUrns && titleUrns.length > 0) {
-              preservedClauses.push({
+              newAndClauses.push({
                 or: { 'urn:li:adTargetingFacet:titles': titleUrns }
               });
               console.log(`[update_campaign_targeting] Replace mode - titles: ${titleUrns.length}`);
@@ -4921,59 +4911,49 @@ serve(async (req) => {
             
             // Add new skill facet if provided
             if (skillUrns && skillUrns.length > 0) {
-              preservedClauses.push({
+              newAndClauses.push({
                 or: { 'urn:li:adTargetingFacet:skills': skillUrns }
               });
               console.log(`[update_campaign_targeting] Replace mode - skills: ${skillUrns.length}`);
             }
             
+            // Build fresh targeting with only the selected entities
             targetingCriteria = {
-              include: { and: preservedClauses },
-              exclude: existingTargeting?.exclude || {}
+              include: { and: newAndClauses },
+              exclude: {} // Clear exclusions as well
             };
+            
+            console.log('[update_campaign_targeting] Replace mode - cleared all existing targeting');
           } else {
-            // For append mode: add to existing facets
+            // APPEND MODE: Add selections as a NEW AND clause to existing targeting
+            // This narrows the audience by adding an additional AND condition
             const existingAndClauses: any[] = existingTargeting?.include?.and || [];
             const newAndClauses = [...existingAndClauses];
             
-            // Find and update title facet
+            // Build a combined OR clause for all selected titles and skills
+            // Then add it as a NEW AND clause (narrowing the audience)
             if (titleUrns && titleUrns.length > 0) {
-              const titleClauseIdx = newAndClauses.findIndex((clause: any) => 
-                clause.or && clause.or['urn:li:adTargetingFacet:titles']
-              );
-              
-              if (titleClauseIdx >= 0) {
-                const existingTitles = newAndClauses[titleClauseIdx].or['urn:li:adTargetingFacet:titles'] || [];
-                const merged = [...new Set([...existingTitles, ...titleUrns])];
-                newAndClauses[titleClauseIdx] = { or: { 'urn:li:adTargetingFacet:titles': merged } };
-                console.log(`[update_campaign_targeting] Append mode - merged titles: ${merged.length}`);
-              } else {
-                newAndClauses.push({ or: { 'urn:li:adTargetingFacet:titles': titleUrns } });
-                console.log(`[update_campaign_targeting] Append mode - added new titles: ${titleUrns.length}`);
-              }
+              // Add as a new AND clause - this means "must ALSO match one of these titles"
+              newAndClauses.push({
+                or: { 'urn:li:adTargetingFacet:titles': titleUrns }
+              });
+              console.log(`[update_campaign_targeting] Append mode - added titles as AND: ${titleUrns.length}`);
             }
             
-            // Find and update skill facet
             if (skillUrns && skillUrns.length > 0) {
-              const skillClauseIdx = newAndClauses.findIndex((clause: any) => 
-                clause.or && clause.or['urn:li:adTargetingFacet:skills']
-              );
-              
-              if (skillClauseIdx >= 0) {
-                const existingSkills = newAndClauses[skillClauseIdx].or['urn:li:adTargetingFacet:skills'] || [];
-                const merged = [...new Set([...existingSkills, ...skillUrns])];
-                newAndClauses[skillClauseIdx] = { or: { 'urn:li:adTargetingFacet:skills': merged } };
-                console.log(`[update_campaign_targeting] Append mode - merged skills: ${merged.length}`);
-              } else {
-                newAndClauses.push({ or: { 'urn:li:adTargetingFacet:skills': skillUrns } });
-                console.log(`[update_campaign_targeting] Append mode - added new skills: ${skillUrns.length}`);
-              }
+              // Add as a new AND clause - this means "must ALSO have one of these skills"
+              newAndClauses.push({
+                or: { 'urn:li:adTargetingFacet:skills': skillUrns }
+              });
+              console.log(`[update_campaign_targeting] Append mode - added skills as AND: ${skillUrns.length}`);
             }
             
             targetingCriteria = {
               include: { and: newAndClauses },
               exclude: existingTargeting?.exclude || {}
             };
+            
+            console.log(`[update_campaign_targeting] Append mode - total AND clauses: ${newAndClauses.length}`);
           }
           
           // Perform PATCH update
