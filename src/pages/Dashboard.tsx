@@ -32,6 +32,8 @@ export default function Dashboard() {
     analytics,
     audiences,
     isLoading,
+    isSyncing,
+    lastSyncedAt,
     currentAccountCanWrite,
     fetchAdAccounts,
     fetchCampaigns,
@@ -39,6 +41,7 @@ export default function Dashboard() {
     fetchAudiences,
     updateCampaignStatus,
     setDefaultAccount,
+    syncAdAccounts,
   } = useLinkedInAds(accessToken);
 
   const [activeTab, setActiveTab] = useState("overview");
@@ -128,6 +131,9 @@ export default function Dashboard() {
               selectedAccount={selectedAccount}
               onSelect={handleAccountChange}
               onSetDefault={setDefaultAccount}
+              onRefresh={syncAdAccounts}
+              isRefreshing={isSyncing}
+              lastSyncedAt={lastSyncedAt}
             />
             <Button 
               variant="outline" 

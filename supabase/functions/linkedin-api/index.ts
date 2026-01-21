@@ -622,7 +622,7 @@ serve(async (req) => {
         // Roles that allow write operations (create/update campaigns, targeting, etc.)
         const writeCapableRoles = ['ACCOUNT_MANAGER', 'CAMPAIGN_MANAGER', 'CREATIVE_MANAGER'];
         
-        // Combine and filter for ACTIVE status, add canWrite and accountUrn
+        // Combine and filter for ACTIVE status, add canWrite, accountUrn, and type
         const allAccounts = Array.from(accountsMap.values())
           .filter((acc: any) => acc.status === 'ACTIVE')
           .map((acc: any) => ({
@@ -631,6 +631,7 @@ serve(async (req) => {
             name: acc.name || `Account ${acc.id}`,
             currency: acc.currency || 'USD',
             status: acc.status,
+            type: acc.type || 'UNKNOWN', // BUSINESS, ENTERPRISE, etc.
             userRole: acc.userRole || 'UNKNOWN',
             accessSource: acc.accessSource || 'unknown',
             canWrite: writeCapableRoles.includes(acc.userRole || ''),
@@ -4867,6 +4868,186 @@ serve(async (req) => {
         });
       }
 
+      case 'sync_ad_accounts': {
+        // Sync all ad accounts to database for the authenticated user
+        // This reuses get_ad_accounts logic but also persists to DB
+        
+        console.log('[sync_ad_accounts] Starting account sync...');
+        
+        // Get user from authorization header
+        const authHeader = req.headers.get('Authorization');
+        const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
+        const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!;
+        
+        // Import Supabase client dynamically
+        const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+        const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+          global: { headers: { Authorization: authHeader || '' } }
+        });
+        
+        const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
+        if (userError || !user) {
+          console.error('[sync_ad_accounts] Failed to get user:', userError);
+          return new Response(JSON.stringify({ 
+            success: false, 
+            error: 'Authentication required' 
+          }), {
+            status: 401,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+        
+        // Discover accounts using same logic as get_ad_accounts
+        const accountsMap = new Map<string, any>();
+        const userRoles = new Map<string, { role: string; accessSource: string }>();
+        
+        // Step 1: Try REST adAccountUsers
+        try {
+          const usersResponse = await fetch(
+            'https://api.linkedin.com/rest/adAccountUsers?q=authenticatedUser',
+            {
+              headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'LinkedIn-Version': '202511',
+                'X-Restli-Protocol-Version': '2.0.0',
+              },
+            }
+          );
+          
+          if (usersResponse.ok) {
+            const usersData = await usersResponse.json();
+            for (const el of (usersData?.elements || [])) {
+              const accountUrn = el.account || '';
+              const accountId = accountUrn.split(':').pop();
+              if (accountId) {
+                userRoles.set(accountId, { role: el.role || 'UNKNOWN', accessSource: 'authenticatedUser' });
+              }
+            }
+          }
+        } catch (err) {
+          console.error('[sync_ad_accounts] Error fetching adAccountUsers:', err);
+        }
+        
+        // Step 2: Fetch via search
+        try {
+          const searchResponse = await fetch(
+            'https://api.linkedin.com/v2/adAccountsV2?q=search&search.status.values[0]=ACTIVE',
+            { headers: { 'Authorization': `Bearer ${accessToken}` } }
+          );
+          
+          if (searchResponse.ok) {
+            const searchData = await searchResponse.json();
+            for (const acc of (searchData?.elements || [])) {
+              if (acc.id) {
+                const accId = String(acc.id);
+                const roleInfo = userRoles.get(accId);
+                acc.userRole = roleInfo?.role || 'DIRECT_ACCESS';
+                acc.accessSource = roleInfo?.accessSource || 'search';
+                accountsMap.set(accId, acc);
+              }
+            }
+          }
+        } catch (err) {
+          console.error('[sync_ad_accounts] Error fetching via search:', err);
+        }
+        
+        // Step 3: Fetch missing accounts individually
+        const missingAccountIds = [...userRoles.keys()].filter(id => !accountsMap.has(id));
+        for (const accId of missingAccountIds) {
+          try {
+            const accResponse = await fetch(
+              `https://api.linkedin.com/v2/adAccountsV2/${accId}`,
+              { headers: { 'Authorization': `Bearer ${accessToken}` } }
+            );
+            
+            if (accResponse.ok) {
+              const acc = await accResponse.json();
+              if (acc && acc.status === 'ACTIVE') {
+                const roleInfo = userRoles.get(accId);
+                acc.userRole = roleInfo?.role || 'UNKNOWN';
+                acc.accessSource = 'authenticatedUser';
+                accountsMap.set(accId, acc);
+              }
+            }
+          } catch (err) {
+            // Continue
+          }
+        }
+        
+        const writeCapableRoles = ['ACCOUNT_MANAGER', 'CAMPAIGN_MANAGER', 'CREATIVE_MANAGER'];
+        
+        const allAccounts = Array.from(accountsMap.values())
+          .filter((acc: any) => acc.status === 'ACTIVE')
+          .map((acc: any) => ({
+            id: String(acc.id),
+            accountUrn: `urn:li:sponsoredAccount:${acc.id}`,
+            name: acc.name || `Account ${acc.id}`,
+            currency: acc.currency || 'USD',
+            status: acc.status,
+            type: acc.type || 'UNKNOWN',
+            userRole: acc.userRole || 'UNKNOWN',
+            accessSource: acc.accessSource || 'unknown',
+            canWrite: writeCapableRoles.includes(acc.userRole || ''),
+          }));
+        
+        console.log(`[sync_ad_accounts] Discovered ${allAccounts.length} accounts`);
+        
+        // Upsert all accounts to database
+        const now = new Date().toISOString();
+        const { error: upsertError } = await supabaseClient
+          .from('linkedin_ad_accounts')
+          .upsert(
+            allAccounts.map(acc => ({
+              user_id: user.id,
+              account_id: acc.id,
+              account_urn: acc.accountUrn,
+              name: acc.name,
+              status: acc.status,
+              type: acc.type,
+              currency: acc.currency,
+              user_role: acc.userRole,
+              can_write: acc.canWrite,
+              last_synced_at: now,
+            })),
+            { onConflict: 'user_id,account_id' }
+          );
+        
+        if (upsertError) {
+          console.error('[sync_ad_accounts] Error upserting accounts:', upsertError);
+        }
+        
+        // Check if user's default account still exists
+        const { data: defaultAcc } = await supabaseClient
+          .from('user_linked_accounts')
+          .select('account_id')
+          .eq('user_id', user.id)
+          .eq('is_default', true)
+          .single();
+        
+        const defaultStillExists = defaultAcc && 
+          allAccounts.some(a => a.id === defaultAcc.account_id);
+        
+        if (!defaultStillExists && defaultAcc) {
+          // Unset default if account no longer accessible
+          await supabaseClient
+            .from('user_linked_accounts')
+            .update({ is_default: false })
+            .eq('user_id', user.id)
+            .eq('account_id', defaultAcc.account_id);
+          
+          console.log(`[sync_ad_accounts] Invalidated default account ${defaultAcc.account_id} - no longer accessible`);
+        }
+        
+        return new Response(JSON.stringify({
+          success: true,
+          accounts: allAccounts,
+          syncedAt: now,
+          defaultInvalidated: !defaultStillExists && !!defaultAcc,
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
       case 'bulk_search_titles': {
         // Bulk resolve job titles - accepts array of title strings, returns matched entities
         const { titles } = params;
@@ -5002,7 +5183,7 @@ serve(async (req) => {
         console.log(`[update_campaign_targeting] Updating ${idsToUpdate.length} campaigns, Mode: ${mode}`);
         console.log(`[update_campaign_targeting] Titles: ${titleUrns?.length || 0}, Skills: ${skillUrns?.length || 0}`);
         
-        const results: { campaignId: string; success: boolean; message: string }[] = [];
+        const results: { campaignId: string; success: boolean; message: string; errorCode?: string }[] = [];
         
         for (const currentCampaignId of idsToUpdate) {
           try {
@@ -5121,12 +5302,39 @@ serve(async (req) => {
               results.push({ campaignId: currentCampaignId, success: true, message: 'Updated' });
             } else {
               const errorText = await updateResponse.text();
+              console.error(`[update_campaign_targeting] LinkedIn error for campaign ${currentCampaignId}: ${updateResponse.status}`, errorText);
+              
               let errorMessage = `Failed: ${updateResponse.status}`;
-              try {
-                const errorJson = JSON.parse(errorText);
-                errorMessage = errorJson.message || errorMessage;
-              } catch {}
-              results.push({ campaignId: currentCampaignId, success: false, message: errorMessage });
+              let errorCode = 'UNKNOWN_ERROR';
+              
+              if (updateResponse.status === 401) {
+                errorMessage = 'Your LinkedIn session has expired. Please re-authenticate.';
+                errorCode = 'TOKEN_EXPIRED';
+              } else if (updateResponse.status === 403) {
+                // Check if it's a tier/permission issue
+                if (errorText.includes('ACCESS_DENIED') || errorText.includes('PERMISSION')) {
+                  errorMessage = 'This LinkedIn app is not approved to manage this ad account. Contact your admin or upgrade your app tier.';
+                  errorCode = 'PERMISSION_DENIED';
+                } else {
+                  errorMessage = 'You don\'t have write permissions for this account. Required role: Account Manager or Campaign Manager.';
+                  errorCode = 'ROLE_INSUFFICIENT';
+                }
+              } else if (updateResponse.status === 400 || updateResponse.status === 404) {
+                errorMessage = 'Invalid account or campaign ID. The resource may have been deleted.';
+                errorCode = 'INVALID_RESOURCE';
+              } else {
+                try {
+                  const errorJson = JSON.parse(errorText);
+                  errorMessage = errorJson.message || errorMessage;
+                } catch {}
+              }
+              
+              results.push({ 
+                campaignId: currentCampaignId, 
+                success: false, 
+                message: errorMessage,
+                errorCode 
+              });
             }
           } catch (err) {
             const message = err instanceof Error ? err.message : 'Unknown error';

@@ -47,6 +47,51 @@ export type Database = {
         }
         Relationships: []
       }
+      linkedin_ad_accounts: {
+        Row: {
+          account_id: string
+          account_urn: string
+          can_write: boolean | null
+          created_at: string | null
+          currency: string | null
+          id: string
+          last_synced_at: string | null
+          name: string | null
+          status: string | null
+          type: string | null
+          user_id: string
+          user_role: string | null
+        }
+        Insert: {
+          account_id: string
+          account_urn: string
+          can_write?: boolean | null
+          created_at?: string | null
+          currency?: string | null
+          id?: string
+          last_synced_at?: string | null
+          name?: string | null
+          status?: string | null
+          type?: string | null
+          user_id: string
+          user_role?: string | null
+        }
+        Update: {
+          account_id?: string
+          account_urn?: string
+          can_write?: boolean | null
+          created_at?: string | null
+          currency?: string | null
+          id?: string
+          last_synced_at?: string | null
+          name?: string | null
+          status?: string | null
+          type?: string | null
+          user_id?: string
+          user_role?: string | null
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           created_at: string

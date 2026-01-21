@@ -8,13 +8,17 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Building2, Star, AlertCircle, Shield, Eye } from "lucide-react";
+import { Building2, Star, AlertCircle, Shield, Eye, RefreshCw } from "lucide-react";
+import { formatDistanceToNow } from "date-fns";
 
 interface AccountSelectorProps {
   accounts: AdAccount[];
   selectedAccount: string | null;
   onSelect: (accountId: string) => void;
   onSetDefault?: (accountId: string) => void;
+  onRefresh?: () => void;
+  isRefreshing?: boolean;
+  lastSyncedAt?: string | null;
 }
 
 // Role display configuration
@@ -32,19 +36,35 @@ export function AccountSelector({
   accounts, 
   selectedAccount, 
   onSelect,
-  onSetDefault 
+  onSetDefault,
+  onRefresh,
+  isRefreshing,
+  lastSyncedAt,
 }: AccountSelectorProps) {
   // Empty state - no accounts found
   if (accounts.length === 0) {
     return (
-      <div className="flex items-center gap-3 p-4 rounded-lg bg-secondary/50 border border-border">
-        <AlertCircle className="h-5 w-5 text-muted-foreground" />
-        <div className="text-sm">
-          <p className="font-medium">No Ad Accounts Found</p>
-          <p className="text-muted-foreground">
-            Request access from your LinkedIn Campaign Manager
-          </p>
+      <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 p-4 rounded-lg bg-secondary/50 border border-border">
+          <AlertCircle className="h-5 w-5 text-muted-foreground" />
+          <div className="text-sm">
+            <p className="font-medium">No Ad Accounts Found</p>
+            <p className="text-muted-foreground">
+              Request access from your LinkedIn Campaign Manager
+            </p>
+          </div>
         </div>
+        {onRefresh && (
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={onRefresh}
+            disabled={isRefreshing}
+            title="Refresh accounts from LinkedIn"
+          >
+            <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+          </Button>
+        )}
       </div>
     );
   }
@@ -114,6 +134,28 @@ export function AccountSelector({
         <div className="p-2" title="Default account">
           <Star className="h-4 w-4 text-yellow-500 fill-yellow-500" />
         </div>
+      )}
+
+      {/* Refresh Button */}
+      {onRefresh && (
+        <Button
+          variant="outline"
+          size="icon"
+          onClick={onRefresh}
+          disabled={isRefreshing}
+          title={lastSyncedAt 
+            ? `Last synced ${formatDistanceToNow(new Date(lastSyncedAt))} ago. Click to refresh.` 
+            : 'Refresh accounts from LinkedIn'}
+        >
+          <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+        </Button>
+      )}
+
+      {/* Last synced indicator */}
+      {lastSyncedAt && (
+        <span className="text-xs text-muted-foreground hidden lg:inline">
+          Synced {formatDistanceToNow(new Date(lastSyncedAt))} ago
+        </span>
       )}
     </div>
   );
