@@ -4897,9 +4897,43 @@ serve(async (req) => {
           let targetingCriteria: any;
           
           if (mode === 'replace') {
-            // REPLACE MODE: Remove ALL existing targeting and add ONLY what's selected
-            // This completely replaces the campaign's targeting criteria
-            const newAndClauses: any[] = [];
+            // REPLACE MODE: Remove title/skill targeting and add ONLY what's selected
+            // BUT preserve required facets like locations (LinkedIn requires these)
+            const existingAndClauses: any[] = existingTargeting?.include?.and || [];
+            
+            // Define facets that must be preserved (LinkedIn requires these)
+            const requiredFacetPrefixes = [
+              'urn:li:adTargetingFacet:locations',
+              'urn:li:adTargetingFacet:profileLocations', 
+              'urn:li:adTargetingFacet:ipLocations',
+              'urn:li:adTargetingFacet:interfaceLocales',
+              'urn:li:adTargetingFacet:locales',
+            ];
+            
+            // Define facets we're replacing
+            const replacedFacets = [
+              'urn:li:adTargetingFacet:titles',
+              'urn:li:adTargetingFacet:skills',
+            ];
+            
+            // Filter existing clauses - keep required facets, remove title/skill facets
+            const preservedClauses = existingAndClauses.filter((clause: any) => {
+              if (!clause.or) return true; // Keep unknown structures
+              const facetKeys = Object.keys(clause.or);
+              // Keep if it contains any required facet
+              const hasRequiredFacet = facetKeys.some(key => 
+                requiredFacetPrefixes.some(prefix => key.startsWith(prefix))
+              );
+              // Remove if it contains facets we're replacing
+              const hasReplacedFacet = facetKeys.some(key =>
+                replacedFacets.includes(key)
+              );
+              return hasRequiredFacet || !hasReplacedFacet;
+            });
+            
+            console.log(`[update_campaign_targeting] Replace mode - preserved ${preservedClauses.length} clauses (locations, etc.)`);
+            
+            const newAndClauses = [...preservedClauses];
             
             // Add new title facet if provided
             if (titleUrns && titleUrns.length > 0) {
@@ -4917,13 +4951,13 @@ serve(async (req) => {
               console.log(`[update_campaign_targeting] Replace mode - skills: ${skillUrns.length}`);
             }
             
-            // Build fresh targeting with only the selected entities
+            // Build targeting with preserved required facets + new selections
             targetingCriteria = {
               include: { and: newAndClauses },
-              exclude: {} // Clear exclusions as well
+              exclude: existingTargeting?.exclude || {} // Preserve exclusions too
             };
             
-            console.log('[update_campaign_targeting] Replace mode - cleared all existing targeting');
+            console.log('[update_campaign_targeting] Replace mode - replaced title/skill targeting, preserved locations');
           } else {
             // APPEND MODE: Add selections as a NEW AND clause to existing targeting
             // This narrows the audience by adding an additional AND condition
