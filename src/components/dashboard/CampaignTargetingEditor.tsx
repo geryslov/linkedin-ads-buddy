@@ -1,13 +1,23 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { 
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuSeparator,
+} from '@/components/ui/dropdown-menu';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
+import { useSavedAudiences, TargetingEntity } from '@/hooks/useSavedAudiences';
+import { SaveAudienceDialog } from './SaveAudienceDialog';
+import { BulkImportDialog } from './BulkImportDialog';
+import { CampaignSearchSelect } from './CampaignSearchSelect';
 import { 
   Search, 
   Plus, 
@@ -19,18 +29,12 @@ import {
   AlertCircle,
   CheckCircle2,
   Replace,
-  PlusCircle
+  PlusCircle,
+  Save,
+  FolderOpen,
+  Upload,
+  Trash2,
 } from 'lucide-react';
-
-interface TargetingEntity {
-  id: string;
-  urn: string;
-  name: string;
-  type: 'title' | 'skill';
-  targetable: boolean;
-  isSuperTitle?: boolean;
-  parentSuperTitle?: { urn: string; name: string } | null;
-}
 
 interface Campaign {
   id: string;
@@ -65,10 +69,25 @@ export function CampaignTargetingEditor({
   // Selection cart
   const [selectedEntities, setSelectedEntities] = useState<TargetingEntity[]>([]);
   
-  // Campaign targeting state
-  const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
+  // Campaign targeting state - now supports multiple campaigns
+  const [selectedCampaignIds, setSelectedCampaignIds] = useState<string[]>([]);
   const [updateMode, setUpdateMode] = useState<'append' | 'replace'>('append');
   const [isUpdating, setIsUpdating] = useState(false);
+  
+  // Saved audiences
+  const { audiences, isLoading: isLoadingAudiences, fetchAudiences, saveAudience, deleteAudience } = useSavedAudiences(selectedAccount);
+  const [showSaveDialog, setShowSaveDialog] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  
+  // Bulk import
+  const [showBulkImport, setShowBulkImport] = useState(false);
+  
+  // Fetch saved audiences when account changes
+  useEffect(() => {
+    if (selectedAccount) {
+      fetchAudiences();
+    }
+  }, [selectedAccount, fetchAudiences]);
   
   const handleSearch = useCallback(async () => {
     if (!accessToken || !searchQuery.trim()) {
@@ -111,8 +130,6 @@ export function CampaignTargetingEditor({
         name: item.name,
         type: searchType === 'titles' ? 'title' : 'skill',
         targetable: item.targetable,
-        isSuperTitle: item.isSuperTitle,
-        parentSuperTitle: item.parentSuperTitle,
       }));
       
       setSearchResults(entities);
@@ -142,6 +159,16 @@ export function CampaignTargetingEditor({
     toast({ title: 'Added', description: `${entity.name} added to selection.` });
   };
   
+  const addMultipleToSelection = (entities: TargetingEntity[]) => {
+    const newEntities = entities.filter(e => !selectedEntities.some(s => s.urn === e.urn));
+    if (newEntities.length === 0) {
+      toast({ title: 'All already selected' });
+      return;
+    }
+    setSelectedEntities(prev => [...prev, ...newEntities]);
+    toast({ title: 'Added', description: `${newEntities.length} entities added to selection.` });
+  };
+  
   const removeFromSelection = (urn: string) => {
     setSelectedEntities(prev => prev.filter(e => e.urn !== urn));
   };
@@ -150,11 +177,57 @@ export function CampaignTargetingEditor({
     setSelectedEntities([]);
   };
   
+  // Bulk import handler
+  const handleBulkResolve = async (titles: string[]): Promise<{ results: TargetingEntity[]; notFound: string[] }> => {
+    if (!accessToken) {
+      return { results: [], notFound: titles };
+    }
+    
+    try {
+      const { data, error } = await supabase.functions.invoke('linkedin-api', {
+        body: { 
+          action: 'bulk_search_titles', 
+          accessToken,
+          params: { titles }
+        }
+      });
+      
+      if (error) throw error;
+      
+      return {
+        results: data.results || [],
+        notFound: data.notFound || [],
+      };
+    } catch (err) {
+      toast({ title: 'Bulk resolve failed', variant: 'destructive' });
+      return { results: [], notFound: titles };
+    }
+  };
+  
+  // Save audience handler
+  const handleSaveAudience = async (name: string, description: string) => {
+    setIsSaving(true);
+    try {
+      const success = await saveAudience(name, description, selectedEntities);
+      if (success) {
+        setShowSaveDialog(false);
+      }
+    } finally {
+      setIsSaving(false);
+    }
+  };
+  
+  // Load saved audience
+  const handleLoadAudience = (entities: TargetingEntity[]) => {
+    setSelectedEntities(entities);
+    toast({ title: 'Audience loaded', description: `${entities.length} entities loaded into selection.` });
+  };
+  
   const handleApplyTargeting = async () => {
-    if (!accessToken || !selectedAccount || !selectedCampaignId) {
+    if (!accessToken || !selectedAccount || selectedCampaignIds.length === 0) {
       toast({ 
         title: 'Missing selection', 
-        description: 'Select a campaign to apply targeting.', 
+        description: 'Select at least one campaign to apply targeting.', 
         variant: 'destructive' 
       });
       return;
@@ -172,20 +245,15 @@ export function CampaignTargetingEditor({
     setIsUpdating(true);
     
     try {
-      // Prepare targeting URNs by type
-      const titleUrns = selectedEntities
-        .filter(e => e.type === 'title')
-        .map(e => e.urn);
-      const skillUrns = selectedEntities
-        .filter(e => e.type === 'skill')
-        .map(e => e.urn);
+      const titleUrns = selectedEntities.filter(e => e.type === 'title').map(e => e.urn);
+      const skillUrns = selectedEntities.filter(e => e.type === 'skill').map(e => e.urn);
       
       const { data, error } = await supabase.functions.invoke('linkedin-api', {
         body: {
           action: 'update_campaign_targeting',
           accessToken,
           params: {
-            campaignId: selectedCampaignId,
+            campaignIds: selectedCampaignIds,
             accountId: selectedAccount,
             titleUrns,
             skillUrns,
@@ -196,15 +264,23 @@ export function CampaignTargetingEditor({
       
       if (error) throw error;
       
-      if (data.success) {
+      const successCount = data.results?.filter((r: any) => r.success).length || 0;
+      const totalCount = selectedCampaignIds.length;
+      
+      if (successCount === totalCount) {
         toast({ 
           title: 'Targeting Updated', 
-          description: `Successfully ${updateMode === 'append' ? 'added' : 'replaced'} targeting on campaign.`,
+          description: `Successfully ${updateMode === 'append' ? 'added' : 'replaced'} targeting on ${successCount} campaign(s).`,
         });
         clearSelection();
+        setSelectedCampaignIds([]);
         onRefreshCampaigns();
       } else {
-        throw new Error(data.message || 'Failed to update targeting');
+        toast({ 
+          title: 'Partial Success', 
+          description: `${successCount}/${totalCount} campaigns updated. Check logs for details.`,
+          variant: 'destructive'
+        });
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Update failed';
@@ -214,7 +290,6 @@ export function CampaignTargetingEditor({
     }
   };
   
-  const selectedCampaign = campaigns.find(c => c.id === selectedCampaignId);
   const titleCount = selectedEntities.filter(e => e.type === 'title').length;
   const skillCount = selectedEntities.filter(e => e.type === 'skill').length;
   
@@ -223,7 +298,7 @@ export function CampaignTargetingEditor({
       <div className="space-y-2">
         <h3 className="text-lg font-semibold">Campaign Targeting Editor</h3>
         <p className="text-sm text-muted-foreground">
-          Search for targeting entities, add them to your selection, then apply to a campaign.
+          Search for targeting entities, add them to your selection, then apply to campaigns.
         </p>
       </div>
       
@@ -292,12 +367,6 @@ export function CampaignTargetingEditor({
                         <div className="flex-1 min-w-0">
                           <div className="font-medium truncate">{entity.name}</div>
                           <div className="flex items-center gap-2 mt-1">
-                            {entity.type === 'title' && entity.isSuperTitle && (
-                              <Badge variant="secondary" className="text-xs">Super Title</Badge>
-                            )}
-                            {entity.type === 'title' && entity.parentSuperTitle?.name && (
-                              <Badge variant="outline" className="text-xs">{entity.parentSuperTitle.name}</Badge>
-                            )}
                             {entity.targetable && (
                               <Badge variant="default" className="text-xs bg-green-600">Targetable</Badge>
                             )}
@@ -339,17 +408,83 @@ export function CampaignTargetingEditor({
                     <Badge variant="secondary">{selectedEntities.length}</Badge>
                   )}
                 </CardTitle>
-                {selectedEntities.length > 0 && (
-                  <Button variant="ghost" size="sm" onClick={clearSelection}>
-                    Clear All
+                <div className="flex items-center gap-1">
+                  {/* Bulk Import Button */}
+                  <Button variant="ghost" size="sm" onClick={() => setShowBulkImport(true)}>
+                    <Upload className="h-4 w-4 mr-1" />
+                    Import
                   </Button>
-                )}
+                  
+                  {/* Save Audience Dropdown */}
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" size="sm">
+                        <FolderOpen className="h-4 w-4 mr-1" />
+                        Audiences
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-56">
+                      <DropdownMenuItem 
+                        onClick={() => setShowSaveDialog(true)}
+                        disabled={selectedEntities.length === 0}
+                      >
+                        <Save className="h-4 w-4 mr-2" />
+                        Save Current Selection
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      {isLoadingAudiences ? (
+                        <DropdownMenuItem disabled>
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          Loading...
+                        </DropdownMenuItem>
+                      ) : audiences.length === 0 ? (
+                        <DropdownMenuItem disabled>
+                          <span className="text-muted-foreground">No saved audiences</span>
+                        </DropdownMenuItem>
+                      ) : (
+                        audiences.map((audience) => (
+                          <DropdownMenuItem 
+                            key={audience.id}
+                            className="flex items-center justify-between"
+                          >
+                            <span 
+                              className="flex-1 truncate cursor-pointer"
+                              onClick={() => handleLoadAudience(audience.entities)}
+                            >
+                              {audience.name}
+                              <Badge variant="outline" className="ml-2 text-xs">
+                                {audience.entities.length}
+                              </Badge>
+                            </span>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                deleteAudience(audience.id);
+                              }}
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </Button>
+                          </DropdownMenuItem>
+                        ))
+                      )}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                  
+                  {selectedEntities.length > 0 && (
+                    <Button variant="ghost" size="sm" onClick={clearSelection}>
+                      Clear
+                    </Button>
+                  )}
+                </div>
               </div>
               <CardDescription>
                 {titleCount > 0 && `${titleCount} title${titleCount > 1 ? 's' : ''}`}
                 {titleCount > 0 && skillCount > 0 && ', '}
                 {skillCount > 0 && `${skillCount} skill${skillCount > 1 ? 's' : ''}`}
-                {selectedEntities.length === 0 && 'Add targeting entities from search results'}
+                {selectedEntities.length === 0 && 'Add targeting entities from search or import'}
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -393,31 +528,19 @@ export function CampaignTargetingEditor({
           {/* Campaign Selector + Apply */}
           <Card className="bg-card/50 backdrop-blur-sm border-border/50">
             <CardHeader className="pb-3">
-              <CardTitle className="text-base">Apply to Campaign</CardTitle>
-              <CardDescription>Select a campaign and update mode</CardDescription>
+              <CardTitle className="text-base">Apply to Campaigns</CardTitle>
+              <CardDescription>Select campaigns and update mode</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              {/* Campaign Selector */}
+              {/* Campaign Multi-Select with Search */}
               <div className="space-y-2">
-                <label className="text-sm font-medium">Target Campaign</label>
-                <Select value={selectedCampaignId || ''} onValueChange={setSelectedCampaignId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select a campaign..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {campaigns.map((campaign) => (
-                      <SelectItem key={campaign.id} value={campaign.id}>
-                        <div className="flex items-center gap-2">
-                          <span className={`w-2 h-2 rounded-full ${
-                            campaign.status === 'ACTIVE' ? 'bg-green-500' : 
-                            campaign.status === 'PAUSED' ? 'bg-yellow-500' : 'bg-gray-500'
-                          }`} />
-                          {campaign.name}
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <label className="text-sm font-medium">Target Campaigns</label>
+                <CampaignSearchSelect
+                  campaigns={campaigns}
+                  selectedCampaignIds={selectedCampaignIds}
+                  onChange={setSelectedCampaignIds}
+                  disabled={!canWrite}
+                />
               </div>
               
               {/* Update Mode */}
@@ -466,7 +589,7 @@ export function CampaignTargetingEditor({
                 className="w-full"
                 size="lg"
                 onClick={handleApplyTargeting}
-                disabled={isUpdating || selectedEntities.length === 0 || !selectedCampaignId || !canWrite}
+                disabled={isUpdating || selectedEntities.length === 0 || selectedCampaignIds.length === 0 || !canWrite}
               >
                 {isUpdating ? (
                   <>
@@ -481,20 +604,29 @@ export function CampaignTargetingEditor({
                 ) : (
                   <>
                     <CheckCircle2 className="mr-2 h-4 w-4" />
-                    Apply Targeting ({selectedEntities.length} {selectedEntities.length === 1 ? 'entity' : 'entities'})
+                    Apply to {selectedCampaignIds.length} Campaign{selectedCampaignIds.length !== 1 ? 's' : ''} ({selectedEntities.length} entities)
                   </>
                 )}
               </Button>
-              
-              {selectedCampaign && canWrite && (
-                <p className="text-xs text-center text-muted-foreground">
-                  Targeting will be applied to: <strong>{selectedCampaign.name}</strong>
-                </p>
-              )}
             </CardContent>
           </Card>
         </div>
       </div>
+      
+      {/* Dialogs */}
+      <SaveAudienceDialog
+        open={showSaveDialog}
+        onOpenChange={setShowSaveDialog}
+        onSave={handleSaveAudience}
+        isLoading={isSaving}
+      />
+      
+      <BulkImportDialog
+        open={showBulkImport}
+        onOpenChange={setShowBulkImport}
+        onResolve={handleBulkResolve}
+        onAddToSelection={addMultipleToSelection}
+      />
     </div>
   );
 }

@@ -4867,200 +4867,294 @@ serve(async (req) => {
         });
       }
 
-      case 'update_campaign_targeting': {
-        const { campaignId, accountId, titleUrns, skillUrns, mode } = params;
+      case 'bulk_search_titles': {
+        // Bulk resolve job titles - accepts array of title strings, returns matched entities
+        const { titles } = params;
         
-        if (!campaignId || !accountId) {
+        if (!titles || !Array.isArray(titles) || titles.length === 0) {
+          return new Response(JSON.stringify({ 
+            results: [],
+            notFound: [],
+            message: 'No titles provided'
+          }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+        
+        // Limit to 50 titles per request
+        const limitedTitles = titles.slice(0, 50);
+        console.log(`[bulk_search_titles] Processing ${limitedTitles.length} titles`);
+        
+        const results: any[] = [];
+        const notFound: string[] = [];
+        
+        // Process titles sequentially with small delay to avoid rate limiting
+        for (const title of limitedTitles) {
+          const trimmedTitle = title.trim();
+          if (!trimmedTitle || trimmedTitle.length < 2) {
+            notFound.push(title);
+            continue;
+          }
+          
+          try {
+            const searchParams = new URLSearchParams({
+              q: 'typeahead',
+              facet: 'urn:li:adTargetingFacet:titles',
+              query: trimmedTitle,
+              count: '5', // Get top 5 matches for each
+            });
+            
+            const searchUrl = `https://api.linkedin.com/rest/adTargetingEntities?${searchParams}`;
+            const response = await fetch(searchUrl, {
+              headers: { 
+                'Authorization': `Bearer ${accessToken}`,
+                'X-Restli-Protocol-Version': '2.0.0',
+                'LinkedIn-Version': '202511',
+              },
+            });
+            
+            if (response.ok) {
+              const data = await response.json();
+              const elements = data.elements || [];
+              
+              // Find best match (exact or closest)
+              const lowerTitle = trimmedTitle.toLowerCase();
+              let bestMatch = null;
+              
+              for (const el of elements) {
+                const name = el.name?.localized?.en_US || 
+                             el.name?.localized?.[Object.keys(el.name?.localized || {})[0]] ||
+                             el.displayName || '';
+                
+                if (typeof name === 'string' && name.toLowerCase() === lowerTitle) {
+                  bestMatch = el;
+                  break;
+                }
+              }
+              
+              // If no exact match, use first result
+              if (!bestMatch && elements.length > 0) {
+                bestMatch = elements[0];
+              }
+              
+              if (bestMatch) {
+                const urn = bestMatch.urn || bestMatch.entity || '';
+                const name = bestMatch.name?.localized?.en_US || 
+                             bestMatch.name?.localized?.[Object.keys(bestMatch.name?.localized || {})[0]] ||
+                             bestMatch.displayName || trimmedTitle;
+                
+                let id = '';
+                const titleMatch = urn.match(/urn:li:title:(\d+)/);
+                if (titleMatch) id = titleMatch[1];
+                
+                results.push({
+                  id,
+                  urn,
+                  name: typeof name === 'string' ? name : String(name),
+                  type: 'title',
+                  targetable: true,
+                  originalQuery: trimmedTitle,
+                });
+              } else {
+                notFound.push(trimmedTitle);
+              }
+            } else {
+              console.log(`[bulk_search_titles] Failed for "${trimmedTitle}": ${response.status}`);
+              notFound.push(trimmedTitle);
+            }
+          } catch (err) {
+            console.log(`[bulk_search_titles] Error for "${trimmedTitle}":`, err);
+            notFound.push(trimmedTitle);
+          }
+          
+          // Small delay between requests
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        
+        console.log(`[bulk_search_titles] Done: ${results.length} matched, ${notFound.length} not found`);
+        
+        return new Response(JSON.stringify({ 
+          results,
+          notFound,
+          count: results.length
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+      case 'update_campaign_targeting': {
+        // Support both single campaignId and array of campaignIds
+        const { campaignId, campaignIds, accountId, titleUrns, skillUrns, mode } = params;
+        
+        // Normalize to array
+        const idsToUpdate: string[] = campaignIds && Array.isArray(campaignIds) 
+          ? campaignIds 
+          : (campaignId ? [campaignId] : []);
+        
+        if (idsToUpdate.length === 0 || !accountId) {
           return new Response(JSON.stringify({ 
             success: false, 
-            message: 'Campaign ID and Account ID are required' 
+            message: 'Campaign ID(s) and Account ID are required' 
           }), {
             status: 400,
             headers: { ...corsHeaders, 'Content-Type': 'application/json' }
           });
         }
         
-        console.log(`[update_campaign_targeting] Campaign: ${campaignId}, Mode: ${mode}`);
+        console.log(`[update_campaign_targeting] Updating ${idsToUpdate.length} campaigns, Mode: ${mode}`);
         console.log(`[update_campaign_targeting] Titles: ${titleUrns?.length || 0}, Skills: ${skillUrns?.length || 0}`);
         
-        try {
-          // Always fetch current campaign targeting to preserve non-title/skill facets
-          let existingTargeting: any = null;
-          
-          const campaignUrl = `https://api.linkedin.com/v2/adCampaignsV2/${campaignId}`;
-          const campaignResponse = await fetch(campaignUrl, {
-            headers: {
-              'Authorization': `Bearer ${accessToken}`,
-              'X-Restli-Protocol-Version': '2.0.0',
-              'LinkedIn-Version': '202511',
-            }
-          });
-          
-          if (campaignResponse.ok) {
-            const campaignData = await campaignResponse.json();
-            existingTargeting = campaignData.targetingCriteria || {};
-            console.log('[update_campaign_targeting] Existing targeting structure:', JSON.stringify(existingTargeting, null, 2));
-          } else {
-            console.log(`[update_campaign_targeting] Could not fetch campaign: ${campaignResponse.status}`);
-            // Continue without existing targeting - will create fresh structure
-          }
-          
-          // Build targeting criteria
-          // LinkedIn uses 'include.and[]' structure with 'or' objects for facets
-          let targetingCriteria: any;
-          
-          if (mode === 'replace') {
-            // REPLACE MODE: Remove title/skill targeting and add ONLY what's selected
-            // BUT preserve required facets like locations (LinkedIn requires these)
-            const existingAndClauses: any[] = existingTargeting?.include?.and || [];
+        const results: { campaignId: string; success: boolean; message: string }[] = [];
+        
+        for (const currentCampaignId of idsToUpdate) {
+          try {
+            // Fetch current campaign targeting to preserve non-title/skill facets
+            let existingTargeting: any = null;
             
-            // Define facets that must be preserved (LinkedIn requires these)
-            const requiredFacetPrefixes = [
-              'urn:li:adTargetingFacet:locations',
-              'urn:li:adTargetingFacet:profileLocations', 
-              'urn:li:adTargetingFacet:ipLocations',
-              'urn:li:adTargetingFacet:interfaceLocales',
-              'urn:li:adTargetingFacet:locales',
-            ];
-            
-            // Define facets we're replacing
-            const replacedFacets = [
-              'urn:li:adTargetingFacet:titles',
-              'urn:li:adTargetingFacet:skills',
-            ];
-            
-            // Filter existing clauses - keep required facets, remove title/skill facets
-            const preservedClauses = existingAndClauses.filter((clause: any) => {
-              if (!clause.or) return true; // Keep unknown structures
-              const facetKeys = Object.keys(clause.or);
-              // Keep if it contains any required facet
-              const hasRequiredFacet = facetKeys.some(key => 
-                requiredFacetPrefixes.some(prefix => key.startsWith(prefix))
-              );
-              // Remove if it contains facets we're replacing
-              const hasReplacedFacet = facetKeys.some(key =>
-                replacedFacets.includes(key)
-              );
-              return hasRequiredFacet || !hasReplacedFacet;
-            });
-            
-            console.log(`[update_campaign_targeting] Replace mode - preserved ${preservedClauses.length} clauses (locations, etc.)`);
-            
-            const newAndClauses = [...preservedClauses];
-            
-            // Add new title facet if provided
-            if (titleUrns && titleUrns.length > 0) {
-              newAndClauses.push({
-                or: { 'urn:li:adTargetingFacet:titles': titleUrns }
-              });
-              console.log(`[update_campaign_targeting] Replace mode - titles: ${titleUrns.length}`);
-            }
-            
-            // Add new skill facet if provided
-            if (skillUrns && skillUrns.length > 0) {
-              newAndClauses.push({
-                or: { 'urn:li:adTargetingFacet:skills': skillUrns }
-              });
-              console.log(`[update_campaign_targeting] Replace mode - skills: ${skillUrns.length}`);
-            }
-            
-            // Build targeting with preserved required facets + new selections
-            targetingCriteria = {
-              include: { and: newAndClauses },
-              exclude: existingTargeting?.exclude || {} // Preserve exclusions too
-            };
-            
-            console.log('[update_campaign_targeting] Replace mode - replaced title/skill targeting, preserved locations');
-          } else {
-            // APPEND MODE: Add selections as a NEW AND clause to existing targeting
-            // This narrows the audience by adding an additional AND condition
-            const existingAndClauses: any[] = existingTargeting?.include?.and || [];
-            const newAndClauses = [...existingAndClauses];
-            
-            // Build a combined OR clause for all selected titles and skills
-            // Then add it as a NEW AND clause (narrowing the audience)
-            if (titleUrns && titleUrns.length > 0) {
-              // Add as a new AND clause - this means "must ALSO match one of these titles"
-              newAndClauses.push({
-                or: { 'urn:li:adTargetingFacet:titles': titleUrns }
-              });
-              console.log(`[update_campaign_targeting] Append mode - added titles as AND: ${titleUrns.length}`);
-            }
-            
-            if (skillUrns && skillUrns.length > 0) {
-              // Add as a new AND clause - this means "must ALSO have one of these skills"
-              newAndClauses.push({
-                or: { 'urn:li:adTargetingFacet:skills': skillUrns }
-              });
-              console.log(`[update_campaign_targeting] Append mode - added skills as AND: ${skillUrns.length}`);
-            }
-            
-            targetingCriteria = {
-              include: { and: newAndClauses },
-              exclude: existingTargeting?.exclude || {}
-            };
-            
-            console.log(`[update_campaign_targeting] Append mode - total AND clauses: ${newAndClauses.length}`);
-          }
-          
-          // Perform PATCH update
-          const updateUrl = `https://api.linkedin.com/v2/adCampaignsV2/${campaignId}`;
-          const updatePayload = {
-            patch: {
-              $set: {
-                targetingCriteria
+            const campaignUrl = `https://api.linkedin.com/v2/adCampaignsV2/${currentCampaignId}`;
+            const campaignResponse = await fetch(campaignUrl, {
+              headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'X-Restli-Protocol-Version': '2.0.0',
+                'LinkedIn-Version': '202511',
               }
+            });
+            
+            if (campaignResponse.ok) {
+              const campaignData = await campaignResponse.json();
+              existingTargeting = campaignData.targetingCriteria || {};
             }
-          };
-          
-          console.log('[update_campaign_targeting] Update payload:', JSON.stringify(updatePayload, null, 2));
-          
-          const updateResponse = await fetch(updateUrl, {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${accessToken}`,
-              'Content-Type': 'application/json',
-              'X-Restli-Method': 'partial_update',
-              'X-Restli-Protocol-Version': '2.0.0',
-              'LinkedIn-Version': '202511',
-            },
-            body: JSON.stringify(updatePayload)
-          });
-          
-          if (updateResponse.ok) {
-            console.log('[update_campaign_targeting] Success!');
-            return new Response(JSON.stringify({ 
-              success: true,
-              message: `Targeting ${mode === 'append' ? 'appended' : 'replaced'} successfully`,
-              titlesAdded: titleUrns?.length || 0,
-              skillsAdded: skillUrns?.length || 0,
-            }), {
-              headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-            });
-          } else {
-            const errorText = await updateResponse.text();
-            console.log(`[update_campaign_targeting] Failed: ${updateResponse.status} - ${errorText}`);
             
-            // Parse LinkedIn API error
-            let errorMessage = `Update failed: ${updateResponse.status}`;
-            try {
-              const errorJson = JSON.parse(errorText);
-              errorMessage = errorJson.message || errorJson.error || errorMessage;
-            } catch {}
+            // Build targeting criteria
+            let targetingCriteria: any;
             
-            return new Response(JSON.stringify({ 
-              success: false,
-              message: errorMessage,
-              status: updateResponse.status
-            }), {
-              status: updateResponse.status,
-              headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+            if (mode === 'replace') {
+              const existingAndClauses: any[] = existingTargeting?.include?.and || [];
+              
+              const requiredFacetPrefixes = [
+                'urn:li:adTargetingFacet:locations',
+                'urn:li:adTargetingFacet:profileLocations', 
+                'urn:li:adTargetingFacet:ipLocations',
+                'urn:li:adTargetingFacet:interfaceLocales',
+                'urn:li:adTargetingFacet:locales',
+              ];
+              
+              const replacedFacets = [
+                'urn:li:adTargetingFacet:titles',
+                'urn:li:adTargetingFacet:skills',
+              ];
+              
+              const preservedClauses = existingAndClauses.filter((clause: any) => {
+                if (!clause.or) return true;
+                const facetKeys = Object.keys(clause.or);
+                const hasRequiredFacet = facetKeys.some(key => 
+                  requiredFacetPrefixes.some(prefix => key.startsWith(prefix))
+                );
+                const hasReplacedFacet = facetKeys.some(key =>
+                  replacedFacets.includes(key)
+                );
+                return hasRequiredFacet || !hasReplacedFacet;
+              });
+              
+              const newAndClauses = [...preservedClauses];
+              
+              if (titleUrns && titleUrns.length > 0) {
+                newAndClauses.push({
+                  or: { 'urn:li:adTargetingFacet:titles': titleUrns }
+                });
+              }
+              
+              if (skillUrns && skillUrns.length > 0) {
+                newAndClauses.push({
+                  or: { 'urn:li:adTargetingFacet:skills': skillUrns }
+                });
+              }
+              
+              targetingCriteria = {
+                include: { and: newAndClauses },
+                exclude: existingTargeting?.exclude || {}
+              };
+            } else {
+              // APPEND MODE
+              const existingAndClauses: any[] = existingTargeting?.include?.and || [];
+              const newAndClauses = [...existingAndClauses];
+              
+              if (titleUrns && titleUrns.length > 0) {
+                newAndClauses.push({
+                  or: { 'urn:li:adTargetingFacet:titles': titleUrns }
+                });
+              }
+              
+              if (skillUrns && skillUrns.length > 0) {
+                newAndClauses.push({
+                  or: { 'urn:li:adTargetingFacet:skills': skillUrns }
+                });
+              }
+              
+              targetingCriteria = {
+                include: { and: newAndClauses },
+                exclude: existingTargeting?.exclude || {}
+              };
+            }
+            
+            // Perform PATCH update
+            const updateUrl = `https://api.linkedin.com/v2/adCampaignsV2/${currentCampaignId}`;
+            const updatePayload = {
+              patch: {
+                $set: {
+                  targetingCriteria
+                }
+              }
+            };
+            
+            const updateResponse = await fetch(updateUrl, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'Content-Type': 'application/json',
+                'X-Restli-Method': 'partial_update',
+                'X-Restli-Protocol-Version': '2.0.0',
+                'LinkedIn-Version': '202511',
+              },
+              body: JSON.stringify(updatePayload)
             });
+            
+            if (updateResponse.ok) {
+              results.push({ campaignId: currentCampaignId, success: true, message: 'Updated' });
+            } else {
+              const errorText = await updateResponse.text();
+              let errorMessage = `Failed: ${updateResponse.status}`;
+              try {
+                const errorJson = JSON.parse(errorText);
+                errorMessage = errorJson.message || errorMessage;
+              } catch {}
+              results.push({ campaignId: currentCampaignId, success: false, message: errorMessage });
+            }
+          } catch (err) {
+            const message = err instanceof Error ? err.message : 'Unknown error';
+            results.push({ campaignId: currentCampaignId, success: false, message });
           }
-        } catch (updateError) {
-          console.error('[update_campaign_targeting] Error:', updateError);
-          throw updateError;
+          
+          // Small delay between campaign updates
+          if (idsToUpdate.length > 1) {
+            await new Promise(resolve => setTimeout(resolve, 200));
+          }
         }
+        
+        const successCount = results.filter(r => r.success).length;
+        const allSuccess = successCount === idsToUpdate.length;
+        
+        console.log(`[update_campaign_targeting] Completed: ${successCount}/${idsToUpdate.length} successful`);
+        
+        return new Response(JSON.stringify({ 
+          success: allSuccess,
+          message: allSuccess 
+            ? `Targeting ${mode === 'append' ? 'appended' : 'replaced'} on ${successCount} campaign(s)`
+            : `${successCount}/${idsToUpdate.length} campaigns updated`,
+          results,
+          titlesAdded: titleUrns?.length || 0,
+          skillsAdded: skillUrns?.length || 0,
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
       }
 
       default:

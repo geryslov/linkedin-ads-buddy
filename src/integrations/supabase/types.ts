@@ -80,6 +80,39 @@ export type Database = {
         }
         Relationships: []
       }
+      saved_targeting_audiences: {
+        Row: {
+          account_id: string
+          created_at: string | null
+          description: string | null
+          entities: Json
+          id: string
+          name: string
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          account_id: string
+          created_at?: string | null
+          description?: string | null
+          entities?: Json
+          id?: string
+          name: string
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          account_id?: string
+          created_at?: string | null
+          description?: string | null
+          entities?: Json
+          id?: string
+          name?: string
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       title_function_map: {
         Row: {
           confidence: number
