@@ -2,7 +2,6 @@ import { useState, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Popover,
   PopoverContent,
@@ -117,7 +116,7 @@ export function CampaignSearchSelect({
               value={search}
               onValueChange={setSearch}
             />
-            <CommandList>
+            <CommandList className="max-h-[300px]">
               <CommandEmpty>No campaigns found.</CommandEmpty>
               <CommandGroup>
                 {/* Select All Active Button */}
@@ -136,28 +135,26 @@ export function CampaignSearchSelect({
                 )}
                 
                 {/* Campaign List */}
-                <ScrollArea className="max-h-[250px]">
-                  {filteredCampaigns.map((campaign) => {
-                    const isSelected = selectedCampaignIds.includes(campaign.id);
-                    return (
-                      <CommandItem
-                        key={campaign.id}
-                        onSelect={() => toggleCampaign(campaign.id)}
-                        className="flex items-center gap-2 cursor-pointer"
-                      >
-                        <Checkbox 
-                          checked={isSelected}
-                          className="pointer-events-none"
-                        />
-                        <span className={`w-2 h-2 rounded-full ${getStatusColor(campaign.status)}`} />
-                        <span className="truncate flex-1">{campaign.name}</span>
-                        <Badge variant="outline" className="text-xs ml-auto">
-                          {campaign.status}
-                        </Badge>
-                      </CommandItem>
-                    );
-                  })}
-                </ScrollArea>
+                {filteredCampaigns.map((campaign) => {
+                  const isSelected = selectedCampaignIds.includes(campaign.id);
+                  return (
+                    <CommandItem
+                      key={campaign.id}
+                      onSelect={() => toggleCampaign(campaign.id)}
+                      className="flex items-center gap-2 cursor-pointer"
+                    >
+                      <Checkbox 
+                        checked={isSelected}
+                        className="pointer-events-none"
+                      />
+                      <span className={`w-2 h-2 rounded-full ${getStatusColor(campaign.status)}`} />
+                      <span className="truncate flex-1">{campaign.name}</span>
+                      <Badge variant="outline" className="text-xs ml-auto">
+                        {campaign.status}
+                      </Badge>
+                    </CommandItem>
+                  );
+                })}
               </CommandGroup>
             </CommandList>
           </Command>
