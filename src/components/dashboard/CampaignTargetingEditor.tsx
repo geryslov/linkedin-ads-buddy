@@ -441,8 +441,8 @@ export function CampaignTargetingEditor({
                 </div>
                 <p className="text-xs text-muted-foreground">
                   {updateMode === 'append' 
-                    ? 'Add to existing targeting criteria' 
-                    : 'Replace all existing targeting criteria'}
+                    ? 'Add as AND condition to narrow existing audience' 
+                    : 'Remove all existing targeting and use only selected'}
                 </p>
               </div>
               
