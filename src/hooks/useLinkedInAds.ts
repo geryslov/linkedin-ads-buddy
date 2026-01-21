@@ -8,6 +8,7 @@ export interface AdAccount {
   name: string;
   currency: string;
   status: string;
+  type: string; // BUSINESS, ENTERPRISE, etc.
   userRole: string;
   accessSource: string;
   canWrite: boolean;
@@ -48,6 +49,8 @@ export function useLinkedInAds(accessToken: string | null) {
   const [audiences, setAudiences] = useState<Audience[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingDefault, setIsLoadingDefault] = useState(true);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const { toast } = useToast();
 
   // Load default account from database on mount
@@ -68,6 +71,19 @@ export function useLinkedInAds(accessToken: string | null) {
 
       if (error && error.code !== 'PGRST116') { // PGRST116 = no rows
         console.error('Error loading default account:', error);
+      }
+
+      // Also load last synced time from linkedin_ad_accounts
+      const { data: syncData } = await supabase
+        .from('linkedin_ad_accounts')
+        .select('last_synced_at')
+        .eq('user_id', session.user.id)
+        .order('last_synced_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (syncData?.last_synced_at) {
+        setLastSyncedAt(syncData.last_synced_at);
       }
 
       setIsLoadingDefault(false);
@@ -153,6 +169,7 @@ export function useLinkedInAds(accessToken: string | null) {
         name: el.name,
         currency: el.currency,
         status: el.status,
+        type: el.type || 'UNKNOWN',
         userRole: el.userRole || 'UNKNOWN',
         accessSource: el.accessSource || 'unknown',
         canWrite: el.canWrite ?? false,
@@ -185,6 +202,73 @@ export function useLinkedInAds(accessToken: string | null) {
       setIsLoading(false);
     }
   }, [accessToken, loadDefaultAccount, setDefaultAccount, toast]);
+
+  // Sync ad accounts - fetches from LinkedIn and caches to database
+  const syncAdAccounts = useCallback(async () => {
+    if (!accessToken) return { success: false };
+    setIsSyncing(true);
+    
+    try {
+      const { data, error } = await supabase.functions.invoke('linkedin-api', {
+        body: { action: 'sync_ad_accounts', accessToken }
+      });
+
+      if (error) throw error;
+      
+      if (!data.success && data.error) {
+        throw new Error(data.error);
+      }
+
+      const accounts: AdAccount[] = (data.accounts || []).map((el: any) => ({
+        id: el.id.toString(),
+        accountUrn: el.accountUrn || `urn:li:sponsoredAccount:${el.id}`,
+        name: el.name,
+        currency: el.currency,
+        status: el.status,
+        type: el.type || 'UNKNOWN',
+        userRole: el.userRole || 'UNKNOWN',
+        accessSource: el.accessSource || 'unknown',
+        canWrite: el.canWrite ?? false,
+        isDefault: el.id.toString() === selectedAccount,
+      }));
+      
+      setAdAccounts(accounts);
+      setLastSyncedAt(data.syncedAt);
+
+      // If default was invalidated, clear selection and show warning
+      if (data.defaultInvalidated) {
+        setSelectedAccount(null);
+        toast({
+          title: 'Account Access Changed',
+          description: 'Your default account is no longer accessible. Please select another.',
+          variant: 'destructive',
+        });
+      } else {
+        toast({
+          title: 'Accounts Synced',
+          description: `Found ${accounts.length} ad account${accounts.length !== 1 ? 's' : ''}`,
+        });
+      }
+
+      // Auto-select if only one account
+      if (accounts.length === 1 && !selectedAccount) {
+        setSelectedAccount(accounts[0].id);
+        await setDefaultAccount(accounts[0].id);
+      }
+
+      return { success: true, accounts };
+    } catch (error: any) {
+      console.error('Sync ad accounts error:', error);
+      toast({
+        title: 'Sync Failed',
+        description: error.message || 'Could not refresh ad accounts from LinkedIn',
+        variant: 'destructive',
+      });
+      return { success: false };
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [accessToken, selectedAccount, setDefaultAccount, toast]);
 
   const fetchCampaigns = useCallback(async (accountId?: string) => {
     if (!accessToken) return;
@@ -315,6 +399,30 @@ export function useLinkedInAds(accessToken: string | null) {
 
       if (error) throw error;
       
+      // Handle specific error codes from the response
+      if (data.errorCode) {
+        if (data.errorCode === 'TOKEN_EXPIRED') {
+          toast({
+            title: 'Session Expired',
+            description: data.message || 'Please re-authenticate with LinkedIn.',
+            variant: 'destructive',
+          });
+        } else if (data.errorCode === 'PERMISSION_DENIED' || data.errorCode === 'ROLE_INSUFFICIENT') {
+          toast({
+            title: 'Access Denied',
+            description: data.message || 'You don\'t have permission for this action.',
+            variant: 'destructive',
+          });
+        } else {
+          toast({
+            title: 'Error',
+            description: data.message || 'Failed to update campaign status',
+            variant: 'destructive',
+          });
+        }
+        return false;
+      }
+      
       if (data.success) {
         toast({
           title: 'Success',
@@ -347,6 +455,8 @@ export function useLinkedInAds(accessToken: string | null) {
     audiences,
     isLoading,
     isLoadingDefault,
+    isSyncing,
+    lastSyncedAt,
     currentAccountCanWrite,
     fetchAdAccounts,
     fetchCampaigns,
@@ -354,5 +464,6 @@ export function useLinkedInAds(accessToken: string | null) {
     fetchAudiences,
     updateCampaignStatus,
     setDefaultAccount,
+    syncAdAccounts,
   };
 }
