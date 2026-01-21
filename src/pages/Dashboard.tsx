@@ -32,11 +32,13 @@ export default function Dashboard() {
     analytics,
     audiences,
     isLoading,
+    currentAccountCanWrite,
     fetchAdAccounts,
     fetchCampaigns,
     fetchAnalytics,
     fetchAudiences,
     updateCampaignStatus,
+    setDefaultAccount,
   } = useLinkedInAds(accessToken);
 
   const [activeTab, setActiveTab] = useState("overview");
@@ -125,6 +127,7 @@ export default function Dashboard() {
               accounts={adAccounts}
               selectedAccount={selectedAccount}
               onSelect={handleAccountChange}
+              onSetDefault={setDefaultAccount}
             />
             <Button 
               variant="outline" 
@@ -298,6 +301,7 @@ export default function Dashboard() {
           <ReportingSection 
             accessToken={accessToken} 
             selectedAccount={selectedAccount}
+            canWrite={currentAccountCanWrite}
           />
         )}
       </main>

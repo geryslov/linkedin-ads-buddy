@@ -36,9 +36,10 @@ import { supabase } from '@/integrations/supabase/client';
 interface ReportingSectionProps {
   accessToken: string | null;
   selectedAccount: string | null;
+  canWrite?: boolean;
 }
 
-export function ReportingSection({ accessToken, selectedAccount }: ReportingSectionProps) {
+export function ReportingSection({ accessToken, selectedAccount, canWrite = false }: ReportingSectionProps) {
   const demographicReporting = useDemographicReporting(accessToken);
   const companyDemographic = useCompanyDemographic(accessToken);
   const creativeNamesReport = useCreativeNamesReport(accessToken);
@@ -908,6 +909,7 @@ export function ReportingSection({ accessToken, selectedAccount }: ReportingSect
               name: c.campaignName,
               status: c.status,
             }))}
+            canWrite={canWrite}
             onRefreshCampaigns={() => {
               if (selectedAccount) {
                 campaignReporting.fetchCampaignReport(selectedAccount);

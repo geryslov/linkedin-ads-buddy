@@ -42,6 +42,7 @@ interface CampaignTargetingEditorProps {
   accessToken: string | null;
   selectedAccount: string | null;
   campaigns: Campaign[];
+  canWrite: boolean;
   onRefreshCampaigns: () => void;
 }
 
@@ -49,6 +50,7 @@ export function CampaignTargetingEditor({
   accessToken, 
   selectedAccount, 
   campaigns,
+  canWrite,
   onRefreshCampaigns 
 }: CampaignTargetingEditorProps) {
   const { toast } = useToast();
@@ -446,17 +448,35 @@ export function CampaignTargetingEditor({
                 </p>
               </div>
               
+              {/* Permission Warning for Viewers */}
+              {!canWrite && (
+                <div className="flex items-center gap-3 p-4 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400">
+                  <AlertCircle className="h-5 w-5 shrink-0" />
+                  <div className="text-sm">
+                    <p className="font-medium">Viewer Access Only</p>
+                    <p className="text-amber-400/80">
+                      You have read-only access to this account. Contact your Campaign Manager for write permissions.
+                    </p>
+                  </div>
+                </div>
+              )}
+              
               {/* Apply Button */}
               <Button
                 className="w-full"
                 size="lg"
                 onClick={handleApplyTargeting}
-                disabled={isUpdating || selectedEntities.length === 0 || !selectedCampaignId}
+                disabled={isUpdating || selectedEntities.length === 0 || !selectedCampaignId || !canWrite}
               >
                 {isUpdating ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     Updating...
+                  </>
+                ) : !canWrite ? (
+                  <>
+                    <AlertCircle className="mr-2 h-4 w-4" />
+                    Viewer Access - Cannot Apply
                   </>
                 ) : (
                   <>
@@ -466,7 +486,7 @@ export function CampaignTargetingEditor({
                 )}
               </Button>
               
-              {selectedCampaign && (
+              {selectedCampaign && canWrite && (
                 <p className="text-xs text-center text-muted-foreground">
                   Targeting will be applied to: <strong>{selectedCampaign.name}</strong>
                 </p>

@@ -619,12 +619,25 @@ serve(async (req) => {
           }
         }
         
-        // Combine and filter for ACTIVE status
-        const allAccounts = Array.from(accountsMap.values()).filter(
-          (acc: any) => acc.status === 'ACTIVE'
-        );
+        // Roles that allow write operations (create/update campaigns, targeting, etc.)
+        const writeCapableRoles = ['ACCOUNT_MANAGER', 'CAMPAIGN_MANAGER', 'CREATIVE_MANAGER'];
+        
+        // Combine and filter for ACTIVE status, add canWrite and accountUrn
+        const allAccounts = Array.from(accountsMap.values())
+          .filter((acc: any) => acc.status === 'ACTIVE')
+          .map((acc: any) => ({
+            id: String(acc.id),
+            accountUrn: `urn:li:sponsoredAccount:${acc.id}`,
+            name: acc.name || `Account ${acc.id}`,
+            currency: acc.currency || 'USD',
+            status: acc.status,
+            userRole: acc.userRole || 'UNKNOWN',
+            accessSource: acc.accessSource || 'unknown',
+            canWrite: writeCapableRoles.includes(acc.userRole || ''),
+          }));
         
         console.log(`[get_ad_accounts] Total unique accounts: ${allAccounts.length}`);
+        console.log(`[get_ad_accounts] Accounts with write access: ${allAccounts.filter(a => a.canWrite).length}`);
         
         return new Response(JSON.stringify({ elements: allAccounts }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },

@@ -153,26 +153,35 @@ export type Database = {
         Row: {
           account_id: string
           account_name: string | null
+          can_write: boolean | null
           id: string
+          is_default: boolean | null
           last_accessed_at: string | null
           linked_at: string
           user_id: string
+          user_role: string | null
         }
         Insert: {
           account_id: string
           account_name?: string | null
+          can_write?: boolean | null
           id?: string
+          is_default?: boolean | null
           last_accessed_at?: string | null
           linked_at?: string
           user_id: string
+          user_role?: string | null
         }
         Update: {
           account_id?: string
           account_name?: string | null
+          can_write?: boolean | null
           id?: string
+          is_default?: boolean | null
           last_accessed_at?: string | null
           linked_at?: string
           user_id?: string
+          user_role?: string | null
         }
         Relationships: []
       }
