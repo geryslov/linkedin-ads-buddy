@@ -4871,65 +4871,109 @@ serve(async (req) => {
         console.log(`[update_campaign_targeting] Titles: ${titleUrns?.length || 0}, Skills: ${skillUrns?.length || 0}`);
         
         try {
-          // First, get current campaign targeting criteria if appending
+          // Always fetch current campaign targeting to preserve non-title/skill facets
           let existingTargeting: any = null;
           
-          if (mode === 'append') {
-            const campaignUrl = `https://api.linkedin.com/v2/adCampaignsV2/${campaignId}`;
-            const campaignResponse = await fetch(campaignUrl, {
-              headers: {
-                'Authorization': `Bearer ${accessToken}`,
-                'X-Restli-Protocol-Version': '2.0.0',
-                'LinkedIn-Version': '202511',
-              }
-            });
-            
-            if (campaignResponse.ok) {
-              const campaignData = await campaignResponse.json();
-              existingTargeting = campaignData.targetingCriteria || {};
-              console.log('[update_campaign_targeting] Existing targeting:', JSON.stringify(existingTargeting));
-            } else {
-              console.log(`[update_campaign_targeting] Could not fetch campaign: ${campaignResponse.status}`);
+          const campaignUrl = `https://api.linkedin.com/v2/adCampaignsV2/${campaignId}`;
+          const campaignResponse = await fetch(campaignUrl, {
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+              'X-Restli-Protocol-Version': '2.0.0',
+              'LinkedIn-Version': '202511',
             }
+          });
+          
+          if (campaignResponse.ok) {
+            const campaignData = await campaignResponse.json();
+            existingTargeting = campaignData.targetingCriteria || {};
+            console.log('[update_campaign_targeting] Existing targeting structure:', JSON.stringify(existingTargeting, null, 2));
+          } else {
+            console.log(`[update_campaign_targeting] Could not fetch campaign: ${campaignResponse.status}`);
+            // Continue without existing targeting - will create fresh structure
           }
           
           // Build targeting criteria
-          // LinkedIn uses 'include' and 'exclude' with facets
-          const include: any = {};
+          // LinkedIn uses 'include.and[]' structure with 'or' objects for facets
+          let targetingCriteria: any;
           
-          // If appending, start with existing includes
-          if (mode === 'append' && existingTargeting?.include) {
-            Object.assign(include, existingTargeting.include);
-          }
-          
-          // Add titles if provided
-          if (titleUrns && titleUrns.length > 0) {
-            // LinkedIn uses 'urn:li:adTargetingFacet:titles' for job titles
-            const existingTitles = include['urn:li:adTargetingFacet:titles'] || [];
-            const newTitles = titleUrns.filter((urn: string) => !existingTitles.includes(urn));
-            include['urn:li:adTargetingFacet:titles'] = mode === 'append' 
-              ? [...existingTitles, ...newTitles]
-              : titleUrns;
-            console.log(`[update_campaign_targeting] Final titles: ${include['urn:li:adTargetingFacet:titles'].length}`);
-          }
-          
-          // Add skills if provided
-          if (skillUrns && skillUrns.length > 0) {
-            // LinkedIn uses 'urn:li:adTargetingFacet:skills' for skills
-            const existingSkills = include['urn:li:adTargetingFacet:skills'] || [];
-            const newSkills = skillUrns.filter((urn: string) => !existingSkills.includes(urn));
-            include['urn:li:adTargetingFacet:skills'] = mode === 'append'
-              ? [...existingSkills, ...newSkills]
-              : skillUrns;
-            console.log(`[update_campaign_targeting] Final skills: ${include['urn:li:adTargetingFacet:skills'].length}`);
-          }
-          
-          // Build the targeting criteria update payload
-          const targetingCriteria: any = { include };
-          
-          // Keep existing exclude if appending
-          if (mode === 'append' && existingTargeting?.exclude) {
-            targetingCriteria.exclude = existingTargeting.exclude;
+          if (mode === 'replace') {
+            // For replace mode: build fresh targeting with only the new titles/skills
+            // Keep existing non-title/skill facets (locations, staff ranges, etc.)
+            const existingAndClauses: any[] = existingTargeting?.include?.and || [];
+            
+            // Filter out existing title and skill facets
+            const preservedClauses = existingAndClauses.filter((clause: any) => {
+              if (!clause.or) return true;
+              const keys = Object.keys(clause.or);
+              return !keys.some(k => 
+                k === 'urn:li:adTargetingFacet:titles' || 
+                k === 'urn:li:adTargetingFacet:skills'
+              );
+            });
+            
+            // Add new title facet if provided
+            if (titleUrns && titleUrns.length > 0) {
+              preservedClauses.push({
+                or: { 'urn:li:adTargetingFacet:titles': titleUrns }
+              });
+              console.log(`[update_campaign_targeting] Replace mode - titles: ${titleUrns.length}`);
+            }
+            
+            // Add new skill facet if provided
+            if (skillUrns && skillUrns.length > 0) {
+              preservedClauses.push({
+                or: { 'urn:li:adTargetingFacet:skills': skillUrns }
+              });
+              console.log(`[update_campaign_targeting] Replace mode - skills: ${skillUrns.length}`);
+            }
+            
+            targetingCriteria = {
+              include: { and: preservedClauses },
+              exclude: existingTargeting?.exclude || {}
+            };
+          } else {
+            // For append mode: add to existing facets
+            const existingAndClauses: any[] = existingTargeting?.include?.and || [];
+            const newAndClauses = [...existingAndClauses];
+            
+            // Find and update title facet
+            if (titleUrns && titleUrns.length > 0) {
+              const titleClauseIdx = newAndClauses.findIndex((clause: any) => 
+                clause.or && clause.or['urn:li:adTargetingFacet:titles']
+              );
+              
+              if (titleClauseIdx >= 0) {
+                const existingTitles = newAndClauses[titleClauseIdx].or['urn:li:adTargetingFacet:titles'] || [];
+                const merged = [...new Set([...existingTitles, ...titleUrns])];
+                newAndClauses[titleClauseIdx] = { or: { 'urn:li:adTargetingFacet:titles': merged } };
+                console.log(`[update_campaign_targeting] Append mode - merged titles: ${merged.length}`);
+              } else {
+                newAndClauses.push({ or: { 'urn:li:adTargetingFacet:titles': titleUrns } });
+                console.log(`[update_campaign_targeting] Append mode - added new titles: ${titleUrns.length}`);
+              }
+            }
+            
+            // Find and update skill facet
+            if (skillUrns && skillUrns.length > 0) {
+              const skillClauseIdx = newAndClauses.findIndex((clause: any) => 
+                clause.or && clause.or['urn:li:adTargetingFacet:skills']
+              );
+              
+              if (skillClauseIdx >= 0) {
+                const existingSkills = newAndClauses[skillClauseIdx].or['urn:li:adTargetingFacet:skills'] || [];
+                const merged = [...new Set([...existingSkills, ...skillUrns])];
+                newAndClauses[skillClauseIdx] = { or: { 'urn:li:adTargetingFacet:skills': merged } };
+                console.log(`[update_campaign_targeting] Append mode - merged skills: ${merged.length}`);
+              } else {
+                newAndClauses.push({ or: { 'urn:li:adTargetingFacet:skills': skillUrns } });
+                console.log(`[update_campaign_targeting] Append mode - added new skills: ${skillUrns.length}`);
+              }
+            }
+            
+            targetingCriteria = {
+              include: { and: newAndClauses },
+              exclude: existingTargeting?.exclude || {}
+            };
           }
           
           // Perform PATCH update
