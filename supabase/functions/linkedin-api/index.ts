@@ -5163,17 +5163,18 @@ serve(async (req) => {
 
       case 'update_campaign_targeting': {
         // Support both single campaignId and array of campaignIds
-        const { campaignId, campaignIds, accountId, titleUrns, skillUrns, mode } = params;
+        // NOTE: accountId is no longer required - derived from campaign
+        const { campaignId, campaignIds, titleUrns, skillUrns, mode } = params;
         
         // Normalize to array
         const idsToUpdate: string[] = campaignIds && Array.isArray(campaignIds) 
           ? campaignIds 
           : (campaignId ? [campaignId] : []);
         
-        if (idsToUpdate.length === 0 || !accountId) {
+        if (idsToUpdate.length === 0) {
           return new Response(JSON.stringify({ 
             success: false, 
-            message: 'Campaign ID(s) and Account ID are required' 
+            message: 'Campaign ID(s) are required' 
           }), {
             status: 400,
             headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -5183,12 +5184,34 @@ serve(async (req) => {
         console.log(`[update_campaign_targeting] Updating ${idsToUpdate.length} campaigns, Mode: ${mode}`);
         console.log(`[update_campaign_targeting] Titles: ${titleUrns?.length || 0}, Skills: ${skillUrns?.length || 0}`);
         
-        const results: { campaignId: string; success: boolean; message: string; errorCode?: string }[] = [];
+        // Initialize Supabase client for permission checks
+        const authHeader = req.headers.get('Authorization');
+        const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
+        const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!;
+        const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+        
+        const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+          global: { headers: { Authorization: authHeader || '' } }
+        });
+        
+        const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
+        if (userError || !user) {
+          return new Response(JSON.stringify({ 
+            success: false, 
+            message: 'Authentication required' 
+          }), {
+            status: 401,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+        
+        const results: { campaignId: string; success: boolean; message: string; errorCode?: string; accountId?: string }[] = [];
         
         for (const currentCampaignId of idsToUpdate) {
           try {
-            // Fetch current campaign targeting to preserve non-title/skill facets
+            // Step 1: Fetch campaign to get targeting AND derive account
             let existingTargeting: any = null;
+            let campaignAccountUrn: string | null = null;
             
             const campaignUrl = `https://api.linkedin.com/v2/adCampaignsV2/${currentCampaignId}`;
             const campaignResponse = await fetch(campaignUrl, {
@@ -5202,9 +5225,145 @@ serve(async (req) => {
             if (campaignResponse.ok) {
               const campaignData = await campaignResponse.json();
               existingTargeting = campaignData.targetingCriteria || {};
+              
+              // Extract account URN from campaign (commonly: account or accountUrn field)
+              campaignAccountUrn = campaignData.account || campaignData.accountUrn || null;
+              console.log(`[update_campaign_targeting] Campaign ${currentCampaignId} belongs to account: ${campaignAccountUrn}`);
+            } else {
+              const errText = await campaignResponse.text();
+              console.error(`[update_campaign_targeting] Failed to fetch campaign ${currentCampaignId}: ${campaignResponse.status}`, errText);
+              results.push({
+                campaignId: currentCampaignId,
+                success: false,
+                message: `Could not fetch campaign: ${campaignResponse.status}`,
+                errorCode: 'CAMPAIGN_FETCH_FAILED'
+              });
+              continue;
             }
             
-            // Build targeting criteria
+            // Step 2: Derive accountId from URN
+            const derivedAccountId = campaignAccountUrn?.split(':').pop() || null;
+            
+            if (!derivedAccountId) {
+              console.error(`[update_campaign_targeting] Missing account URN on campaign ${currentCampaignId}`);
+              results.push({
+                campaignId: currentCampaignId,
+                success: false,
+                message: 'Could not determine ad account for this campaign.',
+                errorCode: 'ACCOUNT_NOT_FOUND_ON_CAMPAIGN'
+              });
+              continue;
+            }
+            
+            // Step 3: Check cached permissions from linkedin_ad_accounts table
+            let { data: accRow, error: accErr } = await supabaseClient
+              .from('linkedin_ad_accounts')
+              .select('can_write, user_role, account_urn')
+              .eq('user_id', user.id)
+              .eq('account_id', derivedAccountId)
+              .maybeSingle();
+            
+            // If not in cache, attempt to sync accounts and retry once
+            if (!accRow) {
+              console.log(`[update_campaign_targeting] Account ${derivedAccountId} not in cache, triggering discovery...`);
+              
+              // Inline minimal discovery for this specific account
+              try {
+                const accResponse = await fetch(
+                  `https://api.linkedin.com/v2/adAccountsV2/${derivedAccountId}`,
+                  { headers: { 'Authorization': `Bearer ${accessToken}` } }
+                );
+                
+                if (accResponse.ok) {
+                  const accData = await accResponse.json();
+                  
+                  // Get user's role on this account
+                  let userRole = 'UNKNOWN';
+                  try {
+                    const usersResponse = await fetch(
+                      'https://api.linkedin.com/rest/adAccountUsers?q=authenticatedUser',
+                      {
+                        headers: {
+                          'Authorization': `Bearer ${accessToken}`,
+                          'LinkedIn-Version': '202511',
+                          'X-Restli-Protocol-Version': '2.0.0',
+                        },
+                      }
+                    );
+                    if (usersResponse.ok) {
+                      const usersData = await usersResponse.json();
+                      for (const el of (usersData?.elements || [])) {
+                        const accountId = (el.account || '').split(':').pop();
+                        if (accountId === derivedAccountId) {
+                          userRole = el.role || 'UNKNOWN';
+                          break;
+                        }
+                      }
+                    }
+                  } catch (e) {
+                    console.log('[update_campaign_targeting] Could not fetch user role:', e);
+                  }
+                  
+                  const writeCapableRoles = ['ACCOUNT_MANAGER', 'CAMPAIGN_MANAGER', 'CREATIVE_MANAGER'];
+                  const canWrite = writeCapableRoles.includes(userRole);
+                  
+                  // Upsert to cache
+                  await supabaseClient
+                    .from('linkedin_ad_accounts')
+                    .upsert({
+                      user_id: user.id,
+                      account_id: derivedAccountId,
+                      account_urn: `urn:li:sponsoredAccount:${derivedAccountId}`,
+                      name: accData.name || `Account ${derivedAccountId}`,
+                      status: accData.status || 'ACTIVE',
+                      type: accData.type || 'UNKNOWN',
+                      currency: accData.currency || 'USD',
+                      user_role: userRole,
+                      can_write: canWrite,
+                      last_synced_at: new Date().toISOString(),
+                    }, { onConflict: 'user_id,account_id' });
+                  
+                  // Re-query
+                  const { data: accRow2 } = await supabaseClient
+                    .from('linkedin_ad_accounts')
+                    .select('can_write, user_role, account_urn')
+                    .eq('user_id', user.id)
+                    .eq('account_id', derivedAccountId)
+                    .maybeSingle();
+                  
+                  accRow = accRow2;
+                }
+              } catch (discoverErr) {
+                console.error('[update_campaign_targeting] Discovery failed:', discoverErr);
+              }
+              
+              // If still not found after discovery
+              if (!accRow) {
+                results.push({
+                  campaignId: currentCampaignId,
+                  success: false,
+                  message: 'This campaign belongs to an ad account you cannot access in this app.',
+                  errorCode: 'ACCOUNT_NOT_ACCESSIBLE',
+                  accountId: derivedAccountId
+                });
+                continue;
+              }
+            }
+            
+            // Step 4: Gate on can_write - don't even attempt PATCH if false
+            if (!accRow.can_write) {
+              console.log(`[update_campaign_targeting] User lacks write permission on account ${derivedAccountId} (role: ${accRow.user_role})`);
+              results.push({
+                campaignId: currentCampaignId,
+                success: false,
+                message: `You don't have a write-capable role on this ad account (role: ${accRow.user_role || 'UNKNOWN'}). Needs Account/Campaign Manager.`,
+                errorCode: 'ROLE_INSUFFICIENT',
+                accountId: derivedAccountId
+              });
+              continue;
+            }
+            
+            // Step 5: Build targeting criteria
             let targetingCriteria: any;
             
             if (mode === 'replace') {
@@ -5276,7 +5435,7 @@ serve(async (req) => {
               };
             }
             
-            // Perform PATCH update
+            // Step 6: Perform PATCH update
             const updateUrl = `https://api.linkedin.com/v2/adCampaignsV2/${currentCampaignId}`;
             const updatePayload = {
               patch: {
@@ -5299,7 +5458,12 @@ serve(async (req) => {
             });
             
             if (updateResponse.ok) {
-              results.push({ campaignId: currentCampaignId, success: true, message: 'Updated' });
+              results.push({ 
+                campaignId: currentCampaignId, 
+                success: true, 
+                message: 'Updated',
+                accountId: derivedAccountId 
+              });
             } else {
               const errorText = await updateResponse.text();
               console.error(`[update_campaign_targeting] LinkedIn error for campaign ${currentCampaignId}: ${updateResponse.status}`, errorText);
@@ -5353,7 +5517,8 @@ serve(async (req) => {
                 campaignId: currentCampaignId, 
                 success: false, 
                 message: errorMessage,
-                errorCode 
+                errorCode,
+                accountId: derivedAccountId
               });
             }
           } catch (err) {
