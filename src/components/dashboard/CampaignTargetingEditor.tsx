@@ -224,7 +224,8 @@ export function CampaignTargetingEditor({
   };
   
   const handleApplyTargeting = async () => {
-    if (!accessToken || !selectedAccount || selectedCampaignIds.length === 0) {
+    // NOTE: selectedAccount no longer required for API call - account is derived from campaign
+    if (!accessToken || selectedCampaignIds.length === 0) {
       toast({ 
         title: 'Missing selection', 
         description: 'Select at least one campaign to apply targeting.', 
@@ -248,13 +249,13 @@ export function CampaignTargetingEditor({
       const titleUrns = selectedEntities.filter(e => e.type === 'title').map(e => e.urn);
       const skillUrns = selectedEntities.filter(e => e.type === 'skill').map(e => e.urn);
       
+      // NOTE: accountId is no longer sent - backend derives it from campaign
       const { data, error } = await supabase.functions.invoke('linkedin-api', {
         body: {
           action: 'update_campaign_targeting',
           accessToken,
           params: {
             campaignIds: selectedCampaignIds,
-            accountId: selectedAccount,
             titleUrns,
             skillUrns,
             mode: updateMode,
