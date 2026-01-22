@@ -5311,13 +5311,33 @@ serve(async (req) => {
                 errorMessage = 'Your LinkedIn session has expired. Please re-authenticate.';
                 errorCode = 'TOKEN_EXPIRED';
               } else if (updateResponse.status === 403) {
-                // Check if it's a tier/permission issue
-                if (errorText.includes('ACCESS_DENIED') || errorText.includes('PERMISSION')) {
-                  errorMessage = 'This LinkedIn app is not approved to manage this ad account. Contact your admin or upgrade your app tier.';
-                  errorCode = 'PERMISSION_DENIED';
-                } else {
-                  errorMessage = 'You don\'t have write permissions for this account. Required role: Account Manager or Campaign Manager.';
+                // Robust 403 classification based on actual LinkedIn error messages
+                const txt = (errorText || '').toLowerCase();
+                
+                const isTierOrAllowlist =
+                  txt.includes('account management list') ||
+                  txt.includes('added the account id') ||
+                  txt.includes('add the account id') ||
+                  txt.includes('not authorized for this account') ||
+                  txt.includes('application is not authorized') ||
+                  txt.includes('not configured to access') ||
+                  txt.includes('not approved');
+                
+                const isRoleIssue =
+                  txt.includes('insufficient') ||
+                  txt.includes('do not have permission') ||
+                  txt.includes('does not have the required role') ||
+                  txt.includes('not have permission');
+                
+                if (isTierOrAllowlist) {
+                  errorMessage = 'LinkedIn blocked this write because the app isn\'t authorized for this ad account (Account Management allowlist / tier restriction).';
+                  errorCode = 'APP_NOT_AUTHORIZED_FOR_ACCOUNT';
+                } else if (isRoleIssue) {
+                  errorMessage = 'You don\'t have a write-capable role on this ad account (needs Account/Campaign/Creative Manager).';
                   errorCode = 'ROLE_INSUFFICIENT';
+                } else {
+                  errorMessage = 'LinkedIn denied this action (403). See error details for the exact restriction.';
+                  errorCode = 'FORBIDDEN';
                 }
               } else if (updateResponse.status === 400 || updateResponse.status === 404) {
                 errorMessage = 'Invalid account or campaign ID. The resource may have been deleted.';
