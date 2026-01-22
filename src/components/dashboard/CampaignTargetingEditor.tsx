@@ -277,19 +277,37 @@ export function CampaignTargetingEditor({
         setSelectedCampaignIds([]);
         onRefreshCampaigns();
       } else {
-        // Extract actual error messages from failed results
+        // Extract actual error messages and codes from failed results
         const failedResults = results.filter((r: any) => !r.success);
+        const errorCodes = failedResults.map((r: any) => r.errorCode).filter(Boolean);
         const errorMessages = failedResults
           .map((r: any) => r.message || 'Unknown error')
-          .filter((msg: string, idx: number, arr: string[]) => arr.indexOf(msg) === idx); // unique messages
+          .filter((msg: string, idx: number, arr: string[]) => arr.indexOf(msg) === idx);
         
-        const errorDetail = errorMessages.length > 0 
-          ? errorMessages.join('; ') 
-          : 'Check console for details';
+        // Check for specific error codes and provide actionable CTAs
+        const hasAllowlistError = errorCodes.includes('APP_NOT_AUTHORIZED_FOR_ACCOUNT');
+        const hasTokenError = errorCodes.includes('TOKEN_EXPIRED');
+        const hasRoleError = errorCodes.includes('ROLE_INSUFFICIENT');
+        
+        let toastTitle = 'Update Failed';
+        let toastDescription = '';
+        
+        if (hasAllowlistError) {
+          toastTitle = 'App Not Authorized';
+          toastDescription = 'This app isn\'t authorized for this account. Try another account or ask your admin to approve the LinkedIn app access (Developer Portal → Account Management).';
+        } else if (hasTokenError) {
+          toastTitle = 'Session Expired';
+          toastDescription = 'Your LinkedIn session has expired. Please log out and reconnect.';
+        } else if (hasRoleError) {
+          toastTitle = 'Insufficient Permissions';
+          toastDescription = 'You need Account Manager or Campaign Manager role on this ad account to make changes.';
+        } else {
+          toastDescription = `${successCount}/${totalCount} campaigns updated. ${errorMessages.join('; ') || 'Check console for details'}`;
+        }
         
         toast({ 
-          title: 'Update Failed', 
-          description: `${successCount}/${totalCount} campaigns updated. ${errorDetail}`,
+          title: toastTitle, 
+          description: toastDescription,
           variant: 'destructive'
         });
         
