@@ -264,7 +264,8 @@ export function CampaignTargetingEditor({
       
       if (error) throw error;
       
-      const successCount = data.results?.filter((r: any) => r.success).length || 0;
+      const results = data.results || [];
+      const successCount = results.filter((r: any) => r.success).length;
       const totalCount = selectedCampaignIds.length;
       
       if (successCount === totalCount) {
@@ -276,11 +277,24 @@ export function CampaignTargetingEditor({
         setSelectedCampaignIds([]);
         onRefreshCampaigns();
       } else {
+        // Extract actual error messages from failed results
+        const failedResults = results.filter((r: any) => !r.success);
+        const errorMessages = failedResults
+          .map((r: any) => r.message || 'Unknown error')
+          .filter((msg: string, idx: number, arr: string[]) => arr.indexOf(msg) === idx); // unique messages
+        
+        const errorDetail = errorMessages.length > 0 
+          ? errorMessages.join('; ') 
+          : 'Check console for details';
+        
         toast({ 
-          title: 'Partial Success', 
-          description: `${successCount}/${totalCount} campaigns updated. Check logs for details.`,
+          title: 'Update Failed', 
+          description: `${successCount}/${totalCount} campaigns updated. ${errorDetail}`,
           variant: 'destructive'
         });
+        
+        // Log detailed results for debugging
+        console.error('[CampaignTargetingEditor] Update results:', results);
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Update failed';
