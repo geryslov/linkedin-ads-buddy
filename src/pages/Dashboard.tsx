@@ -9,6 +9,7 @@ import { MetricCard } from "@/components/dashboard/MetricCard";
 import { CampaignTable } from "@/components/dashboard/CampaignTable";
 import { AudienceCard } from "@/components/dashboard/AudienceCard";
 import { ReportingSection } from "@/components/dashboard/ReportingSection";
+import { TitleCheckerPage } from "@/components/dashboard/TitleCheckerPage";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { 
@@ -120,6 +121,7 @@ export default function Dashboard() {
               {activeTab === "audiences" && "Audience Insights"}
               {activeTab === "analytics" && "Analytics & Reports"}
               {activeTab === "reports" && "Reports"}
+              {activeTab === "title_checker" && "Title Checker"}
             </h1>
             <p className="text-muted-foreground">
               Manage your LinkedIn advertising campaigns
@@ -304,10 +306,17 @@ export default function Dashboard() {
         )}
 
         {activeTab === "reports" && (
-          <ReportingSection 
-            accessToken={accessToken} 
+          <ReportingSection
+            accessToken={accessToken}
             selectedAccount={selectedAccount}
             canWrite={currentAccountCanWrite}
+          />
+        )}
+
+        {activeTab === "title_checker" && (
+          <TitleCheckerPage
+            accessToken={accessToken}
+            selectedAccount={selectedAccount}
           />
         )}
       </main>
