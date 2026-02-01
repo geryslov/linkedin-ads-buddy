@@ -20,7 +20,6 @@ import { LeadGenFormsTable } from './LeadGenFormsTable';
 import { CampaignMultiSelect } from './CampaignMultiSelect';
 import { JobTitleSearch } from './JobTitleSearch';
 import { SkillSearch } from './SkillSearch';
-import { SuperTitleChecker } from './SuperTitleChecker';
 import { CampaignTargetingEditor } from './CampaignTargetingEditor';
 import { TimeFrameSelector } from './TimeFrameSelector';
 import { MetricCard } from './MetricCard';
@@ -894,11 +893,6 @@ export function ReportingSection({ accessToken, selectedAccount, canWrite = fals
               Search and verify LinkedIn targeting entities for your ad campaigns
             </p>
           </div>
-
-          {/* Super Title Checker - Full Width */}
-          <SuperTitleChecker accessToken={accessToken} selectedAccount={selectedAccount} />
-
-          {/* Other Tools Grid */}
           <div className="grid gap-6 md:grid-cols-2">
             <JobTitleSearch accessToken={accessToken} selectedAccount={selectedAccount} />
             <SkillSearch accessToken={accessToken} selectedAccount={selectedAccount} />

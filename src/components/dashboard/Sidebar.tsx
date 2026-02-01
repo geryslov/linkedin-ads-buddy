@@ -10,6 +10,7 @@ import {
   LogOut,
   Linkedin,
   Shield,
+  Crown,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -26,6 +27,7 @@ const navItems = [
   { id: "audiences", label: "Audiences", icon: Users },
   { id: "analytics", label: "Analytics", icon: BarChart3 },
   { id: "reports", label: "Reports", icon: FileBarChart },
+  { id: "title_checker", label: "Title Checker", icon: Crown },
 ];
 
 export function Sidebar({ activeTab, onTabChange, onLogout, profileName, isAdmin }: SidebarProps) {
