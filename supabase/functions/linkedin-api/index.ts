@@ -4751,29 +4751,22 @@ serve(async (req) => {
         }
         
         // Enhance titles with parent super title info
-        // Priority: 1) API metadata lookup, 2) Typeahead payload, 3) null
+        // Only use API metadata lookup - typeahead data is unreliable for parent info
         const titles = parsedTitles.map((title: ParsedTitle) => {
-          // First try: lookup from standardizedTitles API response
+          // Only trust the standardizedTitles API response for parent super title
           let parentSuperTitle = superTitleMetadata[title.id] || null;
-          
-          // Second try: if no API result but typeahead had parent info, use hardcoded names
-          if (!parentSuperTitle && title.superTitleId) {
-            const name = SUPER_TITLE_NAMES[title.superTitleId] || '';
-            if (name) {
-              parentSuperTitle = {
-                urn: title.superTitleUrn || `urn:li:superTitle:${title.superTitleId}`,
-                name,
-              };
-              console.log(`[search_job_titles] Fallback: title "${title.name}" -> parent "${name}" from typeahead superTitleId`);
-            }
-          }
-          
+
           // Clean up internal field before returning
           if (parentSuperTitle && (parentSuperTitle as any)._superTitleId) {
             const { _superTitleId, ...clean } = parentSuperTitle as any;
             parentSuperTitle = clean;
           }
-          
+
+          // Only return parentSuperTitle if it has a valid, non-empty name
+          if (parentSuperTitle && !parentSuperTitle.name) {
+            parentSuperTitle = null;
+          }
+
           return {
             ...title,
             parentSuperTitle,
