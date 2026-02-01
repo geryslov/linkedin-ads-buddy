@@ -4622,6 +4622,12 @@ serve(async (req) => {
           '489': 'Data Scientist',
           '501': 'Data Analyst',
         };
+
+        // Create reverse mapping: normalized name -> super title ID
+        const SUPER_TITLE_NAME_TO_ID: Record<string, string> = {};
+        for (const [id, name] of Object.entries(SUPER_TITLE_NAMES)) {
+          SUPER_TITLE_NAME_TO_ID[name.toLowerCase()] = id;
+        }
         
         if (standardTitleIds.length > 0) {
           try {
@@ -4749,25 +4755,44 @@ serve(async (req) => {
           }
         }
         
-        // Enhance titles with parent super title info
-        // Only use API metadata lookup - typeahead data is unreliable for parent info
+        // Enhance titles with parent super title info and determine if title IS a super title
         const titles = parsedTitles.map((title: ParsedTitle) => {
-          // Only trust the standardizedTitles API response for parent super title
-          let parentSuperTitle = superTitleMetadata[title.id] || null;
+          // Get the super title metadata for this title
+          const metadata = superTitleMetadata[title.id] || null;
+          const superTitleId = metadata ? (metadata as any)._superTitleId : null;
 
-          // Clean up internal field before returning
-          if (parentSuperTitle && (parentSuperTitle as any)._superTitleId) {
-            const { _superTitleId, ...clean } = parentSuperTitle as any;
-            parentSuperTitle = clean;
+          // Determine if this title IS a super title:
+          // 1. URN contains :superTitle: (already checked in isSuperTitle)
+          // 2. Title name matches a known super title name AND its superTitle points to that category
+          let isSuperTitle = title.isSuperTitle; // From URN check
+
+          if (!isSuperTitle && superTitleId) {
+            const normalizedName = title.name.toLowerCase().trim();
+            const matchingSuperTitleId = SUPER_TITLE_NAME_TO_ID[normalizedName];
+
+            // If title name matches a super title name and the API confirms it belongs to that category
+            if (matchingSuperTitleId && matchingSuperTitleId === superTitleId) {
+              isSuperTitle = true;
+              console.log(`[search_job_titles] "${title.name}" IS a super title (name matches and superTitleId=${superTitleId})`);
+            }
           }
 
-          // Only return parentSuperTitle if it has a valid, non-empty name
-          if (parentSuperTitle && !parentSuperTitle.name) {
-            parentSuperTitle = null;
+          // Build parent super title info (only for non-super-titles)
+          let parentSuperTitle: { urn: string; name: string } | null = null;
+
+          if (!isSuperTitle && metadata && superTitleId) {
+            const superTitleName = SUPER_TITLE_NAMES[superTitleId] || '';
+            if (superTitleName) {
+              parentSuperTitle = {
+                urn: metadata.urn,
+                name: superTitleName,
+              };
+            }
           }
 
           return {
             ...title,
+            isSuperTitle,
             parentSuperTitle,
           };
         });

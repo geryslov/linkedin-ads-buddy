@@ -3,7 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, Search, Crown, Tag, CheckCircle, Info } from 'lucide-react';
+import { Loader2, Search, Crown, Tag, CheckCircle, Info, ArrowRight } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 
@@ -13,6 +13,10 @@ interface TitleResult {
   name: string;
   isSuperTitle: boolean;
   targetable: boolean;
+  parentSuperTitle?: {
+    urn: string;
+    name: string;
+  } | null;
 }
 
 interface TitleCheckerPageProps {
@@ -72,19 +76,15 @@ export function TitleCheckerPage({ accessToken, selectedAccount }: TitleCheckerP
         setError(data.error);
         setResults([]);
       } else {
-        // Process results and determine super title status from URN
-        const processedResults: TitleResult[] = (data.titles || []).map((title: any) => {
-          // A title is a super title if its URN contains :superTitle:
-          const isSuperTitle = title.urn?.includes(':superTitle:') || false;
-
-          return {
-            id: title.id || '',
-            urn: title.urn || '',
-            name: title.name || '',
-            isSuperTitle,
-            targetable: title.targetable !== false,
-          };
-        });
+        // Use isSuperTitle from API (determined by standardizedTitles lookup)
+        const processedResults: TitleResult[] = (data.titles || []).map((title: any) => ({
+          id: title.id || '',
+          urn: title.urn || '',
+          name: title.name || '',
+          isSuperTitle: title.isSuperTitle || false,
+          targetable: title.targetable !== false,
+          parentSuperTitle: title.parentSuperTitle || null,
+        }));
 
         setResults(processedResults);
 
@@ -250,6 +250,18 @@ export function TitleCheckerPage({ accessToken, selectedAccount }: TitleCheckerP
                           ? 'This is a Super Title - it represents a broad job category and will target a wider audience.'
                           : 'This is a Standard Title - it represents a specific job role and offers more precise targeting.'}
                       </p>
+
+                      {/* Parent Super Title (for standard titles) */}
+                      {!title.isSuperTitle && title.parentSuperTitle?.name && (
+                        <div className="mt-2 flex items-center gap-2 text-sm">
+                          <span className="text-muted-foreground">Belongs to:</span>
+                          <ArrowRight className="h-3 w-3 text-muted-foreground" />
+                          <div className="flex items-center gap-1.5 bg-purple-100 dark:bg-purple-900/30 px-2 py-0.5 rounded">
+                            <Crown className="h-3 w-3 text-purple-600 dark:text-purple-400" />
+                            <span className="font-medium text-purple-700 dark:text-purple-300">{title.parentSuperTitle.name}</span>
+                          </div>
+                        </div>
+                      )}
 
                       {/* URN Reference */}
                       <div className="mt-2 text-xs text-muted-foreground font-mono bg-muted/50 px-2 py-1 rounded w-fit">
