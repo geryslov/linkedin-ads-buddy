@@ -3,7 +3,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { RefreshCw, FileBarChart, Users, Target, PieChart, Globe, List, Download, Grid3X3, Settings, CheckCircle2, XCircle, Loader2, ClipboardList, Search, Pencil, Wallet, AlertTriangle, Sparkles } from 'lucide-react';
+import { RefreshCw, FileBarChart, Users, Target, PieChart, Globe, List, Download, Grid3X3, Settings, CheckCircle2, XCircle, Loader2, ClipboardList, Search, Pencil, Wallet, AlertTriangle, Sparkles, Building2 } from 'lucide-react';
 import { useDemographicReporting, TimeFrameOption as DemoTimeFrameOption, TimeGranularity, DemographicPivot, DEMOGRAPHIC_PIVOT_OPTIONS } from '@/hooks/useDemographicReporting';
 import { useCompanyDemographic, TimeFrameOption as CompanyDemoTimeFrameOption } from '@/hooks/useCompanyDemographic';
 import { useCreativeNamesReport, TimeFrameOption as CreativeNamesTimeFrameOption } from '@/hooks/useCreativeNamesReport';
@@ -26,6 +26,7 @@ import { MetricCard } from './MetricCard';
 import { BudgetPacingDashboard } from './BudgetPacingDashboard';
 import { CreativeFatigueDetector } from './CreativeFatigueDetector';
 import { AudienceExpansionSuggester } from './AudienceExpansionSuggester';
+import { CompanyInfluenceReport } from './CompanyInfluenceReport';
 import { useToast } from '@/hooks/use-toast';
 import { 
   exportToCSV, 
@@ -405,6 +406,10 @@ export function ReportingSection({ accessToken, selectedAccount, canWrite = fals
           <TabsTrigger value="audience_expansion" className="gap-2">
             <Sparkles className="h-4 w-4" />
             Audience Expander
+          </TabsTrigger>
+          <TabsTrigger value="company_influence" className="gap-2">
+            <Building2 className="h-4 w-4" />
+            Company Influence
           </TabsTrigger>
           <TabsTrigger value="audiences" className="gap-2" disabled>
             <Users className="h-4 w-4" />
@@ -952,6 +957,14 @@ export function ReportingSection({ accessToken, selectedAccount, canWrite = fals
         {/* Audience Expansion Tab */}
         <TabsContent value="audience_expansion" className="space-y-6 mt-6">
           <AudienceExpansionSuggester
+            accessToken={accessToken}
+            selectedAccount={selectedAccount}
+          />
+        </TabsContent>
+
+        {/* Company Influence Tab */}
+        <TabsContent value="company_influence" className="space-y-6 mt-6">
+          <CompanyInfluenceReport
             accessToken={accessToken}
             selectedAccount={selectedAccount}
           />
