@@ -5986,6 +5986,661 @@ serve(async (req) => {
         });
       }
 
+      case 'get_budget_pacing': {
+        // Budget Pacing Dashboard - compares actual spend vs planned budget
+        const { accountId, dateRange } = params || {};
+        const now = new Date();
+        const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+        // Default to current month if no date range specified
+        const startDate = dateRange?.start || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+        const endDate = dateRange?.end || now.toISOString().split('T')[0];
+
+        const [startYear, startMonth, startDay] = startDate.split('-').map(Number);
+        const [endYear, endMonth, endDay] = endDate.split('-').map(Number);
+
+        console.log(`[get_budget_pacing] Account ${accountId}, period: ${startDate} to ${endDate}`);
+
+        // Step 1: Fetch daily spend data
+        const dailySpendUrl = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
+          `dateRange.start.day=${startDay}&dateRange.start.month=${startMonth}&dateRange.start.year=${startYear}&` +
+          `dateRange.end.day=${endDay}&dateRange.end.month=${endMonth}&dateRange.end.year=${endYear}&` +
+          `timeGranularity=DAILY&pivot=ACCOUNT&accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
+          `fields=dateRange,costInLocalCurrency,impressions,clicks,oneClickLeads,externalWebsiteConversions&count=100`;
+
+        const dailyData: Array<{
+          date: string;
+          spend: number;
+          impressions: number;
+          clicks: number;
+          leads: number;
+        }> = [];
+
+        try {
+          const response = await fetch(dailySpendUrl, {
+            headers: { 'Authorization': `Bearer ${accessToken}` }
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            for (const el of (data.elements || [])) {
+              const dr = el.dateRange?.start;
+              if (dr) {
+                const dateStr = `${dr.year}-${String(dr.month).padStart(2, '0')}-${String(dr.day).padStart(2, '0')}`;
+                dailyData.push({
+                  date: dateStr,
+                  spend: parseFloat(el.costInLocalCurrency || '0'),
+                  impressions: el.impressions || 0,
+                  clicks: el.clicks || 0,
+                  leads: (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0),
+                });
+              }
+            }
+          }
+        } catch (err) {
+          console.error('[get_budget_pacing] Daily spend fetch error:', err);
+        }
+
+        // Sort by date
+        dailyData.sort((a, b) => a.date.localeCompare(b.date));
+
+        // Step 2: Fetch budget from Supabase (if exists)
+        let budgetAmount = 0;
+        let budgetCurrency = 'USD';
+
+        try {
+          const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+          const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+          const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+          const supabase = createClient(supabaseUrl, supabaseKey);
+
+          const { data: budgetData } = await supabase
+            .from('account_budgets')
+            .select('budget_amount, currency')
+            .eq('account_id', accountId)
+            .eq('month', currentMonth)
+            .single();
+
+          if (budgetData) {
+            budgetAmount = budgetData.budget_amount || 0;
+            budgetCurrency = budgetData.currency || 'USD';
+          }
+        } catch (err) {
+          console.log('[get_budget_pacing] Budget fetch error (may not exist):', err);
+        }
+
+        // Step 3: Calculate pacing metrics
+        const totalSpent = dailyData.reduce((sum, d) => sum + d.spend, 0);
+        const totalImpressions = dailyData.reduce((sum, d) => sum + d.impressions, 0);
+        const totalClicks = dailyData.reduce((sum, d) => sum + d.clicks, 0);
+        const totalLeads = dailyData.reduce((sum, d) => sum + d.leads, 0);
+
+        const daysElapsed = dailyData.length;
+        const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+        const daysRemaining = daysInMonth - now.getDate();
+
+        const avgDailySpend = daysElapsed > 0 ? totalSpent / daysElapsed : 0;
+        const projectedMonthSpend = avgDailySpend * daysInMonth;
+        const idealDailySpend = budgetAmount > 0 ? budgetAmount / daysInMonth : 0;
+        const idealSpentToDate = idealDailySpend * now.getDate();
+
+        // Pacing status
+        let pacingStatus: 'on_track' | 'underspend' | 'overspend' = 'on_track';
+        let pacingPercent = 0;
+
+        if (budgetAmount > 0) {
+          pacingPercent = (totalSpent / idealSpentToDate) * 100;
+          if (pacingPercent < 85) pacingStatus = 'underspend';
+          else if (pacingPercent > 115) pacingStatus = 'overspend';
+        }
+
+        // Calculate 7-day trend
+        const last7Days = dailyData.slice(-7);
+        const prev7Days = dailyData.slice(-14, -7);
+        const last7Spend = last7Days.reduce((sum, d) => sum + d.spend, 0);
+        const prev7Spend = prev7Days.reduce((sum, d) => sum + d.spend, 0);
+        const spendTrend = prev7Spend > 0 ? ((last7Spend - prev7Spend) / prev7Spend) * 100 : 0;
+
+        // Generate recommendations
+        const recommendations: string[] = [];
+
+        if (budgetAmount > 0) {
+          if (pacingStatus === 'underspend') {
+            const deficit = idealSpentToDate - totalSpent;
+            const increasedDaily = (budgetAmount - totalSpent) / Math.max(daysRemaining, 1);
+            recommendations.push(`Increase daily spend by $${(increasedDaily - avgDailySpend).toFixed(0)} to hit budget`);
+            recommendations.push(`Consider increasing bids or expanding audience`);
+          } else if (pacingStatus === 'overspend') {
+            const surplus = totalSpent - idealSpentToDate;
+            recommendations.push(`Currently $${surplus.toFixed(0)} over pace - consider reducing bids`);
+            recommendations.push(`Projected to exceed budget by $${(projectedMonthSpend - budgetAmount).toFixed(0)}`);
+          }
+        }
+
+        if (totalLeads > 0) {
+          const cpl = totalSpent / totalLeads;
+          recommendations.push(`Current CPL: $${cpl.toFixed(2)} - ${cpl < 100 ? 'Good efficiency' : 'Consider optimization'}`);
+        }
+
+        console.log(`[get_budget_pacing] Complete. ${daysElapsed} days, $${totalSpent.toFixed(2)} spent, ${pacingStatus}`);
+
+        return new Response(JSON.stringify({
+          period: { start: startDate, end: endDate, month: currentMonth },
+          budget: {
+            amount: budgetAmount,
+            currency: budgetCurrency,
+            isSet: budgetAmount > 0,
+          },
+          spending: {
+            total: totalSpent,
+            daily: dailyData,
+            avgDaily: avgDailySpend,
+            projected: projectedMonthSpend,
+          },
+          pacing: {
+            status: pacingStatus,
+            percent: pacingPercent,
+            idealSpentToDate,
+            daysElapsed,
+            daysRemaining,
+            daysInMonth,
+          },
+          performance: {
+            impressions: totalImpressions,
+            clicks: totalClicks,
+            leads: totalLeads,
+            ctr: totalImpressions > 0 ? (totalClicks / totalImpressions) * 100 : 0,
+            cpl: totalLeads > 0 ? totalSpent / totalLeads : 0,
+          },
+          trends: {
+            last7DaysSpend: last7Spend,
+            prev7DaysSpend: prev7Spend,
+            spendTrendPercent: spendTrend,
+          },
+          recommendations,
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+      case 'get_creative_fatigue': {
+        // Creative Fatigue Detector - analyzes performance trends over time
+        const { accountId, dateRange, thresholds } = params || {};
+        const now = new Date();
+        const startDate = dateRange?.start || new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        const endDate = dateRange?.end || now.toISOString().split('T')[0];
+
+        const [startYear, startMonth, startDay] = startDate.split('-').map(Number);
+        const [endYear, endMonth, endDay] = endDate.split('-').map(Number);
+
+        // Configurable thresholds
+        const ctrDeclineThreshold = thresholds?.ctrDecline || 20; // % decline to flag
+        const cplIncreaseThreshold = thresholds?.cplIncrease || 30; // % increase to flag
+        const minImpressions = thresholds?.minImpressions || 1000; // Min impressions to analyze
+
+        console.log(`[get_creative_fatigue] Account ${accountId}, period: ${startDate} to ${endDate}`);
+
+        // Step 1: Fetch creative-level daily analytics
+        const analyticsUrl = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
+          `dateRange.start.day=${startDay}&dateRange.start.month=${startMonth}&dateRange.start.year=${startYear}&` +
+          `dateRange.end.day=${endDay}&dateRange.end.month=${endMonth}&dateRange.end.year=${endYear}&` +
+          `timeGranularity=DAILY&pivot=CREATIVE&accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
+          `fields=dateRange,pivotValue,impressions,clicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions,oneClickLeadFormOpens&count=10000`;
+
+        const creativeDaily = new Map<string, Array<{
+          date: string;
+          impressions: number;
+          clicks: number;
+          spend: number;
+          leads: number;
+          formOpens: number;
+        }>>();
+
+        try {
+          const response = await fetch(analyticsUrl, {
+            headers: { 'Authorization': `Bearer ${accessToken}` }
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            for (const el of (data.elements || [])) {
+              const creativeUrn = el.pivotValue || '';
+              const dr = el.dateRange?.start;
+              if (!creativeUrn || !dr) continue;
+
+              const dateStr = `${dr.year}-${String(dr.month).padStart(2, '0')}-${String(dr.day).padStart(2, '0')}`;
+
+              if (!creativeDaily.has(creativeUrn)) {
+                creativeDaily.set(creativeUrn, []);
+              }
+
+              creativeDaily.get(creativeUrn)!.push({
+                date: dateStr,
+                impressions: el.impressions || 0,
+                clicks: el.clicks || 0,
+                spend: parseFloat(el.costInLocalCurrency || '0'),
+                leads: (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0),
+                formOpens: el.oneClickLeadFormOpens || 0,
+              });
+            }
+          }
+        } catch (err) {
+          console.error('[get_creative_fatigue] Analytics fetch error:', err);
+        }
+
+        console.log(`[get_creative_fatigue] Found ${creativeDaily.size} creatives with daily data`);
+
+        // Step 2: Fetch creative metadata (names)
+        const creativeNames = new Map<string, string>();
+        try {
+          const creativesUrl = `https://api.linkedin.com/v2/adCreativesV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=500`;
+          const response = await fetch(creativesUrl, {
+            headers: { 'Authorization': `Bearer ${accessToken}` }
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            for (const c of (data.elements || [])) {
+              const id = c.id?.toString();
+              if (id) {
+                const name = c.creativeDscName || c.name || `Creative ${id}`;
+                creativeNames.set(`urn:li:sponsoredCreative:${id}`, name);
+              }
+            }
+          }
+        } catch (err) {
+          console.error('[get_creative_fatigue] Creative names fetch error:', err);
+        }
+
+        // Step 3: Analyze each creative for fatigue signals
+        const fatigueAnalysis: Array<{
+          creativeId: string;
+          creativeName: string;
+          status: 'healthy' | 'warning' | 'fatigued';
+          signals: string[];
+          metrics: {
+            totalImpressions: number;
+            totalSpend: number;
+            totalLeads: number;
+            avgCtr: number;
+            avgCpl: number;
+            ctrTrend: number;
+            cplTrend: number;
+            impressionTrend: number;
+          };
+          recommendation: string;
+          dailyData: Array<{ date: string; ctr: number; cpl: number; impressions: number }>;
+        }> = [];
+
+        for (const [creativeUrn, dailyData] of creativeDaily.entries()) {
+          // Sort by date
+          dailyData.sort((a, b) => a.date.localeCompare(b.date));
+
+          // Calculate totals
+          const totalImpressions = dailyData.reduce((sum, d) => sum + d.impressions, 0);
+          const totalClicks = dailyData.reduce((sum, d) => sum + d.clicks, 0);
+          const totalSpend = dailyData.reduce((sum, d) => sum + d.spend, 0);
+          const totalLeads = dailyData.reduce((sum, d) => sum + d.leads, 0);
+
+          // Skip low-volume creatives
+          if (totalImpressions < minImpressions) continue;
+
+          const avgCtr = totalImpressions > 0 ? (totalClicks / totalImpressions) * 100 : 0;
+          const avgCpl = totalLeads > 0 ? totalSpend / totalLeads : 0;
+
+          // Calculate weekly trends (compare last 7 days vs previous 7 days)
+          const last7 = dailyData.slice(-7);
+          const prev7 = dailyData.slice(-14, -7);
+
+          const last7Impr = last7.reduce((sum, d) => sum + d.impressions, 0);
+          const last7Clicks = last7.reduce((sum, d) => sum + d.clicks, 0);
+          const last7Spend = last7.reduce((sum, d) => sum + d.spend, 0);
+          const last7Leads = last7.reduce((sum, d) => sum + d.leads, 0);
+
+          const prev7Impr = prev7.reduce((sum, d) => sum + d.impressions, 0);
+          const prev7Clicks = prev7.reduce((sum, d) => sum + d.clicks, 0);
+          const prev7Spend = prev7.reduce((sum, d) => sum + d.spend, 0);
+          const prev7Leads = prev7.reduce((sum, d) => sum + d.leads, 0);
+
+          const last7Ctr = last7Impr > 0 ? (last7Clicks / last7Impr) * 100 : 0;
+          const prev7Ctr = prev7Impr > 0 ? (prev7Clicks / prev7Impr) * 100 : 0;
+          const last7Cpl = last7Leads > 0 ? last7Spend / last7Leads : 0;
+          const prev7Cpl = prev7Leads > 0 ? prev7Spend / prev7Leads : 0;
+
+          // Calculate trend percentages
+          const ctrTrend = prev7Ctr > 0 ? ((last7Ctr - prev7Ctr) / prev7Ctr) * 100 : 0;
+          const cplTrend = prev7Cpl > 0 ? ((last7Cpl - prev7Cpl) / prev7Cpl) * 100 : 0;
+          const impressionTrend = prev7Impr > 0 ? ((last7Impr - prev7Impr) / prev7Impr) * 100 : 0;
+
+          // Detect fatigue signals
+          const signals: string[] = [];
+          let status: 'healthy' | 'warning' | 'fatigued' = 'healthy';
+
+          if (ctrTrend < -ctrDeclineThreshold) {
+            signals.push(`CTR declined ${Math.abs(ctrTrend).toFixed(0)}% (${prev7Ctr.toFixed(2)}% → ${last7Ctr.toFixed(2)}%)`);
+            status = ctrTrend < -ctrDeclineThreshold * 1.5 ? 'fatigued' : 'warning';
+          }
+
+          if (cplTrend > cplIncreaseThreshold && totalLeads > 0) {
+            signals.push(`CPL increased ${cplTrend.toFixed(0)}% ($${prev7Cpl.toFixed(0)} → $${last7Cpl.toFixed(0)})`);
+            status = cplTrend > cplIncreaseThreshold * 1.5 ? 'fatigued' : status === 'fatigued' ? 'fatigued' : 'warning';
+          }
+
+          if (impressionTrend < -30 && last7Impr < 500) {
+            signals.push(`Impressions dropped ${Math.abs(impressionTrend).toFixed(0)}% - losing auction competitiveness`);
+            if (status !== 'fatigued') status = 'warning';
+          }
+
+          // Generate recommendation
+          let recommendation = 'Creative performing well - no action needed';
+          if (status === 'fatigued') {
+            recommendation = 'Consider pausing this creative and launching new variants';
+          } else if (status === 'warning') {
+            recommendation = 'Monitor closely - prepare replacement creative';
+          }
+
+          // Daily CTR/CPL for charts
+          const chartData = dailyData.map(d => ({
+            date: d.date,
+            ctr: d.impressions > 0 ? (d.clicks / d.impressions) * 100 : 0,
+            cpl: d.leads > 0 ? d.spend / d.leads : 0,
+            impressions: d.impressions,
+          }));
+
+          fatigueAnalysis.push({
+            creativeId: creativeUrn.split(':').pop() || '',
+            creativeName: creativeNames.get(creativeUrn) || `Creative ${creativeUrn.split(':').pop()}`,
+            status,
+            signals,
+            metrics: {
+              totalImpressions,
+              totalSpend,
+              totalLeads,
+              avgCtr,
+              avgCpl,
+              ctrTrend,
+              cplTrend,
+              impressionTrend,
+            },
+            recommendation,
+            dailyData: chartData,
+          });
+        }
+
+        // Sort by status severity
+        const statusOrder = { fatigued: 0, warning: 1, healthy: 2 };
+        fatigueAnalysis.sort((a, b) => statusOrder[a.status] - statusOrder[b.status]);
+
+        // Summary stats
+        const summary = {
+          total: fatigueAnalysis.length,
+          fatigued: fatigueAnalysis.filter(c => c.status === 'fatigued').length,
+          warning: fatigueAnalysis.filter(c => c.status === 'warning').length,
+          healthy: fatigueAnalysis.filter(c => c.status === 'healthy').length,
+        };
+
+        console.log(`[get_creative_fatigue] Complete. ${summary.fatigued} fatigued, ${summary.warning} warning, ${summary.healthy} healthy`);
+
+        return new Response(JSON.stringify({
+          period: { start: startDate, end: endDate },
+          thresholds: { ctrDeclineThreshold, cplIncreaseThreshold, minImpressions },
+          summary,
+          creatives: fatigueAnalysis,
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+      case 'get_audience_expansion': {
+        // Smart Audience Expander - suggests similar titles/skills based on top performers
+        const { accountId, dateRange, topN } = params || {};
+        const now = new Date();
+        const startDate = dateRange?.start || new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        const endDate = dateRange?.end || now.toISOString().split('T')[0];
+        const topCount = topN || 10;
+
+        const [startYear, startMonth, startDay] = startDate.split('-').map(Number);
+        const [endYear, endMonth, endDay] = endDate.split('-').map(Number);
+
+        console.log(`[get_audience_expansion] Account ${accountId}, period: ${startDate} to ${endDate}, top ${topCount}`);
+
+        // Step 1: Get job title performance data
+        const titleAnalyticsUrl = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
+          `dateRange.start.day=${startDay}&dateRange.start.month=${startMonth}&dateRange.start.year=${startYear}&` +
+          `dateRange.end.day=${endDay}&dateRange.end.month=${endMonth}&dateRange.end.year=${endYear}&` +
+          `timeGranularity=ALL&pivot=MEMBER_JOB_TITLE&accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
+          `fields=pivotValue,impressions,clicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions&count=500`;
+
+        const titlePerformance: Array<{
+          titleUrn: string;
+          titleId: string;
+          impressions: number;
+          clicks: number;
+          spend: number;
+          leads: number;
+          ctr: number;
+          cpl: number;
+        }> = [];
+
+        try {
+          const response = await fetch(titleAnalyticsUrl, {
+            headers: { 'Authorization': `Bearer ${accessToken}` }
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            for (const el of (data.elements || [])) {
+              const titleUrn = el.pivotValue || '';
+              if (!titleUrn) continue;
+
+              const impressions = el.impressions || 0;
+              const clicks = el.clicks || 0;
+              const spend = parseFloat(el.costInLocalCurrency || '0');
+              const leads = (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
+
+              titlePerformance.push({
+                titleUrn,
+                titleId: titleUrn.split(':').pop() || '',
+                impressions,
+                clicks,
+                spend,
+                leads,
+                ctr: impressions > 0 ? (clicks / impressions) * 100 : 0,
+                cpl: leads > 0 ? spend / leads : Infinity,
+              });
+            }
+          }
+        } catch (err) {
+          console.error('[get_audience_expansion] Title analytics fetch error:', err);
+        }
+
+        // Step 2: Get job function performance for context
+        const functionAnalyticsUrl = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
+          `dateRange.start.day=${startDay}&dateRange.start.month=${startMonth}&dateRange.start.year=${startYear}&` +
+          `dateRange.end.day=${endDay}&dateRange.end.month=${endMonth}&dateRange.end.year=${endYear}&` +
+          `timeGranularity=ALL&pivot=MEMBER_JOB_FUNCTION&accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
+          `fields=pivotValue,impressions,clicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions&count=100`;
+
+        const topFunctions: Array<{ functionUrn: string; leads: number; cpl: number }> = [];
+
+        try {
+          const response = await fetch(functionAnalyticsUrl, {
+            headers: { 'Authorization': `Bearer ${accessToken}` }
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            for (const el of (data.elements || [])) {
+              const leads = (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
+              const spend = parseFloat(el.costInLocalCurrency || '0');
+              if (leads > 0) {
+                topFunctions.push({
+                  functionUrn: el.pivotValue || '',
+                  leads,
+                  cpl: spend / leads,
+                });
+              }
+            }
+          }
+        } catch (err) {
+          console.error('[get_audience_expansion] Function analytics fetch error:', err);
+        }
+
+        // Sort functions by CPL (lower is better)
+        topFunctions.sort((a, b) => a.cpl - b.cpl);
+
+        // Step 3: Identify top performing titles (by CPL, with min lead threshold)
+        const titlesWithLeads = titlePerformance.filter(t => t.leads >= 1);
+        titlesWithLeads.sort((a, b) => a.cpl - b.cpl);
+        const topTitles = titlesWithLeads.slice(0, topCount);
+
+        console.log(`[get_audience_expansion] Found ${titlesWithLeads.length} titles with leads, top ${topTitles.length} selected`);
+
+        // Step 4: Resolve title names and find similar titles
+        const suggestions: Array<{
+          basedOn: {
+            titleId: string;
+            titleName: string;
+            cpl: number;
+            leads: number;
+          };
+          suggestedTitles: Array<{
+            titleId: string;
+            titleName: string;
+            reason: string;
+          }>;
+        }> = [];
+
+        // Resolve top title names via standardizedTitles API
+        const titleNames = new Map<string, string>();
+
+        for (const title of topTitles.slice(0, 5)) { // Limit API calls
+          try {
+            // Get title details
+            const titleUrl = `https://api.linkedin.com/v2/standardizedTitles/${encodeURIComponent(title.titleUrn)}`;
+            const response = await fetch(titleUrl, {
+              headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'X-Restli-Protocol-Version': '2.0.0',
+              }
+            });
+
+            if (response.ok) {
+              const data = await response.json();
+              const name = data.name?.localized?.en_US || data.name || `Title ${title.titleId}`;
+              titleNames.set(title.titleId, name);
+
+              // Search for similar titles
+              const searchUrl = `https://api.linkedin.com/v2/standardizedTitles?q=search&keywords=${encodeURIComponent(name.split(' ')[0])}&count=20`;
+              const searchResponse = await fetch(searchUrl, {
+                headers: {
+                  'Authorization': `Bearer ${accessToken}`,
+                  'X-Restli-Protocol-Version': '2.0.0',
+                }
+              });
+
+              if (searchResponse.ok) {
+                const searchData = await searchResponse.json();
+                const similarTitles: Array<{ titleId: string; titleName: string; reason: string }> = [];
+
+                for (const st of (searchData.elements || []).slice(0, 5)) {
+                  const stId = st.id?.toString() || st.$URN?.split(':').pop();
+                  const stName = st.name?.localized?.en_US || st.name || '';
+
+                  // Skip if it's the same title or already in targeting
+                  if (stId === title.titleId) continue;
+                  if (titlePerformance.some(t => t.titleId === stId)) continue;
+
+                  similarTitles.push({
+                    titleId: stId,
+                    titleName: stName,
+                    reason: `Similar to "${name}" (top performer with $${title.cpl.toFixed(0)} CPL)`,
+                  });
+                }
+
+                if (similarTitles.length > 0) {
+                  suggestions.push({
+                    basedOn: {
+                      titleId: title.titleId,
+                      titleName: name,
+                      cpl: title.cpl,
+                      leads: title.leads,
+                    },
+                    suggestedTitles: similarTitles,
+                  });
+                }
+              }
+            }
+          } catch (err) {
+            console.log(`[get_audience_expansion] Title lookup error for ${title.titleId}:`, err);
+          }
+
+          // Small delay between API calls
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+
+        // Step 5: Generate function-based suggestions
+        const functionSuggestions: Array<{
+          functionName: string;
+          currentPerformance: { leads: number; cpl: number };
+          suggestion: string;
+        }> = [];
+
+        // Job function name mapping (simplified)
+        const functionNames: Record<string, string> = {
+          'urn:li:function:1': 'Accounting', 'urn:li:function:2': 'Administrative',
+          'urn:li:function:3': 'Arts & Design', 'urn:li:function:4': 'Business Development',
+          'urn:li:function:5': 'Community & Social Services', 'urn:li:function:6': 'Consulting',
+          'urn:li:function:7': 'Education', 'urn:li:function:8': 'Engineering',
+          'urn:li:function:9': 'Entrepreneurship', 'urn:li:function:10': 'Finance',
+          'urn:li:function:11': 'Healthcare Services', 'urn:li:function:12': 'Human Resources',
+          'urn:li:function:13': 'Information Technology', 'urn:li:function:14': 'Legal',
+          'urn:li:function:15': 'Marketing', 'urn:li:function:16': 'Media & Communications',
+          'urn:li:function:17': 'Military & Protective Services', 'urn:li:function:18': 'Operations',
+          'urn:li:function:19': 'Product Management', 'urn:li:function:20': 'Program & Project Management',
+          'urn:li:function:21': 'Purchasing', 'urn:li:function:22': 'Quality Assurance',
+          'urn:li:function:23': 'Real Estate', 'urn:li:function:24': 'Research',
+          'urn:li:function:25': 'Sales', 'urn:li:function:26': 'Support',
+        };
+
+        for (const func of topFunctions.slice(0, 3)) {
+          const funcName = functionNames[func.functionUrn] || func.functionUrn;
+          functionSuggestions.push({
+            functionName: funcName,
+            currentPerformance: { leads: func.leads, cpl: func.cpl },
+            suggestion: `Expand targeting within ${funcName} - currently your best performing function at $${func.cpl.toFixed(0)} CPL`,
+          });
+        }
+
+        // Summary
+        const totalSuggestedTitles = suggestions.reduce((sum, s) => sum + s.suggestedTitles.length, 0);
+
+        console.log(`[get_audience_expansion] Complete. ${suggestions.length} expansion groups, ${totalSuggestedTitles} suggested titles`);
+
+        return new Response(JSON.stringify({
+          period: { start: startDate, end: endDate },
+          topPerformers: {
+            titles: topTitles.slice(0, 10).map(t => ({
+              ...t,
+              titleName: titleNames.get(t.titleId) || `Title ${t.titleId}`,
+            })),
+            functions: topFunctions.slice(0, 5).map(f => ({
+              ...f,
+              functionName: functionNames[f.functionUrn] || f.functionUrn,
+            })),
+          },
+          suggestions,
+          functionSuggestions,
+          summary: {
+            totalTitlesAnalyzed: titlePerformance.length,
+            titlesWithLeads: titlesWithLeads.length,
+            expansionSuggestions: totalSuggestedTitles,
+          },
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
       default:
         return new Response(JSON.stringify({ error: 'Unknown action' }), {
           status: 400,
