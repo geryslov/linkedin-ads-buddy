@@ -4290,6 +4290,377 @@ serve(async (req) => {
         });
       }
 
+      case 'get_form_creative_analytics': {
+        // Extracts form names from creative names and groups analytics by form
+        // Supports multiple naming conventions: "FormName | Creative", "FormName - Creative", "[FormName] Creative"
+        const { accountId, dateRange, separator } = params || {};
+        const startDate = dateRange?.start || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        const endDate = dateRange?.end || new Date().toISOString().split('T')[0];
+
+        const [startYear, startMonth, startDay] = startDate.split('-').map(Number);
+        const [endYear, endMonth, endDay] = endDate.split('-').map(Number);
+
+        console.log(`[get_form_creative_analytics] Starting for account ${accountId}, date range: ${startDate} to ${endDate}`);
+
+        // Helper function to extract form name from creative name
+        const extractFormName = (creativeName: string, customSeparator?: string): { formName: string; creativePart: string } => {
+          if (!creativeName) {
+            return { formName: 'Unknown Form', creativePart: creativeName };
+          }
+
+          // Try custom separator first if provided
+          if (customSeparator && creativeName.includes(customSeparator)) {
+            const parts = creativeName.split(customSeparator);
+            return {
+              formName: parts[0].trim(),
+              creativePart: parts.slice(1).join(customSeparator).trim()
+            };
+          }
+
+          // Pattern 1: "FormName | CreativeDescription"
+          if (creativeName.includes(' | ')) {
+            const parts = creativeName.split(' | ');
+            return {
+              formName: parts[0].trim(),
+              creativePart: parts.slice(1).join(' | ').trim()
+            };
+          }
+
+          // Pattern 2: "FormName - CreativeDescription" (but not "Campaign - Creative" patterns)
+          // Only split on " - " if the first part looks like a form name (shorter, no "Campaign" word)
+          if (creativeName.includes(' - ')) {
+            const parts = creativeName.split(' - ');
+            const firstPart = parts[0].trim();
+            // Heuristic: form names are usually shorter and don't contain "Campaign"
+            if (firstPart.length <= 50 && !firstPart.toLowerCase().includes('campaign')) {
+              return {
+                formName: firstPart,
+                creativePart: parts.slice(1).join(' - ').trim()
+              };
+            }
+          }
+
+          // Pattern 3: "[FormName] CreativeDescription"
+          const bracketMatch = creativeName.match(/^\[([^\]]+)\]\s*(.*)$/);
+          if (bracketMatch) {
+            return {
+              formName: bracketMatch[1].trim(),
+              creativePart: bracketMatch[2].trim()
+            };
+          }
+
+          // Pattern 4: "FormName: CreativeDescription"
+          if (creativeName.includes(': ')) {
+            const parts = creativeName.split(': ');
+            const firstPart = parts[0].trim();
+            if (firstPart.length <= 50) {
+              return {
+                formName: firstPart,
+                creativePart: parts.slice(1).join(': ').trim()
+              };
+            }
+          }
+
+          // No pattern matched - return as unknown
+          return { formName: 'Unknown Form', creativePart: creativeName };
+        };
+
+        // Step 1: Fetch creative-level analytics
+        console.log('[Step 1] Fetching creative-level analytics...');
+        const creativeAnalytics = new Map<string, {
+          creativeUrn: string;
+          impressions: number;
+          clicks: number;
+          spent: number;
+          leads: number;
+          formOpens: number;
+          videoViews: number;
+          videoCompletions: number;
+        }>();
+
+        const analyticsUrl = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
+          `dateRange.start.day=${startDay}&dateRange.start.month=${startMonth}&dateRange.start.year=${startYear}&` +
+          `dateRange.end.day=${endDay}&dateRange.end.month=${endMonth}&dateRange.end.year=${endYear}&` +
+          `timeGranularity=ALL&pivot=CREATIVE&accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
+          `fields=impressions,clicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions,oneClickLeadFormOpens,videoViews,videoCompletions,pivotValue&count=10000`;
+
+        try {
+          const response = await fetch(analyticsUrl, {
+            headers: { 'Authorization': `Bearer ${accessToken}` }
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            for (const el of (data.elements || [])) {
+              const pivotValue = el.pivotValue || '';
+              creativeAnalytics.set(pivotValue, {
+                creativeUrn: pivotValue,
+                impressions: el.impressions || 0,
+                clicks: el.clicks || 0,
+                spent: parseFloat(el.costInLocalCurrency || '0'),
+                leads: (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0),
+                formOpens: el.oneClickLeadFormOpens || 0,
+                videoViews: el.videoViews || 0,
+                videoCompletions: el.videoCompletions || 0,
+              });
+            }
+          }
+        } catch (err) {
+          console.error('[Step 1] Analytics fetch error:', err);
+        }
+
+        console.log(`[Step 1] Found ${creativeAnalytics.size} creatives with analytics`);
+
+        // Step 2: Fetch creative metadata (names)
+        console.log('[Step 2] Fetching creative metadata...');
+        const creativeMetadata = new Map<string, { name: string; campaignId: string; status: string }>();
+
+        try {
+          let hasMore = true;
+          let start = 0;
+          const count = 500;
+
+          while (hasMore) {
+            const creativesUrl = `https://api.linkedin.com/v2/adCreativesV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=${count}&start=${start}`;
+            const response = await fetch(creativesUrl, {
+              headers: { 'Authorization': `Bearer ${accessToken}` }
+            });
+
+            if (response.ok) {
+              const data = await response.json();
+              const elements = data.elements || [];
+
+              for (const creative of elements) {
+                const creativeId = creative.id?.toString();
+                if (!creativeId) continue;
+
+                const creativeUrn = `urn:li:sponsoredCreative:${creativeId}`;
+                const campaignId = (creative.campaign || '').split(':').pop() || '';
+
+                // Extract name from creative
+                let name = creative.creativeDscName || creative.name || '';
+
+                // If no name, try variables
+                if (!name && creative.variables?.data) {
+                  const data = creative.variables.data;
+                  if (data.creativeDscName) name = data.creativeDscName;
+                }
+
+                creativeMetadata.set(creativeUrn, {
+                  name: name || `Creative ${creativeId}`,
+                  campaignId,
+                  status: creative.status || 'UNKNOWN'
+                });
+              }
+
+              hasMore = elements.length === count;
+              start += count;
+              if (start > 5000) hasMore = false; // Safety limit
+            } else {
+              hasMore = false;
+            }
+          }
+        } catch (err) {
+          console.error('[Step 2] Creative metadata fetch error:', err);
+        }
+
+        console.log(`[Step 2] Found ${creativeMetadata.size} creative metadata records`);
+
+        // Step 3: Fetch creative names via versioned API for better accuracy
+        console.log('[Step 3] Enhancing creative names via versioned API...');
+        const creativesToEnhance = Array.from(creativeMetadata.keys()).slice(0, 200);
+
+        for (let i = 0; i < creativesToEnhance.length; i += 10) {
+          const batch = creativesToEnhance.slice(i, i + 10);
+          await Promise.all(batch.map(async (creativeUrn) => {
+            try {
+              const creativeId = creativeUrn.split(':').pop();
+              const encodedUrn = encodeURIComponent(creativeUrn);
+              const url = `https://api.linkedin.com/rest/adAccounts/${accountId}/creatives/${encodedUrn}`;
+
+              const response = await fetch(url, {
+                headers: {
+                  'Authorization': `Bearer ${accessToken}`,
+                  'LinkedIn-Version': '202511',
+                  'X-Restli-Protocol-Version': '2.0.0'
+                }
+              });
+
+              if (response.ok) {
+                const data = await response.json();
+                if (data.name) {
+                  const existing = creativeMetadata.get(creativeUrn);
+                  if (existing) {
+                    existing.name = data.name;
+                    creativeMetadata.set(creativeUrn, existing);
+                  }
+                }
+              }
+            } catch {}
+          }));
+        }
+
+        // Step 4: Group creatives by extracted form name
+        console.log('[Step 4] Grouping creatives by form name...');
+        const formGroups = new Map<string, {
+          formName: string;
+          impressions: number;
+          clicks: number;
+          spent: number;
+          leads: number;
+          formOpens: number;
+          videoViews: number;
+          videoCompletions: number;
+          creatives: Array<{
+            creativeId: string;
+            creativeName: string;
+            creativePart: string;
+            campaignId: string;
+            status: string;
+            impressions: number;
+            clicks: number;
+            spent: number;
+            leads: number;
+            formOpens: number;
+            ctr: number;
+            cpc: number;
+            cpl: number;
+            lgfRate: number;
+          }>;
+        }>();
+
+        // Track form name detection stats
+        const detectionStats = {
+          pipe: 0,
+          dash: 0,
+          bracket: 0,
+          colon: 0,
+          custom: 0,
+          unknown: 0
+        };
+
+        for (const [creativeUrn, metrics] of creativeAnalytics.entries()) {
+          const meta = creativeMetadata.get(creativeUrn) || { name: `Creative ${creativeUrn.split(':').pop()}`, campaignId: '', status: 'UNKNOWN' };
+          const creativeId = creativeUrn.split(':').pop() || '';
+
+          // Extract form name from creative name
+          const { formName, creativePart } = extractFormName(meta.name, separator);
+
+          // Track detection method
+          if (meta.name.includes(' | ')) detectionStats.pipe++;
+          else if (meta.name.includes(' - ') && formName !== 'Unknown Form') detectionStats.dash++;
+          else if (meta.name.match(/^\[/)) detectionStats.bracket++;
+          else if (meta.name.includes(': ') && formName !== 'Unknown Form') detectionStats.colon++;
+          else if (separator && meta.name.includes(separator)) detectionStats.custom++;
+          else detectionStats.unknown++;
+
+          // Calculate creative-level metrics
+          const ctr = metrics.impressions > 0 ? (metrics.clicks / metrics.impressions) * 100 : 0;
+          const cpc = metrics.clicks > 0 ? metrics.spent / metrics.clicks : 0;
+          const cpl = metrics.leads > 0 ? metrics.spent / metrics.leads : 0;
+          const lgfRate = metrics.formOpens > 0 ? (metrics.leads / metrics.formOpens) * 100 : 0;
+
+          const creativeData = {
+            creativeId,
+            creativeName: meta.name,
+            creativePart,
+            campaignId: meta.campaignId,
+            status: meta.status,
+            impressions: metrics.impressions,
+            clicks: metrics.clicks,
+            spent: metrics.spent,
+            leads: metrics.leads,
+            formOpens: metrics.formOpens,
+            ctr,
+            cpc,
+            cpl,
+            lgfRate,
+          };
+
+          // Add to form group
+          let group = formGroups.get(formName);
+          if (!group) {
+            group = {
+              formName,
+              impressions: 0,
+              clicks: 0,
+              spent: 0,
+              leads: 0,
+              formOpens: 0,
+              videoViews: 0,
+              videoCompletions: 0,
+              creatives: []
+            };
+            formGroups.set(formName, group);
+          }
+
+          group.creatives.push(creativeData);
+          group.impressions += metrics.impressions;
+          group.clicks += metrics.clicks;
+          group.spent += metrics.spent;
+          group.leads += metrics.leads;
+          group.formOpens += metrics.formOpens;
+          group.videoViews += metrics.videoViews;
+          group.videoCompletions += metrics.videoCompletions;
+        }
+
+        // Build final response with calculated metrics
+        const forms = Array.from(formGroups.values()).map(form => {
+          const ctr = form.impressions > 0 ? (form.clicks / form.impressions) * 100 : 0;
+          const cpc = form.clicks > 0 ? form.spent / form.clicks : 0;
+          const cpl = form.leads > 0 ? form.spent / form.leads : 0;
+          const lgfRate = form.formOpens > 0 ? (form.leads / form.formOpens) * 100 : 0;
+
+          // Sort creatives by leads then spend
+          form.creatives.sort((a, b) => b.leads - a.leads || b.spent - a.spent);
+
+          return {
+            ...form,
+            ctr,
+            cpc,
+            cpl,
+            lgfRate,
+            creativeCount: form.creatives.length
+          };
+        });
+
+        // Sort forms by leads then spend
+        forms.sort((a, b) => b.leads - a.leads || b.spent - a.spent);
+
+        // Calculate totals
+        const totals = forms.reduce((acc, form) => ({
+          impressions: acc.impressions + form.impressions,
+          clicks: acc.clicks + form.clicks,
+          spent: acc.spent + form.spent,
+          leads: acc.leads + form.leads,
+          formOpens: acc.formOpens + form.formOpens,
+        }), { impressions: 0, clicks: 0, spent: 0, leads: 0, formOpens: 0 });
+
+        console.log(`[get_form_creative_analytics] Complete. ${forms.length} forms extracted from ${creativeAnalytics.size} creatives`);
+        console.log(`[Detection Stats] pipe: ${detectionStats.pipe}, dash: ${detectionStats.dash}, bracket: ${detectionStats.bracket}, colon: ${detectionStats.colon}, unknown: ${detectionStats.unknown}`);
+
+        return new Response(JSON.stringify({
+          forms,
+          totals: {
+            ...totals,
+            ctr: totals.impressions > 0 ? (totals.clicks / totals.impressions) * 100 : 0,
+            cpc: totals.clicks > 0 ? totals.spent / totals.clicks : 0,
+            cpl: totals.leads > 0 ? totals.spent / totals.leads : 0,
+            lgfRate: totals.formOpens > 0 ? (totals.leads / totals.formOpens) * 100 : 0,
+          },
+          metadata: {
+            accountId,
+            dateRange: { start: startDate, end: endDate },
+            totalForms: forms.length,
+            totalCreatives: creativeAnalytics.size,
+            detectionStats,
+            separatorUsed: separator || 'auto-detect'
+          }
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
       case 'test_titles_api': {
         // Test the LinkedIn Standardized Titles API access
         // GET https://api.linkedin.com/v2/standardizedTitles?q=criteria&name=Engineer
