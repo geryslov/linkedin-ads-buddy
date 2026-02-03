@@ -668,14 +668,18 @@ serve(async (req) => {
         const { accountId, campaignIds, dateRange } = params || {};
         const startDate = dateRange?.start || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
         const endDate = dateRange?.end || new Date().toISOString().split('T')[0];
-        
+
+        // Parse dates by splitting string to avoid timezone issues
+        const [startYear, startMonth, startDay] = startDate.split('-').map(Number);
+        const [endYear, endMonth, endDay] = endDate.split('-').map(Number);
+
         let url = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
-          `dateRange.start.day=${new Date(startDate).getDate()}&` +
-          `dateRange.start.month=${new Date(startDate).getMonth() + 1}&` +
-          `dateRange.start.year=${new Date(startDate).getFullYear()}&` +
-          `dateRange.end.day=${new Date(endDate).getDate()}&` +
-          `dateRange.end.month=${new Date(endDate).getMonth() + 1}&` +
-          `dateRange.end.year=${new Date(endDate).getFullYear()}&` +
+          `dateRange.start.day=${startDay}&` +
+          `dateRange.start.month=${startMonth}&` +
+          `dateRange.start.year=${startYear}&` +
+          `dateRange.end.day=${endDay}&` +
+          `dateRange.end.month=${endMonth}&` +
+          `dateRange.end.year=${endYear}&` +
           `timeGranularity=DAILY&` +
           `accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
           `fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads`;
@@ -730,7 +734,11 @@ serve(async (req) => {
         const startDate = dateRange?.start || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
         const endDate = dateRange?.end || new Date().toISOString().split('T')[0];
         const granularity = timeGranularity || 'DAILY';
-        
+
+        // Parse dates by splitting string to avoid timezone issues
+        const [startYear, startMonth, startDay] = startDate.split('-').map(Number);
+        const [endYear, endMonth, endDay] = endDate.split('-').map(Number);
+
         // First fetch campaigns if not provided
         let campaigns = campaignIds || [];
         if (campaigns.length === 0) {
@@ -752,12 +760,12 @@ serve(async (req) => {
 
         // Build URL with campaigns for CREATIVE pivot
         let url = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
-          `dateRange.start.day=${new Date(startDate).getDate()}&` +
-          `dateRange.start.month=${new Date(startDate).getMonth() + 1}&` +
-          `dateRange.start.year=${new Date(startDate).getFullYear()}&` +
-          `dateRange.end.day=${new Date(endDate).getDate()}&` +
-          `dateRange.end.month=${new Date(endDate).getMonth() + 1}&` +
-          `dateRange.end.year=${new Date(endDate).getFullYear()}&` +
+          `dateRange.start.day=${startDay}&` +
+          `dateRange.start.month=${startMonth}&` +
+          `dateRange.start.year=${startYear}&` +
+          `dateRange.end.day=${endDay}&` +
+          `dateRange.end.month=${endMonth}&` +
+          `dateRange.end.year=${endYear}&` +
           `timeGranularity=${granularity}&` +
           `pivot=CREATIVE&` +
           `fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,dateRange,pivotValue`;
