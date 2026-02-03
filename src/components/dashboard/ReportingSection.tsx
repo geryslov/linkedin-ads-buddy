@@ -3,7 +3,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { RefreshCw, FileBarChart, Users, Target, PieChart, Globe, List, Download, Grid3X3, Settings, CheckCircle2, XCircle, Loader2, ClipboardList, Search, Pencil } from 'lucide-react';
+import { RefreshCw, FileBarChart, Users, Target, PieChart, Globe, List, Download, Grid3X3, Settings, CheckCircle2, XCircle, Loader2, ClipboardList, Search, Pencil, Wallet, AlertTriangle, Sparkles, Building2 } from 'lucide-react';
 import { useDemographicReporting, TimeFrameOption as DemoTimeFrameOption, TimeGranularity, DemographicPivot, DEMOGRAPHIC_PIVOT_OPTIONS } from '@/hooks/useDemographicReporting';
 import { useCompanyDemographic, TimeFrameOption as CompanyDemoTimeFrameOption } from '@/hooks/useCompanyDemographic';
 import { useCreativeNamesReport, TimeFrameOption as CreativeNamesTimeFrameOption } from '@/hooks/useCreativeNamesReport';
@@ -23,6 +23,10 @@ import { SkillSearch } from './SkillSearch';
 import { CampaignTargetingEditor } from './CampaignTargetingEditor';
 import { TimeFrameSelector } from './TimeFrameSelector';
 import { MetricCard } from './MetricCard';
+import { BudgetPacingDashboard } from './BudgetPacingDashboard';
+import { CreativeFatigueDetector } from './CreativeFatigueDetector';
+import { AudienceExpansionSuggester } from './AudienceExpansionSuggester';
+import { CompanyInfluenceReport } from './CompanyInfluenceReport';
 import { useToast } from '@/hooks/use-toast';
 import { 
   exportToCSV, 
@@ -390,6 +394,22 @@ export function ReportingSection({ accessToken, selectedAccount, canWrite = fals
           <TabsTrigger value="campaign_editor" className="gap-2">
             <Pencil className="h-4 w-4" />
             Campaign Editor
+          </TabsTrigger>
+          <TabsTrigger value="budget_pacing" className="gap-2">
+            <Wallet className="h-4 w-4" />
+            Budget Pacing
+          </TabsTrigger>
+          <TabsTrigger value="creative_fatigue" className="gap-2">
+            <AlertTriangle className="h-4 w-4" />
+            Creative Fatigue
+          </TabsTrigger>
+          <TabsTrigger value="audience_expansion" className="gap-2">
+            <Sparkles className="h-4 w-4" />
+            Audience Expander
+          </TabsTrigger>
+          <TabsTrigger value="company_influence" className="gap-2">
+            <Building2 className="h-4 w-4" />
+            Company Influence
           </TabsTrigger>
           <TabsTrigger value="audiences" className="gap-2" disabled>
             <Users className="h-4 w-4" />
@@ -915,6 +935,38 @@ export function ReportingSection({ accessToken, selectedAccount, canWrite = fals
                 campaignReporting.fetchCampaignReport(selectedAccount);
               }
             }}
+          />
+        </TabsContent>
+
+        {/* Budget Pacing Tab */}
+        <TabsContent value="budget_pacing" className="space-y-6 mt-6">
+          <BudgetPacingDashboard
+            accessToken={accessToken}
+            selectedAccount={selectedAccount}
+          />
+        </TabsContent>
+
+        {/* Creative Fatigue Tab */}
+        <TabsContent value="creative_fatigue" className="space-y-6 mt-6">
+          <CreativeFatigueDetector
+            accessToken={accessToken}
+            selectedAccount={selectedAccount}
+          />
+        </TabsContent>
+
+        {/* Audience Expansion Tab */}
+        <TabsContent value="audience_expansion" className="space-y-6 mt-6">
+          <AudienceExpansionSuggester
+            accessToken={accessToken}
+            selectedAccount={selectedAccount}
+          />
+        </TabsContent>
+
+        {/* Company Influence Tab */}
+        <TabsContent value="company_influence" className="space-y-6 mt-6">
+          <CompanyInfluenceReport
+            accessToken={accessToken}
+            selectedAccount={selectedAccount}
           />
         </TabsContent>
 
