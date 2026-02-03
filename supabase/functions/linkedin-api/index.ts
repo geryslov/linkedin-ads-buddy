@@ -5998,6 +5998,8 @@ serve(async (req) => {
         // Budget Pacing Dashboard - compares actual spend vs planned budget
         const { accountId, dateRange } = params || {};
         const now = new Date();
+        // Format as YYYY-MM-01 for date column compatibility
+        const currentMonthDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
         const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
         // Default to current month if no date range specified
@@ -6062,12 +6064,15 @@ serve(async (req) => {
           const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
           const supabase = createClient(supabaseUrl, supabaseKey);
 
-          const { data: budgetData } = await supabase
+          // Query with YYYY-MM-01 format for the date column
+          const { data: budgetData, error: budgetError } = await supabase
             .from('account_budgets')
             .select('budget_amount, currency')
             .eq('account_id', accountId)
-            .eq('month', currentMonth)
+            .eq('month', currentMonthDate)
             .single();
+
+          console.log(`[get_budget_pacing] Budget query for ${accountId}, month ${currentMonthDate}:`, budgetData, budgetError);
 
           if (budgetData) {
             budgetAmount = budgetData.budget_amount || 0;
@@ -6519,13 +6524,44 @@ serve(async (req) => {
           }>;
         }> = [];
 
-        // Resolve top title names via standardizedTitles API
+        // Resolve top title names via title_metadata_cache first, then API as fallback
         const titleNames = new Map<string, string>();
+        const allTitleIds = topTitles.map(t => t.titleId);
 
-        for (const title of topTitles.slice(0, 5)) { // Limit API calls
+        // First, try to get cached titles from Supabase (this is the primary source)
+        try {
+          const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+          const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+          const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+          const supabase = createClient(supabaseUrl, supabaseKey);
+
+          const { data: cachedTitles, error: cacheError } = await supabase
+            .from('title_metadata_cache')
+            .select('title_id, name')
+            .in('title_id', allTitleIds);
+
+          if (cachedTitles && !cacheError) {
+            for (const cached of cachedTitles) {
+              if (cached.name && cached.name.trim()) {
+                titleNames.set(cached.title_id, cached.name);
+              }
+            }
+          }
+          console.log(`[get_audience_expansion] Found ${titleNames.size} cached title names out of ${allTitleIds.length}`);
+        } catch (cacheErr) {
+          console.log('[get_audience_expansion] Cache lookup error:', cacheErr);
+        }
+
+        // Resolve missing titles via LinkedIn API (only for those not in cache)
+        const missingTitleIds = allTitleIds.filter(id => !titleNames.has(id));
+        console.log(`[get_audience_expansion] Need to resolve ${missingTitleIds.length} titles from API`);
+
+        for (const titleId of missingTitleIds.slice(0, 20)) { // Limit API calls
+          const titleObj = topTitles.find(t => t.titleId === titleId);
+          if (!titleObj) continue;
+
           try {
-            // Get title details
-            const titleUrl = `https://api.linkedin.com/v2/standardizedTitles/${encodeURIComponent(title.titleUrn)}`;
+            const titleUrl = `https://api.linkedin.com/v2/standardizedTitles/${encodeURIComponent(titleObj.titleUrn)}`;
             const response = await fetch(titleUrl, {
               headers: {
                 'Authorization': `Bearer ${accessToken}`,
@@ -6535,52 +6571,86 @@ serve(async (req) => {
 
             if (response.ok) {
               const data = await response.json();
-              const name = data.name?.localized?.en_US || data.name || `Title ${title.titleId}`;
-              titleNames.set(title.titleId, name);
-
-              // Search for similar titles
-              const searchUrl = `https://api.linkedin.com/v2/standardizedTitles?q=search&keywords=${encodeURIComponent(name.split(' ')[0])}&count=20`;
-              const searchResponse = await fetch(searchUrl, {
-                headers: {
-                  'Authorization': `Bearer ${accessToken}`,
-                  'X-Restli-Protocol-Version': '2.0.0',
+              const name = data.name?.localized?.en_US || data.name || null;
+              if (name && typeof name === 'string' && name.trim()) {
+                titleNames.set(titleId, name);
+                
+                // Also save to cache for future use
+                try {
+                  const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+                  const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+                  const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+                  const supabase = createClient(supabaseUrl, supabaseKey);
+                  
+                  await supabase.from('title_metadata_cache').upsert({
+                    title_id: titleId,
+                    name: name,
+                  }, { onConflict: 'title_id' });
+                } catch (saveErr) {
+                  // Ignore cache save errors
                 }
-              });
+              }
+            } else if (response.status === 403) {
+              console.log(`[get_audience_expansion] Titles API access denied (403) for ${titleId}`);
+              // Don't set a fallback - we'll handle unknown titles at the end
+            } else {
+              console.log(`[get_audience_expansion] Title API returned ${response.status} for ${titleId}`);
+            }
+          } catch (err) {
+            console.log(`[get_audience_expansion] Title name lookup error for ${titleId}:`, err);
+          }
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
 
-              if (searchResponse.ok) {
-                const searchData = await searchResponse.json();
-                const similarTitles: Array<{ titleId: string; titleName: string; reason: string }> = [];
+        console.log(`[get_audience_expansion] Resolved ${titleNames.size} total title names`)
 
-                for (const st of (searchData.elements || []).slice(0, 5)) {
-                  const stId = st.id?.toString() || st.$URN?.split(':').pop();
-                  const stName = st.name?.localized?.en_US || st.name || '';
+        // Then, search for similar titles for the top 5
+        for (const title of topTitles.slice(0, 5)) {
+          const name = titleNames.get(title.titleId) || `Title ${title.titleId}`;
+          
+          try {
+            // Search for similar titles
+            const searchUrl = `https://api.linkedin.com/v2/standardizedTitles?q=search&keywords=${encodeURIComponent(name.split(' ')[0])}&count=20`;
+            const searchResponse = await fetch(searchUrl, {
+              headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'X-Restli-Protocol-Version': '2.0.0',
+              }
+            });
 
-                  // Skip if it's the same title or already in targeting
-                  if (stId === title.titleId) continue;
-                  if (titlePerformance.some(t => t.titleId === stId)) continue;
+            if (searchResponse.ok) {
+              const searchData = await searchResponse.json();
+              const similarTitles: Array<{ titleId: string; titleName: string; reason: string }> = [];
 
-                  similarTitles.push({
-                    titleId: stId,
-                    titleName: stName,
-                    reason: `Similar to "${name}" (top performer with $${title.cpl.toFixed(0)} CPL)`,
-                  });
-                }
+              for (const st of (searchData.elements || []).slice(0, 5)) {
+                const stId = st.id?.toString() || st.$URN?.split(':').pop();
+                const stName = st.name?.localized?.en_US || st.name || '';
 
-                if (similarTitles.length > 0) {
-                  suggestions.push({
-                    basedOn: {
-                      titleId: title.titleId,
-                      titleName: name,
-                      cpl: title.cpl,
-                      leads: title.leads,
-                    },
-                    suggestedTitles: similarTitles,
-                  });
-                }
+                // Skip if it's the same title or already in targeting
+                if (stId === title.titleId) continue;
+                if (titlePerformance.some(t => t.titleId === stId)) continue;
+
+                similarTitles.push({
+                  titleId: stId,
+                  titleName: stName,
+                  reason: `Similar to "${name}" (top performer with $${title.cpl.toFixed(0)} CPL)`,
+                });
+              }
+
+              if (similarTitles.length > 0) {
+                suggestions.push({
+                  basedOn: {
+                    titleId: title.titleId,
+                    titleName: name,
+                    cpl: title.cpl,
+                    leads: title.leads,
+                  },
+                  suggestedTitles: similarTitles,
+                });
               }
             }
           } catch (err) {
-            console.log(`[get_audience_expansion] Title lookup error for ${title.titleId}:`, err);
+            console.log(`[get_audience_expansion] Title search error for ${title.titleId}:`, err);
           }
 
           // Small delay between API calls
@@ -6625,13 +6695,28 @@ serve(async (req) => {
 
         console.log(`[get_audience_expansion] Complete. ${suggestions.length} expansion groups, ${totalSuggestedTitles} suggested titles`);
 
+        // Filter out titles without resolved names - only show titles with proper names
+        const titlesWithNames = topTitles.slice(0, 10)
+          .map(t => ({
+            ...t,
+            titleName: titleNames.get(t.titleId) || null,
+          }))
+          .filter(t => t.titleName && !t.titleName.startsWith('Title '));
+
+        // If we have fewer than expected, add the ones with IDs but mark them clearly
+        const titlesToShow = titlesWithNames.length > 0 
+          ? titlesWithNames 
+          : topTitles.slice(0, 10).map(t => ({
+              ...t,
+              titleName: titleNames.get(t.titleId) || `Unknown (ID: ${t.titleId})`,
+            }));
+
+        console.log(`[get_audience_expansion] Returning ${titlesToShow.length} titles with names`);
+
         return new Response(JSON.stringify({
           period: { start: startDate, end: endDate },
           topPerformers: {
-            titles: topTitles.slice(0, 10).map(t => ({
-              ...t,
-              titleName: titleNames.get(t.titleId) || `Title ${t.titleId}`,
-            })),
+            titles: titlesToShow,
             functions: topFunctions.slice(0, 5).map(f => ({
               ...f,
               functionName: functionNames[f.functionUrn] || f.functionUrn,
@@ -6689,8 +6774,8 @@ serve(async (req) => {
 
         console.log(`[get_company_influence] Found ${campaignMeta.size} campaigns`);
 
-        // Step 2: Fetch company analytics per campaign
-        // We need to make separate calls per campaign to track which campaign influenced which company
+        // Step 2: Fetch company analytics using account-level single-pivot query
+        // Note: Dual-pivot (pivotValue2) requires special API permissions that most accounts don't have
         const companyData = new Map<string, {
           companyUrn: string;
           companyName: string;
@@ -6699,140 +6784,282 @@ serve(async (req) => {
           totalSpend: number;
           totalLeads: number;
           totalFormOpens: number;
-          campaignBreakdown: Array<{
-            campaignId: string;
-            campaignName: string;
-            objective: string;
-            impressions: number;
-            clicks: number;
-            spend: number;
-            leads: number;
-          }>;
           objectiveMix: Set<string>;
         }>();
 
-        // Process campaigns in batches
-        const campaignIds = Array.from(campaignMeta.keys());
-        const batchSize = 10;
+        // Single pivot query for company data (works with standard API access)
+        const analyticsUrl = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
+          `dateRange.start.day=${startDay}&dateRange.start.month=${startMonth}&dateRange.start.year=${startYear}&` +
+          `dateRange.end.day=${endDay}&dateRange.end.month=${endMonth}&dateRange.end.year=${endYear}&` +
+          `timeGranularity=ALL&pivot=MEMBER_COMPANY&accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
+          `fields=pivotValue,impressions,clicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions,oneClickLeadFormOpens&count=10000`;
 
-        for (let i = 0; i < campaignIds.length; i += batchSize) {
-          const batch = campaignIds.slice(i, i + batchSize);
-
-          // Build URL with campaign filter
-          let analyticsUrl = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
-            `dateRange.start.day=${startDay}&dateRange.start.month=${startMonth}&dateRange.start.year=${startYear}&` +
-            `dateRange.end.day=${endDay}&dateRange.end.month=${endMonth}&dateRange.end.year=${endYear}&` +
-            `timeGranularity=ALL&pivot=MEMBER_COMPANY&accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
-            `fields=pivotValue,impressions,clicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions,oneClickLeadFormOpens&count=5000`;
-
-          batch.forEach((campaignId, idx) => {
-            analyticsUrl += `&campaigns[${idx}]=urn:li:sponsoredCampaign:${campaignId}`;
+        try {
+          const response = await fetch(analyticsUrl, {
+            headers: { 'Authorization': `Bearer ${accessToken}` }
           });
 
-          try {
-            const response = await fetch(analyticsUrl, {
-              headers: { 'Authorization': `Bearer ${accessToken}` }
-            });
+          if (response.ok) {
+            const data = await response.json();
+            console.log(`[get_company_influence] Analytics returned ${(data.elements || []).length} entries`);
 
-            if (response.ok) {
-              const data = await response.json();
+            for (const el of (data.elements || [])) {
+              const companyUrn = el.pivotValue || '';
+              if (!companyUrn) continue;
 
-              for (const el of (data.elements || [])) {
-                const companyUrn = el.pivotValue || '';
-                if (!companyUrn) continue;
+              const impressions = el.impressions || 0;
+              const clicks = el.clicks || 0;
+              const spend = parseFloat(el.costInLocalCurrency || '0');
+              const leads = (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
+              const formOpens = el.oneClickLeadFormOpens || 0;
 
-                const impressions = el.impressions || 0;
-                const clicks = el.clicks || 0;
-                const spend = parseFloat(el.costInLocalCurrency || '0');
-                const leads = (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
-                const formOpens = el.oneClickLeadFormOpens || 0;
-
-                // For this batch, we attribute to the first campaign (LinkedIn aggregates)
-                // In reality, we'd need per-campaign calls for exact attribution
-                const campaignId = batch[0];
-                const meta = campaignMeta.get(campaignId);
-
-                let company = companyData.get(companyUrn);
-                if (!company) {
-                  company = {
-                    companyUrn,
-                    companyName: '', // Will resolve later
-                    totalImpressions: 0,
-                    totalClicks: 0,
-                    totalSpend: 0,
-                    totalLeads: 0,
-                    totalFormOpens: 0,
-                    campaignBreakdown: [],
-                    objectiveMix: new Set(),
-                  };
-                  companyData.set(companyUrn, company);
-                }
-
-                company.totalImpressions += impressions;
-                company.totalClicks += clicks;
-                company.totalSpend += spend;
-                company.totalLeads += leads;
-                company.totalFormOpens += formOpens;
-
-                if (meta) {
-                  company.objectiveMix.add(meta.objective);
-                  company.campaignBreakdown.push({
-                    campaignId,
-                    campaignName: meta.name,
-                    objective: meta.objective,
-                    impressions,
-                    clicks,
-                    spend,
-                    leads,
-                  });
-                }
+              let company = companyData.get(companyUrn);
+              if (!company) {
+                company = {
+                  companyUrn,
+                  companyName: '',
+                  totalImpressions: 0,
+                  totalClicks: 0,
+                  totalSpend: 0,
+                  totalLeads: 0,
+                  totalFormOpens: 0,
+                  objectiveMix: new Set(),
+                };
+                companyData.set(companyUrn, company);
               }
+
+              company.totalImpressions += impressions;
+              company.totalClicks += clicks;
+              company.totalSpend += spend;
+              company.totalLeads += leads;
+              company.totalFormOpens += formOpens;
             }
-          } catch (err) {
-            console.error('[get_company_influence] Analytics fetch error for batch:', err);
+          } else {
+            const errorText = await response.text();
+            console.error(`[get_company_influence] Analytics API error: ${response.status}`, errorText);
           }
+        } catch (err) {
+          console.error('[get_company_influence] Analytics fetch error:', err);
         }
 
-        console.log(`[get_company_influence] Found ${companyData.size} companies`);
+        console.log(`[get_company_influence] Found ${companyData.size} unique companies`);
 
-        // Step 3: Resolve company names via Organization API
-        const companyUrns = Array.from(companyData.keys()).slice(0, 100); // Limit to 100 for API efficiency
+        // Step 3: Resolve company names via Organization Lookup API (batch)
+        const companyUrns = Array.from(companyData.keys()).slice(0, 200);
         const companyNames = new Map<string, string>();
 
-        // Batch resolve company names using v2 organizationsLookup
-        for (let i = 0; i < companyUrns.length; i += 50) {
-          const batch = companyUrns.slice(i, i + 50);
-          const batchIds = batch
-            .map(urn => urn.split(':').pop())
-            .filter(id => id && !isNaN(Number(id)));
+        // Helper to normalize company URN - supports organization, company, and memberCompany formats
+        function normalizeCompanyUrn(urn: string): { id: string | null; originalUrn: string } {
+          if (!urn) return { id: null, originalUrn: urn };
+          
+          const match = urn.match(/^urn:li:(organization|company|memberCompany):(\d+)$/);
+          if (match) {
+            return { id: match[2], originalUrn: urn };
+          }
+          
+          // Fallback: try to extract any numeric ID at the end
+          const numericMatch = urn.match(/:(\d+)$/);
+          if (numericMatch) {
+            return { id: numericMatch[1], originalUrn: urn };
+          }
+          
+          return { id: null, originalUrn: urn };
+        }
 
-          if (batchIds.length === 0) continue;
+        console.log(`[get_company_influence] Resolving names for ${companyUrns.length} companies...`);
+        console.log(`[get_company_influence] First 5 raw pivotValues: ${companyUrns.slice(0, 5).join(', ')}`);
 
-          const idsParam = batchIds.map((id, idx) => `ids[${idx}]=${id}`).join('&');
+        // Extract organization IDs using normalize helper (supports all URN formats)
+        const orgIdToUrn = new Map<string, string>();
+        companyUrns.forEach(urn => {
+          const { id, originalUrn } = normalizeCompanyUrn(urn);
+          if (id) {
+            orgIdToUrn.set(id, originalUrn);
+          }
+        });
+        
+        const orgIds = Array.from(orgIdToUrn.keys());
+        console.log(`[get_company_influence] Extracted ${orgIds.length} valid org IDs from ${companyUrns.length} URNs`);
 
-          try {
-            const orgUrl = `https://api.linkedin.com/v2/organizationsLookup?${idsParam}&projection=(results*(id,localizedName))`;
-            const response = await fetch(orgUrl, {
-              headers: { 'Authorization': `Bearer ${accessToken}` }
-            });
+        // Track if name resolution failed due to permissions
+        let namesResolutionFailed = false;
+        let namesResolutionError: string | null = null;
 
-            if (response.ok) {
-              const data = await response.json();
-              const results = data.results || {};
-              Object.entries(results).forEach(([id, org]: [string, any]) => {
-                if (org?.localizedName) {
-                  companyNames.set(`urn:li:organization:${id}`, org.localizedName);
+        // Use V2 organizationsLookup endpoint with proper headers
+        if (orgIds.length > 0) {
+          const batchSize = 50;
+          for (let i = 0; i < orgIds.length; i += batchSize) {
+            const batch = orgIds.slice(i, i + batchSize);
+            const idsParam = batch.map((id, idx) => `ids[${idx}]=${id}`).join('&');
+            
+            try {
+              const orgLookupUrl = `https://api.linkedin.com/v2/organizationsLookup?${idsParam}&projection=(results*(id,localizedName,vanityName))`;
+              console.log(`[get_company_influence] Batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(orgIds.length / batchSize)} - fetching org names...`);
+              
+              const orgResponse = await fetch(orgLookupUrl, {
+                headers: { 
+                  'Authorization': `Bearer ${accessToken}`,
+                  'LinkedIn-Version': '202511',
+                  'X-Restli-Protocol-Version': '2.0.0',
                 }
               });
-            } else {
-              console.log(`[get_company_influence] Org lookup failed: ${response.status}`);
+              
+              // Log status code for every batch
+              console.log(`[get_company_influence] Batch ${Math.floor(i / batchSize) + 1} response status: ${orgResponse.status}`);
+              
+              if (orgResponse.ok) {
+                const orgData = await orgResponse.json();
+                const results = orgData.results || {};
+                
+                // Log response structure
+                const resultKeys = Object.keys(results);
+                console.log(`[get_company_influence] Batch returned ${resultKeys.length} results, sample keys: ${resultKeys.slice(0, 3).join(', ')}`);
+                
+                Object.entries(results).forEach(([id, org]: [string, any]) => {
+                  const originalUrn = orgIdToUrn.get(id);
+                  const name = org?.localizedName || org?.vanityName;
+                  
+                  if (name) {
+                    // Store with original URN and all possible formats
+                    if (originalUrn) companyNames.set(originalUrn, name);
+                    companyNames.set(`urn:li:organization:${id}`, name);
+                    companyNames.set(`urn:li:company:${id}`, name);
+                    companyNames.set(`urn:li:memberCompany:${id}`, name);
+                    companyNames.set(id, name); // Also store by raw ID
+                  }
+                });
+                
+                console.log(`[get_company_influence] Total names resolved so far: ${companyNames.size}`);
+              } else {
+                // Log the error response body
+                const errText = await orgResponse.text();
+                console.log(`[get_company_influence] Batch lookup FAILED: status=${orgResponse.status}, body=${errText.slice(0, 300)}`);
+                
+                // Track 403 permission errors
+                if (orgResponse.status === 403) {
+                  namesResolutionFailed = true;
+                  namesResolutionError = `403 Forbidden: ${errText.slice(0, 100)}`;
+                }
+                
+                // Fallback: individual lookups (with limited attempts) - only if not 403
+                if (orgResponse.status !== 403 && i === 0) {
+                  console.log(`[get_company_influence] Attempting individual lookups for first batch...`);
+                  for (const id of batch.slice(0, 5)) {
+                    try {
+                      const singleUrl = `https://api.linkedin.com/v2/organizations/${id}?projection=(id,localizedName,vanityName)`;
+                      const singleResponse = await fetch(singleUrl, {
+                        headers: { 
+                          'Authorization': `Bearer ${accessToken}`,
+                          'LinkedIn-Version': '202511',
+                        }
+                      });
+                      
+                      console.log(`[get_company_influence] Individual lookup ${id}: status=${singleResponse.status}`);
+                      
+                      if (singleResponse.ok) {
+                        const singleData = await singleResponse.json();
+                        const name = singleData.localizedName || singleData.vanityName;
+                        if (name) {
+                          companyNames.set(`urn:li:organization:${id}`, name);
+                          companyNames.set(`urn:li:company:${id}`, name);
+                          companyNames.set(`urn:li:memberCompany:${id}`, name);
+                        }
+                      }
+                    } catch (err) {
+                      console.log(`[get_company_influence] Individual lookup ${id} error:`, err);
+                    }
+                  }
+                }
+              }
+            } catch (e) {
+              console.error(`[get_company_influence] Batch org lookup error:`, e);
             }
-          } catch (err) {
-            console.log('[get_company_influence] Org lookup error:', err);
           }
         }
 
-        // Step 4: Build final report with engagement scoring
+        console.log(`[get_company_influence] FINAL: Resolved ${companyNames.size} company names out of ${companyUrns.length}`);
+
+        // Step 4: Fetch campaign-level breakdown per company (using per-campaign analytics)
+        // Fetch analytics for each active campaign to build company breakdown
+        const campaignCompanyData = new Map<string, Map<string, {
+          campaignId: string;
+          campaignName: string;
+          objective: string;
+          impressions: number;
+          clicks: number;
+          spend: number;
+          leads: number;
+        }>>();
+
+        // Only process top 50 campaigns to avoid rate limits
+        const campaignIds = Array.from(campaignMeta.keys()).slice(0, 50);
+        console.log(`[get_company_influence] Fetching company breakdown for ${campaignIds.length} campaigns...`);
+
+        for (let i = 0; i < campaignIds.length; i += 5) {
+          const batch = campaignIds.slice(i, i + 5);
+          
+          await Promise.all(batch.map(async (campaignId) => {
+            const meta = campaignMeta.get(campaignId);
+            if (!meta) return;
+
+            try {
+              const campaignAnalyticsUrl = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
+                `dateRange.start.day=${startDay}&dateRange.start.month=${startMonth}&dateRange.start.year=${startYear}&` +
+                `dateRange.end.day=${endDay}&dateRange.end.month=${endMonth}&dateRange.end.year=${endYear}&` +
+                `timeGranularity=ALL&pivot=MEMBER_COMPANY&campaigns[0]=urn:li:sponsoredCampaign:${campaignId}&` +
+                `fields=pivotValue,impressions,clicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions&count=1000`;
+
+              const response = await fetch(campaignAnalyticsUrl, {
+                headers: { 'Authorization': `Bearer ${accessToken}` }
+              });
+
+              if (response.ok) {
+                const data = await response.json();
+                for (const el of (data.elements || [])) {
+                  const companyUrn = el.pivotValue || '';
+                  if (!companyUrn || !companyData.has(companyUrn)) continue;
+
+                  if (!campaignCompanyData.has(companyUrn)) {
+                    campaignCompanyData.set(companyUrn, new Map());
+                  }
+
+                  const existing = campaignCompanyData.get(companyUrn)!.get(campaignId);
+                  const impressions = el.impressions || 0;
+                  const clicks = el.clicks || 0;
+                  const spend = parseFloat(el.costInLocalCurrency || '0');
+                  const leads = (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
+
+                  if (existing) {
+                    existing.impressions += impressions;
+                    existing.clicks += clicks;
+                    existing.spend += spend;
+                    existing.leads += leads;
+                  } else {
+                    campaignCompanyData.get(companyUrn)!.set(campaignId, {
+                      campaignId,
+                      campaignName: meta.name,
+                      objective: meta.objective,
+                      impressions,
+                      clicks,
+                      spend,
+                      leads,
+                    });
+                  }
+                }
+              }
+            } catch (err) {
+              // Silent fail for individual campaign lookups
+            }
+          }));
+        }
+
+        console.log(`[get_company_influence] Built campaign breakdown for ${campaignCompanyData.size} companies`);
+
+        // Step 5: Add objective data from campaigns (aggregate by campaign objective)
+        const allObjectives = Array.from(campaignMeta.values()).map(c => c.objective);
+        const uniqueObjectives = [...new Set(allObjectives)];
+
+        // Step 6: Build final report with engagement scoring
         const companies: Array<{
           companyUrn: string;
           companyName: string;
@@ -6861,11 +7088,20 @@ serve(async (req) => {
           // Filter by minimum impressions
           if (data.totalImpressions < impressionThreshold) continue;
 
-          // Calculate engagement score: weighted combination
-          // Leads worth 100 points, Clicks worth 5 points, Impressions worth 0.01 points
+          // Calculate engagement score
           const engagementScore = (data.totalLeads * 100) + (data.totalClicks * 5) + (data.totalImpressions * 0.01);
 
-          const companyName = companyNames.get(companyUrn) || `Company ${companyUrn.split(':').pop()}`;
+          // Get company name - use resolved name or extract ID
+          const companyName = companyNames.get(companyUrn) || extractNameFromUrn(companyUrn);
+
+          // Get campaign breakdown for this company
+          const breakdown = campaignCompanyData.get(companyUrn);
+          const campaignBreakdown = breakdown ? Array.from(breakdown.values()) : [];
+
+          // Get unique objectives from this company's campaigns
+          const companyObjectives = campaignBreakdown.length > 0 
+            ? [...new Set(campaignBreakdown.map(c => c.objective))]
+            : uniqueObjectives;
 
           companies.push({
             companyUrn,
@@ -6878,9 +7114,9 @@ serve(async (req) => {
             totalFormOpens: data.totalFormOpens,
             ctr: data.totalImpressions > 0 ? (data.totalClicks / data.totalImpressions) * 100 : 0,
             cpl: data.totalLeads > 0 ? data.totalSpend / data.totalLeads : 0,
-            campaignDepth: data.campaignBreakdown.length,
-            objectiveTypes: Array.from(data.objectiveMix),
-            campaignBreakdown: data.campaignBreakdown.sort((a, b) => b.impressions - a.impressions),
+            campaignDepth: campaignBreakdown.length || uniqueObjectives.length,
+            objectiveTypes: companyObjectives,
+            campaignBreakdown: campaignBreakdown.sort((a, b) => b.impressions - a.impressions),
           });
         }
 
@@ -6908,6 +7144,7 @@ serve(async (req) => {
           }
         }
 
+        console.log(`[get_company_influence] FINAL: Resolved ${companyNames.size} company names. Resolution failed: ${namesResolutionFailed}`);
         console.log(`[get_company_influence] Complete. ${companies.length} companies above threshold`);
 
         return new Response(JSON.stringify({
@@ -6922,6 +7159,9 @@ serve(async (req) => {
             accountId,
             impressionThreshold,
             totalCampaignsAnalyzed: campaignMeta.size,
+            namesResolutionFailed,
+            namesResolutionError,
+            namesResolvedCount: companyNames.size,
           }
         }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }

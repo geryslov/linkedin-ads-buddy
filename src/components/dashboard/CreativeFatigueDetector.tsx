@@ -80,30 +80,30 @@ function CreativeRow({ creative }: { creative: CreativeFatigueItem }) {
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
       <TableRow className="hover:bg-muted/50 cursor-pointer" onClick={() => setIsOpen(!isOpen)}>
-        <TableCell className="w-8">
+        <TableCell className="w-10">
           <CollapsibleTrigger asChild>
             <Button variant="ghost" size="sm" className="h-6 w-6 p-0">
               {isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
             </Button>
           </CollapsibleTrigger>
         </TableCell>
-        <TableCell>
+        <TableCell className="w-24">
           <StatusBadge status={creative.status} />
         </TableCell>
-        <TableCell className="font-medium max-w-[200px] truncate" title={creative.creativeName}>
+        <TableCell className="w-48 font-medium truncate" title={creative.creativeName}>
           {creative.creativeName}
         </TableCell>
-        <TableCell className="text-right">{creative.metrics.totalImpressions.toLocaleString()}</TableCell>
-        <TableCell className="text-right">${creative.metrics.totalSpend.toFixed(2)}</TableCell>
-        <TableCell className="text-right">{creative.metrics.totalLeads}</TableCell>
-        <TableCell className="text-right">{creative.metrics.avgCtr.toFixed(2)}%</TableCell>
-        <TableCell className="text-right">
+        <TableCell className="w-28 text-right">{creative.metrics.totalImpressions.toLocaleString()}</TableCell>
+        <TableCell className="w-24 text-right">${creative.metrics.totalSpend.toFixed(2)}</TableCell>
+        <TableCell className="w-16 text-right">{creative.metrics.totalLeads}</TableCell>
+        <TableCell className="w-16 text-right">{creative.metrics.avgCtr.toFixed(2)}%</TableCell>
+        <TableCell className="w-24 text-right">
           <TrendIndicator value={creative.metrics.ctrTrend} />
         </TableCell>
-        <TableCell className="text-right">
+        <TableCell className="w-20 text-right">
           {creative.metrics.totalLeads > 0 ? `$${creative.metrics.avgCpl.toFixed(2)}` : '-'}
         </TableCell>
-        <TableCell className="text-right">
+        <TableCell className="w-24 text-right">
           {creative.metrics.totalLeads > 0 ? <TrendIndicator value={creative.metrics.cplTrend} inverted /> : '-'}
         </TableCell>
       </TableRow>
@@ -286,19 +286,19 @@ export function CreativeFatigueDetector({ accessToken, selectedAccount }: Creati
         <CardContent>
           {data?.creatives && data.creatives.length > 0 ? (
             <div className="rounded-md border">
-              <Table>
+              <Table className="table-fixed w-full">
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-8"></TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Creative</TableHead>
-                    <TableHead className="text-right">Impressions</TableHead>
-                    <TableHead className="text-right">Spend</TableHead>
-                    <TableHead className="text-right">Leads</TableHead>
-                    <TableHead className="text-right">CTR</TableHead>
-                    <TableHead className="text-right">CTR Trend</TableHead>
-                    <TableHead className="text-right">CPL</TableHead>
-                    <TableHead className="text-right">CPL Trend</TableHead>
+                    <TableHead className="w-10"></TableHead>
+                    <TableHead className="w-24">Status</TableHead>
+                    <TableHead className="w-48">Creative</TableHead>
+                    <TableHead className="w-28 text-right">Impressions</TableHead>
+                    <TableHead className="w-24 text-right">Spend</TableHead>
+                    <TableHead className="w-16 text-right">Leads</TableHead>
+                    <TableHead className="w-16 text-right">CTR</TableHead>
+                    <TableHead className="w-24 text-right">CTR Trend</TableHead>
+                    <TableHead className="w-20 text-right">CPL</TableHead>
+                    <TableHead className="w-24 text-right">CPL Trend</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
