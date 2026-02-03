@@ -6841,17 +6841,20 @@ serve(async (req) => {
         const companyNames = new Map<string, string>();
 
         console.log(`[get_company_influence] Resolving names for ${companyUrns.length} companies...`);
+        console.log(`[get_company_influence] Sample URNs: ${companyUrns.slice(0, 3).join(', ')}`);
 
-        // Build URN-to-ID mapping for organization lookups
+        // Extract organization IDs from URNs (matching Company Demographic pattern)
         const orgIdToUrn = new Map<string, string>();
-        for (const urn of companyUrns) {
-          const id = urn.split(':').pop();
-          if (id) {
-            orgIdToUrn.set(id, urn);
+        companyUrns.forEach(urn => {
+          // Match exact URN format: urn:li:organization:12345
+          const match = urn.match(/^urn:li:organization:(\d+)$/);
+          if (match) {
+            orgIdToUrn.set(match[1], urn);
           }
-        }
-
+        });
+        
         const orgIds = Array.from(orgIdToUrn.keys());
+        console.log(`[get_company_influence] Extracted ${orgIds.length} valid org IDs from ${companyUrns.length} URNs`);
 
         // Use V2 organizationsLookup endpoint (proven reliable in Company Demographic)
         if (orgIds.length > 0) {
