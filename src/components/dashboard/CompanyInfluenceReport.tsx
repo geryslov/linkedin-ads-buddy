@@ -194,6 +194,7 @@ export function CompanyInfluenceReport({ accessToken, selectedAccount }: Company
   const handleTimeFrameChange = (option: typeof timeFrameOptions[0]) => {
     setSelectedTimeFrame(option.value);
     setTimeFrame(option);
+    // Note: Refetch will be triggered by useEffect due to fetchCompanyInfluence dependency change
   };
 
   const handleExport = () => {

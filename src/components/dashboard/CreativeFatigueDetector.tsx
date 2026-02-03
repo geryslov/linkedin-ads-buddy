@@ -286,7 +286,7 @@ export function CreativeFatigueDetector({ accessToken, selectedAccount }: Creati
         <CardContent>
           {data?.creatives && data.creatives.length > 0 ? (
             <div className="rounded-md border">
-              <Table className="table-fixed">
+              <Table className="table-fixed w-full">
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-10"></TableHead>
