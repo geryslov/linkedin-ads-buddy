@@ -19,11 +19,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '@/components/ui/collapsible';
+// Removed Collapsible - using standard table rows for proper alignment
 
 interface CompanyInfluenceReportProps {
   accessToken: string | null;
@@ -83,28 +79,26 @@ function CompanyRow({ company, isExpanded, onToggle }: {
   onToggle: () => void;
 }) {
   return (
-    <Collapsible open={isExpanded} onOpenChange={onToggle}>
+    <>
       <TableRow className="hover:bg-muted/50 cursor-pointer" onClick={onToggle}>
-        <TableCell className="w-8">
-          <CollapsibleTrigger asChild>
-            <Button variant="ghost" size="sm" className="h-6 w-6 p-0">
-              {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-            </Button>
-          </CollapsibleTrigger>
+        <TableCell className="w-10">
+          <Button variant="ghost" size="sm" className="h-6 w-6 p-0">
+            {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+          </Button>
         </TableCell>
-        <TableCell className="font-medium max-w-[200px] truncate" title={company.companyName}>
+        <TableCell className="w-48 font-medium truncate" title={company.companyName}>
           {company.companyName}
         </TableCell>
-        <TableCell>
+        <TableCell className="w-24">
           <EngagementScoreBadge score={company.engagementScore} leads={company.totalLeads} />
         </TableCell>
-        <TableCell className="text-right">{company.totalImpressions.toLocaleString()}</TableCell>
-        <TableCell className="text-right">{company.totalClicks.toLocaleString()}</TableCell>
-        <TableCell className="text-right font-medium text-primary">{company.totalLeads}</TableCell>
-        <TableCell className="text-right">${company.totalSpend.toFixed(2)}</TableCell>
-        <TableCell className="text-right">{company.ctr.toFixed(2)}%</TableCell>
-        <TableCell className="text-center">{company.campaignDepth}</TableCell>
-        <TableCell>
+        <TableCell className="w-28 text-right">{company.totalImpressions.toLocaleString()}</TableCell>
+        <TableCell className="w-20 text-right">{company.totalClicks.toLocaleString()}</TableCell>
+        <TableCell className="w-16 text-right font-medium text-primary">{company.totalLeads}</TableCell>
+        <TableCell className="w-24 text-right">${company.totalSpend.toFixed(2)}</TableCell>
+        <TableCell className="w-20 text-right">{company.ctr.toFixed(2)}%</TableCell>
+        <TableCell className="w-16 text-center">{company.campaignDepth}</TableCell>
+        <TableCell className="w-40">
           <div className="flex flex-wrap gap-1">
             {company.objectiveTypes.slice(0, 2).map(obj => (
               <ObjectiveBadge key={obj} objective={obj} />
@@ -115,44 +109,50 @@ function CompanyRow({ company, isExpanded, onToggle }: {
           </div>
         </TableCell>
       </TableRow>
-      <CollapsibleContent asChild>
-        <tr>
-          <td colSpan={10} className="p-0">
-            <div className="bg-muted/30 p-4 ml-8 mr-4 mb-4 rounded-lg">
+      {isExpanded && (
+        <TableRow>
+          <TableCell colSpan={10} className="p-0 bg-muted/30">
+            <div className="p-4 ml-8 mr-4 mb-2 rounded-lg">
               <h4 className="text-sm font-medium mb-3">Campaign Breakdown</h4>
-              <Table>
-                <TableHeader>
-                  <TableRow className="hover:bg-transparent">
-                    <TableHead className="text-xs">Campaign</TableHead>
-                    <TableHead className="text-xs">Objective</TableHead>
-                    <TableHead className="text-xs text-right">Impressions</TableHead>
-                    <TableHead className="text-xs text-right">Clicks</TableHead>
-                    <TableHead className="text-xs text-right">Leads</TableHead>
-                    <TableHead className="text-xs text-right">Spend</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {company.campaignBreakdown.map((campaign, idx) => (
-                    <TableRow key={idx} className="hover:bg-muted/50">
-                      <TableCell className="text-xs font-medium max-w-[150px] truncate" title={campaign.campaignName}>
-                        {campaign.campaignName}
-                      </TableCell>
-                      <TableCell>
-                        <ObjectiveBadge objective={campaign.objective} />
-                      </TableCell>
-                      <TableCell className="text-xs text-right">{campaign.impressions.toLocaleString()}</TableCell>
-                      <TableCell className="text-xs text-right">{campaign.clicks.toLocaleString()}</TableCell>
-                      <TableCell className="text-xs text-right font-medium">{campaign.leads}</TableCell>
-                      <TableCell className="text-xs text-right">${campaign.spend.toFixed(2)}</TableCell>
+              {company.campaignBreakdown.length > 0 ? (
+                <Table>
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead className="text-xs w-48">Campaign</TableHead>
+                      <TableHead className="text-xs w-32">Objective</TableHead>
+                      <TableHead className="text-xs text-right w-24">Impressions</TableHead>
+                      <TableHead className="text-xs text-right w-20">Clicks</TableHead>
+                      <TableHead className="text-xs text-right w-16">Leads</TableHead>
+                      <TableHead className="text-xs text-right w-24">Spend</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {company.campaignBreakdown.map((campaign, idx) => (
+                      <TableRow key={idx} className="hover:bg-muted/50">
+                        <TableCell className="text-xs font-medium max-w-[150px] truncate" title={campaign.campaignName}>
+                          {campaign.campaignName}
+                        </TableCell>
+                        <TableCell>
+                          <ObjectiveBadge objective={campaign.objective} />
+                        </TableCell>
+                        <TableCell className="text-xs text-right">{campaign.impressions.toLocaleString()}</TableCell>
+                        <TableCell className="text-xs text-right">{campaign.clicks.toLocaleString()}</TableCell>
+                        <TableCell className="text-xs text-right font-medium">{campaign.leads}</TableCell>
+                        <TableCell className="text-xs text-right">${campaign.spend.toFixed(2)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  Campaign-level breakdown not available. Account-level analytics aggregated.
+                </p>
+              )}
             </div>
-          </td>
-        </tr>
-      </CollapsibleContent>
-    </Collapsible>
+          </TableCell>
+        </TableRow>
+      )}
+    </>
   );
 }
 
@@ -434,20 +434,20 @@ export function CompanyInfluenceReport({ accessToken, selectedAccount }: Company
         </CardHeader>
         <CardContent>
           {filteredCompanies.length > 0 ? (
-            <div className="rounded-md border">
-              <Table>
+            <div className="rounded-md border overflow-x-auto">
+              <Table className="table-fixed w-full min-w-[900px]">
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-8"></TableHead>
-                    <TableHead>Company</TableHead>
-                    <TableHead>Score</TableHead>
-                    <TableHead className="text-right">Impressions</TableHead>
-                    <TableHead className="text-right">Clicks</TableHead>
-                    <TableHead className="text-right">Leads</TableHead>
-                    <TableHead className="text-right">Spend</TableHead>
-                    <TableHead className="text-right">CTR</TableHead>
-                    <TableHead className="text-center">Depth</TableHead>
-                    <TableHead>Objectives</TableHead>
+                    <TableHead className="w-10"></TableHead>
+                    <TableHead className="w-48">Company</TableHead>
+                    <TableHead className="w-24">Score</TableHead>
+                    <TableHead className="w-28 text-right">Impressions</TableHead>
+                    <TableHead className="w-20 text-right">Clicks</TableHead>
+                    <TableHead className="w-16 text-right">Leads</TableHead>
+                    <TableHead className="w-24 text-right">Spend</TableHead>
+                    <TableHead className="w-20 text-right">CTR</TableHead>
+                    <TableHead className="w-16 text-center">Depth</TableHead>
+                    <TableHead className="w-40">Objectives</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
