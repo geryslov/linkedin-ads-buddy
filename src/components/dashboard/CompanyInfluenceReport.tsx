@@ -179,11 +179,18 @@ export function CompanyInfluenceReport({ accessToken, selectedAccount }: Company
   const { toast } = useToast();
   const [selectedTimeFrame, setSelectedTimeFrame] = useState('last_30_days');
 
+  // Refetch when account or date range changes
   useEffect(() => {
+    if (selectedAccount && accessToken) {
+      fetchCompanyInfluence(selectedAccount, minImpressions);
+    }
+  }, [selectedAccount, accessToken, dateRange.start, dateRange.end]);
+
+  const handleApplyFilters = () => {
     if (selectedAccount) {
       fetchCompanyInfluence(selectedAccount, minImpressions);
     }
-  }, [selectedAccount, fetchCompanyInfluence, minImpressions]);
+  };
 
   const handleRefresh = () => {
     if (selectedAccount) {
@@ -194,7 +201,7 @@ export function CompanyInfluenceReport({ accessToken, selectedAccount }: Company
   const handleTimeFrameChange = (option: typeof timeFrameOptions[0]) => {
     setSelectedTimeFrame(option.value);
     setTimeFrame(option);
-    // Note: Refetch will be triggered by useEffect due to fetchCompanyInfluence dependency change
+    // Refetch will be triggered by the useEffect watching dateRange
   };
 
   const handleExport = () => {
@@ -295,6 +302,9 @@ export function CompanyInfluenceReport({ accessToken, selectedAccount }: Company
                   onChange={(e) => setMinImpressions(parseInt(e.target.value) || 0)}
                   className="w-24"
                 />
+                <Button variant="secondary" size="sm" onClick={handleApplyFilters}>
+                  Apply
+                </Button>
               </div>
             </div>
             <div className="flex gap-2">
