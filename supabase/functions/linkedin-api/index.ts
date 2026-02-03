@@ -6897,11 +6897,7 @@ serve(async (req) => {
               console.log(`[get_company_influence] Batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(orgIds.length / batchSize)} - fetching org names...`);
               
               const orgResponse = await fetch(orgLookupUrl, {
-                headers: { 
-                  'Authorization': `Bearer ${accessToken}`,
-                  'LinkedIn-Version': '202511',
-                  'X-Restli-Protocol-Version': '2.0.0',
-                }
+                headers: { 'Authorization': `Bearer ${accessToken}` }
               });
               
               // Log status code for every batch
@@ -7091,8 +7087,24 @@ serve(async (req) => {
           // Calculate engagement score
           const engagementScore = (data.totalLeads * 100) + (data.totalClicks * 5) + (data.totalImpressions * 0.01);
 
-          // Get company name - use resolved name or extract ID
-          const companyName = companyNames.get(companyUrn) || extractNameFromUrn(companyUrn);
+          // Get company name - try multiple lookup strategies
+          let companyName = companyNames.get(companyUrn);
+
+          if (!companyName) {
+            // Try extracting ID and looking up by various URN formats
+            const { id } = normalizeCompanyUrn(companyUrn);
+            if (id) {
+              companyName = companyNames.get(id)
+                || companyNames.get(`urn:li:organization:${id}`)
+                || companyNames.get(`urn:li:company:${id}`)
+                || companyNames.get(`urn:li:memberCompany:${id}`);
+            }
+          }
+
+          // Final fallback: show ID from URN
+          if (!companyName) {
+            companyName = extractNameFromUrn(companyUrn);
+          }
 
           // Get campaign breakdown for this company
           const breakdown = campaignCompanyData.get(companyUrn);
