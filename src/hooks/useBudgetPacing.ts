@@ -89,7 +89,8 @@ export function useBudgetPacing(accessToken: string | null) {
 
   const saveBudget = useCallback(async (accountId: string, amount: number, currency: string = 'USD') => {
     const now = new Date();
-    const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    // Format as YYYY-MM-01 for date column compatibility
+    const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
 
     try {
       // Get current user

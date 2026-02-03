@@ -6514,9 +6514,9 @@ serve(async (req) => {
         // Resolve top title names via standardizedTitles API
         const titleNames = new Map<string, string>();
 
-        for (const title of topTitles.slice(0, 5)) { // Limit API calls
+        // First, resolve names for all top 10 titles (for display in top performers table)
+        for (const title of topTitles.slice(0, 10)) {
           try {
-            // Get title details
             const titleUrl = `https://api.linkedin.com/v2/standardizedTitles/${encodeURIComponent(title.titleUrn)}`;
             const response = await fetch(titleUrl, {
               headers: {
@@ -6529,50 +6529,60 @@ serve(async (req) => {
               const data = await response.json();
               const name = data.name?.localized?.en_US || data.name || `Title ${title.titleId}`;
               titleNames.set(title.titleId, name);
+            }
+          } catch (err) {
+            console.log(`[get_audience_expansion] Title name lookup error for ${title.titleId}:`, err);
+          }
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
 
-              // Search for similar titles
-              const searchUrl = `https://api.linkedin.com/v2/standardizedTitles?q=search&keywords=${encodeURIComponent(name.split(' ')[0])}&count=20`;
-              const searchResponse = await fetch(searchUrl, {
-                headers: {
-                  'Authorization': `Bearer ${accessToken}`,
-                  'X-Restli-Protocol-Version': '2.0.0',
-                }
-              });
+        // Then, search for similar titles for the top 5
+        for (const title of topTitles.slice(0, 5)) {
+          const name = titleNames.get(title.titleId) || `Title ${title.titleId}`;
+          
+          try {
+            // Search for similar titles
+            const searchUrl = `https://api.linkedin.com/v2/standardizedTitles?q=search&keywords=${encodeURIComponent(name.split(' ')[0])}&count=20`;
+            const searchResponse = await fetch(searchUrl, {
+              headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'X-Restli-Protocol-Version': '2.0.0',
+              }
+            });
 
-              if (searchResponse.ok) {
-                const searchData = await searchResponse.json();
-                const similarTitles: Array<{ titleId: string; titleName: string; reason: string }> = [];
+            if (searchResponse.ok) {
+              const searchData = await searchResponse.json();
+              const similarTitles: Array<{ titleId: string; titleName: string; reason: string }> = [];
 
-                for (const st of (searchData.elements || []).slice(0, 5)) {
-                  const stId = st.id?.toString() || st.$URN?.split(':').pop();
-                  const stName = st.name?.localized?.en_US || st.name || '';
+              for (const st of (searchData.elements || []).slice(0, 5)) {
+                const stId = st.id?.toString() || st.$URN?.split(':').pop();
+                const stName = st.name?.localized?.en_US || st.name || '';
 
-                  // Skip if it's the same title or already in targeting
-                  if (stId === title.titleId) continue;
-                  if (titlePerformance.some(t => t.titleId === stId)) continue;
+                // Skip if it's the same title or already in targeting
+                if (stId === title.titleId) continue;
+                if (titlePerformance.some(t => t.titleId === stId)) continue;
 
-                  similarTitles.push({
-                    titleId: stId,
-                    titleName: stName,
-                    reason: `Similar to "${name}" (top performer with $${title.cpl.toFixed(0)} CPL)`,
-                  });
-                }
+                similarTitles.push({
+                  titleId: stId,
+                  titleName: stName,
+                  reason: `Similar to "${name}" (top performer with $${title.cpl.toFixed(0)} CPL)`,
+                });
+              }
 
-                if (similarTitles.length > 0) {
-                  suggestions.push({
-                    basedOn: {
-                      titleId: title.titleId,
-                      titleName: name,
-                      cpl: title.cpl,
-                      leads: title.leads,
-                    },
-                    suggestedTitles: similarTitles,
-                  });
-                }
+              if (similarTitles.length > 0) {
+                suggestions.push({
+                  basedOn: {
+                    titleId: title.titleId,
+                    titleName: name,
+                    cpl: title.cpl,
+                    leads: title.leads,
+                  },
+                  suggestedTitles: similarTitles,
+                });
               }
             }
           } catch (err) {
-            console.log(`[get_audience_expansion] Title lookup error for ${title.titleId}:`, err);
+            console.log(`[get_audience_expansion] Title search error for ${title.titleId}:`, err);
           }
 
           // Small delay between API calls
