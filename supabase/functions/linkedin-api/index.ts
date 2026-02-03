@@ -6836,49 +6836,162 @@ serve(async (req) => {
 
         console.log(`[get_company_influence] Found ${companyData.size} unique companies`);
 
-        // Step 3: Resolve company names via Organization API
+        // Step 3: Resolve company names via Organization Lookup API (batch)
         const companyUrns = Array.from(companyData.keys()).slice(0, 200);
         const companyNames = new Map<string, string>();
 
-        // Batch resolve company names in smaller batches
-        for (let i = 0; i < companyUrns.length; i += 10) {
-          const batch = companyUrns.slice(i, i + 10);
+        console.log(`[get_company_influence] Resolving names for ${companyUrns.length} companies...`);
+
+        // Try batch lookup first using organizationsLookup endpoint
+        const orgIds = companyUrns.map(urn => urn.split(':').pop()).filter(Boolean);
+        
+        // Use batch lookup via /rest/organizations with List projection
+        for (let i = 0; i < orgIds.length; i += 20) {
+          const batch = orgIds.slice(i, i + 20);
           
-          for (const urn of batch) {
-            const id = urn.split(':').pop();
-            if (!id) continue;
+          // Try REST API batch lookup
+          try {
+            // Build the List parameter format: (id:{orgId1},id:{orgId2})
+            const idsParam = batch.map(id => `(id:${id})`).join(',');
+            const batchUrl = `https://api.linkedin.com/rest/organizations?ids=List(${idsParam})&fields=id,localizedName,vanityName`;
+            
+            const response = await fetch(batchUrl, {
+              headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'X-Restli-Protocol-Version': '2.0.0',
+                'LinkedIn-Version': '202511',
+              }
+            });
 
-            try {
-              const orgUrl = `https://api.linkedin.com/rest/organizations/${id}`;
-              const response = await fetch(orgUrl, {
-                headers: {
-                  'Authorization': `Bearer ${accessToken}`,
-                  'X-Restli-Protocol-Version': '2.0.0',
-                  'LinkedIn-Version': '202511',
-                }
-              });
-
-              if (response.ok) {
-                const orgData = await response.json();
-                const name = orgData.localizedName || orgData.name;
-                if (name) {
-                  companyNames.set(urn, name);
+            if (response.ok) {
+              const data = await response.json();
+              // Handle results map format
+              if (data.results) {
+                for (const [key, org] of Object.entries(data.results)) {
+                  const orgData = org as { id?: string; localizedName?: string; vanityName?: string };
+                  const name = orgData.localizedName || orgData.vanityName;
+                  if (name && orgData.id) {
+                    companyNames.set(`urn:li:organization:${orgData.id}`, name);
+                  }
                 }
               }
-            } catch (err) {
-              // Silent fail for individual org lookups
+              console.log(`[get_company_influence] Batch ${i / 20 + 1} resolved ${Object.keys(data.results || {}).length} names`);
+            } else {
+              const errorText = await response.text();
+              console.log(`[get_company_influence] Batch lookup failed: ${response.status}, trying individual lookups`);
+              
+              // Fallback to individual lookups for this batch
+              for (const id of batch) {
+                try {
+                  const orgUrl = `https://api.linkedin.com/rest/organizations/${id}`;
+                  const orgResponse = await fetch(orgUrl, {
+                    headers: {
+                      'Authorization': `Bearer ${accessToken}`,
+                      'X-Restli-Protocol-Version': '2.0.0',
+                      'LinkedIn-Version': '202511',
+                    }
+                  });
+
+                  if (orgResponse.ok) {
+                    const orgData = await orgResponse.json();
+                    const name = orgData.localizedName || orgData.name || orgData.vanityName;
+                    if (name) {
+                      companyNames.set(`urn:li:organization:${id}`, name);
+                    }
+                  }
+                } catch (err) {
+                  // Silent fail for individual org lookups
+                }
+              }
             }
+          } catch (err) {
+            console.error(`[get_company_influence] Batch org lookup error:`, err);
           }
         }
 
-        console.log(`[get_company_influence] Resolved ${companyNames.size} company names`);
+        console.log(`[get_company_influence] Resolved ${companyNames.size} company names out of ${companyUrns.length}`);
 
-        // Step 4: Add objective data from campaigns (aggregate by campaign objective)
-        // Map objectives to companies based on which campaigns they appeared in
+        // Step 4: Fetch campaign-level breakdown per company (using per-campaign analytics)
+        // Fetch analytics for each active campaign to build company breakdown
+        const campaignCompanyData = new Map<string, Map<string, {
+          campaignId: string;
+          campaignName: string;
+          objective: string;
+          impressions: number;
+          clicks: number;
+          spend: number;
+          leads: number;
+        }>>();
+
+        // Only process top 50 campaigns to avoid rate limits
+        const campaignIds = Array.from(campaignMeta.keys()).slice(0, 50);
+        console.log(`[get_company_influence] Fetching company breakdown for ${campaignIds.length} campaigns...`);
+
+        for (let i = 0; i < campaignIds.length; i += 5) {
+          const batch = campaignIds.slice(i, i + 5);
+          
+          await Promise.all(batch.map(async (campaignId) => {
+            const meta = campaignMeta.get(campaignId);
+            if (!meta) return;
+
+            try {
+              const campaignAnalyticsUrl = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
+                `dateRange.start.day=${startDay}&dateRange.start.month=${startMonth}&dateRange.start.year=${startYear}&` +
+                `dateRange.end.day=${endDay}&dateRange.end.month=${endMonth}&dateRange.end.year=${endYear}&` +
+                `timeGranularity=ALL&pivot=MEMBER_COMPANY&campaigns[0]=urn:li:sponsoredCampaign:${campaignId}&` +
+                `fields=pivotValue,impressions,clicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions&count=1000`;
+
+              const response = await fetch(campaignAnalyticsUrl, {
+                headers: { 'Authorization': `Bearer ${accessToken}` }
+              });
+
+              if (response.ok) {
+                const data = await response.json();
+                for (const el of (data.elements || [])) {
+                  const companyUrn = el.pivotValue || '';
+                  if (!companyUrn || !companyData.has(companyUrn)) continue;
+
+                  if (!campaignCompanyData.has(companyUrn)) {
+                    campaignCompanyData.set(companyUrn, new Map());
+                  }
+
+                  const existing = campaignCompanyData.get(companyUrn)!.get(campaignId);
+                  const impressions = el.impressions || 0;
+                  const clicks = el.clicks || 0;
+                  const spend = parseFloat(el.costInLocalCurrency || '0');
+                  const leads = (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
+
+                  if (existing) {
+                    existing.impressions += impressions;
+                    existing.clicks += clicks;
+                    existing.spend += spend;
+                    existing.leads += leads;
+                  } else {
+                    campaignCompanyData.get(companyUrn)!.set(campaignId, {
+                      campaignId,
+                      campaignName: meta.name,
+                      objective: meta.objective,
+                      impressions,
+                      clicks,
+                      spend,
+                      leads,
+                    });
+                  }
+                }
+              }
+            } catch (err) {
+              // Silent fail for individual campaign lookups
+            }
+          }));
+        }
+
+        console.log(`[get_company_influence] Built campaign breakdown for ${campaignCompanyData.size} companies`);
+
+        // Step 5: Add objective data from campaigns (aggregate by campaign objective)
         const allObjectives = Array.from(campaignMeta.values()).map(c => c.objective);
         const uniqueObjectives = [...new Set(allObjectives)];
 
-        // Step 5: Build final report with engagement scoring
+        // Step 6: Build final report with engagement scoring
         const companies: Array<{
           companyUrn: string;
           companyName: string;
@@ -6913,6 +7026,15 @@ serve(async (req) => {
           // Get company name - use resolved name or extract ID
           const companyName = companyNames.get(companyUrn) || `Company ${companyUrn.split(':').pop()}`;
 
+          // Get campaign breakdown for this company
+          const breakdown = campaignCompanyData.get(companyUrn);
+          const campaignBreakdown = breakdown ? Array.from(breakdown.values()) : [];
+
+          // Get unique objectives from this company's campaigns
+          const companyObjectives = campaignBreakdown.length > 0 
+            ? [...new Set(campaignBreakdown.map(c => c.objective))]
+            : uniqueObjectives;
+
           companies.push({
             companyUrn,
             companyName,
@@ -6924,9 +7046,9 @@ serve(async (req) => {
             totalFormOpens: data.totalFormOpens,
             ctr: data.totalImpressions > 0 ? (data.totalClicks / data.totalImpressions) * 100 : 0,
             cpl: data.totalLeads > 0 ? data.totalSpend / data.totalLeads : 0,
-            campaignDepth: uniqueObjectives.length, // Number of unique objectives in account
-            objectiveTypes: uniqueObjectives,
-            campaignBreakdown: [], // Campaign breakdown not available with standard API access
+            campaignDepth: campaignBreakdown.length || uniqueObjectives.length,
+            objectiveTypes: companyObjectives,
+            campaignBreakdown: campaignBreakdown.sort((a, b) => b.impressions - a.impressions),
           });
         }
 
