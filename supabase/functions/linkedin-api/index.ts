@@ -5990,6 +5990,8 @@ serve(async (req) => {
         // Budget Pacing Dashboard - compares actual spend vs planned budget
         const { accountId, dateRange } = params || {};
         const now = new Date();
+        // Format as YYYY-MM-01 for date column compatibility
+        const currentMonthDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
         const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
         // Default to current month if no date range specified
@@ -6054,12 +6056,15 @@ serve(async (req) => {
           const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
           const supabase = createClient(supabaseUrl, supabaseKey);
 
-          const { data: budgetData } = await supabase
+          // Query with YYYY-MM-01 format for the date column
+          const { data: budgetData, error: budgetError } = await supabase
             .from('account_budgets')
             .select('budget_amount, currency')
             .eq('account_id', accountId)
-            .eq('month', currentMonth)
+            .eq('month', currentMonthDate)
             .single();
+
+          console.log(`[get_budget_pacing] Budget query for ${accountId}, month ${currentMonthDate}:`, budgetData, budgetError);
 
           if (budgetData) {
             budgetAmount = budgetData.budget_amount || 0;
@@ -6511,11 +6516,36 @@ serve(async (req) => {
           }>;
         }> = [];
 
-        // Resolve top title names via standardizedTitles API
+        // Resolve top title names via standardizedTitles API or title_metadata_cache
         const titleNames = new Map<string, string>();
 
-        // First, resolve names for all top 10 titles (for display in top performers table)
+        // First, try to get cached titles from Supabase
+        try {
+          const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+          const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+          const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+          const supabase = createClient(supabaseUrl, supabaseKey);
+
+          const titleIds = topTitles.slice(0, 10).map(t => t.titleId);
+          const { data: cachedTitles } = await supabase
+            .from('title_metadata_cache')
+            .select('title_id, name')
+            .in('title_id', titleIds);
+
+          if (cachedTitles) {
+            for (const cached of cachedTitles) {
+              titleNames.set(cached.title_id, cached.name);
+            }
+          }
+          console.log(`[get_audience_expansion] Found ${titleNames.size} cached title names`);
+        } catch (cacheErr) {
+          console.log('[get_audience_expansion] Cache lookup error:', cacheErr);
+        }
+
+        // Then resolve missing titles via API
         for (const title of topTitles.slice(0, 10)) {
+          if (titleNames.has(title.titleId)) continue; // Already have from cache
+
           try {
             const titleUrl = `https://api.linkedin.com/v2/standardizedTitles/${encodeURIComponent(title.titleUrn)}`;
             const response = await fetch(titleUrl, {
@@ -6529,12 +6559,16 @@ serve(async (req) => {
               const data = await response.json();
               const name = data.name?.localized?.en_US || data.name || `Title ${title.titleId}`;
               titleNames.set(title.titleId, name);
+            } else {
+              console.log(`[get_audience_expansion] Title API returned ${response.status} for ${title.titleId}`);
             }
           } catch (err) {
             console.log(`[get_audience_expansion] Title name lookup error for ${title.titleId}:`, err);
           }
           await new Promise(resolve => setTimeout(resolve, 50));
         }
+
+        console.log(`[get_audience_expansion] Resolved ${titleNames.size} total title names`)
 
         // Then, search for similar titles for the top 5
         for (const title of topTitles.slice(0, 5)) {
