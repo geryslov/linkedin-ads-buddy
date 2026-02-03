@@ -6766,8 +6766,8 @@ serve(async (req) => {
 
         console.log(`[get_company_influence] Found ${campaignMeta.size} campaigns`);
 
-        // Step 2: Fetch company analytics per campaign
-        // We need to make separate calls per campaign to track which campaign influenced which company
+        // Step 2: Fetch company analytics using account-level query (works with Business Manager delegation)
+        // Note: Using campaign batching (campaigns[x] params) doesn't work for BM-delegated access
         const companyData = new Map<string, {
           companyUrn: string;
           companyName: string;
@@ -6788,89 +6788,65 @@ serve(async (req) => {
           objectiveMix: Set<string>;
         }>();
 
-        // Process campaigns in batches
-        const campaignIds = Array.from(campaignMeta.keys());
-        const batchSize = 10;
+        // Single account-level query for all company data
+        const analyticsUrl = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
+          `dateRange.start.day=${startDay}&dateRange.start.month=${startMonth}&dateRange.start.year=${startYear}&` +
+          `dateRange.end.day=${endDay}&dateRange.end.month=${endMonth}&dateRange.end.year=${endYear}&` +
+          `timeGranularity=ALL&pivot=MEMBER_COMPANY&accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
+          `fields=pivotValue,impressions,clicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions,oneClickLeadFormOpens&count=5000`;
 
-        for (let i = 0; i < campaignIds.length; i += batchSize) {
-          const batch = campaignIds.slice(i, i + batchSize);
-
-          // Build URL with campaign filter
-          let analyticsUrl = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
-            `dateRange.start.day=${startDay}&dateRange.start.month=${startMonth}&dateRange.start.year=${startYear}&` +
-            `dateRange.end.day=${endDay}&dateRange.end.month=${endMonth}&dateRange.end.year=${endYear}&` +
-            `timeGranularity=ALL&pivot=MEMBER_COMPANY&accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
-            `fields=pivotValue,impressions,clicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions,oneClickLeadFormOpens&count=5000`;
-
-          batch.forEach((campaignId, idx) => {
-            analyticsUrl += `&campaigns[${idx}]=urn:li:sponsoredCampaign:${campaignId}`;
+        try {
+          const response = await fetch(analyticsUrl, {
+            headers: { 'Authorization': `Bearer ${accessToken}` }
           });
 
-          try {
-            const response = await fetch(analyticsUrl, {
-              headers: { 'Authorization': `Bearer ${accessToken}` }
-            });
+          if (response.ok) {
+            const data = await response.json();
+            console.log(`[get_company_influence] Analytics returned ${(data.elements || []).length} company entries`);
 
-            if (response.ok) {
-              const data = await response.json();
+            for (const el of (data.elements || [])) {
+              const companyUrn = el.pivotValue || '';
+              if (!companyUrn) continue;
 
-              for (const el of (data.elements || [])) {
-                const companyUrn = el.pivotValue || '';
-                if (!companyUrn) continue;
+              const impressions = el.impressions || 0;
+              const clicks = el.clicks || 0;
+              const spend = parseFloat(el.costInLocalCurrency || '0');
+              const leads = (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
+              const formOpens = el.oneClickLeadFormOpens || 0;
 
-                const impressions = el.impressions || 0;
-                const clicks = el.clicks || 0;
-                const spend = parseFloat(el.costInLocalCurrency || '0');
-                const leads = (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
-                const formOpens = el.oneClickLeadFormOpens || 0;
-
-                // For this batch, we attribute to the first campaign (LinkedIn aggregates)
-                // In reality, we'd need per-campaign calls for exact attribution
-                const campaignId = batch[0];
-                const meta = campaignMeta.get(campaignId);
-
-                let company = companyData.get(companyUrn);
-                if (!company) {
-                  company = {
-                    companyUrn,
-                    companyName: '', // Will resolve later
-                    totalImpressions: 0,
-                    totalClicks: 0,
-                    totalSpend: 0,
-                    totalLeads: 0,
-                    totalFormOpens: 0,
-                    campaignBreakdown: [],
-                    objectiveMix: new Set(),
-                  };
-                  companyData.set(companyUrn, company);
-                }
-
-                company.totalImpressions += impressions;
-                company.totalClicks += clicks;
-                company.totalSpend += spend;
-                company.totalLeads += leads;
-                company.totalFormOpens += formOpens;
-
-                if (meta) {
-                  company.objectiveMix.add(meta.objective);
-                  company.campaignBreakdown.push({
-                    campaignId,
-                    campaignName: meta.name,
-                    objective: meta.objective,
-                    impressions,
-                    clicks,
-                    spend,
-                    leads,
-                  });
-                }
+              // For account-level query, we aggregate at company level
+              // Campaign breakdown requires separate per-campaign calls (optional enhancement)
+              let company = companyData.get(companyUrn);
+              if (!company) {
+                company = {
+                  companyUrn,
+                  companyName: '',
+                  totalImpressions: 0,
+                  totalClicks: 0,
+                  totalSpend: 0,
+                  totalLeads: 0,
+                  totalFormOpens: 0,
+                  campaignBreakdown: [],
+                  objectiveMix: new Set(),
+                };
+                companyData.set(companyUrn, company);
               }
+
+              company.totalImpressions += impressions;
+              company.totalClicks += clicks;
+              company.totalSpend += spend;
+              company.totalLeads += leads;
+              company.totalFormOpens += formOpens;
             }
-          } catch (err) {
-            console.error('[get_company_influence] Analytics fetch error for batch:', err);
+          } else {
+            const errorText = await response.text();
+            console.error(`[get_company_influence] Analytics API error: ${response.status}`, errorText);
           }
+        } catch (err) {
+          console.error('[get_company_influence] Analytics fetch error:', err);
         }
 
-        console.log(`[get_company_influence] Found ${companyData.size} companies`);
+        console.log(`[get_company_influence] Found ${companyData.size} unique companies`);
 
         // Step 3: Resolve company names via Organization API
         const companyUrns = Array.from(companyData.keys()).slice(0, 100); // Limit to 100 for API efficiency
