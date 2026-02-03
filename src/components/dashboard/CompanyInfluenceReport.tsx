@@ -6,7 +6,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { RefreshCw, Building2, TrendingUp, Users, Target, ChevronDown, ChevronRight, Download, Flame } from 'lucide-react';
+import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
+import { RefreshCw, Building2, TrendingUp, Users, Target, ChevronDown, ChevronRight, Download, Flame, AlertTriangle } from 'lucide-react';
 import { useCompanyInfluence, CompanyInfluenceItem } from '@/hooks/useCompanyInfluence';
 import { TimeFrameSelector } from './TimeFrameSelector';
 import { useToast } from '@/hooks/use-toast';
@@ -258,6 +259,20 @@ export function CompanyInfluenceReport({ accessToken, selectedAccount }: Company
 
   return (
     <div className="space-y-6">
+      {/* Names Resolution Warning */}
+      {data?.metadata?.namesResolutionFailed && (
+        <Alert variant="destructive" className="border-yellow-500/50 bg-yellow-50 dark:bg-yellow-950/30">
+          <AlertTriangle className="h-4 w-4 text-yellow-600" />
+          <AlertTitle className="text-yellow-800 dark:text-yellow-200">Company Names Restricted</AlertTitle>
+          <AlertDescription className="text-yellow-700 dark:text-yellow-300">
+            Unable to resolve company names due to API permissions. Showing company IDs instead.
+            {data.metadata.namesResolutionError && (
+              <span className="block text-xs mt-1 opacity-75">{data.metadata.namesResolutionError}</span>
+            )}
+          </AlertDescription>
+        </Alert>
+      )}
+
       {/* Controls */}
       <Card className="bg-card/50 backdrop-blur-sm border-border/50">
         <CardContent className="pt-4">
