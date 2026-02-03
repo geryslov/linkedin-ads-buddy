@@ -6516,38 +6516,44 @@ serve(async (req) => {
           }>;
         }> = [];
 
-        // Resolve top title names via standardizedTitles API or title_metadata_cache
+        // Resolve top title names via title_metadata_cache first, then API as fallback
         const titleNames = new Map<string, string>();
+        const allTitleIds = topTitles.map(t => t.titleId);
 
-        // First, try to get cached titles from Supabase
+        // First, try to get cached titles from Supabase (this is the primary source)
         try {
           const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
           const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
           const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
           const supabase = createClient(supabaseUrl, supabaseKey);
 
-          const titleIds = topTitles.slice(0, 10).map(t => t.titleId);
-          const { data: cachedTitles } = await supabase
+          const { data: cachedTitles, error: cacheError } = await supabase
             .from('title_metadata_cache')
             .select('title_id, name')
-            .in('title_id', titleIds);
+            .in('title_id', allTitleIds);
 
-          if (cachedTitles) {
+          if (cachedTitles && !cacheError) {
             for (const cached of cachedTitles) {
-              titleNames.set(cached.title_id, cached.name);
+              if (cached.name && cached.name.trim()) {
+                titleNames.set(cached.title_id, cached.name);
+              }
             }
           }
-          console.log(`[get_audience_expansion] Found ${titleNames.size} cached title names`);
+          console.log(`[get_audience_expansion] Found ${titleNames.size} cached title names out of ${allTitleIds.length}`);
         } catch (cacheErr) {
           console.log('[get_audience_expansion] Cache lookup error:', cacheErr);
         }
 
-        // Then resolve missing titles via API
-        for (const title of topTitles.slice(0, 10)) {
-          if (titleNames.has(title.titleId)) continue; // Already have from cache
+        // Resolve missing titles via LinkedIn API (only for those not in cache)
+        const missingTitleIds = allTitleIds.filter(id => !titleNames.has(id));
+        console.log(`[get_audience_expansion] Need to resolve ${missingTitleIds.length} titles from API`);
+
+        for (const titleId of missingTitleIds.slice(0, 20)) { // Limit API calls
+          const titleObj = topTitles.find(t => t.titleId === titleId);
+          if (!titleObj) continue;
 
           try {
-            const titleUrl = `https://api.linkedin.com/v2/standardizedTitles/${encodeURIComponent(title.titleUrn)}`;
+            const titleUrl = `https://api.linkedin.com/v2/standardizedTitles/${encodeURIComponent(titleObj.titleUrn)}`;
             const response = await fetch(titleUrl, {
               headers: {
                 'Authorization': `Bearer ${accessToken}`,
@@ -6557,13 +6563,33 @@ serve(async (req) => {
 
             if (response.ok) {
               const data = await response.json();
-              const name = data.name?.localized?.en_US || data.name || `Title ${title.titleId}`;
-              titleNames.set(title.titleId, name);
+              const name = data.name?.localized?.en_US || data.name || null;
+              if (name && typeof name === 'string' && name.trim()) {
+                titleNames.set(titleId, name);
+                
+                // Also save to cache for future use
+                try {
+                  const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+                  const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+                  const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+                  const supabase = createClient(supabaseUrl, supabaseKey);
+                  
+                  await supabase.from('title_metadata_cache').upsert({
+                    title_id: titleId,
+                    name: name,
+                  }, { onConflict: 'title_id' });
+                } catch (saveErr) {
+                  // Ignore cache save errors
+                }
+              }
+            } else if (response.status === 403) {
+              console.log(`[get_audience_expansion] Titles API access denied (403) for ${titleId}`);
+              // Don't set a fallback - we'll handle unknown titles at the end
             } else {
-              console.log(`[get_audience_expansion] Title API returned ${response.status} for ${title.titleId}`);
+              console.log(`[get_audience_expansion] Title API returned ${response.status} for ${titleId}`);
             }
           } catch (err) {
-            console.log(`[get_audience_expansion] Title name lookup error for ${title.titleId}:`, err);
+            console.log(`[get_audience_expansion] Title name lookup error for ${titleId}:`, err);
           }
           await new Promise(resolve => setTimeout(resolve, 50));
         }
@@ -6661,13 +6687,28 @@ serve(async (req) => {
 
         console.log(`[get_audience_expansion] Complete. ${suggestions.length} expansion groups, ${totalSuggestedTitles} suggested titles`);
 
+        // Filter out titles without resolved names - only show titles with proper names
+        const titlesWithNames = topTitles.slice(0, 10)
+          .map(t => ({
+            ...t,
+            titleName: titleNames.get(t.titleId) || null,
+          }))
+          .filter(t => t.titleName && !t.titleName.startsWith('Title '));
+
+        // If we have fewer than expected, add the ones with IDs but mark them clearly
+        const titlesToShow = titlesWithNames.length > 0 
+          ? titlesWithNames 
+          : topTitles.slice(0, 10).map(t => ({
+              ...t,
+              titleName: titleNames.get(t.titleId) || `Unknown (ID: ${t.titleId})`,
+            }));
+
+        console.log(`[get_audience_expansion] Returning ${titlesToShow.length} titles with names`);
+
         return new Response(JSON.stringify({
           period: { start: startDate, end: endDate },
           topPerformers: {
-            titles: topTitles.slice(0, 10).map(t => ({
-              ...t,
-              titleName: titleNames.get(t.titleId) || `Title ${t.titleId}`,
-            })),
+            titles: titlesToShow,
             functions: topFunctions.slice(0, 5).map(f => ({
               ...f,
               functionName: functionNames[f.functionUrn] || f.functionUrn,
