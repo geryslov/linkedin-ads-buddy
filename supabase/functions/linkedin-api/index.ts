@@ -6846,10 +6846,10 @@ serve(async (req) => {
         // Extract organization IDs from URNs (matching Company Demographic pattern)
         const orgIdToUrn = new Map<string, string>();
         companyUrns.forEach(urn => {
-          // Match exact URN format: urn:li:organization:12345
-          const match = urn.match(/^urn:li:organization:(\d+)$/);
+          // Handle both urn:li:organization: and urn:li:company: formats
+          const match = urn.match(/^urn:li:(organization|company):(\d+)$/);
           if (match) {
-            orgIdToUrn.set(match[1], urn);
+            orgIdToUrn.set(match[2], urn); // match[2] is the numeric ID
           }
         });
         
@@ -6878,16 +6878,18 @@ serve(async (req) => {
                 
                 // LinkedIn returns results keyed by the numeric ID
                 Object.entries(results).forEach(([id, org]: [string, any]) => {
-                  // Try both the raw ID and URN format
-                  const urn = orgIdToUrn.get(id) || `urn:li:organization:${id}`;
+                  // Get the original URN that was used in companyData (preserves organization or company prefix)
+                  const originalUrn = orgIdToUrn.get(id);
+                  const name = org?.localizedName || org?.vanityName;
                   
-                  if (org?.localizedName) {
-                    companyNames.set(urn, org.localizedName);
-                    // Also set by raw ID in case URN mapping differs
-                    companyNames.set(`urn:li:organization:${id}`, org.localizedName);
-                  } else if (org?.vanityName) {
-                    companyNames.set(urn, org.vanityName);
-                    companyNames.set(`urn:li:organization:${id}`, org.vanityName);
+                  if (name && originalUrn) {
+                    // Store with original URN key for reliable lookup
+                    companyNames.set(originalUrn, name);
+                  }
+                  // Also store with both possible URN formats as fallback
+                  if (name) {
+                    companyNames.set(`urn:li:organization:${id}`, name);
+                    companyNames.set(`urn:li:company:${id}`, name);
                   }
                 });
                 console.log(`[get_company_influence] Batch ${Math.floor(i / batchSize) + 1} resolved ${Object.keys(results).length} names, total: ${companyNames.size}`);
