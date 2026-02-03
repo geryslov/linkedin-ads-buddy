@@ -57,6 +57,9 @@ export interface CompanyInfluenceData {
     accountId: string;
     impressionThreshold: number;
     totalCampaignsAnalyzed: number;
+    namesResolutionFailed?: boolean;
+    namesResolutionError?: string;
+    namesResolvedCount?: number;
   };
 }
 
