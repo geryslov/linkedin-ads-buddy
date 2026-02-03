@@ -6766,8 +6766,8 @@ serve(async (req) => {
 
         console.log(`[get_company_influence] Found ${campaignMeta.size} campaigns`);
 
-        // Step 2: Fetch company analytics with CAMPAIGN pivot to get per-campaign breakdown
-        // Using account-level query for BM-delegated access compatibility
+        // Step 2: Fetch company analytics using account-level single-pivot query
+        // Note: Dual-pivot (pivotValue2) requires special API permissions that most accounts don't have
         const companyData = new Map<string, {
           companyUrn: string;
           companyName: string;
@@ -6776,24 +6776,15 @@ serve(async (req) => {
           totalSpend: number;
           totalLeads: number;
           totalFormOpens: number;
-          campaignBreakdown: Map<string, {
-            campaignId: string;
-            campaignName: string;
-            objective: string;
-            impressions: number;
-            clicks: number;
-            spend: number;
-            leads: number;
-          }>;
           objectiveMix: Set<string>;
         }>();
 
-        // First, fetch company + campaign pivot analytics
+        // Single pivot query for company data (works with standard API access)
         const analyticsUrl = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
           `dateRange.start.day=${startDay}&dateRange.start.month=${startMonth}&dateRange.start.year=${startYear}&` +
           `dateRange.end.day=${endDay}&dateRange.end.month=${endMonth}&dateRange.end.year=${endYear}&` +
-          `timeGranularity=ALL&pivot=MEMBER_COMPANY&pivotValue2=CAMPAIGN&accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
-          `fields=pivotValue,pivotValue2,impressions,clicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions,oneClickLeadFormOpens&count=10000`;
+          `timeGranularity=ALL&pivot=MEMBER_COMPANY&accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
+          `fields=pivotValue,impressions,clicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions,oneClickLeadFormOpens&count=10000`;
 
         try {
           const response = await fetch(analyticsUrl, {
@@ -6806,11 +6797,7 @@ serve(async (req) => {
 
             for (const el of (data.elements || [])) {
               const companyUrn = el.pivotValue || '';
-              const campaignUrn = el.pivotValue2 || '';
               if (!companyUrn) continue;
-
-              const campaignId = campaignUrn.split(':').pop() || '';
-              const meta = campaignMeta.get(campaignId);
 
               const impressions = el.impressions || 0;
               const clicks = el.clicks || 0;
@@ -6828,7 +6815,6 @@ serve(async (req) => {
                   totalSpend: 0,
                   totalLeads: 0,
                   totalFormOpens: 0,
-                  campaignBreakdown: new Map(),
                   objectiveMix: new Set(),
                 };
                 companyData.set(companyUrn, company);
@@ -6839,30 +6825,6 @@ serve(async (req) => {
               company.totalSpend += spend;
               company.totalLeads += leads;
               company.totalFormOpens += formOpens;
-
-              // Add campaign breakdown
-              if (campaignId && (impressions > 0 || clicks > 0 || leads > 0)) {
-                const objective = meta?.objective || 'UNKNOWN';
-                company.objectiveMix.add(objective);
-
-                let campaignEntry = company.campaignBreakdown.get(campaignId);
-                if (!campaignEntry) {
-                  campaignEntry = {
-                    campaignId,
-                    campaignName: meta?.name || `Campaign ${campaignId}`,
-                    objective,
-                    impressions: 0,
-                    clicks: 0,
-                    spend: 0,
-                    leads: 0,
-                  };
-                  company.campaignBreakdown.set(campaignId, campaignEntry);
-                }
-                campaignEntry.impressions += impressions;
-                campaignEntry.clicks += clicks;
-                campaignEntry.spend += spend;
-                campaignEntry.leads += leads;
-              }
             }
           } else {
             const errorText = await response.text();
@@ -6875,48 +6837,48 @@ serve(async (req) => {
         console.log(`[get_company_influence] Found ${companyData.size} unique companies`);
 
         // Step 3: Resolve company names via Organization API
-        const companyUrns = Array.from(companyData.keys()).slice(0, 200); // Increased limit
+        const companyUrns = Array.from(companyData.keys()).slice(0, 200);
         const companyNames = new Map<string, string>();
 
-        // Batch resolve company names
-        for (let i = 0; i < companyUrns.length; i += 20) {
-          const batch = companyUrns.slice(i, i + 20);
-          const ids = batch.map(urn => urn.split(':').pop()).filter(Boolean);
+        // Batch resolve company names in smaller batches
+        for (let i = 0; i < companyUrns.length; i += 10) {
+          const batch = companyUrns.slice(i, i + 10);
           
-          if (ids.length === 0) continue;
+          for (const urn of batch) {
+            const id = urn.split(':').pop();
+            if (!id) continue;
 
-          try {
-            // Use simpler individual lookup for reliability
-            for (const id of ids) {
-              try {
-                const orgUrl = `https://api.linkedin.com/rest/organizations/${id}`;
-                const response = await fetch(orgUrl, {
-                  headers: {
-                    'Authorization': `Bearer ${accessToken}`,
-                    'X-Restli-Protocol-Version': '2.0.0',
-                    'LinkedIn-Version': '202511',
-                  }
-                });
-
-                if (response.ok) {
-                  const orgData = await response.json();
-                  const name = orgData.localizedName || orgData.name;
-                  if (name) {
-                    companyNames.set(`urn:li:organization:${id}`, name);
-                  }
+            try {
+              const orgUrl = `https://api.linkedin.com/rest/organizations/${id}`;
+              const response = await fetch(orgUrl, {
+                headers: {
+                  'Authorization': `Bearer ${accessToken}`,
+                  'X-Restli-Protocol-Version': '2.0.0',
+                  'LinkedIn-Version': '202511',
                 }
-              } catch (err) {
-                // Silent fail for individual org lookups
+              });
+
+              if (response.ok) {
+                const orgData = await response.json();
+                const name = orgData.localizedName || orgData.name;
+                if (name) {
+                  companyNames.set(urn, name);
+                }
               }
+            } catch (err) {
+              // Silent fail for individual org lookups
             }
-          } catch (err) {
-            console.log('[get_company_influence] Org batch lookup error:', err);
           }
         }
 
-        console.log(`[get_company_influence] Resolved ${companyNames.size} company names`)
+        console.log(`[get_company_influence] Resolved ${companyNames.size} company names`);
 
-        // Step 4: Build final report with engagement scoring
+        // Step 4: Add objective data from campaigns (aggregate by campaign objective)
+        // Map objectives to companies based on which campaigns they appeared in
+        const allObjectives = Array.from(campaignMeta.values()).map(c => c.objective);
+        const uniqueObjectives = [...new Set(allObjectives)];
+
+        // Step 5: Build final report with engagement scoring
         const companies: Array<{
           companyUrn: string;
           companyName: string;
@@ -6945,10 +6907,10 @@ serve(async (req) => {
           // Filter by minimum impressions
           if (data.totalImpressions < impressionThreshold) continue;
 
-          // Calculate engagement score: weighted combination
-          // Leads worth 100 points, Clicks worth 5 points, Impressions worth 0.01 points
+          // Calculate engagement score
           const engagementScore = (data.totalLeads * 100) + (data.totalClicks * 5) + (data.totalImpressions * 0.01);
 
+          // Get company name - use resolved name or extract ID
           const companyName = companyNames.get(companyUrn) || `Company ${companyUrn.split(':').pop()}`;
 
           companies.push({
@@ -6962,9 +6924,9 @@ serve(async (req) => {
             totalFormOpens: data.totalFormOpens,
             ctr: data.totalImpressions > 0 ? (data.totalClicks / data.totalImpressions) * 100 : 0,
             cpl: data.totalLeads > 0 ? data.totalSpend / data.totalLeads : 0,
-            campaignDepth: data.campaignBreakdown.size,
-            objectiveTypes: Array.from(data.objectiveMix),
-            campaignBreakdown: Array.from(data.campaignBreakdown.values()).sort((a, b) => b.impressions - a.impressions),
+            campaignDepth: uniqueObjectives.length, // Number of unique objectives in account
+            objectiveTypes: uniqueObjectives,
+            campaignBreakdown: [], // Campaign breakdown not available with standard API access
           });
         }
 
