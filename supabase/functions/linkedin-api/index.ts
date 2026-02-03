@@ -6842,70 +6842,70 @@ serve(async (req) => {
 
         console.log(`[get_company_influence] Resolving names for ${companyUrns.length} companies...`);
 
-        // Try batch lookup first using organizationsLookup endpoint
-        const orgIds = companyUrns.map(urn => urn.split(':').pop()).filter(Boolean);
-        
-        // Use batch lookup via /rest/organizations with List projection
-        for (let i = 0; i < orgIds.length; i += 20) {
-          const batch = orgIds.slice(i, i + 20);
-          
-          // Try REST API batch lookup
-          try {
-            // Build the List parameter format: (id:{orgId1},id:{orgId2})
-            const idsParam = batch.map(id => `(id:${id})`).join(',');
-            const batchUrl = `https://api.linkedin.com/rest/organizations?ids=List(${idsParam})&fields=id,localizedName,vanityName`;
+        // Build URN-to-ID mapping for organization lookups
+        const orgIdToUrn = new Map<string, string>();
+        for (const urn of companyUrns) {
+          const id = urn.split(':').pop();
+          if (id) {
+            orgIdToUrn.set(id, urn);
+          }
+        }
+
+        const orgIds = Array.from(orgIdToUrn.keys());
+
+        // Use V2 organizationsLookup endpoint (proven reliable in Company Demographic)
+        if (orgIds.length > 0) {
+          const batchSize = 50;
+          for (let i = 0; i < orgIds.length; i += batchSize) {
+            const batch = orgIds.slice(i, i + batchSize);
+            const idsParam = batch.map((id, idx) => `ids[${idx}]=${id}`).join('&');
             
-            const response = await fetch(batchUrl, {
-              headers: {
-                'Authorization': `Bearer ${accessToken}`,
-                'X-Restli-Protocol-Version': '2.0.0',
-                'LinkedIn-Version': '202511',
-              }
-            });
-
-            if (response.ok) {
-              const data = await response.json();
-              // Handle results map format
-              if (data.results) {
-                for (const [key, org] of Object.entries(data.results)) {
-                  const orgData = org as { id?: string; localizedName?: string; vanityName?: string };
-                  const name = orgData.localizedName || orgData.vanityName;
-                  if (name && orgData.id) {
-                    companyNames.set(`urn:li:organization:${orgData.id}`, name);
-                  }
-                }
-              }
-              console.log(`[get_company_influence] Batch ${i / 20 + 1} resolved ${Object.keys(data.results || {}).length} names`);
-            } else {
-              const errorText = await response.text();
-              console.log(`[get_company_influence] Batch lookup failed: ${response.status}, trying individual lookups`);
+            try {
+              const orgResponse = await fetch(
+                `https://api.linkedin.com/v2/organizationsLookup?${idsParam}&projection=(results*(id,localizedName,vanityName))`,
+                { headers: { 'Authorization': `Bearer ${accessToken}` } }
+              );
               
-              // Fallback to individual lookups for this batch
-              for (const id of batch) {
-                try {
-                  const orgUrl = `https://api.linkedin.com/rest/organizations/${id}`;
-                  const orgResponse = await fetch(orgUrl, {
-                    headers: {
-                      'Authorization': `Bearer ${accessToken}`,
-                      'X-Restli-Protocol-Version': '2.0.0',
-                      'LinkedIn-Version': '202511',
-                    }
-                  });
-
-                  if (orgResponse.ok) {
-                    const orgData = await orgResponse.json();
-                    const name = orgData.localizedName || orgData.name || orgData.vanityName;
-                    if (name) {
-                      companyNames.set(`urn:li:organization:${id}`, name);
-                    }
+              if (orgResponse.ok) {
+                const orgData = await orgResponse.json();
+                const results = orgData.results || {};
+                
+                Object.entries(results).forEach(([id, org]: [string, any]) => {
+                  const urn = orgIdToUrn.get(id);
+                  if (!urn) return;
+                  
+                  const name = org?.localizedName || org?.vanityName;
+                  if (name) {
+                    companyNames.set(urn, name);
                   }
-                } catch (err) {
-                  // Silent fail for individual org lookups
+                });
+                console.log(`[get_company_influence] Batch ${Math.floor(i / batchSize) + 1} resolved ${Object.keys(results).length} names`);
+              } else {
+                console.log(`[get_company_influence] Batch lookup failed: ${orgResponse.status}, trying individual lookups`);
+                
+                // Fallback to individual lookups
+                for (const id of batch) {
+                  try {
+                    const singleUrl = `https://api.linkedin.com/v2/organizations/${id}?projection=(id,localizedName,vanityName)`;
+                    const singleResponse = await fetch(singleUrl, {
+                      headers: { 'Authorization': `Bearer ${accessToken}` }
+                    });
+                    
+                    if (singleResponse.ok) {
+                      const singleData = await singleResponse.json();
+                      const name = singleData.localizedName || singleData.vanityName;
+                      if (name) {
+                        companyNames.set(`urn:li:organization:${id}`, name);
+                      }
+                    }
+                  } catch (err) {
+                    // Silent fail for individual lookups
+                  }
                 }
               }
+            } catch (e) {
+              console.error(`[get_company_influence] Batch org lookup error:`, e);
             }
-          } catch (err) {
-            console.error(`[get_company_influence] Batch org lookup error:`, err);
           }
         }
 
@@ -7024,7 +7024,7 @@ serve(async (req) => {
           const engagementScore = (data.totalLeads * 100) + (data.totalClicks * 5) + (data.totalImpressions * 0.01);
 
           // Get company name - use resolved name or extract ID
-          const companyName = companyNames.get(companyUrn) || `Company ${companyUrn.split(':').pop()}`;
+          const companyName = companyNames.get(companyUrn) || extractNameFromUrn(companyUrn);
 
           // Get campaign breakdown for this company
           const breakdown = campaignCompanyData.get(companyUrn);
