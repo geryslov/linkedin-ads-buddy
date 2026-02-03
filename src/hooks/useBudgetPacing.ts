@@ -92,6 +92,13 @@ export function useBudgetPacing(accessToken: string | null) {
     const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
     try {
+      // Get current user
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        console.error('No authenticated user');
+        return false;
+      }
+
       const { error: upsertError } = await supabase
         .from('account_budgets')
         .upsert({
@@ -99,6 +106,7 @@ export function useBudgetPacing(accessToken: string | null) {
           budget_amount: amount,
           currency,
           month,
+          user_id: user.id,
         }, {
           onConflict: 'account_id,month'
         });
