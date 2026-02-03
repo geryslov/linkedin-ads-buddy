@@ -8,6 +8,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { DollarSign, TrendingUp, TrendingDown, AlertTriangle, CheckCircle, RefreshCw, Save } from 'lucide-react';
 import { useBudgetPacing, BudgetPacingData } from '@/hooks/useBudgetPacing';
 import { useToast } from '@/hooks/use-toast';
+import { formatNumber, formatCurrency } from '@/lib/utils';
 import {
   LineChart,
   Line,
@@ -60,7 +61,7 @@ export function BudgetPacingDashboard({ accessToken, selectedAccount }: BudgetPa
 
     const success = await saveBudget(selectedAccount, amount);
     if (success) {
-      toast({ title: 'Budget saved', description: `Monthly budget set to $${amount.toLocaleString()}` });
+      toast({ title: 'Budget saved', description: `Monthly budget set to ${formatCurrency(amount)}` });
       fetchBudgetPacing(selectedAccount);
     } else {
       toast({ title: 'Error', description: 'Failed to save budget', variant: 'destructive' });
@@ -147,7 +148,7 @@ export function BudgetPacingDashboard({ accessToken, selectedAccount }: BudgetPa
             </div>
             {data?.budget?.isSet && (
               <div className="text-sm text-muted-foreground">
-                Budget for {data.period.month}: ${data.budget.amount.toLocaleString()} {data.budget.currency}
+                Budget for {data.period.month}: {formatCurrency(data.budget.amount)} {data.budget.currency}
               </div>
             )}
           </CardContent>
@@ -171,11 +172,11 @@ export function BudgetPacingDashboard({ accessToken, selectedAccount }: BudgetPa
                 <div className="grid grid-cols-2 gap-2 text-sm">
                   <div>
                     <span className="text-muted-foreground">Spent to date:</span>
-                    <span className="ml-2 font-medium">${data.spending.total.toFixed(2)}</span>
+                    <span className="ml-2 font-medium">{formatCurrency(data.spending.total)}</span>
                   </div>
                   <div>
                     <span className="text-muted-foreground">Ideal pace:</span>
-                    <span className="ml-2 font-medium">${data.pacing.idealSpentToDate.toFixed(2)}</span>
+                    <span className="ml-2 font-medium">{formatCurrency(data.pacing.idealSpentToDate)}</span>
                   </div>
                 </div>
               </div>
@@ -191,37 +192,37 @@ export function BudgetPacingDashboard({ accessToken, selectedAccount }: BudgetPa
         <Card className="bg-card/50">
           <CardContent className="pt-4">
             <div className="text-xs text-muted-foreground">Total Spent</div>
-            <div className="text-2xl font-bold">${data?.spending?.total?.toFixed(2) || '0.00'}</div>
+            <div className="text-2xl font-bold">{formatCurrency(data?.spending?.total || 0)}</div>
           </CardContent>
         </Card>
         <Card className="bg-card/50">
           <CardContent className="pt-4">
             <div className="text-xs text-muted-foreground">Avg Daily</div>
-            <div className="text-2xl font-bold">${data?.spending?.avgDaily?.toFixed(2) || '0.00'}</div>
+            <div className="text-2xl font-bold">{formatCurrency(data?.spending?.avgDaily || 0)}</div>
           </CardContent>
         </Card>
         <Card className="bg-card/50">
           <CardContent className="pt-4">
             <div className="text-xs text-muted-foreground">Projected</div>
-            <div className="text-2xl font-bold">${data?.spending?.projected?.toFixed(0) || '0'}</div>
+            <div className="text-2xl font-bold">{formatCurrency(data?.spending?.projected || 0, 0)}</div>
           </CardContent>
         </Card>
         <Card className="bg-card/50">
           <CardContent className="pt-4">
             <div className="text-xs text-muted-foreground">Days Left</div>
-            <div className="text-2xl font-bold">{data?.pacing?.daysRemaining || 0}</div>
+            <div className="text-2xl font-bold">{formatNumber(data?.pacing?.daysRemaining || 0)}</div>
           </CardContent>
         </Card>
         <Card className="bg-card/50">
           <CardContent className="pt-4">
             <div className="text-xs text-muted-foreground">Total Leads</div>
-            <div className="text-2xl font-bold">{data?.performance?.leads || 0}</div>
+            <div className="text-2xl font-bold">{formatNumber(data?.performance?.leads || 0)}</div>
           </CardContent>
         </Card>
         <Card className="bg-card/50">
           <CardContent className="pt-4">
             <div className="text-xs text-muted-foreground">CPL</div>
-            <div className="text-2xl font-bold">${data?.performance?.cpl?.toFixed(2) || '0.00'}</div>
+            <div className="text-2xl font-bold">{formatCurrency(data?.performance?.cpl || 0)}</div>
           </CardContent>
         </Card>
       </div>
@@ -247,7 +248,7 @@ export function BudgetPacingDashboard({ accessToken, selectedAccount }: BudgetPa
                 <Tooltip
                   contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))' }}
                   formatter={(value: number, name: string) => [
-                    `$${value.toFixed(2)}`,
+                    formatCurrency(value),
                     name === 'cumulative' ? 'Actual Spend' : name === 'idealPace' ? 'Ideal Pace' : 'Daily'
                   ]}
                 />
@@ -295,11 +296,11 @@ export function BudgetPacingDashboard({ accessToken, selectedAccount }: BudgetPa
             <div className="flex items-center gap-4">
               <div>
                 <span className="text-muted-foreground text-sm">Last 7 days:</span>
-                <span className="ml-2 font-medium">${data.trends.last7DaysSpend.toFixed(2)}</span>
+                <span className="ml-2 font-medium">{formatCurrency(data.trends.last7DaysSpend)}</span>
               </div>
               <div>
                 <span className="text-muted-foreground text-sm">Previous 7 days:</span>
-                <span className="ml-2 font-medium">${data.trends.prev7DaysSpend.toFixed(2)}</span>
+                <span className="ml-2 font-medium">{formatCurrency(data.trends.prev7DaysSpend)}</span>
               </div>
               <div className={`flex items-center gap-1 ${data.trends.spendTrendPercent >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                 {data.trends.spendTrendPercent >= 0 ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
