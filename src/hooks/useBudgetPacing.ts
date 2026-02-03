@@ -109,7 +109,7 @@ export function useBudgetPacing(accessToken: string | null) {
           month,
           user_id: user.id,
         }, {
-          onConflict: 'account_id,month'
+          onConflict: 'user_id,account_id,month'
         });
 
       if (upsertError) {
