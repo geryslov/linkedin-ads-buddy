@@ -95,7 +95,7 @@ export function useCompanyInfluence(accessToken: string | null) {
     ];
   }, []);
 
-  const fetchCompanyInfluence = useCallback(async (accountId: string) => {
+  const fetchCompanyInfluence = useCallback(async (accountId: string, customMinImpressions?: number) => {
     if (!accessToken || !accountId) return;
 
     setIsLoading(true);
@@ -106,7 +106,7 @@ export function useCompanyInfluence(accessToken: string | null) {
         body: {
           action: 'get_company_influence',
           accessToken,
-          params: { accountId, dateRange, minImpressions }
+          params: { accountId, dateRange, minImpressions: customMinImpressions ?? minImpressions }
         }
       });
 

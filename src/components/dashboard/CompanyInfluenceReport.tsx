@@ -181,13 +181,13 @@ export function CompanyInfluenceReport({ accessToken, selectedAccount }: Company
 
   useEffect(() => {
     if (selectedAccount) {
-      fetchCompanyInfluence(selectedAccount);
+      fetchCompanyInfluence(selectedAccount, minImpressions);
     }
-  }, [selectedAccount, fetchCompanyInfluence]);
+  }, [selectedAccount, fetchCompanyInfluence, minImpressions]);
 
   const handleRefresh = () => {
     if (selectedAccount) {
-      fetchCompanyInfluence(selectedAccount);
+      fetchCompanyInfluence(selectedAccount, minImpressions);
     }
   };
 
