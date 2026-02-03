@@ -1,48 +1,28 @@
 
+# Fix Company Influence Report: Company Names Not Displaying
 
-# Fix Company Influence Report: Company Names and Campaign Breakdown
+## Problem
+The Company Influence report displays company IDs (like "717281") instead of actual company names, even though the edge function logs show that 199/200 company names were successfully resolved from LinkedIn's API.
 
-## Problem Summary
-The Company Influence report is displaying company IDs (e.g., "Company 717281") instead of actual company names, and the campaign breakdown shows "Campaign-level breakdown not available."
+## Root Cause
 
-## Root Cause Analysis
+After examining the code, there is a **key mismatch** between how companies are stored and how names are looked up:
 
-After examining the code, I found **two key issues**:
+1. **Analytics data storage** (line 6799-6820): Companies are stored in `companyData` using `el.pivotValue` as the key, which comes directly from LinkedIn's analytics response
 
-### Issue 1: Organization Batch Lookup Failing
-The `get_company_influence` handler uses the REST API format `/rest/organizations?ids=List(...)` for batch lookups, which appears to be failing silently. When the batch lookup fails, it falls back to individual lookups, but the fallback mechanism may also be encountering issues.
+2. **Name resolution** (line 6848-6854): The code extracts org IDs using a regex that expects `urn:li:organization:12345` format, then stores resolved names keyed by the same URN format
 
-**Current approach** (Company Influence - Line 6856):
-```typescript
-const idsParam = batch.map(id => `(id:${id})`).join(',');
-const batchUrl = `https://api.linkedin.com/rest/organizations?ids=List(${idsParam})`;
-```
+3. **Name lookup** (line 7039): When building the final response, it looks up names using `companyNames.get(companyUrn)` where `companyUrn` is the original `pivotValue`
 
-**Working approach** (Company Demographic - Line 2174):
-```typescript
-const idsParam = batch.map((id, idx) => `ids[${idx}]=${id}`).join('&');
-const orgResponse = await fetch(
-  `https://api.linkedin.com/v2/organizationsLookup?${idsParam}&projection=(...)`
-);
-```
+**The Issue**: LinkedIn's MEMBER_COMPANY analytics may return `pivotValue` in a format like `urn:li:company:717281` instead of `urn:li:organization:717281`. The regex on line 6850 only matches `urn:li:organization:`, so it fails to extract IDs for companies with different URN prefixes.
 
-The Company Demographic handler uses the **V2 organizationsLookup endpoint** with array-style parameters, while Company Influence uses the **REST API** with List syntax which appears to fail.
-
-### Issue 2: Campaign Breakdown Empty
-The campaign breakdown requires per-campaign analytics with MEMBER_COMPANY pivot. This is currently implemented but may be timing out or failing for large accounts due to rate limits.
+This explains why:
+- The logs show "Extracted 199 valid org IDs" (some match)
+- But companies still show as numeric IDs (the lookup fails because the key format differs)
 
 ## Solution
 
-Align the Company Influence handler with the proven Company Demographic implementation:
-
-### Step 1: Use V2 organizationsLookup Endpoint
-Replace the REST API batch lookup with the V2 `organizationsLookup` endpoint used in Company Demographic, which has proven reliable.
-
-### Step 2: Add extractNameFromUrn Fallback
-Improve the fallback to use the `extractNameFromUrn` helper consistently (matching Company Demographic pattern).
-
-### Step 3: Improve Campaign Breakdown Fetching
-Add better error handling and logging for the campaign-level breakdown queries.
+Update the URN parsing to handle both `urn:li:organization:` and `urn:li:company:` formats, and ensure names are stored with the original URN as the key for reliable lookups.
 
 ---
 
@@ -50,111 +30,67 @@ Add better error handling and logging for the campaign-level breakdown queries.
 
 ### File: `supabase/functions/linkedin-api/index.ts`
 
-**Location: Lines 6845-6910 (Organization name resolution)**
+**Change 1: Update URN regex to handle both formats (around line 6846-6858)**
 
-Replace the current REST API batch lookup with the V2 organizationsLookup pattern:
-
+Current:
 ```typescript
-// Step 3: Resolve company names via Organization Lookup API (batch)
-const companyUrns = Array.from(companyData.keys()).slice(0, 200);
-const companyNames = new Map<string, string>();
-
-console.log(`[get_company_influence] Resolving names for ${companyUrns.length} companies...`);
-
-// Extract org IDs and build URN-to-ID mapping
-const orgIdToUrn = new Map<string, string>();
-for (const urn of companyUrns) {
-  const id = urn.split(':').pop();
-  if (id) {
-    orgIdToUrn.set(id, urn);
+companyUrns.forEach(urn => {
+  const match = urn.match(/^urn:li:organization:(\d+)$/);
+  if (match) {
+    orgIdToUrn.set(match[1], urn);
   }
-}
-
-const orgIds = Array.from(orgIdToUrn.keys());
-
-// Use V2 organizationsLookup endpoint (proven reliable in Company Demographic)
-if (orgIds.length > 0) {
-  const batchSize = 50;
-  for (let i = 0; i < orgIds.length; i += batchSize) {
-    const batch = orgIds.slice(i, i + batchSize);
-    const idsParam = batch.map((id, idx) => `ids[${idx}]=${id}`).join('&');
-    
-    try {
-      const orgResponse = await fetch(
-        `https://api.linkedin.com/v2/organizationsLookup?${idsParam}&projection=(results*(id,localizedName,vanityName))`,
-        { headers: { 'Authorization': `Bearer ${accessToken}` } }
-      );
-      
-      if (orgResponse.ok) {
-        const orgData = await orgResponse.json();
-        const results = orgData.results || {};
-        
-        Object.entries(results).forEach(([id, org]: [string, any]) => {
-          const urn = orgIdToUrn.get(id);
-          if (!urn) return;
-          
-          const name = org?.localizedName || org?.vanityName;
-          if (name) {
-            companyNames.set(urn, name);
-          }
-        });
-        console.log(`[get_company_influence] Batch ${Math.floor(i / batchSize) + 1} resolved ${Object.keys(results).length} names`);
-      } else {
-        console.log(`[get_company_influence] Batch lookup failed: ${orgResponse.status}, trying individual lookups`);
-        
-        // Fallback to individual lookups
-        for (const id of batch) {
-          try {
-            const singleUrl = `https://api.linkedin.com/v2/organizations/${id}?projection=(id,localizedName,vanityName)`;
-            const singleResponse = await fetch(singleUrl, {
-              headers: { 'Authorization': `Bearer ${accessToken}` }
-            });
-            
-            if (singleResponse.ok) {
-              const orgData = await singleResponse.json();
-              const name = orgData.localizedName || orgData.vanityName;
-              if (name) {
-                companyNames.set(`urn:li:organization:${id}`, name);
-              }
-            }
-          } catch (err) {
-            // Silent fail for individual lookups
-          }
-        }
-      }
-    } catch (e) {
-      console.error(`[get_company_influence] Batch org lookup error:`, e);
-    }
-  }
-}
-
-console.log(`[get_company_influence] Resolved ${companyNames.size} company names out of ${companyUrns.length}`);
+});
 ```
 
-**Location: Line 7027 (Company name assignment)**
+Updated:
+```typescript
+companyUrns.forEach(urn => {
+  // Handle both urn:li:organization: and urn:li:company: formats
+  const match = urn.match(/^urn:li:(organization|company):(\d+)$/);
+  if (match) {
+    orgIdToUrn.set(match[2], urn); // match[2] is the ID
+  }
+});
+```
 
-Use `extractNameFromUrn` helper for better fallback:
+**Change 2: Store names with original URN key (around line 6879-6892)**
+
+Ensure we always store the name using the exact original URN from `companyData`, not a reconstructed one:
 
 ```typescript
-// Get company name - use resolved name or extract from URN
-const companyName = companyNames.get(companyUrn) || extractNameFromUrn(companyUrn);
+Object.entries(results).forEach(([id, org]: [string, any]) => {
+  // Get the original URN that was used in companyData
+  const originalUrn = orgIdToUrn.get(id);
+  
+  if (org?.localizedName && originalUrn) {
+    companyNames.set(originalUrn, org.localizedName);
+  } else if (org?.vanityName && originalUrn) {
+    companyNames.set(originalUrn, org.vanityName);
+  }
+});
+```
+
+**Change 3: Add logging to debug URN formats (optional but helpful)**
+
+Add a log to show what URN formats are being received:
+
+```typescript
+console.log(`[get_company_influence] Sample URNs: ${companyUrns.slice(0, 3).join(', ')}`);
 ```
 
 ---
 
 ## Summary of Changes
 
-| Component | Current Issue | Fix |
-|-----------|--------------|-----|
-| Organization lookup | Uses REST API `/rest/organizations?ids=List(...)` which fails | Use V2 `organizationsLookup` endpoint with array parameters |
-| Fallback name | Falls back to `Company {id}` format | Use `extractNameFromUrn` helper |
-| Batch size | 20 per batch | Increase to 50 (matching Company Demographic) |
-| Campaign breakdown | May timeout silently | Add better error handling and logging |
+| Location | Current Issue | Fix |
+|----------|---------------|-----|
+| Line 6850 | Only matches `urn:li:organization:` | Also match `urn:li:company:` |
+| Line 6880-6891 | Stores names with reconstructed URN | Store with original URN from orgIdToUrn map |
+| Line 7039 | No change needed | Will work once keys match |
 
 ## Testing After Implementation
-1. Navigate to the Company Influence tab
-2. Select an account and click Refresh
-3. Verify company names display properly (not IDs)
-4. Click on a company row to expand campaign breakdown
-5. Verify campaign breakdown shows data (if campaigns exist)
 
+1. Navigate to the Company Influence tab
+2. Select an account and click Refresh  
+3. Verify company names display properly instead of numeric IDs
+4. Check the edge function logs for the "Sample URNs" output to confirm URN formats
