@@ -6766,8 +6766,8 @@ serve(async (req) => {
 
         console.log(`[get_company_influence] Found ${campaignMeta.size} campaigns`);
 
-        // Step 2: Fetch company analytics using account-level query (works with Business Manager delegation)
-        // Note: Using campaign batching (campaigns[x] params) doesn't work for BM-delegated access
+        // Step 2: Fetch company analytics with CAMPAIGN pivot to get per-campaign breakdown
+        // Using account-level query for BM-delegated access compatibility
         const companyData = new Map<string, {
           companyUrn: string;
           companyName: string;
@@ -6776,7 +6776,7 @@ serve(async (req) => {
           totalSpend: number;
           totalLeads: number;
           totalFormOpens: number;
-          campaignBreakdown: Array<{
+          campaignBreakdown: Map<string, {
             campaignId: string;
             campaignName: string;
             objective: string;
@@ -6788,12 +6788,12 @@ serve(async (req) => {
           objectiveMix: Set<string>;
         }>();
 
-        // Single account-level query for all company data
+        // First, fetch company + campaign pivot analytics
         const analyticsUrl = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
           `dateRange.start.day=${startDay}&dateRange.start.month=${startMonth}&dateRange.start.year=${startYear}&` +
           `dateRange.end.day=${endDay}&dateRange.end.month=${endMonth}&dateRange.end.year=${endYear}&` +
-          `timeGranularity=ALL&pivot=MEMBER_COMPANY&accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
-          `fields=pivotValue,impressions,clicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions,oneClickLeadFormOpens&count=5000`;
+          `timeGranularity=ALL&pivot=MEMBER_COMPANY&pivotValue2=CAMPAIGN&accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
+          `fields=pivotValue,pivotValue2,impressions,clicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions,oneClickLeadFormOpens&count=10000`;
 
         try {
           const response = await fetch(analyticsUrl, {
@@ -6802,11 +6802,15 @@ serve(async (req) => {
 
           if (response.ok) {
             const data = await response.json();
-            console.log(`[get_company_influence] Analytics returned ${(data.elements || []).length} company entries`);
+            console.log(`[get_company_influence] Analytics returned ${(data.elements || []).length} entries`);
 
             for (const el of (data.elements || [])) {
               const companyUrn = el.pivotValue || '';
+              const campaignUrn = el.pivotValue2 || '';
               if (!companyUrn) continue;
+
+              const campaignId = campaignUrn.split(':').pop() || '';
+              const meta = campaignMeta.get(campaignId);
 
               const impressions = el.impressions || 0;
               const clicks = el.clicks || 0;
@@ -6814,8 +6818,6 @@ serve(async (req) => {
               const leads = (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
               const formOpens = el.oneClickLeadFormOpens || 0;
 
-              // For account-level query, we aggregate at company level
-              // Campaign breakdown requires separate per-campaign calls (optional enhancement)
               let company = companyData.get(companyUrn);
               if (!company) {
                 company = {
@@ -6826,7 +6828,7 @@ serve(async (req) => {
                   totalSpend: 0,
                   totalLeads: 0,
                   totalFormOpens: 0,
-                  campaignBreakdown: [],
+                  campaignBreakdown: new Map(),
                   objectiveMix: new Set(),
                 };
                 companyData.set(companyUrn, company);
@@ -6837,6 +6839,30 @@ serve(async (req) => {
               company.totalSpend += spend;
               company.totalLeads += leads;
               company.totalFormOpens += formOpens;
+
+              // Add campaign breakdown
+              if (campaignId && (impressions > 0 || clicks > 0 || leads > 0)) {
+                const objective = meta?.objective || 'UNKNOWN';
+                company.objectiveMix.add(objective);
+
+                let campaignEntry = company.campaignBreakdown.get(campaignId);
+                if (!campaignEntry) {
+                  campaignEntry = {
+                    campaignId,
+                    campaignName: meta?.name || `Campaign ${campaignId}`,
+                    objective,
+                    impressions: 0,
+                    clicks: 0,
+                    spend: 0,
+                    leads: 0,
+                  };
+                  company.campaignBreakdown.set(campaignId, campaignEntry);
+                }
+                campaignEntry.impressions += impressions;
+                campaignEntry.clicks += clicks;
+                campaignEntry.spend += spend;
+                campaignEntry.leads += leads;
+              }
             }
           } else {
             const errorText = await response.text();
@@ -6849,37 +6875,46 @@ serve(async (req) => {
         console.log(`[get_company_influence] Found ${companyData.size} unique companies`);
 
         // Step 3: Resolve company names via Organization API
-        const companyUrns = Array.from(companyData.keys()).slice(0, 100); // Limit to 100 for API efficiency
+        const companyUrns = Array.from(companyData.keys()).slice(0, 200); // Increased limit
         const companyNames = new Map<string, string>();
 
         // Batch resolve company names
         for (let i = 0; i < companyUrns.length; i += 20) {
           const batch = companyUrns.slice(i, i + 20);
-          const idsParam = batch.map(urn => urn.split(':').pop()).join(',');
+          const ids = batch.map(urn => urn.split(':').pop()).filter(Boolean);
+          
+          if (ids.length === 0) continue;
 
           try {
-            const orgUrl = `https://api.linkedin.com/rest/organizations?ids=List(${idsParam})`;
-            const response = await fetch(orgUrl, {
-              headers: {
-                'Authorization': `Bearer ${accessToken}`,
-                'X-Restli-Protocol-Version': '2.0.0',
-                'LinkedIn-Version': '202511',
-              }
-            });
+            // Use simpler individual lookup for reliability
+            for (const id of ids) {
+              try {
+                const orgUrl = `https://api.linkedin.com/rest/organizations/${id}`;
+                const response = await fetch(orgUrl, {
+                  headers: {
+                    'Authorization': `Bearer ${accessToken}`,
+                    'X-Restli-Protocol-Version': '2.0.0',
+                    'LinkedIn-Version': '202511',
+                  }
+                });
 
-            if (response.ok) {
-              const data = await response.json();
-              const results = data.results || {};
-              for (const [id, org] of Object.entries(results)) {
-                const orgData = org as any;
-                const name = orgData.localizedName || orgData.name || `Company ${id}`;
-                companyNames.set(`urn:li:organization:${id}`, name);
+                if (response.ok) {
+                  const orgData = await response.json();
+                  const name = orgData.localizedName || orgData.name;
+                  if (name) {
+                    companyNames.set(`urn:li:organization:${id}`, name);
+                  }
+                }
+              } catch (err) {
+                // Silent fail for individual org lookups
               }
             }
           } catch (err) {
-            console.log('[get_company_influence] Org lookup error:', err);
+            console.log('[get_company_influence] Org batch lookup error:', err);
           }
         }
+
+        console.log(`[get_company_influence] Resolved ${companyNames.size} company names`)
 
         // Step 4: Build final report with engagement scoring
         const companies: Array<{
@@ -6927,9 +6962,9 @@ serve(async (req) => {
             totalFormOpens: data.totalFormOpens,
             ctr: data.totalImpressions > 0 ? (data.totalClicks / data.totalImpressions) * 100 : 0,
             cpl: data.totalLeads > 0 ? data.totalSpend / data.totalLeads : 0,
-            campaignDepth: data.campaignBreakdown.length,
+            campaignDepth: data.campaignBreakdown.size,
             objectiveTypes: Array.from(data.objectiveMix),
-            campaignBreakdown: data.campaignBreakdown.sort((a, b) => b.impressions - a.impressions),
+            campaignBreakdown: Array.from(data.campaignBreakdown.values()).sort((a, b) => b.impressions - a.impressions),
           });
         }
 
