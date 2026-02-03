@@ -1,21 +1,83 @@
 
+# Fix Edge Function Errors and Build Error
 
-# Force Sync to GitHub
+## Summary
+There are two issues to fix:
 
-## Overview
-Make a minor, non-functional change to trigger Lovable's bidirectional sync, pushing all current code to your GitHub repository.
+1. **Edge Function 400 Errors**: The deployed edge function was outdated and missing the `get_budget_pacing`, `get_creative_fatigue`, and `get_audience_expansion` action handlers. I've already redeployed the edge function, and all three actions are now working correctly.
 
-## What I'll Do
-Add a timestamp comment to the main edge function file (`supabase/functions/linkedin-api/index.ts`) to trigger a commit and push to GitHub.
+2. **TypeScript Build Error**: The `useBudgetPacing.ts` file has a type error at line 98. The `saveBudget` function is trying to upsert to the `account_budgets` table without including the required `user_id` field.
 
-## Change Details
-- **File**: `supabase/functions/linkedin-api/index.ts`
-- **Change**: Add a comment line with the current date near the top of the file
-- **Impact**: Zero functional impact - purely a sync trigger
+## What Was Already Fixed
+- The edge function has been redeployed and all three feature endpoints are now returning 200 status codes
+
+## What Needs To Be Fixed
+
+### Build Error in useBudgetPacing.ts
+
+**Problem**: The `account_budgets` table requires a `user_id` field, but the `saveBudget` function doesn't include it in the upsert operation.
+
+**Error Message**:
+```
+Object literal may only specify known properties, and 'account_id' does not exist in type '...'
+```
+
+**Solution**: Modify the `saveBudget` function to:
+1. Get the current authenticated user's ID from Supabase Auth
+2. Include `user_id` in the upsert data
+
+### Code Changes
+
+**File**: `src/hooks/useBudgetPacing.ts`
+
+Update the `saveBudget` function to get the user ID and include it in the upsert:
+
+```typescript
+const saveBudget = useCallback(async (accountId: string, amount: number, currency: string = 'USD') => {
+  const now = new Date();
+  const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+  try {
+    // Get current user
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      console.error('No authenticated user');
+      return false;
+    }
+
+    const { error: upsertError } = await supabase
+      .from('account_budgets')
+      .upsert({
+        account_id: accountId,
+        budget_amount: amount,
+        currency,
+        month,
+        user_id: user.id,
+      }, {
+        onConflict: 'account_id,month'
+      });
+
+    if (upsertError) {
+      console.error('Budget save error:', upsertError);
+      return false;
+    }
+
+    return true;
+  } catch (err) {
+    console.error('Budget save error:', err);
+    return false;
+  }
+}, []);
+```
+
+## Technical Details
+
+| Issue | Root Cause | Fix |
+|-------|-----------|-----|
+| Edge function 400 errors | Deployed version was outdated | Redeployed edge function (done) |
+| TypeScript build error | Missing `user_id` in upsert | Add user authentication and include user_id |
 
 ## Expected Result
-Once approved, the change will:
-1. Trigger an automatic commit to your connected GitHub repository
-2. Push the complete, up-to-date Lovable codebase (~5,500+ lines in the edge function) to GitHub
-3. Your GitHub repo will then reflect the latest version including the full `SUPER_TITLE_NAMES` mapping and all recent features
-
+- All three features (Budget Pacing, Creative Fatigue, Audience Expander) will work correctly
+- The build error will be resolved
+- Budget data will be properly associated with the authenticated user
