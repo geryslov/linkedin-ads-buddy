@@ -6778,7 +6778,10 @@ serve(async (req) => {
 
         try {
           const response = await fetch(campaignsUrl, {
-            headers: { 'Authorization': `Bearer ${accessToken}` }
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+              'LinkedIn-Version': '202511',
+            }
           });
           if (response.ok) {
             const data = await response.json();
@@ -6820,7 +6823,10 @@ serve(async (req) => {
 
         try {
           const response = await fetch(analyticsUrl, {
-            headers: { 'Authorization': `Bearer ${accessToken}` }
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+              'LinkedIn-Version': '202511',
+            }
           });
 
           if (response.ok) {
@@ -7620,7 +7626,10 @@ serve(async (req) => {
 
         try {
           const response = await fetch(campaignsUrl, {
-            headers: { 'Authorization': `Bearer ${accessToken}` }
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+              'LinkedIn-Version': '202511',
+            }
           });
           if (response.ok) {
             const data = await response.json();
@@ -7659,7 +7668,10 @@ serve(async (req) => {
 
         try {
           const response = await fetch(analyticsUrl, {
-            headers: { 'Authorization': `Bearer ${accessToken}` }
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+              'LinkedIn-Version': '202511',
+            }
           });
 
           if (response.ok) {
@@ -7730,7 +7742,12 @@ serve(async (req) => {
             try {
               const orgResponse = await fetch(
                 `https://api.linkedin.com/v2/organizationsLookup?${idsParam}&projection=(results*(id,localizedName,localizedWebsite,vanityName))`,
-                { headers: { 'Authorization': `Bearer ${accessToken}` } }
+                {
+                  headers: {
+                    'Authorization': `Bearer ${accessToken}`,
+                    'LinkedIn-Version': '202511',
+                  }
+                }
               );
 
               if (orgResponse.ok) {
