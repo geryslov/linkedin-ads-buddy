@@ -5,6 +5,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Input } from '@/components/ui/input';
 import {
   RefreshCw,
   Building2,
@@ -14,6 +15,9 @@ import {
   Users,
   Download,
   AlertTriangle,
+  Pencil,
+  Check,
+  X,
 } from 'lucide-react';
 import {
   LineChart,
@@ -39,6 +43,77 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+
+// Helper function to normalize company URN and extract ID
+function normalizeCompanyUrn(urn: string): { id: string | null } {
+  if (!urn) return { id: null };
+  const match = urn.match(/^urn:li:(organization|company|memberCompany):(\d+)$/);
+  if (match) return { id: match[2] };
+  const numericMatch = urn.match(/:(\d+)$/);
+  return { id: numericMatch ? numericMatch[1] : null };
+}
+
+// Inline editing component for company names
+function EditableCompanyName({ 
+  company, 
+  onNameUpdate 
+}: { 
+  company: CompanyTimeline; 
+  onNameUpdate?: (orgId: string, name: string) => Promise<{ success: boolean }>;
+}) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editName, setEditName] = useState(company.companyName);
+  const isUnresolved = company.companyName.startsWith('Company ');
+
+  const handleSave = async () => {
+    if (!editName.trim()) return;
+    const { id } = normalizeCompanyUrn(company.companyUrn);
+    if (id && onNameUpdate) {
+      const result = await onNameUpdate(id, editName.trim());
+      if (result.success) {
+        setIsEditing(false);
+      }
+    }
+  };
+
+  if (isEditing) {
+    return (
+      <div className="flex items-center gap-1">
+        <Input
+          value={editName}
+          onChange={(e) => setEditName(e.target.value)}
+          className="h-7 text-sm w-32"
+          autoFocus
+        />
+        <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={handleSave}>
+          <Check className="h-3 w-3" />
+        </Button>
+        <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => setIsEditing(false)}>
+          <X className="h-3 w-3" />
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <span className={isUnresolved ? 'text-muted-foreground' : ''}>
+        {company.companyName}
+      </span>
+      {isUnresolved && onNameUpdate && (
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-6 w-6 p-0 opacity-50 hover:opacity-100"
+          onClick={() => setIsEditing(true)}
+          title="Edit company name"
+        >
+          <Pencil className="h-3 w-3" />
+        </Button>
+      )}
+    </div>
+  );
+}
 
 interface CompanyEngagementTimelineProps {
   accessToken: string | null;
@@ -74,6 +149,7 @@ export function CompanyEngagementTimeline({ accessToken, selectedAccount }: Comp
     clearSelection,
     chartCompanies,
     chartData,
+    updateCompanyName,
   } = useCompanyEngagementTimeline(accessToken);
   const { toast } = useToast();
   const [selectedTimeFrame, setSelectedTimeFrame] = useState('last_30_days');
@@ -145,11 +221,14 @@ export function CompanyEngagementTimeline({ accessToken, selectedAccount }: Comp
     <div className="space-y-6">
       {/* Names Resolution Warning */}
       {data?.metadata?.namesResolutionFailed && (
-        <Alert variant="destructive" className="bg-destructive/10 border-destructive/30">
-          <AlertTriangle className="h-4 w-4" />
-          <AlertTitle>Company Names Restricted</AlertTitle>
-          <AlertDescription>
-            Unable to resolve company names due to API permissions. Showing company IDs instead.
+        <Alert className="border-yellow-500/50 bg-yellow-50 dark:bg-yellow-950/30">
+          <AlertTriangle className="h-4 w-4 text-yellow-600" />
+          <AlertTitle className="text-yellow-800 dark:text-yellow-200">
+            Some Company Names Unavailable
+          </AlertTitle>
+          <AlertDescription className="text-yellow-700 dark:text-yellow-300">
+            LinkedIn blocked automatic name resolution. Showing cached names and IDs for unknowns.
+            Click the edit icon next to any "Company 12345" to set a name manually.
           </AlertDescription>
         </Alert>
       )}
@@ -349,7 +428,9 @@ export function CompanyEngagementTimeline({ accessToken, selectedAccount }: Comp
                   style={{ backgroundColor: CHART_COLORS[idx % CHART_COLORS.length] }}
                 />
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">{company.companyName}</p>
+                  <div className="text-sm font-medium truncate">
+                    <EditableCompanyName company={company} onNameUpdate={updateCompanyName} />
+                  </div>
                   <p className="text-xs text-muted-foreground">
                     {company.totals.impressions.toLocaleString()} imp · {company.totals.clicks} clicks · {company.totals.leads} leads
                   </p>
@@ -461,7 +542,9 @@ export function CompanyEngagementTimeline({ accessToken, selectedAccount }: Comp
                   {data.topCompanies.map((company, idx) => (
                     <TableRow key={company.companyUrn}>
                       <TableCell className="font-medium">{idx + 1}</TableCell>
-                      <TableCell className="font-medium">{company.companyName}</TableCell>
+                      <TableCell className="font-medium min-w-[200px]">
+                        <EditableCompanyName company={company} onNameUpdate={updateCompanyName} />
+                      </TableCell>
                       <TableCell className="text-right">{company.totals.impressions.toLocaleString()}</TableCell>
                       <TableCell className="text-right">{company.totals.clicks.toLocaleString()}</TableCell>
                       <TableCell className="text-right font-medium text-primary">{company.totals.leads}</TableCell>
