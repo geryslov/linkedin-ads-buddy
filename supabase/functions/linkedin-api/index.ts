@@ -7315,58 +7315,84 @@ serve(async (req) => {
         const orgIds = Array.from(orgIdToUrn.keys());
         console.log(`[get_company_engagement_timeline] Extracted ${orgIds.length} valid org IDs from ${topCompanyUrns.length} URNs`);
 
+        // Try individual organization lookups - more reliable than batch organizationsLookup
+        // The /v2/organizations/{id} endpoint has broader access than organizationsLookup
         if (orgIds.length > 0) {
-          const batchSize = 50;
-          for (let i = 0; i < orgIds.length; i += batchSize) {
-            const batch = orgIds.slice(i, i + batchSize);
-            const idsParam = batch.map((id, idx) => `ids[${idx}]=${id}`).join('&');
-
-            try {
-              const orgLookupUrl = `https://api.linkedin.com/v2/organizationsLookup?${idsParam}&projection=(results*(id,localizedName,vanityName))`;
-              console.log(`[get_company_engagement_timeline] Batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(orgIds.length / batchSize)} - fetching org names...`);
-              
-              const orgResponse = await fetch(orgLookupUrl, {
-                headers: { 
-                  'Authorization': `Bearer ${accessToken}`,
-                  'LinkedIn-Version': '202511',
-                  'X-Restli-Protocol-Version': '2.0.0',
-                }
-              });
-              
-              console.log(`[get_company_engagement_timeline] Org lookup response status: ${orgResponse.status}`);
-
-              if (orgResponse.ok) {
-                const orgData = await orgResponse.json();
-                const results = orgData.results || {};
-                const resultKeys = Object.keys(results);
-                console.log(`[get_company_engagement_timeline] Batch returned ${resultKeys.length} results, sample keys: ${resultKeys.slice(0, 3).join(', ')}`);
-                
-                Object.entries(results).forEach(([id, org]: [string, any]) => {
-                  const originalUrn = orgIdToUrn.get(id);
-                  const name = org?.localizedName || org?.vanityName;
-                  if (name) {
-                    // Store with all possible URN formats
-                    if (originalUrn) companyNames.set(originalUrn, name);
-                    companyNames.set(`urn:li:organization:${id}`, name);
-                    companyNames.set(`urn:li:company:${id}`, name);
-                    companyNames.set(`urn:li:memberCompany:${id}`, name);
-                    companyNames.set(id, name);
+          console.log(`[get_company_engagement_timeline] Resolving ${orgIds.length} org names via individual lookups...`);
+          
+          // Limit to top 100 to avoid too many API calls
+          const idsToResolve = orgIds.slice(0, 100);
+          let successCount = 0;
+          let failCount = 0;
+          
+          // Process in parallel batches of 10
+          const parallelBatchSize = 10;
+          for (let i = 0; i < idsToResolve.length; i += parallelBatchSize) {
+            const batch = idsToResolve.slice(i, i + parallelBatchSize);
+            
+            const results = await Promise.allSettled(
+              batch.map(async (id) => {
+                try {
+                  // Use the individual organization endpoint
+                  const orgUrl = `https://api.linkedin.com/v2/organizations/${id}?projection=(id,localizedName,vanityName)`;
+                  const orgResponse = await fetch(orgUrl, {
+                    headers: { 
+                      'Authorization': `Bearer ${accessToken}`,
+                      'LinkedIn-Version': '202511',
+                    }
+                  });
+                  
+                  if (orgResponse.ok) {
+                    const orgData = await orgResponse.json();
+                    const name = orgData.localizedName || orgData.vanityName;
+                    if (name) {
+                      return { id, name, success: true };
+                    }
+                  } else if (orgResponse.status === 403) {
+                    // Track 403 but continue trying others
+                    return { id, success: false, status: 403 };
                   }
-                });
-                console.log(`[get_company_engagement_timeline] Total names resolved so far: ${companyNames.size}`);
+                  return { id, success: false };
+                } catch (e) {
+                  return { id, success: false, error: e };
+                }
+              })
+            );
+            
+            // Process results
+            results.forEach((result) => {
+              if (result.status === 'fulfilled' && result.value.success) {
+                const { id, name } = result.value;
+                const originalUrn = orgIdToUrn.get(id);
+                if (originalUrn) companyNames.set(originalUrn, name);
+                companyNames.set(`urn:li:organization:${id}`, name);
+                companyNames.set(`urn:li:company:${id}`, name);
+                companyNames.set(`urn:li:memberCompany:${id}`, name);
+                companyNames.set(id, name);
+                successCount++;
               } else {
-                const errText = await orgResponse.text();
-                console.log(`[get_company_engagement_timeline] Org lookup FAILED: status=${orgResponse.status}, body=${errText.slice(0, 300)}`);
-                
-                // Track 403 permission errors
-                if (orgResponse.status === 403) {
+                failCount++;
+                // Check if all failures are 403s
+                if (result.status === 'fulfilled' && result.value.status === 403) {
                   namesResolutionFailed = true;
-                  namesResolutionError = `403 Forbidden: ${errText.slice(0, 100)}`;
                 }
               }
-            } catch (e) {
-              console.log('[get_company_engagement_timeline] Org lookup error:', e);
+            });
+            
+            // Log progress every batch
+            if ((i + parallelBatchSize) % 50 === 0 || i + parallelBatchSize >= idsToResolve.length) {
+              console.log(`[get_company_engagement_timeline] Progress: ${Math.min(i + parallelBatchSize, idsToResolve.length)}/${idsToResolve.length}, success: ${successCount}, failed: ${failCount}`);
             }
+          }
+          
+          console.log(`[get_company_engagement_timeline] Individual lookups complete: ${successCount} resolved, ${failCount} failed`);
+          
+          // Only mark as failed if ALL lookups failed with 403
+          if (successCount === 0 && failCount > 0 && namesResolutionFailed) {
+            namesResolutionError = 'All organization lookups returned 403 Forbidden';
+          } else if (successCount > 0) {
+            // If we got some names, don't show the warning
+            namesResolutionFailed = false;
           }
         }
 
