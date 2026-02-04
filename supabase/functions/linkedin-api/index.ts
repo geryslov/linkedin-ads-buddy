@@ -7165,6 +7165,231 @@ serve(async (req) => {
         });
       }
 
+      case 'get_company_engagement_timeline': {
+        // Company Engagement Timeline - daily engagement metrics for companies over time
+        const { accountId, dateRange, companyIds } = params || {};
+        const now = new Date();
+        const startDate = dateRange?.start || new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        const endDate = dateRange?.end || now.toISOString().split('T')[0];
+
+        const [startYear, startMonth, startDay] = startDate.split('-').map(Number);
+        const [endYear, endMonth, endDay] = endDate.split('-').map(Number);
+
+        console.log(`[get_company_engagement_timeline] Account ${accountId}, period: ${startDate} to ${endDate}`);
+
+        // Step 1: Fetch daily company analytics with MEMBER_COMPANY pivot
+        const analyticsUrl = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
+          `dateRange.start.day=${startDay}&dateRange.start.month=${startMonth}&dateRange.start.year=${startYear}&` +
+          `dateRange.end.day=${endDay}&dateRange.end.month=${endMonth}&dateRange.end.year=${endYear}&` +
+          `timeGranularity=DAILY&pivot=MEMBER_COMPANY&accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
+          `fields=dateRange,pivotValue,impressions,clicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions&count=10000`;
+
+        let allElements: any[] = [];
+        try {
+          const response = await fetch(analyticsUrl, {
+            headers: { 'Authorization': `Bearer ${accessToken}` }
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            allElements = data.elements || [];
+            console.log(`[get_company_engagement_timeline] Fetched ${allElements.length} daily records`);
+          } else {
+            const errorText = await response.text();
+            console.error(`[get_company_engagement_timeline] API error: ${response.status}`, errorText);
+          }
+        } catch (err) {
+          console.error('[get_company_engagement_timeline] Fetch error:', err);
+        }
+
+        // Step 2: Aggregate data by date and company
+        const dailyData = new Map<string, Map<string, {
+          impressions: number;
+          clicks: number;
+          spend: number;
+          leads: number;
+        }>>();
+
+        const companyTotals = new Map<string, {
+          impressions: number;
+          clicks: number;
+          spend: number;
+          leads: number;
+        }>();
+
+        for (const el of allElements) {
+          const companyUrn = el.pivotValue || '';
+          if (!companyUrn) continue;
+
+          // Extract date from dateRange
+          const dr = el.dateRange?.start;
+          if (!dr) continue;
+          const dateKey = `${dr.year}-${String(dr.month).padStart(2, '0')}-${String(dr.day).padStart(2, '0')}`;
+
+          const impressions = el.impressions || 0;
+          const clicks = el.clicks || 0;
+          const spend = parseFloat(el.costInLocalCurrency || '0');
+          const leads = (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
+
+          // Update daily data
+          if (!dailyData.has(dateKey)) {
+            dailyData.set(dateKey, new Map());
+          }
+          const dayMap = dailyData.get(dateKey)!;
+          const existing = dayMap.get(companyUrn) || { impressions: 0, clicks: 0, spend: 0, leads: 0 };
+          dayMap.set(companyUrn, {
+            impressions: existing.impressions + impressions,
+            clicks: existing.clicks + clicks,
+            spend: existing.spend + spend,
+            leads: existing.leads + leads,
+          });
+
+          // Update company totals
+          const total = companyTotals.get(companyUrn) || { impressions: 0, clicks: 0, spend: 0, leads: 0 };
+          companyTotals.set(companyUrn, {
+            impressions: total.impressions + impressions,
+            clicks: total.clicks + clicks,
+            spend: total.spend + spend,
+            leads: total.leads + leads,
+          });
+        }
+
+        // Step 3: Resolve company names
+        const topCompanyUrns = Array.from(companyTotals.entries())
+          .sort((a, b) => b[1].impressions - a[1].impressions)
+          .slice(0, 100)
+          .map(([urn]) => urn);
+
+        const companyNames = new Map<string, string>();
+        const orgIdToUrn = new Map<string, string>();
+
+        topCompanyUrns.forEach(urn => {
+          const match = urn.match(/(\d+)$/);
+          if (match) {
+            orgIdToUrn.set(match[1], urn);
+          }
+        });
+
+        const orgIds = Array.from(orgIdToUrn.keys());
+        if (orgIds.length > 0) {
+          const batchSize = 50;
+          for (let i = 0; i < orgIds.length; i += batchSize) {
+            const batch = orgIds.slice(i, i + batchSize);
+            const idsParam = batch.map((id, idx) => `ids[${idx}]=${id}`).join('&');
+
+            try {
+              const orgResponse = await fetch(
+                `https://api.linkedin.com/v2/organizationsLookup?${idsParam}&projection=(results*(id,localizedName))`,
+                { headers: { 'Authorization': `Bearer ${accessToken}` } }
+              );
+
+              if (orgResponse.ok) {
+                const orgData = await orgResponse.json();
+                const results = orgData.results || {};
+                Object.entries(results).forEach(([id, org]: [string, any]) => {
+                  const urn = orgIdToUrn.get(id);
+                  if (urn && org?.localizedName) {
+                    companyNames.set(urn, org.localizedName);
+                    companyNames.set(id, org.localizedName);
+                  }
+                });
+              }
+            } catch (e) {
+              console.log('[get_company_engagement_timeline] Org lookup error:', e);
+            }
+          }
+        }
+
+        console.log(`[get_company_engagement_timeline] Resolved ${companyNames.size} company names`);
+
+        // Step 4: Build timeline data
+        const dates = Array.from(dailyData.keys()).sort();
+
+        // Daily aggregates (all companies combined)
+        const dailyAggregates = dates.map(date => {
+          const dayMap = dailyData.get(date)!;
+          let totalImpressions = 0;
+          let totalClicks = 0;
+          let totalSpend = 0;
+          let totalLeads = 0;
+          let companyCount = 0;
+
+          dayMap.forEach((metrics) => {
+            totalImpressions += metrics.impressions;
+            totalClicks += metrics.clicks;
+            totalSpend += metrics.spend;
+            totalLeads += metrics.leads;
+            companyCount++;
+          });
+
+          return {
+            date,
+            impressions: totalImpressions,
+            clicks: totalClicks,
+            spend: totalSpend,
+            leads: totalLeads,
+            companyCount,
+            ctr: totalImpressions > 0 ? (totalClicks / totalImpressions) * 100 : 0,
+          };
+        });
+
+        // Top companies with their daily data
+        const topCompanies = topCompanyUrns.slice(0, 20).map(urn => {
+          const totals = companyTotals.get(urn)!;
+          const idMatch = urn.match(/(\d+)$/);
+          const id = idMatch ? idMatch[1] : urn;
+          const name = companyNames.get(urn) || companyNames.get(id) || `Company ${id}`;
+
+          // Get daily data for this company
+          const timeline = dates.map(date => {
+            const dayMap = dailyData.get(date);
+            const metrics = dayMap?.get(urn) || { impressions: 0, clicks: 0, spend: 0, leads: 0 };
+            return {
+              date,
+              ...metrics,
+            };
+          });
+
+          return {
+            companyUrn: urn,
+            companyName: name,
+            totals: {
+              impressions: totals.impressions,
+              clicks: totals.clicks,
+              spend: totals.spend,
+              leads: totals.leads,
+              ctr: totals.impressions > 0 ? (totals.clicks / totals.impressions) * 100 : 0,
+            },
+            timeline,
+          };
+        });
+
+        // Summary
+        const summary = {
+          totalCompanies: companyTotals.size,
+          totalImpressions: Array.from(companyTotals.values()).reduce((sum, c) => sum + c.impressions, 0),
+          totalClicks: Array.from(companyTotals.values()).reduce((sum, c) => sum + c.clicks, 0),
+          totalSpend: Array.from(companyTotals.values()).reduce((sum, c) => sum + c.spend, 0),
+          totalLeads: Array.from(companyTotals.values()).reduce((sum, c) => sum + c.leads, 0),
+          dateRange: { start: startDate, end: endDate },
+          daysInRange: dates.length,
+        };
+
+        console.log(`[get_company_engagement_timeline] Complete. ${topCompanies.length} companies, ${dates.length} days`);
+
+        return new Response(JSON.stringify({
+          summary,
+          dailyAggregates,
+          topCompanies,
+          metadata: {
+            accountId,
+            companiesResolved: companyNames.size,
+          }
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
       default:
         return new Response(JSON.stringify({ error: 'Unknown action' }), {
           status: 400,

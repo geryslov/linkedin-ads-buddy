@@ -10,6 +10,7 @@ import { CampaignTable } from "@/components/dashboard/CampaignTable";
 import { AudienceCard } from "@/components/dashboard/AudienceCard";
 import { ReportingSection } from "@/components/dashboard/ReportingSection";
 import { TitleCheckerPage } from "@/components/dashboard/TitleCheckerPage";
+import { CompanyEngagementTimeline } from "@/components/dashboard/CompanyEngagementTimeline";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { 
@@ -120,6 +121,7 @@ export default function Dashboard() {
               {activeTab === "campaigns" && "Campaign Management"}
               {activeTab === "audiences" && "Audience Insights"}
               {activeTab === "analytics" && "Analytics & Reports"}
+              {activeTab === "company_timeline" && "Company Engagement Timeline"}
               {activeTab === "reports" && "Reports"}
               {activeTab === "title_checker" && "Title Checker"}
             </h1>
@@ -303,6 +305,13 @@ export default function Dashboard() {
               </p>
             </div>
           </div>
+        )}
+
+        {activeTab === "company_timeline" && (
+          <CompanyEngagementTimeline
+            accessToken={accessToken}
+            selectedAccount={selectedAccount}
+          />
         )}
 
         {activeTab === "reports" && (
