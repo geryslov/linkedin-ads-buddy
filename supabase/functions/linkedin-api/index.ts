@@ -6848,33 +6848,16 @@ serve(async (req) => {
         const companyUrns = Array.from(companyData.keys()).slice(0, 200);
         const companyNames = new Map<string, string>();
 
-        // Helper to normalize company URN - supports organization, company, and memberCompany formats
-        function normalizeCompanyUrn(urn: string): { id: string | null; originalUrn: string } {
-          if (!urn) return { id: null, originalUrn: urn };
-          
-          const match = urn.match(/^urn:li:(organization|company|memberCompany):(\d+)$/);
-          if (match) {
-            return { id: match[2], originalUrn: urn };
-          }
-          
-          // Fallback: try to extract any numeric ID at the end
-          const numericMatch = urn.match(/:(\d+)$/);
-          if (numericMatch) {
-            return { id: numericMatch[1], originalUrn: urn };
-          }
-          
-          return { id: null, originalUrn: urn };
-        }
-
         console.log(`[get_company_influence] Resolving names for ${companyUrns.length} companies...`);
         console.log(`[get_company_influence] First 5 raw pivotValues: ${companyUrns.slice(0, 5).join(', ')}`);
 
-        // Extract organization IDs using normalize helper (supports all URN formats)
+        // Extract organization IDs from URNs - match the exact pattern from get_company_demographic
         const orgIdToUrn = new Map<string, string>();
         companyUrns.forEach(urn => {
-          const { id, originalUrn } = normalizeCompanyUrn(urn);
-          if (id) {
-            orgIdToUrn.set(id, originalUrn);
+          // Try to extract numeric ID from any URN format
+          const match = urn.match(/(\d+)$/);
+          if (match) {
+            orgIdToUrn.set(match[1], urn);
           }
         });
         
@@ -6893,7 +6876,7 @@ serve(async (req) => {
             const idsParam = batch.map((id, idx) => `ids[${idx}]=${id}`).join('&');
             
             try {
-              const orgLookupUrl = `https://api.linkedin.com/v2/organizationsLookup?${idsParam}&projection=(results*(id,localizedName,vanityName))`;
+              const orgLookupUrl = `https://api.linkedin.com/v2/organizationsLookup?${idsParam}&projection=(results*(id,localizedName,localizedWebsite,vanityName))`;
               console.log(`[get_company_influence] Batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(orgIds.length / batchSize)} - fetching org names...`);
               
               const orgResponse = await fetch(orgLookupUrl, {
@@ -7091,9 +7074,10 @@ serve(async (req) => {
           let companyName = companyNames.get(companyUrn);
 
           if (!companyName) {
-            // Try extracting ID and looking up by various URN formats
-            const { id } = normalizeCompanyUrn(companyUrn);
-            if (id) {
+            // Extract numeric ID from URN (handles any format)
+            const idMatch = companyUrn.match(/:(\d+)$/);
+            if (idMatch) {
+              const id = idMatch[1];
               companyName = companyNames.get(id)
                 || companyNames.get(`urn:li:organization:${id}`)
                 || companyNames.get(`urn:li:company:${id}`)
@@ -7101,9 +7085,10 @@ serve(async (req) => {
             }
           }
 
-          // Final fallback: show ID from URN
+          // Final fallback: show "Company" + ID from URN
           if (!companyName) {
-            companyName = extractNameFromUrn(companyUrn);
+            const idMatch = companyUrn.match(/:(\d+)$/);
+            companyName = idMatch ? `Company ${idMatch[1]}` : companyUrn;
           }
 
           // Get campaign breakdown for this company
