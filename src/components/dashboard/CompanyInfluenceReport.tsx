@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
-import { RefreshCw, Building2, TrendingUp, Users, Target, ChevronDown, ChevronRight, Download, Flame, AlertTriangle } from 'lucide-react';
+import { RefreshCw, Building2, TrendingUp, Users, Target, ChevronDown, ChevronRight, Download, Flame, AlertTriangle, Pencil, Check, X } from 'lucide-react';
 import { useCompanyInfluence, CompanyInfluenceItem } from '@/hooks/useCompanyInfluence';
 import { TimeFrameSelector } from './TimeFrameSelector';
 import { useToast } from '@/hooks/use-toast';
@@ -20,7 +20,15 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-// Removed Collapsible - using standard table rows for proper alignment
+
+// Helper function to normalize company URN and extract ID
+function normalizeCompanyUrn(urn: string): { id: string | null } {
+  if (!urn) return { id: null };
+  const match = urn.match(/^urn:li:(organization|company|memberCompany):(\d+)$/);
+  if (match) return { id: match[2] };
+  const numericMatch = urn.match(/:(\d+)$/);
+  return { id: numericMatch ? numericMatch[1] : null };
+}
 
 interface CompanyInfluenceReportProps {
   accessToken: string | null;
@@ -74,11 +82,32 @@ function EngagementScoreBadge({ score, leads }: { score: number; leads: number }
   );
 }
 
-function CompanyRow({ company, isExpanded, onToggle }: {
+function CompanyRow({ company, isExpanded, onToggle, onNameUpdate }: {
   company: CompanyInfluenceItem;
   isExpanded: boolean;
   onToggle: () => void;
+  onNameUpdate?: (orgId: string, name: string) => Promise<{ success: boolean }>;
 }) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editName, setEditName] = useState(company.companyName);
+  const isUnresolved = company.companyName.startsWith('Company ');
+
+  const handleSave = async () => {
+    if (!editName.trim()) return;
+    const { id } = normalizeCompanyUrn(company.companyUrn);
+    if (id && onNameUpdate) {
+      const result = await onNameUpdate(id, editName.trim());
+      if (result.success) {
+        setIsEditing(false);
+      }
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') handleSave();
+    if (e.key === 'Escape') setIsEditing(false);
+  };
+
   return (
     <>
       <TableRow className="hover:bg-muted/50 cursor-pointer" onClick={onToggle}>
@@ -87,8 +116,42 @@ function CompanyRow({ company, isExpanded, onToggle }: {
             {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
           </Button>
         </TableCell>
-        <TableCell className="w-48 font-medium truncate" title={company.companyName}>
-          {company.companyName}
+        <TableCell className="w-48 font-medium" onClick={(e) => isEditing && e.stopPropagation()}>
+          {isEditing ? (
+            <div className="flex items-center gap-1">
+              <Input
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                onKeyDown={handleKeyDown}
+                className="h-7 text-sm"
+                autoFocus
+                onClick={(e) => e.stopPropagation()}
+              />
+              <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={(e) => { e.stopPropagation(); handleSave(); }}>
+                <Check className="h-3 w-3" />
+              </Button>
+              <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={(e) => { e.stopPropagation(); setIsEditing(false); }}>
+                <X className="h-3 w-3" />
+              </Button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <span className={isUnresolved ? 'text-muted-foreground' : ''} title={company.companyName}>
+                {company.companyName}
+              </span>
+              {isUnresolved && onNameUpdate && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-6 w-6 p-0 opacity-50 hover:opacity-100"
+                  onClick={(e) => { e.stopPropagation(); setIsEditing(true); }}
+                  title="Edit company name"
+                >
+                  <Pencil className="h-3 w-3" />
+                </Button>
+              )}
+            </div>
+          )}
         </TableCell>
         <TableCell className="w-24">
           <EngagementScoreBadge score={company.engagementScore} leads={company.totalLeads} />
@@ -176,6 +239,7 @@ export function CompanyInfluenceReport({ accessToken, selectedAccount }: Company
     minImpressions,
     setMinImpressions,
     engagementTiers,
+    updateCompanyName,
   } = useCompanyInfluence(accessToken);
   const { toast } = useToast();
   const [selectedTimeFrame, setSelectedTimeFrame] = useState('last_30_days');
@@ -261,14 +325,12 @@ export function CompanyInfluenceReport({ accessToken, selectedAccount }: Company
     <div className="space-y-6">
       {/* Names Resolution Warning */}
       {data?.metadata?.namesResolutionFailed && (
-        <Alert variant="destructive" className="border-yellow-500/50 bg-yellow-50 dark:bg-yellow-950/30">
+        <Alert className="border-yellow-500/50 bg-yellow-50 dark:bg-yellow-950/30">
           <AlertTriangle className="h-4 w-4 text-yellow-600" />
-          <AlertTitle className="text-yellow-800 dark:text-yellow-200">Company Names Restricted</AlertTitle>
+          <AlertTitle className="text-yellow-800 dark:text-yellow-200">Some Company Names Unavailable</AlertTitle>
           <AlertDescription className="text-yellow-700 dark:text-yellow-300">
-            Unable to resolve company names due to API permissions. Showing company IDs instead.
-            {data.metadata.namesResolutionError && (
-              <span className="block text-xs mt-1 opacity-75">{data.metadata.namesResolutionError}</span>
-            )}
+            LinkedIn blocked automatic name resolution. Showing cached names and IDs for unknowns.
+            Click the edit icon next to any "Company 12345" to set a name manually.
           </AlertDescription>
         </Alert>
       )}
@@ -472,6 +534,7 @@ export function CompanyInfluenceReport({ accessToken, selectedAccount }: Company
                       company={company}
                       isExpanded={expandedCompanies.has(company.companyUrn)}
                       onToggle={() => toggleCompanyExpanded(company.companyUrn)}
+                      onNameUpdate={updateCompanyName}
                     />
                   ))}
                 </TableBody>
