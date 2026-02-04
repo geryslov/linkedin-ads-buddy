@@ -1,6 +1,15 @@
 import { useState, useCallback, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 
+// Helper function to normalize company URN and extract ID
+function normalizeCompanyUrn(urn: string): { id: string | null } {
+  if (!urn) return { id: null };
+  const match = urn.match(/^urn:li:(organization|company|memberCompany):(\d+)$/);
+  if (match) return { id: match[2] };
+  const numericMatch = urn.match(/:(\d+)$/);
+  return { id: numericMatch ? numericMatch[1] : null };
+}
+
 export interface DailyAggregate {
   date: string;
   impressions: number;
@@ -50,6 +59,8 @@ export interface CompanyEngagementTimelineData {
   metadata: {
     accountId: string;
     companiesResolved: number;
+    namesResolutionFailed?: boolean;
+    namesResolutionError?: string;
   };
 }
 
@@ -187,6 +198,39 @@ export function useCompanyEngagementTimeline(accessToken: string | null) {
     });
   }, [data?.dailyAggregates, chartCompanies]);
 
+  // Update company name manually (persists to DB cache)
+  const updateCompanyName = useCallback(async (orgId: string, name: string) => {
+    try {
+      const { error } = await supabase.functions.invoke('linkedin-api', {
+        body: {
+          action: 'update_company_name',
+          params: { orgId, name, source: 'manual' }
+        }
+      });
+
+      if (error) throw error;
+
+      // Update local state optimistically
+      if (data?.topCompanies) {
+        setData(prev => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            topCompanies: prev.topCompanies.map(c => {
+              const { id } = normalizeCompanyUrn(c.companyUrn);
+              return id === orgId ? { ...c, companyName: name } : c;
+            })
+          };
+        });
+      }
+
+      return { success: true };
+    } catch (err) {
+      console.error('Failed to update company name:', err);
+      return { success: false, error: err };
+    }
+  }, [data]);
+
   return {
     data,
     isLoading,
@@ -202,5 +246,6 @@ export function useCompanyEngagementTimeline(accessToken: string | null) {
     clearSelection,
     chartCompanies,
     chartData,
+    updateCompanyName,
   };
 }

@@ -1,9 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Input } from '@/components/ui/input';
 import {
   RefreshCw,
   Building2,
@@ -12,6 +14,12 @@ import {
   MousePointerClick,
   Users,
   Download,
+  AlertTriangle,
+  Pencil,
+  Check,
+  X,
+  Search,
+  ArrowUpDown,
 } from 'lucide-react';
 import {
   LineChart,
@@ -33,10 +41,85 @@ import {
   Table,
   TableBody,
   TableCell,
+  TableFooter,
   TableHead,
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+
+type SortField = 'companyName' | 'impressions' | 'clicks' | 'leads' | 'spend' | 'ctr' | 'cpc' | 'cpm';
+type SortDirection = 'asc' | 'desc';
+
+// Helper function to normalize company URN and extract ID
+function normalizeCompanyUrn(urn: string): { id: string | null } {
+  if (!urn) return { id: null };
+  const match = urn.match(/^urn:li:(organization|company|memberCompany):(\d+)$/);
+  if (match) return { id: match[2] };
+  const numericMatch = urn.match(/:(\d+)$/);
+  return { id: numericMatch ? numericMatch[1] : null };
+}
+
+// Inline editing component for company names
+function EditableCompanyName({ 
+  company, 
+  onNameUpdate 
+}: { 
+  company: CompanyTimeline; 
+  onNameUpdate?: (orgId: string, name: string) => Promise<{ success: boolean }>;
+}) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editName, setEditName] = useState(company.companyName);
+  const isUnresolved = company.companyName.startsWith('Company ');
+
+  const handleSave = async () => {
+    if (!editName.trim()) return;
+    const { id } = normalizeCompanyUrn(company.companyUrn);
+    if (id && onNameUpdate) {
+      const result = await onNameUpdate(id, editName.trim());
+      if (result.success) {
+        setIsEditing(false);
+      }
+    }
+  };
+
+  if (isEditing) {
+    return (
+      <div className="flex items-center gap-1">
+        <Input
+          value={editName}
+          onChange={(e) => setEditName(e.target.value)}
+          className="h-7 text-sm w-32"
+          autoFocus
+        />
+        <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={handleSave}>
+          <Check className="h-3 w-3" />
+        </Button>
+        <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => setIsEditing(false)}>
+          <X className="h-3 w-3" />
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <span className={isUnresolved ? 'text-muted-foreground' : ''}>
+        {company.companyName}
+      </span>
+      {isUnresolved && onNameUpdate && (
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-6 w-6 p-0 opacity-50 hover:opacity-100"
+          onClick={() => setIsEditing(true)}
+          title="Edit company name"
+        >
+          <Pencil className="h-3 w-3" />
+        </Button>
+      )}
+    </div>
+  );
+}
 
 interface CompanyEngagementTimelineProps {
   accessToken: string | null;
@@ -72,16 +155,123 @@ export function CompanyEngagementTimeline({ accessToken, selectedAccount }: Comp
     clearSelection,
     chartCompanies,
     chartData,
+    updateCompanyName,
   } = useCompanyEngagementTimeline(accessToken);
   const { toast } = useToast();
   const [selectedTimeFrame, setSelectedTimeFrame] = useState('last_30_days');
   const [activeMetric, setActiveMetric] = useState<'impressions' | 'clicks' | 'leads'>('impressions');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [sortField, setSortField] = useState<SortField>('impressions');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDirection('desc');
+    }
+  };
+
+  const filteredAndSortedCompanies = useMemo(() => {
+    if (!data?.topCompanies) return [];
+    
+    let filtered = data.topCompanies;
+    
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      filtered = data.topCompanies.filter(company => 
+        company.companyName.toLowerCase().includes(query)
+      );
+    }
+    
+    return [...filtered].sort((a, b) => {
+      let aValue: number | string;
+      let bValue: number | string;
+      
+      switch (sortField) {
+        case 'companyName':
+          aValue = a.companyName;
+          bValue = b.companyName;
+          break;
+        case 'impressions':
+          aValue = a.totals.impressions;
+          bValue = b.totals.impressions;
+          break;
+        case 'clicks':
+          aValue = a.totals.clicks;
+          bValue = b.totals.clicks;
+          break;
+        case 'leads':
+          aValue = a.totals.leads;
+          bValue = b.totals.leads;
+          break;
+        case 'spend':
+          aValue = a.totals.spend;
+          bValue = b.totals.spend;
+          break;
+        case 'ctr':
+          aValue = a.totals.ctr;
+          bValue = b.totals.ctr;
+          break;
+        case 'cpc':
+          aValue = a.totals.clicks > 0 ? a.totals.spend / a.totals.clicks : 0;
+          bValue = b.totals.clicks > 0 ? b.totals.spend / b.totals.clicks : 0;
+          break;
+        case 'cpm':
+          aValue = a.totals.impressions > 0 ? (a.totals.spend / a.totals.impressions) * 1000 : 0;
+          bValue = b.totals.impressions > 0 ? (b.totals.spend / b.totals.impressions) * 1000 : 0;
+          break;
+        default:
+          aValue = a.totals.impressions;
+          bValue = b.totals.impressions;
+      }
+      
+      if (typeof aValue === 'string' && typeof bValue === 'string') {
+        return sortDirection === 'asc' 
+          ? aValue.localeCompare(bValue) 
+          : bValue.localeCompare(aValue);
+      }
+      
+      return sortDirection === 'asc' 
+        ? (aValue as number) - (bValue as number) 
+        : (bValue as number) - (aValue as number);
+    });
+  }, [data?.topCompanies, searchQuery, sortField, sortDirection]);
+
+  const tableTotals = useMemo(() => {
+    return filteredAndSortedCompanies.reduce(
+      (acc, company) => ({
+        impressions: acc.impressions + company.totals.impressions,
+        clicks: acc.clicks + company.totals.clicks,
+        leads: acc.leads + company.totals.leads,
+        spend: acc.spend + company.totals.spend,
+      }),
+      { impressions: 0, clicks: 0, leads: 0, spend: 0 }
+    );
+  }, [filteredAndSortedCompanies]);
+
+  const totalCtr = tableTotals.impressions > 0 ? (tableTotals.clicks / tableTotals.impressions) * 100 : 0;
+  const totalCpc = tableTotals.clicks > 0 ? tableTotals.spend / tableTotals.clicks : 0;
+  const totalCpm = tableTotals.impressions > 0 ? (tableTotals.spend / tableTotals.impressions) * 1000 : 0;
+
+  const SortButton = ({ field, children }: { field: SortField; children: React.ReactNode }) => (
+    <Button
+      variant="ghost"
+      size="sm"
+      className="h-8 px-2 hover:bg-muted/50"
+      onClick={() => handleSort(field)}
+    >
+      {children}
+      <ArrowUpDown className="ml-1 h-3 w-3" />
+    </Button>
+  );
 
   useEffect(() => {
     if (selectedAccount && accessToken) {
       fetchTimeline(selectedAccount);
     }
-  }, [selectedAccount, accessToken, dateRange.start, dateRange.end]);
+  }, [selectedAccount, accessToken, dateRange.start, dateRange.end, fetchTimeline]);
 
   const handleTimeFrameChange = (option: typeof timeFrameOptions[0]) => {
     setSelectedTimeFrame(option.value);
@@ -141,6 +331,20 @@ export function CompanyEngagementTimeline({ accessToken, selectedAccount }: Comp
 
   return (
     <div className="space-y-6">
+      {/* Names Resolution Warning */}
+      {data?.metadata?.namesResolutionFailed && (
+        <Alert className="border-yellow-500/50 bg-yellow-50 dark:bg-yellow-950/30">
+          <AlertTriangle className="h-4 w-4 text-yellow-600" />
+          <AlertTitle className="text-yellow-800 dark:text-yellow-200">
+            Some Company Names Unavailable
+          </AlertTitle>
+          <AlertDescription className="text-yellow-700 dark:text-yellow-300">
+            LinkedIn blocked automatic name resolution. Showing cached names and IDs for unknowns.
+            Click the edit icon next to any "Company 12345" to set a name manually.
+          </AlertDescription>
+        </Alert>
+      )}
+
       {/* Controls */}
       <Card className="bg-card/50 backdrop-blur-sm border-border/50">
         <CardContent className="pt-4">
@@ -336,7 +540,9 @@ export function CompanyEngagementTimeline({ accessToken, selectedAccount }: Comp
                   style={{ backgroundColor: CHART_COLORS[idx % CHART_COLORS.length] }}
                 />
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">{company.companyName}</p>
+                  <div className="text-sm font-medium truncate">
+                    <EditableCompanyName company={company} onNameUpdate={updateCompanyName} />
+                  </div>
                   <p className="text-xs text-muted-foreground">
                     {company.totals.impressions.toLocaleString()} imp · {company.totals.clicks} clicks · {company.totals.leads} leads
                   </p>
@@ -429,39 +635,101 @@ export function CompanyEngagementTimeline({ accessToken, selectedAccount }: Comp
             Top companies by total impressions during the selected period
           </CardDescription>
         </CardHeader>
-        <CardContent>
-          {data?.topCompanies && data.topCompanies.length > 0 ? (
-            <div className="rounded-md border overflow-x-auto">
+        <CardContent className="space-y-4">
+          {/* Search and count */}
+          <div className="flex items-center gap-4">
+            <div className="relative flex-1 max-w-sm">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="Search companies..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9"
+              />
+            </div>
+            <span className="text-sm text-muted-foreground">
+              {filteredAndSortedCompanies.length} companies
+            </span>
+          </div>
+
+          {filteredAndSortedCompanies.length > 0 ? (
+            <div className="rounded-lg border border-border/50 overflow-hidden">
               <Table>
                 <TableHeader>
-                  <TableRow>
+                  <TableRow className="bg-muted/30 hover:bg-muted/30">
                     <TableHead className="w-8">#</TableHead>
-                    <TableHead className="min-w-[200px]">Company</TableHead>
-                    <TableHead className="text-right">Impressions</TableHead>
-                    <TableHead className="text-right">Clicks</TableHead>
-                    <TableHead className="text-right">Leads</TableHead>
-                    <TableHead className="text-right">Spend</TableHead>
-                    <TableHead className="text-right">CTR</TableHead>
+                    <TableHead className="min-w-[200px]">
+                      <SortButton field="companyName">Company</SortButton>
+                    </TableHead>
+                    <TableHead className="text-right">
+                      <SortButton field="impressions">Impressions</SortButton>
+                    </TableHead>
+                    <TableHead className="text-right">
+                      <SortButton field="clicks">Clicks</SortButton>
+                    </TableHead>
+                    <TableHead className="text-right">
+                      <SortButton field="leads">Leads</SortButton>
+                    </TableHead>
+                    <TableHead className="text-right">
+                      <SortButton field="spend">Spend</SortButton>
+                    </TableHead>
+                    <TableHead className="text-right">
+                      <SortButton field="ctr">CTR</SortButton>
+                    </TableHead>
+                    <TableHead className="text-right">
+                      <SortButton field="cpc">CPC</SortButton>
+                    </TableHead>
+                    <TableHead className="text-right">
+                      <SortButton field="cpm">CPM</SortButton>
+                    </TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {data.topCompanies.map((company, idx) => (
-                    <TableRow key={company.companyUrn}>
-                      <TableCell className="font-medium">{idx + 1}</TableCell>
-                      <TableCell className="font-medium">{company.companyName}</TableCell>
-                      <TableCell className="text-right">{company.totals.impressions.toLocaleString()}</TableCell>
-                      <TableCell className="text-right">{company.totals.clicks.toLocaleString()}</TableCell>
-                      <TableCell className="text-right font-medium text-primary">{company.totals.leads}</TableCell>
-                      <TableCell className="text-right">${company.totals.spend.toFixed(2)}</TableCell>
-                      <TableCell className="text-right">{company.totals.ctr.toFixed(2)}%</TableCell>
-                    </TableRow>
-                  ))}
+                  {filteredAndSortedCompanies.map((company, idx) => {
+                    const cpc = company.totals.clicks > 0 ? company.totals.spend / company.totals.clicks : 0;
+                    const cpm = company.totals.impressions > 0 ? (company.totals.spend / company.totals.impressions) * 1000 : 0;
+                    
+                    return (
+                      <TableRow key={company.companyUrn} className="hover:bg-muted/20">
+                        <TableCell className="font-medium">{idx + 1}</TableCell>
+                        <TableCell className="font-medium min-w-[200px]">
+                          <div className="flex items-center gap-2">
+                            <Building2 className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                            <EditableCompanyName company={company} onNameUpdate={updateCompanyName} />
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">{company.totals.impressions.toLocaleString()}</TableCell>
+                        <TableCell className="text-right tabular-nums">{company.totals.clicks.toLocaleString()}</TableCell>
+                        <TableCell className="text-right tabular-nums font-medium text-primary">{company.totals.leads}</TableCell>
+                        <TableCell className="text-right tabular-nums">${company.totals.spend.toFixed(2)}</TableCell>
+                        <TableCell className="text-right tabular-nums">{company.totals.ctr.toFixed(2)}%</TableCell>
+                        <TableCell className="text-right tabular-nums">${cpc.toFixed(2)}</TableCell>
+                        <TableCell className="text-right tabular-nums">${cpm.toFixed(2)}</TableCell>
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
+                <TableFooter>
+                  <TableRow className="bg-muted/50 font-semibold">
+                    <TableCell></TableCell>
+                    <TableCell>Total ({filteredAndSortedCompanies.length} companies)</TableCell>
+                    <TableCell className="text-right tabular-nums">{tableTotals.impressions.toLocaleString()}</TableCell>
+                    <TableCell className="text-right tabular-nums">{tableTotals.clicks.toLocaleString()}</TableCell>
+                    <TableCell className="text-right tabular-nums font-medium text-primary">{tableTotals.leads.toLocaleString()}</TableCell>
+                    <TableCell className="text-right tabular-nums">${tableTotals.spend.toFixed(2)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{totalCtr.toFixed(2)}%</TableCell>
+                    <TableCell className="text-right tabular-nums">${totalCpc.toFixed(2)}</TableCell>
+                    <TableCell className="text-right tabular-nums">${totalCpm.toFixed(2)}</TableCell>
+                  </TableRow>
+                </TableFooter>
               </Table>
             </div>
           ) : (
             <div className="text-center py-12 text-muted-foreground">
-              No company data available for the selected period
+              <div className="flex flex-col items-center gap-2">
+                <Building2 className="h-8 w-8 opacity-50" />
+                <span>No company data available for the selected period</span>
+              </div>
             </div>
           )}
         </CardContent>

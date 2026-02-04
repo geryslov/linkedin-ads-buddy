@@ -1,6 +1,7 @@
 // GitHub Sync: 2026-02-01
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -9,6 +10,11 @@ const corsHeaders = {
 
 const LINKEDIN_CLIENT_ID = Deno.env.get('LINKEDIN_CLIENT_ID');
 const LINKEDIN_CLIENT_SECRET = Deno.env.get('LINKEDIN_CLIENT_SECRET');
+
+// Initialize Supabase client for company cache operations
+const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+const supabaseClient = createClient(supabaseUrl, supabaseServiceKey);
 
 // Helper function to format pivot values into human-readable names
 function formatPivotValue(urn: string, pivot: string): string {
@@ -466,6 +472,25 @@ function extractNameFromUrn(urn: string): string {
   if (!urn) return 'Unknown';
   const parts = urn.split(':');
   return parts[parts.length - 1] || 'Unknown';
+}
+
+// Normalize company URN to extract the numeric ID
+// Supports: urn:li:organization:123, urn:li:company:123, urn:li:memberCompany:123
+function normalizeCompanyUrn(urn: string): { id: string | null; originalUrn: string } {
+  if (!urn) return { id: null, originalUrn: urn };
+  
+  const match = urn.match(/^urn:li:(organization|company|memberCompany):(\d+)$/);
+  if (match) {
+    return { id: match[2], originalUrn: urn };
+  }
+  
+  // Fallback: try to extract any numeric ID at the end
+  const numericMatch = urn.match(/:(\d+)$/);
+  if (numericMatch) {
+    return { id: numericMatch[1], originalUrn: urn };
+  }
+  
+  return { id: null, originalUrn: urn };
 }
 
 serve(async (req) => {
@@ -6775,7 +6800,6 @@ serve(async (req) => {
         console.log(`[get_company_influence] Found ${campaignMeta.size} campaigns`);
 
         // Step 2: Fetch company analytics using account-level single-pivot query
-        // Note: Dual-pivot (pivotValue2) requires special API permissions that most accounts don't have
         const companyData = new Map<string, {
           companyUrn: string;
           companyName: string;
@@ -6844,115 +6868,157 @@ serve(async (req) => {
 
         console.log(`[get_company_influence] Found ${companyData.size} unique companies`);
 
-        // Step 3: Resolve company names via Organization Lookup API (batch)
+        // Step 3: Three-step company name resolution pipeline
+        // Step 3A: Load cached names from Supabase first
+        // Step 3B: Query LinkedIn API only for missing IDs
+        // Step 3C: Upsert resolved names to cache
+        
         const companyUrns = Array.from(companyData.keys()).slice(0, 200);
         const companyNames = new Map<string, string>();
 
         console.log(`[get_company_influence] Resolving names for ${companyUrns.length} companies...`);
-        console.log(`[get_company_influence] First 5 raw pivotValues: ${companyUrns.slice(0, 5).join(', ')}`);
 
-        // Extract organization IDs from URNs - match the exact pattern from get_company_demographic
+        // Extract organization IDs from URNs
         const orgIdToUrn = new Map<string, string>();
         companyUrns.forEach(urn => {
-          // Try to extract numeric ID from any URN format
-          const match = urn.match(/(\d+)$/);
-          if (match) {
-            orgIdToUrn.set(match[1], urn);
+          const { id } = normalizeCompanyUrn(urn);
+          if (id) {
+            orgIdToUrn.set(id, urn);
           }
         });
         
         const orgIds = Array.from(orgIdToUrn.keys());
         console.log(`[get_company_influence] Extracted ${orgIds.length} valid org IDs from ${companyUrns.length} URNs`);
 
+        // Step 3A: Load cached names from Supabase first
+        try {
+          const { data: cached, error: cacheError } = await supabaseClient
+            .from('linkedin_company_cache')
+            .select('org_id, name, vanity_name')
+            .in('org_id', orgIds);
+
+          if (!cacheError && cached) {
+            console.log(`[get_company_influence] Loaded ${cached.length} cached company names`);
+            cached.forEach((row: { org_id: string; name: string; vanity_name: string | null }) => {
+              const displayName = row.name || row.vanity_name || '';
+              if (displayName) {
+                companyNames.set(row.org_id, displayName);
+                companyNames.set(`urn:li:organization:${row.org_id}`, displayName);
+                companyNames.set(`urn:li:company:${row.org_id}`, displayName);
+                companyNames.set(`urn:li:memberCompany:${row.org_id}`, displayName);
+              }
+            });
+          } else if (cacheError) {
+            console.error('[get_company_influence] Cache lookup error:', cacheError);
+          }
+        } catch (e) {
+          console.error('[get_company_influence] Cache lookup error:', e);
+        }
+
+        // Step 3B: Only query LinkedIn for IDs not in cache
+        const idsMissing = orgIds.filter(id => !companyNames.has(id));
+        console.log(`[get_company_influence] ${orgIds.length - idsMissing.length} from cache, ${idsMissing.length} need API lookup`);
+
         // Track if name resolution failed due to permissions
         let namesResolutionFailed = false;
         let namesResolutionError: string | null = null;
 
-        // Use V2 organizationsLookup endpoint with proper headers
-        if (orgIds.length > 0) {
-          const batchSize = 50;
-          for (let i = 0; i < orgIds.length; i += batchSize) {
-            const batch = orgIds.slice(i, i + batchSize);
-            const idsParam = batch.map((id, idx) => `ids[${idx}]=${id}`).join('&');
+        // Use individual organization lookups for missing IDs
+        if (idsMissing.length > 0) {
+          console.log(`[get_company_influence] Resolving ${idsMissing.length} org names via individual lookups...`);
+          
+          const idsToResolve = idsMissing.slice(0, 100);
+          let successCount = 0;
+          let failCount = 0;
+          const newlyResolved: Array<{ id: string; name: string; vanityName: string | null }> = [];
+          
+          // Process in parallel batches of 10
+          const parallelBatchSize = 10;
+          for (let i = 0; i < idsToResolve.length; i += parallelBatchSize) {
+            const batch = idsToResolve.slice(i, i + parallelBatchSize);
             
-            try {
-              const orgLookupUrl = `https://api.linkedin.com/v2/organizationsLookup?${idsParam}&projection=(results*(id,localizedName))`;
-              console.log(`[get_company_influence] Batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(orgIds.length / batchSize)} - fetching org names...`);
-              
-              const orgResponse = await fetch(orgLookupUrl, {
-                headers: { 'Authorization': `Bearer ${accessToken}` }
-              });
-              
-              // Log status code for every batch
-              console.log(`[get_company_influence] Batch ${Math.floor(i / batchSize) + 1} response status: ${orgResponse.status}`);
-              
-              if (orgResponse.ok) {
-                const orgData = await orgResponse.json();
-                const results = orgData.results || {};
-                
-                // Log response structure
-                const resultKeys = Object.keys(results);
-                console.log(`[get_company_influence] Batch returned ${resultKeys.length} results, sample keys: ${resultKeys.slice(0, 3).join(', ')}`);
-                
-                Object.entries(results).forEach(([id, org]: [string, any]) => {
-                  const originalUrn = orgIdToUrn.get(id);
-                  const name = org?.localizedName;
-                  
-                  if (name) {
-                    // Store with original URN and all possible formats
-                    if (originalUrn) companyNames.set(originalUrn, name);
-                    companyNames.set(`urn:li:organization:${id}`, name);
-                    companyNames.set(`urn:li:company:${id}`, name);
-                    companyNames.set(`urn:li:memberCompany:${id}`, name);
-                    companyNames.set(id, name); // Also store by raw ID
-                  }
-                });
-                
-                console.log(`[get_company_influence] Total names resolved so far: ${companyNames.size}`);
-              } else {
-                // Log the error response body
-                const errText = await orgResponse.text();
-                console.log(`[get_company_influence] Batch lookup FAILED: status=${orgResponse.status}, body=${errText.slice(0, 300)}`);
-                
-                // Track 403 permission errors
-                if (orgResponse.status === 403) {
-                  namesResolutionFailed = true;
-                  namesResolutionError = `403 Forbidden: ${errText.slice(0, 100)}`;
-                }
-                
-                // Fallback: individual lookups (with limited attempts) - only if not 403
-                if (orgResponse.status !== 403 && i === 0) {
-                  console.log(`[get_company_influence] Attempting individual lookups for first batch...`);
-                  for (const id of batch.slice(0, 5)) {
-                    try {
-                      const singleUrl = `https://api.linkedin.com/v2/organizations/${id}?projection=(id,localizedName,vanityName)`;
-                      const singleResponse = await fetch(singleUrl, {
-                        headers: { 
-                          'Authorization': `Bearer ${accessToken}`,
-                          'LinkedIn-Version': '202511',
-                        }
-                      });
-                      
-                      console.log(`[get_company_influence] Individual lookup ${id}: status=${singleResponse.status}`);
-                      
-                      if (singleResponse.ok) {
-                        const singleData = await singleResponse.json();
-                        const name = singleData.localizedName || singleData.vanityName;
-                        if (name) {
-                          companyNames.set(`urn:li:organization:${id}`, name);
-                          companyNames.set(`urn:li:company:${id}`, name);
-                          companyNames.set(`urn:li:memberCompany:${id}`, name);
-                        }
-                      }
-                    } catch (err) {
-                      console.log(`[get_company_influence] Individual lookup ${id} error:`, err);
+            const results = await Promise.allSettled(
+              batch.map(async (id) => {
+                try {
+                  const orgUrl = `https://api.linkedin.com/v2/organizations/${id}?projection=(id,localizedName,vanityName)`;
+                  const orgResponse = await fetch(orgUrl, {
+                    headers: { 
+                      'Authorization': `Bearer ${accessToken}`,
+                      'LinkedIn-Version': '202511',
                     }
+                  });
+                  
+                  if (orgResponse.ok) {
+                    const orgData = await orgResponse.json();
+                    const name = orgData.localizedName || orgData.vanityName;
+                    const vanityName = orgData.vanityName || null;
+                    if (name) {
+                      return { id, name, vanityName, success: true };
+                    }
+                  } else if (orgResponse.status === 403) {
+                    return { id, success: false, status: 403 };
                   }
+                  return { id, success: false };
+                } catch (e) {
+                  return { id, success: false, error: e };
+                }
+              })
+            );
+            
+            // Process results
+            results.forEach((result) => {
+              if (result.status === 'fulfilled' && result.value.success) {
+                const { id, name, vanityName } = result.value;
+                const originalUrn = orgIdToUrn.get(id);
+                if (originalUrn) companyNames.set(originalUrn, name);
+                companyNames.set(`urn:li:organization:${id}`, name);
+                companyNames.set(`urn:li:company:${id}`, name);
+                companyNames.set(`urn:li:memberCompany:${id}`, name);
+                companyNames.set(id, name);
+                successCount++;
+                newlyResolved.push({ id, name, vanityName });
+              } else {
+                failCount++;
+                if (result.status === 'fulfilled' && result.value.status === 403) {
+                  namesResolutionFailed = true;
                 }
               }
+            });
+          }
+          
+          console.log(`[get_company_influence] Individual lookups complete: ${successCount} resolved, ${failCount} failed`);
+          
+          // Step 3C: Upsert newly resolved names to cache
+          if (newlyResolved.length > 0) {
+            console.log(`[get_company_influence] Caching ${newlyResolved.length} newly resolved names...`);
+            try {
+              const upsertData = newlyResolved.map(r => ({
+                org_id: r.id,
+                name: r.name,
+                vanity_name: r.vanityName,
+                source: 'linkedin_org_api',
+                last_seen_at: new Date().toISOString(),
+              }));
+              
+              const { error: upsertError } = await supabaseClient
+                .from('linkedin_company_cache')
+                .upsert(upsertData, { onConflict: 'org_id' });
+              
+              if (upsertError) {
+                console.error('[get_company_influence] Cache upsert error:', upsertError);
+              } else {
+                console.log(`[get_company_influence] Cached ${newlyResolved.length} company names`);
+              }
             } catch (e) {
-              console.error(`[get_company_influence] Batch org lookup error:`, e);
+              console.error('[get_company_influence] Cache upsert error:', e);
             }
+          }
+          
+          // Only mark as failed if ALL lookups failed with 403
+          if (successCount === 0 && failCount > 0 && namesResolutionFailed) {
+            namesResolutionError = 'All organization lookups returned 403 Forbidden';
+          } else if (successCount > 0) {
+            namesResolutionFailed = false;
           }
         }
 
@@ -7070,25 +7136,21 @@ serve(async (req) => {
           // Calculate engagement score
           const engagementScore = (data.totalLeads * 100) + (data.totalClicks * 5) + (data.totalImpressions * 0.01);
 
-          // Get company name - try multiple lookup strategies
-          let companyName = companyNames.get(companyUrn);
-
-          if (!companyName) {
-            // Extract numeric ID from URN (handles any format)
-            const idMatch = companyUrn.match(/:(\d+)$/);
-            if (idMatch) {
-              const id = idMatch[1];
-              companyName = companyNames.get(id)
-                || companyNames.get(`urn:li:organization:${id}`)
-                || companyNames.get(`urn:li:company:${id}`)
-                || companyNames.get(`urn:li:memberCompany:${id}`);
-            }
-          }
-
+          // Get company name - use multi-key lookup
+          const { id: companyId } = normalizeCompanyUrn(companyUrn);
+          const lookupKeys = [
+            companyUrn,
+            companyId ?? '',
+            `urn:li:organization:${companyId}`,
+            `urn:li:company:${companyId}`,
+            `urn:li:memberCompany:${companyId}`,
+          ].filter(Boolean);
+          
+          let companyName = lookupKeys.map(k => companyNames.get(k)).find(Boolean);
+          
           // Final fallback: show "Company" + ID from URN
           if (!companyName) {
-            const idMatch = companyUrn.match(/:(\d+)$/);
-            companyName = idMatch ? `Company ${idMatch[1]}` : companyUrn;
+            companyName = companyId ? `Company ${companyId}` : 'Unknown Company';
           }
 
           // Get campaign breakdown for this company
@@ -7187,7 +7249,10 @@ serve(async (req) => {
         let allElements: any[] = [];
         try {
           const response = await fetch(analyticsUrl, {
-            headers: { 'Authorization': `Bearer ${accessToken}` }
+            headers: { 
+              'Authorization': `Bearer ${accessToken}`,
+              'LinkedIn-Version': '202511',
+            }
           });
 
           if (response.ok) {
@@ -7196,10 +7261,24 @@ serve(async (req) => {
             console.log(`[get_company_engagement_timeline] Fetched ${allElements.length} daily records`);
           } else {
             const errorText = await response.text();
-            console.error(`[get_company_engagement_timeline] API error: ${response.status}`, errorText);
+            console.error(`[get_company_engagement_timeline] API error: ${response.status}`, errorText.slice(0, 300));
+            return new Response(JSON.stringify({ 
+              error: `LinkedIn API error: ${response.status}`,
+              details: errorText.slice(0, 200)
+            }), {
+              status: response.status,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+            });
           }
         } catch (err) {
           console.error('[get_company_engagement_timeline] Fetch error:', err);
+          return new Response(JSON.stringify({ 
+            error: 'Failed to fetch analytics data',
+            details: err instanceof Error ? err.message : 'Unknown error'
+          }), {
+            status: 500,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
         }
 
         // Step 2: Aggregate data by date and company
@@ -7254,7 +7333,11 @@ serve(async (req) => {
           });
         }
 
-        // Step 3: Resolve company names
+        // Step 3: Three-step company name resolution pipeline
+        // Step 3A: Load cached names from Supabase first
+        // Step 3B: Query LinkedIn API only for missing IDs
+        // Step 3C: Upsert resolved names to cache
+        
         const topCompanyUrns = Array.from(companyTotals.entries())
           .sort((a, b) => b[1].impressions - a[1].impressions)
           .slice(0, 100)
@@ -7262,45 +7345,158 @@ serve(async (req) => {
 
         const companyNames = new Map<string, string>();
         const orgIdToUrn = new Map<string, string>();
+        let namesResolutionFailed = false;
+        let namesResolutionError: string | null = null;
 
+        // Use normalizeCompanyUrn to extract IDs from all URN formats
         topCompanyUrns.forEach(urn => {
-          const match = urn.match(/(\d+)$/);
-          if (match) {
-            orgIdToUrn.set(match[1], urn);
+          const { id, originalUrn } = normalizeCompanyUrn(urn);
+          if (id) {
+            orgIdToUrn.set(id, originalUrn);
           }
         });
 
         const orgIds = Array.from(orgIdToUrn.keys());
-        if (orgIds.length > 0) {
-          const batchSize = 50;
-          for (let i = 0; i < orgIds.length; i += batchSize) {
-            const batch = orgIds.slice(i, i + batchSize);
-            const idsParam = batch.map((id, idx) => `ids[${idx}]=${id}`).join('&');
+        console.log(`[get_company_engagement_timeline] Extracted ${orgIds.length} valid org IDs from ${topCompanyUrns.length} URNs`);
 
+        // Step 3A: Load cached names from Supabase first
+        try {
+          const { data: cached, error: cacheError } = await supabaseClient
+            .from('linkedin_company_cache')
+            .select('org_id, name, vanity_name')
+            .in('org_id', orgIds);
+
+          if (!cacheError && cached) {
+            console.log(`[get_company_engagement_timeline] Loaded ${cached.length} cached company names`);
+            cached.forEach((row: { org_id: string; name: string; vanity_name: string | null }) => {
+              const displayName = row.name || row.vanity_name || '';
+              if (displayName) {
+                companyNames.set(row.org_id, displayName);
+                companyNames.set(`urn:li:organization:${row.org_id}`, displayName);
+                companyNames.set(`urn:li:company:${row.org_id}`, displayName);
+                companyNames.set(`urn:li:memberCompany:${row.org_id}`, displayName);
+              }
+            });
+          } else if (cacheError) {
+            console.error('[get_company_engagement_timeline] Cache lookup error:', cacheError);
+          }
+        } catch (e) {
+          console.error('[get_company_engagement_timeline] Cache lookup error:', e);
+        }
+
+        // Step 3B: Only query LinkedIn for IDs not in cache
+        const idsMissing = orgIds.filter(id => !companyNames.has(id));
+        console.log(`[get_company_engagement_timeline] ${orgIds.length - idsMissing.length} from cache, ${idsMissing.length} need API lookup`);
+
+        if (idsMissing.length > 0) {
+          console.log(`[get_company_engagement_timeline] Resolving ${idsMissing.length} org names via individual lookups...`);
+          
+          const idsToResolve = idsMissing.slice(0, 100);
+          let successCount = 0;
+          let failCount = 0;
+          const newlyResolved: Array<{ id: string; name: string; vanityName: string | null }> = [];
+          
+          // Process in parallel batches of 10
+          const parallelBatchSize = 10;
+          for (let i = 0; i < idsToResolve.length; i += parallelBatchSize) {
+            const batch = idsToResolve.slice(i, i + parallelBatchSize);
+            
+            const results = await Promise.allSettled(
+              batch.map(async (id) => {
+                try {
+                  const orgUrl = `https://api.linkedin.com/v2/organizations/${id}?projection=(id,localizedName,vanityName)`;
+                  const orgResponse = await fetch(orgUrl, {
+                    headers: { 
+                      'Authorization': `Bearer ${accessToken}`,
+                      'LinkedIn-Version': '202511',
+                    }
+                  });
+                  
+                  if (orgResponse.ok) {
+                    const orgData = await orgResponse.json();
+                    const name = orgData.localizedName || orgData.vanityName;
+                    const vanityName = orgData.vanityName || null;
+                    if (name) {
+                      return { id, name, vanityName, success: true };
+                    }
+                  } else if (orgResponse.status === 403) {
+                    return { id, success: false, status: 403 };
+                  }
+                  return { id, success: false };
+                } catch (e) {
+                  return { id, success: false, error: e };
+                }
+              })
+            );
+            
+            // Process results
+            results.forEach((result) => {
+              if (result.status === 'fulfilled' && result.value.success) {
+                const { id, name, vanityName } = result.value;
+                const originalUrn = orgIdToUrn.get(id);
+                if (originalUrn) companyNames.set(originalUrn, name);
+                companyNames.set(`urn:li:organization:${id}`, name);
+                companyNames.set(`urn:li:company:${id}`, name);
+                companyNames.set(`urn:li:memberCompany:${id}`, name);
+                companyNames.set(id, name);
+                successCount++;
+                newlyResolved.push({ id, name, vanityName });
+              } else {
+                failCount++;
+                if (result.status === 'fulfilled' && result.value.status === 403) {
+                  namesResolutionFailed = true;
+                }
+              }
+            });
+          }
+          
+          console.log(`[get_company_engagement_timeline] Individual lookups complete: ${successCount} resolved, ${failCount} failed`);
+          
+          // Step 3C: Upsert newly resolved names to cache
+          if (newlyResolved.length > 0) {
+            console.log(`[get_company_engagement_timeline] Caching ${newlyResolved.length} newly resolved names...`);
             try {
-              const orgResponse = await fetch(
-                `https://api.linkedin.com/v2/organizationsLookup?${idsParam}&projection=(results*(id,localizedName))`,
-                { headers: { 'Authorization': `Bearer ${accessToken}` } }
+              // Create authenticated client for cache writes (RLS requires auth.uid())
+              const authHeader = req.headers.get('Authorization') || '';
+              const supabaseAuth = createClient(
+                Deno.env.get('SUPABASE_URL')!,
+                Deno.env.get('SUPABASE_ANON_KEY')!,
+                { global: { headers: { Authorization: authHeader } } }
               );
 
-              if (orgResponse.ok) {
-                const orgData = await orgResponse.json();
-                const results = orgData.results || {};
-                Object.entries(results).forEach(([id, org]: [string, any]) => {
-                  const urn = orgIdToUrn.get(id);
-                  if (urn && org?.localizedName) {
-                    companyNames.set(urn, org.localizedName);
-                    companyNames.set(id, org.localizedName);
-                  }
-                });
+              const upsertData = newlyResolved.map(r => ({
+                org_id: r.id,
+                name: r.name,
+                vanity_name: r.vanityName,
+                source: 'linkedin_org_api',
+                last_seen_at: new Date().toISOString(),
+              }));
+              
+              const { error: upsertError } = await supabaseAuth
+                .from('linkedin_company_cache')
+                .upsert(upsertData, { onConflict: 'org_id' });
+              
+              if (upsertError) {
+                console.error('[get_company_engagement_timeline] Cache upsert error:', upsertError);
+              } else {
+                console.log(`[get_company_engagement_timeline] Cached ${newlyResolved.length} company names`);
               }
             } catch (e) {
-              console.log('[get_company_engagement_timeline] Org lookup error:', e);
+              console.error('[get_company_engagement_timeline] Cache upsert error:', e);
             }
+          }
+          
+          // Only mark as failed if we have NO names at all (from cache or API)
+          const totalNamesResolved = companyNames.size;
+          if (totalNamesResolved === 0 && failCount > 0) {
+            namesResolutionFailed = true;
+            namesResolutionError = 'All organization lookups returned 403 Forbidden and no cached names available';
+          } else if (totalNamesResolved > 0) {
+            namesResolutionFailed = false;
           }
         }
 
-        console.log(`[get_company_engagement_timeline] Resolved ${companyNames.size} company names`);
+        console.log(`[get_company_engagement_timeline] FINAL: Resolved ${companyNames.size} company names. Resolution failed: ${namesResolutionFailed}`);
 
         // Step 4: Build timeline data
         const dates = Array.from(dailyData.keys()).sort();
@@ -7336,9 +7532,21 @@ serve(async (req) => {
         // Top companies with their daily data
         const topCompanies = topCompanyUrns.slice(0, 20).map(urn => {
           const totals = companyTotals.get(urn)!;
-          const idMatch = urn.match(/(\d+)$/);
-          const id = idMatch ? idMatch[1] : urn;
-          const name = companyNames.get(urn) || companyNames.get(id) || `Company ${id}`;
+          
+          // Use multi-key lookup
+          const { id: companyId } = normalizeCompanyUrn(urn);
+          const lookupKeys = [
+            urn,
+            companyId ?? '',
+            `urn:li:organization:${companyId}`,
+            `urn:li:company:${companyId}`,
+            `urn:li:memberCompany:${companyId}`,
+          ].filter(Boolean);
+          
+          let name = lookupKeys.map(k => companyNames.get(k)).find(Boolean);
+          if (!name) {
+            name = companyId ? `Company ${companyId}` : 'Unknown Company';
+          }
 
           // Get daily data for this company
           const timeline = dates.map(date => {
@@ -7384,6 +7592,8 @@ serve(async (req) => {
           metadata: {
             accountId,
             companiesResolved: companyNames.size,
+            namesResolutionFailed,
+            namesResolutionError,
           }
         }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -7640,6 +7850,55 @@ serve(async (req) => {
         }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
+      }
+
+      case 'update_company_name': {
+        // Manual override for company names - stores in cache with source='manual'
+        const { orgId, name, source = 'manual' } = params || {};
+
+        if (!orgId || !name) {
+          return new Response(JSON.stringify({ error: 'orgId and name are required' }), {
+            status: 400,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+
+        console.log(`[update_company_name] Saving name for ${orgId}: "${name}" (source: ${source})`);
+
+        try {
+          // Create request-scoped authenticated client for RLS
+          const authHeader = req.headers.get('Authorization') || '';
+          const supabaseAuth = createClient(
+            Deno.env.get('SUPABASE_URL')!,
+            Deno.env.get('SUPABASE_ANON_KEY')!,
+            { global: { headers: { Authorization: authHeader } } }
+          );
+
+          const { data, error } = await supabaseAuth
+            .from('linkedin_company_cache')
+            .upsert({
+              org_id: orgId,
+              name: name.trim(),
+              source,
+              last_seen_at: new Date().toISOString()
+            }, { onConflict: 'org_id' })
+            .select()
+            .single();
+
+          if (error) throw error;
+
+          console.log(`[update_company_name] Saved name for ${orgId}: "${name}" (source: ${source})`);
+
+          return new Response(JSON.stringify({ success: true, data }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        } catch (e) {
+          console.error('[update_company_name] Error:', e);
+          return new Response(JSON.stringify({ error: 'Failed to save company name' }), {
+            status: 500,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
       }
 
       default:

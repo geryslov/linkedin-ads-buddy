@@ -92,6 +92,36 @@ export type Database = {
         }
         Relationships: []
       }
+      linkedin_company_cache: {
+        Row: {
+          created_at: string | null
+          id: string
+          last_seen_at: string | null
+          name: string
+          org_id: string
+          source: string
+          vanity_name: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          last_seen_at?: string | null
+          name: string
+          org_id: string
+          source?: string
+          vanity_name?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          last_seen_at?: string | null
+          name?: string
+          org_id?: string
+          source?: string
+          vanity_name?: string | null
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           created_at: string
