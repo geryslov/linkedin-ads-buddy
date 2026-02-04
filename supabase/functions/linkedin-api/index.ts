@@ -7456,6 +7456,14 @@ serve(async (req) => {
           if (newlyResolved.length > 0) {
             console.log(`[get_company_engagement_timeline] Caching ${newlyResolved.length} newly resolved names...`);
             try {
+              // Create authenticated client for cache writes (RLS requires auth.uid())
+              const authHeader = req.headers.get('Authorization') || '';
+              const supabaseAuth = createClient(
+                Deno.env.get('SUPABASE_URL')!,
+                Deno.env.get('SUPABASE_ANON_KEY')!,
+                { global: { headers: { Authorization: authHeader } } }
+              );
+
               const upsertData = newlyResolved.map(r => ({
                 org_id: r.id,
                 name: r.name,
@@ -7464,7 +7472,7 @@ serve(async (req) => {
                 last_seen_at: new Date().toISOString(),
               }));
               
-              const { error: upsertError } = await supabaseClient
+              const { error: upsertError } = await supabaseAuth
                 .from('linkedin_company_cache')
                 .upsert(upsertData, { onConflict: 'org_id' });
               
@@ -7478,10 +7486,12 @@ serve(async (req) => {
             }
           }
           
-          // Only mark as failed if ALL lookups failed with 403
-          if (successCount === 0 && failCount > 0 && namesResolutionFailed) {
-            namesResolutionError = 'All organization lookups returned 403 Forbidden';
-          } else if (successCount > 0) {
+          // Only mark as failed if we have NO names at all (from cache or API)
+          const totalNamesResolved = companyNames.size;
+          if (totalNamesResolved === 0 && failCount > 0) {
+            namesResolutionFailed = true;
+            namesResolutionError = 'All organization lookups returned 403 Forbidden and no cached names available';
+          } else if (totalNamesResolved > 0) {
             namesResolutionFailed = false;
           }
         }
@@ -7604,7 +7614,15 @@ serve(async (req) => {
         console.log(`[update_company_name] Saving name for ${orgId}: "${name}" (source: ${source})`);
 
         try {
-          const { data, error } = await supabaseClient
+          // Create request-scoped authenticated client for RLS
+          const authHeader = req.headers.get('Authorization') || '';
+          const supabaseAuth = createClient(
+            Deno.env.get('SUPABASE_URL')!,
+            Deno.env.get('SUPABASE_ANON_KEY')!,
+            { global: { headers: { Authorization: authHeader } } }
+          );
+
+          const { data, error } = await supabaseAuth
             .from('linkedin_company_cache')
             .upsert({
               org_id: orgId,
