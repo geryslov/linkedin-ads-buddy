@@ -50,6 +50,8 @@ export interface CompanyEngagementTimelineData {
   metadata: {
     accountId: string;
     companiesResolved: number;
+    namesResolutionFailed?: boolean;
+    namesResolutionError?: string;
   };
 }
 
