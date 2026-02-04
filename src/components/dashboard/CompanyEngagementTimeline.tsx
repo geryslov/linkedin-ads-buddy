@@ -271,7 +271,7 @@ export function CompanyEngagementTimeline({ accessToken, selectedAccount }: Comp
     if (selectedAccount && accessToken) {
       fetchTimeline(selectedAccount);
     }
-  }, [selectedAccount, accessToken, dateRange.start, dateRange.end]);
+  }, [selectedAccount, accessToken, dateRange.start, dateRange.end, fetchTimeline]);
 
   const handleTimeFrameChange = (option: typeof timeFrameOptions[0]) => {
     setSelectedTimeFrame(option.value);
