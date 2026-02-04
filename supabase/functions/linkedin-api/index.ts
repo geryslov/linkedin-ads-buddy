@@ -468,6 +468,25 @@ function extractNameFromUrn(urn: string): string {
   return parts[parts.length - 1] || 'Unknown';
 }
 
+// Normalize company URN to extract the numeric ID
+// Supports: urn:li:organization:123, urn:li:company:123, urn:li:memberCompany:123
+function normalizeCompanyUrn(urn: string): { id: string | null; originalUrn: string } {
+  if (!urn) return { id: null, originalUrn: urn };
+  
+  const match = urn.match(/^urn:li:(organization|company|memberCompany):(\d+)$/);
+  if (match) {
+    return { id: match[2], originalUrn: urn };
+  }
+  
+  // Fallback: try to extract any numeric ID at the end
+  const numericMatch = urn.match(/:(\d+)$/);
+  if (numericMatch) {
+    return { id: numericMatch[1], originalUrn: urn };
+  }
+  
+  return { id: null, originalUrn: urn };
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -7277,17 +7296,25 @@ serve(async (req) => {
           .slice(0, 100)
           .map(([urn]) => urn);
 
+        // Log first 5 raw URNs to diagnose format
+        console.log(`[get_company_engagement_timeline] First 5 raw pivotValues: ${topCompanyUrns.slice(0, 5).join(', ')}`);
+
         const companyNames = new Map<string, string>();
         const orgIdToUrn = new Map<string, string>();
+        let namesResolutionFailed = false;
+        let namesResolutionError: string | null = null;
 
+        // Use normalizeCompanyUrn to extract IDs from all URN formats
         topCompanyUrns.forEach(urn => {
-          const match = urn.match(/(\d+)$/);
-          if (match) {
-            orgIdToUrn.set(match[1], urn);
+          const { id, originalUrn } = normalizeCompanyUrn(urn);
+          if (id) {
+            orgIdToUrn.set(id, originalUrn);
           }
         });
 
         const orgIds = Array.from(orgIdToUrn.keys());
+        console.log(`[get_company_engagement_timeline] Extracted ${orgIds.length} valid org IDs from ${topCompanyUrns.length} URNs`);
+
         if (orgIds.length > 0) {
           const batchSize = 50;
           for (let i = 0; i < orgIds.length; i += batchSize) {
@@ -7311,20 +7338,31 @@ serve(async (req) => {
               if (orgResponse.ok) {
                 const orgData = await orgResponse.json();
                 const results = orgData.results || {};
+                const resultKeys = Object.keys(results);
+                console.log(`[get_company_engagement_timeline] Batch returned ${resultKeys.length} results, sample keys: ${resultKeys.slice(0, 3).join(', ')}`);
+                
                 Object.entries(results).forEach(([id, org]: [string, any]) => {
-                  const urn = orgIdToUrn.get(id);
+                  const originalUrn = orgIdToUrn.get(id);
                   const name = org?.localizedName || org?.vanityName;
-                  if (urn && name) {
-                    companyNames.set(urn, name);
+                  if (name) {
+                    // Store with all possible URN formats
+                    if (originalUrn) companyNames.set(originalUrn, name);
                     companyNames.set(`urn:li:organization:${id}`, name);
                     companyNames.set(`urn:li:company:${id}`, name);
                     companyNames.set(`urn:li:memberCompany:${id}`, name);
                     companyNames.set(id, name);
                   }
                 });
+                console.log(`[get_company_engagement_timeline] Total names resolved so far: ${companyNames.size}`);
               } else {
                 const errText = await orgResponse.text();
-                console.log(`[get_company_engagement_timeline] Org lookup failed: ${orgResponse.status}, ${errText.slice(0, 200)}`);
+                console.log(`[get_company_engagement_timeline] Org lookup FAILED: status=${orgResponse.status}, body=${errText.slice(0, 300)}`);
+                
+                // Track 403 permission errors
+                if (orgResponse.status === 403) {
+                  namesResolutionFailed = true;
+                  namesResolutionError = `403 Forbidden: ${errText.slice(0, 100)}`;
+                }
               }
             } catch (e) {
               console.log('[get_company_engagement_timeline] Org lookup error:', e);
@@ -7332,7 +7370,7 @@ serve(async (req) => {
           }
         }
 
-        console.log(`[get_company_engagement_timeline] Resolved ${companyNames.size} company names`);
+        console.log(`[get_company_engagement_timeline] FINAL: Resolved ${companyNames.size} company names. Resolution failed: ${namesResolutionFailed}`);
 
         // Step 4: Build timeline data
         const dates = Array.from(dailyData.keys()).sort();
@@ -7416,6 +7454,8 @@ serve(async (req) => {
           metadata: {
             accountId,
             companiesResolved: companyNames.size,
+            namesResolutionFailed,
+            namesResolutionError,
           }
         }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }

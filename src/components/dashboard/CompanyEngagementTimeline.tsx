@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
   RefreshCw,
   Building2,
@@ -12,6 +13,7 @@ import {
   MousePointerClick,
   Users,
   Download,
+  AlertTriangle,
 } from 'lucide-react';
 import {
   LineChart,
@@ -141,6 +143,17 @@ export function CompanyEngagementTimeline({ accessToken, selectedAccount }: Comp
 
   return (
     <div className="space-y-6">
+      {/* Names Resolution Warning */}
+      {data?.metadata?.namesResolutionFailed && (
+        <Alert variant="destructive" className="bg-destructive/10 border-destructive/30">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertTitle>Company Names Restricted</AlertTitle>
+          <AlertDescription>
+            Unable to resolve company names due to API permissions. Showing company IDs instead.
+          </AlertDescription>
+        </Alert>
+      )}
+
       {/* Controls */}
       <Card className="bg-card/50 backdrop-blur-sm border-border/50">
         <CardContent className="pt-4">
