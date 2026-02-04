@@ -7600,10 +7600,262 @@ serve(async (req) => {
         });
       }
 
+      case 'get_company_engagement_report': {
+        // Combined Company Engagement Report - demographic data + influence features
+        // Uses the same name resolution as get_company_demographic (which works)
+        const { accountId, dateRange, minImpressions } = params || {};
+        const now = new Date();
+        const startDate = dateRange?.start || new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        const endDate = dateRange?.end || now.toISOString().split('T')[0];
+        const impressionThreshold = minImpressions || 100;
+
+        const [startYear, startMonth, startDay] = startDate.split('-').map(Number);
+        const [endYear, endMonth, endDay] = endDate.split('-').map(Number);
+
+        console.log(`[get_company_engagement_report] Account ${accountId}, period: ${startDate} to ${endDate}`);
+
+        // Step 1: Fetch all campaigns to get objective types
+        const campaignsUrl = `https://api.linkedin.com/v2/adCampaignsV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=200`;
+        const campaignMeta = new Map<string, { name: string; objective: string; status: string }>();
+
+        try {
+          const response = await fetch(campaignsUrl, {
+            headers: { 'Authorization': `Bearer ${accessToken}` }
+          });
+          if (response.ok) {
+            const data = await response.json();
+            for (const c of (data.elements || [])) {
+              const id = c.id?.toString();
+              if (id) {
+                campaignMeta.set(id, {
+                  name: c.name || `Campaign ${id}`,
+                  objective: c.objectiveType || 'UNKNOWN',
+                  status: c.status || 'UNKNOWN',
+                });
+              }
+            }
+          }
+        } catch (err) {
+          console.error('[get_company_engagement_report] Campaign fetch error:', err);
+        }
+
+        console.log(`[get_company_engagement_report] Found ${campaignMeta.size} campaigns`);
+
+        // Step 2: Fetch company analytics with MEMBER_COMPANY pivot (same as demographic)
+        const analyticsUrl = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
+          `dateRange.start.day=${startDay}&dateRange.start.month=${startMonth}&dateRange.start.year=${startYear}&` +
+          `dateRange.end.day=${endDay}&dateRange.end.month=${endMonth}&dateRange.end.year=${endYear}&` +
+          `timeGranularity=ALL&pivot=MEMBER_COMPANY&accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
+          `fields=pivotValue,impressions,clicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions,oneClickLeadFormOpens&count=10000`;
+
+        const companyData = new Map<string, {
+          companyUrn: string;
+          impressions: number;
+          clicks: number;
+          spend: number;
+          leads: number;
+          formOpens: number;
+        }>();
+
+        try {
+          const response = await fetch(analyticsUrl, {
+            headers: { 'Authorization': `Bearer ${accessToken}` }
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            console.log(`[get_company_engagement_report] Analytics returned ${(data.elements || []).length} entries`);
+
+            for (const el of (data.elements || [])) {
+              const companyUrn = el.pivotValue || '';
+              if (!companyUrn) continue;
+
+              const impressions = el.impressions || 0;
+              const clicks = el.clicks || 0;
+              const spend = parseFloat(el.costInLocalCurrency || '0');
+              const leads = (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
+              const formOpens = el.oneClickLeadFormOpens || 0;
+
+              const existing = companyData.get(companyUrn);
+              if (existing) {
+                existing.impressions += impressions;
+                existing.clicks += clicks;
+                existing.spend += spend;
+                existing.leads += leads;
+                existing.formOpens += formOpens;
+              } else {
+                companyData.set(companyUrn, {
+                  companyUrn,
+                  impressions,
+                  clicks,
+                  spend,
+                  leads,
+                  formOpens,
+                });
+              }
+            }
+          } else {
+            const errorText = await response.text();
+            console.error(`[get_company_engagement_report] Analytics API error: ${response.status}`, errorText);
+          }
+        } catch (err) {
+          console.error('[get_company_engagement_report] Analytics fetch error:', err);
+        }
+
+        console.log(`[get_company_engagement_report] Found ${companyData.size} unique companies`);
+
+        // Step 3: Resolve company names - SAME APPROACH AS get_company_demographic
+        const companyNames = new Map<string, string>();
+        const companyUrns = Array.from(companyData.keys());
+
+        // Extract organization IDs from URNs (same as demographic)
+        const orgIdToUrn = new Map<string, string>();
+        companyUrns.forEach(urn => {
+          const match = urn.match(/^urn:li:organization:(\d+)$/);
+          if (match) {
+            orgIdToUrn.set(match[1], urn);
+          }
+        });
+
+        const orgIds = Array.from(orgIdToUrn.keys());
+        console.log(`[get_company_engagement_report] Resolving ${orgIds.length} organization IDs...`);
+
+        // Batch fetch organization data - SAME AS DEMOGRAPHIC
+        if (orgIds.length > 0) {
+          const batchSize = 50;
+          for (let i = 0; i < orgIds.length; i += batchSize) {
+            const batch = orgIds.slice(i, i + batchSize);
+            const idsParam = batch.map((id, idx) => `ids[${idx}]=${id}`).join('&');
+
+            try {
+              const orgResponse = await fetch(
+                `https://api.linkedin.com/v2/organizationsLookup?${idsParam}&projection=(results*(id,localizedName,localizedWebsite,vanityName))`,
+                { headers: { 'Authorization': `Bearer ${accessToken}` } }
+              );
+
+              if (orgResponse.ok) {
+                const orgData = await orgResponse.json();
+                const results = orgData.results || {};
+
+                Object.entries(results).forEach(([id, org]: [string, any]) => {
+                  const urn = orgIdToUrn.get(id);
+                  if (!urn) return;
+
+                  if (org?.localizedName) {
+                    companyNames.set(urn, org.localizedName);
+                  }
+                });
+              } else {
+                console.log(`[get_company_engagement_report] Org lookup failed: ${orgResponse.status}`);
+              }
+            } catch (e) {
+              console.log('[get_company_engagement_report] Organization lookup failed:', e);
+            }
+          }
+        }
+
+        console.log(`[get_company_engagement_report] Resolved ${companyNames.size} company names`);
+
+        // Step 4: Build final report with engagement scoring
+        const companies: Array<{
+          companyUrn: string;
+          companyName: string;
+          engagementScore: number;
+          impressions: number;
+          clicks: number;
+          spend: number;
+          leads: number;
+          formOpens: number;
+          ctr: number;
+          cpc: number;
+          cpm: number;
+          cpl: number;
+        }> = [];
+
+        for (const [companyUrn, data] of companyData.entries()) {
+          // Filter by minimum impressions
+          if (data.impressions < impressionThreshold) continue;
+
+          // Calculate engagement score (same as influence)
+          const engagementScore = (data.leads * 100) + (data.clicks * 5) + (data.impressions * 0.01);
+
+          // Get company name
+          const companyName = companyNames.get(companyUrn) || extractNameFromUrn(companyUrn);
+
+          // Calculate metrics
+          const ctr = data.impressions > 0 ? (data.clicks / data.impressions) * 100 : 0;
+          const cpc = data.clicks > 0 ? data.spend / data.clicks : 0;
+          const cpm = data.impressions > 0 ? (data.spend / data.impressions) * 1000 : 0;
+          const cpl = data.leads > 0 ? data.spend / data.leads : 0;
+
+          companies.push({
+            companyUrn,
+            companyName,
+            engagementScore: Math.round(engagementScore),
+            impressions: data.impressions,
+            clicks: data.clicks,
+            spend: data.spend,
+            leads: data.leads,
+            formOpens: data.formOpens,
+            ctr,
+            cpc,
+            cpm,
+            cpl,
+          });
+        }
+
+        // Sort by engagement score
+        companies.sort((a, b) => b.engagementScore - a.engagementScore);
+
+        // Calculate summary metrics
+        const summary = {
+          totalCompanies: companies.length,
+          companiesEngaged: companies.filter(c => c.clicks > 0).length,
+          companiesConverted: companies.filter(c => c.leads > 0).length,
+          totalImpressions: companies.reduce((sum, c) => sum + c.impressions, 0),
+          totalClicks: companies.reduce((sum, c) => sum + c.clicks, 0),
+          totalSpend: companies.reduce((sum, c) => sum + c.spend, 0),
+          totalLeads: companies.reduce((sum, c) => sum + c.leads, 0),
+          avgCtr: companies.length > 0 ? companies.reduce((sum, c) => sum + c.ctr, 0) / companies.length : 0,
+          avgCpc: companies.filter(c => c.clicks > 0).length > 0
+            ? companies.filter(c => c.clicks > 0).reduce((sum, c) => sum + c.cpc, 0) / companies.filter(c => c.clicks > 0).length
+            : 0,
+        };
+
+        // Engagement tiers
+        const sortedByScore = [...companies].sort((a, b) => b.engagementScore - a.engagementScore);
+        const hotThreshold = sortedByScore[Math.floor(sortedByScore.length * 0.1)]?.engagementScore || Infinity;
+        const warmThreshold = sortedByScore[Math.floor(sortedByScore.length * 0.3)]?.engagementScore || 0;
+
+        const engagementTiers = {
+          hot: companies.filter(c => c.engagementScore >= hotThreshold && c.leads > 0).length,
+          warm: companies.filter(c => c.engagementScore >= warmThreshold && c.engagementScore < hotThreshold).length,
+          cold: companies.filter(c => c.engagementScore < warmThreshold).length,
+        };
+
+        console.log(`[get_company_engagement_report] Complete. ${companies.length} companies, ${companyNames.size} names resolved`);
+
+        return new Response(JSON.stringify({
+          period: { start: startDate, end: endDate },
+          summary,
+          engagementTiers,
+          companies: companies.slice(0, 500),
+          metadata: {
+            accountId,
+            impressionThreshold,
+            totalCampaignsAnalyzed: campaignMeta.size,
+            namesResolved: companyNames.size,
+            namesUnresolved: companies.length - companyNames.size,
+          }
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
       case 'update_company_name': {
         // Manual override for company names - stores in cache with source='manual'
         const { orgId, name, source = 'manual' } = params || {};
-        
+
         if (!orgId || !name) {
           return new Response(JSON.stringify({ error: 'orgId and name are required' }), {
             status: 400,

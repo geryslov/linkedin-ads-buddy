@@ -27,6 +27,7 @@ import { BudgetPacingDashboard } from './BudgetPacingDashboard';
 import { CreativeFatigueDetector } from './CreativeFatigueDetector';
 import { AudienceExpansionSuggester } from './AudienceExpansionSuggester';
 import { CompanyInfluenceReport } from './CompanyInfluenceReport';
+import { CompanyEngagementReport } from './CompanyEngagementReport';
 import { useToast } from '@/hooks/use-toast';
 import { 
   exportToCSV, 
@@ -410,6 +411,10 @@ export function ReportingSection({ accessToken, selectedAccount, canWrite = fals
           <TabsTrigger value="company_influence" className="gap-2">
             <Building2 className="h-4 w-4" />
             Company Influence
+          </TabsTrigger>
+          <TabsTrigger value="company_engagement" className="gap-2">
+            <Building2 className="h-4 w-4" />
+            Company Engagement
           </TabsTrigger>
           <TabsTrigger value="audiences" className="gap-2" disabled>
             <Users className="h-4 w-4" />
@@ -965,6 +970,14 @@ export function ReportingSection({ accessToken, selectedAccount, canWrite = fals
         {/* Company Influence Tab */}
         <TabsContent value="company_influence" className="space-y-6 mt-6">
           <CompanyInfluenceReport
+            accessToken={accessToken}
+            selectedAccount={selectedAccount}
+          />
+        </TabsContent>
+
+        {/* Company Engagement Tab */}
+        <TabsContent value="company_engagement" className="space-y-6 mt-6">
+          <CompanyEngagementReport
             accessToken={accessToken}
             selectedAccount={selectedAccount}
           />
