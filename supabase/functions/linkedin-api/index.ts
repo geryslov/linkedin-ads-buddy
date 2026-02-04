@@ -7187,7 +7187,10 @@ serve(async (req) => {
         let allElements: any[] = [];
         try {
           const response = await fetch(analyticsUrl, {
-            headers: { 'Authorization': `Bearer ${accessToken}` }
+            headers: { 
+              'Authorization': `Bearer ${accessToken}`,
+              'LinkedIn-Version': '202511',
+            }
           });
 
           if (response.ok) {
@@ -7196,10 +7199,24 @@ serve(async (req) => {
             console.log(`[get_company_engagement_timeline] Fetched ${allElements.length} daily records`);
           } else {
             const errorText = await response.text();
-            console.error(`[get_company_engagement_timeline] API error: ${response.status}`, errorText);
+            console.error(`[get_company_engagement_timeline] API error: ${response.status}`, errorText.slice(0, 300));
+            return new Response(JSON.stringify({ 
+              error: `LinkedIn API error: ${response.status}`,
+              details: errorText.slice(0, 200)
+            }), {
+              status: response.status,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+            });
           }
         } catch (err) {
           console.error('[get_company_engagement_timeline] Fetch error:', err);
+          return new Response(JSON.stringify({ 
+            error: 'Failed to fetch analytics data',
+            details: err instanceof Error ? err.message : 'Unknown error'
+          }), {
+            status: 500,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
         }
 
         // Step 2: Aggregate data by date and company
@@ -7278,21 +7295,36 @@ serve(async (req) => {
             const idsParam = batch.map((id, idx) => `ids[${idx}]=${id}`).join('&');
 
             try {
-              const orgResponse = await fetch(
-                `https://api.linkedin.com/v2/organizationsLookup?${idsParam}&projection=(results*(id,localizedName))`,
-                { headers: { 'Authorization': `Bearer ${accessToken}` } }
-              );
+              const orgLookupUrl = `https://api.linkedin.com/v2/organizationsLookup?${idsParam}&projection=(results*(id,localizedName,vanityName))`;
+              console.log(`[get_company_engagement_timeline] Batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(orgIds.length / batchSize)} - fetching org names...`);
+              
+              const orgResponse = await fetch(orgLookupUrl, {
+                headers: { 
+                  'Authorization': `Bearer ${accessToken}`,
+                  'LinkedIn-Version': '202511',
+                  'X-Restli-Protocol-Version': '2.0.0',
+                }
+              });
+              
+              console.log(`[get_company_engagement_timeline] Org lookup response status: ${orgResponse.status}`);
 
               if (orgResponse.ok) {
                 const orgData = await orgResponse.json();
                 const results = orgData.results || {};
                 Object.entries(results).forEach(([id, org]: [string, any]) => {
                   const urn = orgIdToUrn.get(id);
-                  if (urn && org?.localizedName) {
-                    companyNames.set(urn, org.localizedName);
-                    companyNames.set(id, org.localizedName);
+                  const name = org?.localizedName || org?.vanityName;
+                  if (urn && name) {
+                    companyNames.set(urn, name);
+                    companyNames.set(`urn:li:organization:${id}`, name);
+                    companyNames.set(`urn:li:company:${id}`, name);
+                    companyNames.set(`urn:li:memberCompany:${id}`, name);
+                    companyNames.set(id, name);
                   }
                 });
+              } else {
+                const errText = await orgResponse.text();
+                console.log(`[get_company_engagement_timeline] Org lookup failed: ${orgResponse.status}, ${errText.slice(0, 200)}`);
               }
             } catch (e) {
               console.log('[get_company_engagement_timeline] Org lookup error:', e);
