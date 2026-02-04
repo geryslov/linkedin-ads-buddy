@@ -6876,7 +6876,7 @@ serve(async (req) => {
             const idsParam = batch.map((id, idx) => `ids[${idx}]=${id}`).join('&');
             
             try {
-              const orgLookupUrl = `https://api.linkedin.com/v2/organizationsLookup?${idsParam}&projection=(results*(id,localizedName,localizedWebsite,vanityName))`;
+              const orgLookupUrl = `https://api.linkedin.com/v2/organizationsLookup?${idsParam}&projection=(results*(id,localizedName))`;
               console.log(`[get_company_influence] Batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(orgIds.length / batchSize)} - fetching org names...`);
               
               const orgResponse = await fetch(orgLookupUrl, {
@@ -6896,7 +6896,7 @@ serve(async (req) => {
                 
                 Object.entries(results).forEach(([id, org]: [string, any]) => {
                   const originalUrn = orgIdToUrn.get(id);
-                  const name = org?.localizedName || org?.vanityName;
+                  const name = org?.localizedName;
                   
                   if (name) {
                     // Store with original URN and all possible formats
