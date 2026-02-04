@@ -1,304 +1,69 @@
 
+# Fix Company Name Resolution: Completing the Implementation
 
-# Company Name Caching System: Multi-Source Resolution Pipeline
+## Problem Analysis
 
-## Overview
+After investigating the codebase, I found several issues preventing company names from appearing:
 
-This plan implements a persistent company name caching system that resolves names from multiple sources, stores them permanently, and allows manual overrides when LinkedIn API access is restricted.
+1. **Cache is empty**: The `linkedin_company_cache` table has no entries yet, so nothing is being retrieved from cache
+2. **Edge function not being called for company reports**: Recent logs only show `get_ad_accounts` calls - the `get_company_influence` and `get_company_engagement_timeline` endpoints haven't been invoked recently
+3. **CompanyEngagementTimeline.tsx is incomplete**: The component still uses the old destructive red alert and is missing the inline editing feature for manual name overrides that was implemented in `CompanyInfluenceReport.tsx`
 
----
+## Root Cause
 
-## Architecture
+The user is on the main route (`/`) and hasn't navigated to the Company Influence or Company Timeline tabs yet. When they do navigate there:
+- The edge function will be called
+- If LinkedIn API returns 403 for organization lookups, names won't be resolved
+- The cache is empty, so there's nothing to fall back to
+- The UI will show "Company 12345" IDs
+
+## Required Changes
+
+### 1. Update CompanyEngagementTimeline.tsx to Match CompanyInfluenceReport.tsx
+
+The timeline component needs:
+- Yellow warning alert instead of destructive red alert
+- Import and use `updateCompanyName` from the hook
+- Add inline editing with pencil icon for company names showing "Company {id}"
+- Include the `normalizeCompanyUrn` helper function
 
 ```text
-+---------------------------+
-|  LinkedIn Analytics API   |
-|  (returns company URNs)   |
-+-----------+---------------+
-            |
-            v
-+---------------------------+
-|   Name Resolution Pipeline |
-|                           |
-|  Step A: Check DB Cache   |
-|           |               |
-|           v               |
-|  Step B: LinkedIn API     |
-|  (/v2/organizations/{id}) |
-|           |               |
-|           v               |
-|  Step C: Fallback         |
-|  (show ID, allow edit)    |
-+-----------+---------------+
-            |
-            v
-+---------------------------+
-|   linkedin_company_cache  |
-|   (Supabase table)        |
-+---------------------------+
-            ^
-            |
-+---------------------------+
-|   Frontend: Inline Edit   |
-|   (manual name override)  |
-+---------------------------+
+Location: src/components/dashboard/CompanyEngagementTimeline.tsx
+Changes needed:
+- Line 147-155: Replace destructive Alert with yellow warning
+- Line 61-77: Add updateCompanyName from hook destructuring  
+- Line 338-358: Add inline editing capability to company list items
+- Add Pencil, Check, X imports from lucide-react
+- Add Input import from @/components/ui/input
+- Add normalizeCompanyUrn helper function
 ```
 
----
+### 2. Add Inline Editing Component for Company Names
 
-## Changes Summary
+Create an `EditableCompanyName` component that:
+- Shows company name with pencil icon for unresolved names
+- Toggles to input field on click
+- Saves to database on confirm
+- Updates local state optimistically
 
-| Component | Change |
-|-----------|--------|
-| Database | Create `linkedin_company_cache` table with RLS policies |
-| Edge Function | Add cache lookup (Step A) before LinkedIn API calls |
-| Edge Function | Only query LinkedIn for missing IDs (Step B) |
-| Edge Function | Upsert resolved names to cache after successful lookups |
-| Edge Function | Improved fallback naming with `normalizeCompanyUrn` |
-| Frontend Hook | Add `updateCompanyName` mutation for manual overrides |
-| Frontend Component | Yellow warning instead of destructive alert |
-| Frontend Component | Inline edit icon for "Company 12345" names |
-| Frontend Component | Save edited names to database |
+### 3. Verify Edge Function Deployment
 
----
+The edge function code looks correct but needs verification that:
+- The `update_company_name` action is properly deployed
+- Cache lookups and upserts work correctly
 
-## Technical Implementation
+## Implementation Details
 
-### 1. Database Migration
+### File: src/components/dashboard/CompanyEngagementTimeline.tsx
 
-Create a new table to cache company names with proper indexing:
-
-```sql
-CREATE TABLE linkedin_company_cache (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  org_id TEXT UNIQUE NOT NULL,
-  name TEXT NOT NULL,
-  vanity_name TEXT,
-  source TEXT NOT NULL DEFAULT 'linkedin_org_api',
-  last_seen_at TIMESTAMPTZ DEFAULT now(),
-  created_at TIMESTAMPTZ DEFAULT now()
-);
-
-CREATE INDEX idx_linkedin_company_cache_org_id ON linkedin_company_cache(org_id);
-
-ALTER TABLE linkedin_company_cache ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Anyone can read company cache"
-  ON linkedin_company_cache FOR SELECT
-  USING (true);
-
-CREATE POLICY "Authenticated users can insert company cache"
-  ON linkedin_company_cache FOR INSERT
-  WITH CHECK (auth.uid() IS NOT NULL);
-
-CREATE POLICY "Authenticated users can update company cache"
-  ON linkedin_company_cache FOR UPDATE
-  USING (auth.uid() IS NOT NULL);
+#### Add missing imports
+```tsx
+import { Pencil, Check, X } from 'lucide-react';
+import { Input } from '@/components/ui/input';
 ```
 
-**Source values**: `linkedin_org_api`, `manual`, `enrichment`, `historic`
-
----
-
-### 2. Edge Function Changes
-
-#### File: `supabase/functions/linkedin-api/index.ts`
-
-##### Add Supabase Client Import (top of file)
-
-```typescript
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-
-const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-const supabaseClient = createClient(supabaseUrl, supabaseServiceKey);
-```
-
-##### Update `get_company_influence` Handler
-
-**Step A: Load cached names first** (insert after extracting `orgIds`)
-
-```typescript
-// Step A: Load cached names from Supabase first
-const companyNames = new Map<string, string>();
-try {
-  const { data: cached, error: cacheError } = await supabaseClient
-    .from('linkedin_company_cache')
-    .select('org_id, name, vanity_name')
-    .in('org_id', orgIds);
-
-  if (!cacheError && cached) {
-    console.log(`[get_company_influence] Loaded ${cached.length} cached company names`);
-    cached.forEach(row => {
-      const displayName = row.name || row.vanity_name || '';
-      if (displayName) {
-        companyNames.set(row.org_id, displayName);
-        companyNames.set(`urn:li:organization:${row.org_id}`, displayName);
-        companyNames.set(`urn:li:company:${row.org_id}`, displayName);
-        companyNames.set(`urn:li:memberCompany:${row.org_id}`, displayName);
-      }
-    });
-  }
-} catch (e) {
-  console.error('[get_company_influence] Cache lookup error:', e);
-}
-```
-
-**Step B: Only resolve missing IDs via LinkedIn API**
-
-```typescript
-// Step B: Only query LinkedIn for IDs not in cache
-const idsMissing = orgIds.filter(id => !companyNames.has(id));
-console.log(`[get_company_influence] ${orgIds.length - idsMissing.length} from cache, ${idsMissing.length} need API lookup`);
-
-if (idsMissing.length > 0) {
-  // ... existing batch/individual lookup logic, but only for idsMissing
-  // After successful lookup, upsert to cache
-}
-```
-
-**Upsert resolved names to cache**
-
-```typescript
-// After each successful name resolution:
-if (name) {
-  // Store in memory maps (existing logic)
-  companyNames.set(id, name);
-  // ...
-
-  // Also persist to cache
-  try {
-    await supabaseClient.from('linkedin_company_cache').upsert({
-      org_id: id,
-      name: name,
-      vanity_name: vanityName || null,
-      source: 'linkedin_org_api',
-      last_seen_at: new Date().toISOString()
-    }, { onConflict: 'org_id' });
-  } catch (e) {
-    console.log(`[get_company_influence] Cache upsert failed for ${id}:`, e);
-  }
-}
-```
-
-##### Update `get_company_engagement_timeline` Handler
-
-Apply the same 3-step pattern:
-1. Load from cache first
-2. Query LinkedIn only for missing
-3. Upsert successful resolutions
-
-##### Improve Fallback Naming Logic
-
-Replace the current fallback logic with safer normalization:
-
-```typescript
-// Get company name - use multi-key lookup
-const { id } = normalizeCompanyUrn(companyUrn);
-const lookupKeys = [
-  companyUrn,
-  id ?? '',
-  `urn:li:organization:${id}`,
-  `urn:li:company:${id}`,
-  `urn:li:memberCompany:${id}`,
-].filter(Boolean);
-
-let companyName = lookupKeys.map(k => companyNames.get(k)).find(Boolean);
-
-if (!companyName) {
-  companyName = id ? `Company ${id}` : 'Unknown Company';
-}
-```
-
-##### Add New Action: `update_company_name`
-
-For manual overrides from the frontend:
-
-```typescript
-case 'update_company_name': {
-  const { orgId, name, source = 'manual' } = params || {};
-  
-  if (!orgId || !name) {
-    return new Response(JSON.stringify({ error: 'orgId and name are required' }), {
-      status: 400,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-    });
-  }
-
-  try {
-    const { data, error } = await supabaseClient
-      .from('linkedin_company_cache')
-      .upsert({
-        org_id: orgId,
-        name: name.trim(),
-        source,
-        last_seen_at: new Date().toISOString()
-      }, { onConflict: 'org_id' })
-      .select()
-      .single();
-
-    if (error) throw error;
-
-    console.log(`[update_company_name] Saved name for ${orgId}: "${name}" (source: ${source})`);
-
-    return new Response(JSON.stringify({ success: true, data }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-    });
-  } catch (e) {
-    console.error('[update_company_name] Error:', e);
-    return new Response(JSON.stringify({ error: 'Failed to save company name' }), {
-      status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-    });
-  }
-}
-```
-
----
-
-### 3. Frontend Hook Updates
-
-#### File: `src/hooks/useCompanyInfluence.ts`
-
-Add a mutation function for manual name updates:
-
-```typescript
-const updateCompanyName = useCallback(async (orgId: string, name: string) => {
-  try {
-    const { data: result, error } = await supabase.functions.invoke('linkedin-api', {
-      body: {
-        action: 'update_company_name',
-        params: { orgId, name, source: 'manual' }
-      }
-    });
-
-    if (error) throw error;
-
-    // Update local state optimistically
-    if (data?.companies) {
-      setData(prev => {
-        if (!prev) return prev;
-        return {
-          ...prev,
-          companies: prev.companies.map(c => {
-            const { id } = normalizeCompanyUrn(c.companyUrn);
-            return id === orgId ? { ...c, companyName: name } : c;
-          })
-        };
-      });
-    }
-
-    return { success: true };
-  } catch (err) {
-    console.error('Failed to update company name:', err);
-    return { success: false, error: err };
-  }
-}, [data]);
-```
-
-Add helper function (or import from shared utils):
-
-```typescript
+#### Add helper function
+```tsx
 function normalizeCompanyUrn(urn: string): { id: string | null } {
   if (!urn) return { id: null };
   const match = urn.match(/^urn:li:(organization|company|memberCompany):(\d+)$/);
@@ -308,20 +73,15 @@ function normalizeCompanyUrn(urn: string): { id: string | null } {
 }
 ```
 
-#### File: `src/hooks/useCompanyEngagementTimeline.ts`
+#### Update hook destructuring to include updateCompanyName
+```tsx
+const {
+  // ... existing fields
+  updateCompanyName,  // Add this
+} = useCompanyEngagementTimeline(accessToken);
+```
 
-Add the same `updateCompanyName` mutation pattern.
-
----
-
-### 4. Frontend Component Updates
-
-#### File: `src/components/dashboard/CompanyInfluenceReport.tsx`
-
-##### Change Alert to Yellow Warning
-
-Replace the destructive alert with a softer yellow warning:
-
+#### Replace the names resolution alert (lines 147-155)
 ```tsx
 {data?.metadata?.namesResolutionFailed && (
   <Alert className="border-yellow-500/50 bg-yellow-50 dark:bg-yellow-950/30">
@@ -337,18 +97,14 @@ Replace the destructive alert with a softer yellow warning:
 )}
 ```
 
-##### Add Inline Edit for Company Names
-
-Update the `CompanyRow` component to show an edit icon for unresolved names:
-
+#### Add EditableCompanyName component
 ```tsx
-import { Pencil, Check, X } from 'lucide-react';
-
-function CompanyRow({ company, isExpanded, onToggle, onNameUpdate }: {
-  company: CompanyInfluenceItem;
-  isExpanded: boolean;
-  onToggle: () => void;
-  onNameUpdate: (orgId: string, name: string) => Promise<{ success: boolean }>;
+function EditableCompanyName({ 
+  company, 
+  onNameUpdate 
+}: { 
+  company: CompanyTimeline; 
+  onNameUpdate?: (orgId: string, name: string) => Promise<{ success: boolean }>;
 }) {
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(company.companyName);
@@ -357,7 +113,7 @@ function CompanyRow({ company, isExpanded, onToggle, onNameUpdate }: {
   const handleSave = async () => {
     if (!editName.trim()) return;
     const { id } = normalizeCompanyUrn(company.companyUrn);
-    if (id) {
+    if (id && onNameUpdate) {
       const result = await onNameUpdate(id, editName.trim());
       if (result.success) {
         setIsEditing(false);
@@ -365,96 +121,83 @@ function CompanyRow({ company, isExpanded, onToggle, onNameUpdate }: {
     }
   };
 
+  if (isEditing) {
+    return (
+      <div className="flex items-center gap-1">
+        <Input
+          value={editName}
+          onChange={(e) => setEditName(e.target.value)}
+          className="h-7 text-sm w-32"
+          autoFocus
+        />
+        <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={handleSave}>
+          <Check className="h-3 w-3" />
+        </Button>
+        <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => setIsEditing(false)}>
+          <X className="h-3 w-3" />
+        </Button>
+      </div>
+    );
+  }
+
   return (
-    <TableRow>
-      {/* ... existing cells ... */}
-      <TableCell className="w-48 font-medium">
-        {isEditing ? (
-          <div className="flex items-center gap-1">
-            <Input
-              value={editName}
-              onChange={(e) => setEditName(e.target.value)}
-              className="h-7 text-sm"
-              autoFocus
-            />
-            <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={handleSave}>
-              <Check className="h-3 w-3" />
-            </Button>
-            <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => setIsEditing(false)}>
-              <X className="h-3 w-3" />
-            </Button>
-          </div>
-        ) : (
-          <div className="flex items-center gap-2">
-            <span className={isUnresolved ? 'text-muted-foreground' : ''}>
-              {company.companyName}
-            </span>
-            {isUnresolved && (
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-6 w-6 p-0 opacity-50 hover:opacity-100"
-                onClick={(e) => { e.stopPropagation(); setIsEditing(true); }}
-                title="Edit company name"
-              >
-                <Pencil className="h-3 w-3" />
-              </Button>
-            )}
-          </div>
-        )}
-      </TableCell>
-      {/* ... rest of cells ... */}
-    </TableRow>
+    <div className="flex items-center gap-2">
+      <span className={isUnresolved ? 'text-muted-foreground' : ''}>
+        {company.companyName}
+      </span>
+      {isUnresolved && onNameUpdate && (
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-6 w-6 p-0 opacity-50 hover:opacity-100"
+          onClick={() => setIsEditing(true)}
+          title="Edit company name"
+        >
+          <Pencil className="h-3 w-3" />
+        </Button>
+      )}
+    </div>
   );
 }
 ```
 
-#### File: `src/components/dashboard/CompanyEngagementTimeline.tsx`
-
-Apply the same inline edit pattern for the company list section.
-
----
-
-## Data Flow
-
-```text
-1. User loads Company Influence or Timeline tab
-2. Edge Function extracts org IDs from analytics
-3. Step A: Query linkedin_company_cache for known names
-4. Step B: Call LinkedIn API only for missing IDs
-5. Step C: For any still missing, show "Company {id}"
-6. Upsert any newly resolved names to cache
-7. Return data with names (from cache + API + fallback)
-
-Manual Override Flow:
-1. User sees "Company 12345" in table
-2. Clicks pencil icon → inline edit
-3. Types real name → clicks checkmark
-4. Frontend calls update_company_name action
-5. Edge Function upserts to linkedin_company_cache with source='manual'
-6. Next load will show the manual name
+#### Update company list to use EditableCompanyName (around line 352)
+Replace the simple `{company.companyName}` display with:
+```tsx
+<EditableCompanyName 
+  company={company} 
+  onNameUpdate={updateCompanyName} 
+/>
 ```
 
----
-
-## Benefits
-
-| Before | After |
-|--------|-------|
-| Every request tries LinkedIn API | Cached names returned instantly |
-| 403 = all IDs show as numbers | 403 = only new IDs need resolution |
-| No way to fix names | Manual override persists forever |
-| Destructive red alert | Friendly yellow warning with guidance |
-
----
+#### Update the table to use EditableCompanyName (around line 462-464)
+Replace the company name cell in the table with:
+```tsx
+<TableCell className="font-medium min-w-[200px]">
+  <EditableCompanyName 
+    company={company} 
+    onNameUpdate={updateCompanyName} 
+  />
+</TableCell>
+```
 
 ## Testing Steps
 
-1. Clear cache (optional) and load Company Influence
-2. Check edge function logs for "Loaded X cached company names"
-3. Verify companies with cached names appear correctly
-4. Find a "Company 12345" entry and click the edit icon
-5. Enter a real name and save
-6. Refresh the page - the manual name should persist
-7. Check the `linkedin_company_cache` table in the database
+1. Navigate to the Company Influence or Company Timeline tab
+2. Verify the edge function logs show `get_company_influence` or `get_company_engagement_timeline`
+3. Check if the yellow warning appears instead of the red alert
+4. If companies show as "Company 12345":
+   - Click the pencil icon next to the name
+   - Enter the real company name
+   - Click the checkmark to save
+5. Refresh the page and verify the name persists
+6. Check the `linkedin_company_cache` table to confirm the entry was saved
 
+## Expected Behavior After Fix
+
+1. First load: LinkedIn API attempts to resolve names, may fail with 403
+2. Yellow warning appears with guidance on manual naming
+3. User can click pencil icon on any "Company 12345" entry
+4. Entering a name and saving stores it in `linkedin_company_cache`
+5. Future loads retrieve names from cache, no API call needed for cached companies
+6. Over time, the cache fills up and fewer "Company {id}" entries appear
