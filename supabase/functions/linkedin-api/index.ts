@@ -6268,109 +6268,51 @@ serve(async (req) => {
 
         console.log(`[get_creative_fatigue] Found ${creativeDaily.size} creatives with daily data`);
 
-        // Step 2: Fetch creative metadata (names) with robust extraction
+        // Step 2: Fetch creative names via REST API individual lookup (this works reliably)
         const creativeNames = new Map<string, string>();
-        const creativeCampaigns = new Map<string, string>();
 
-        // Helper function to extract creative name from various structures
-        const extractName = (creative: any): string | null => {
-          // Try creativeDscName field first
-          if (creative.creativeDscName && typeof creative.creativeDscName === 'string' && creative.creativeDscName.trim()) {
-            return creative.creativeDscName.trim();
-          }
+        // Get the list of creative URNs we need names for
+        const creativeUrns = Array.from(creativeDaily.keys());
+        console.log(`[get_creative_fatigue] Need names for ${creativeUrns.length} creatives`);
 
-          // Try top-level name field
-          if (creative.name && typeof creative.name === 'string' && creative.name.trim()) {
-            return creative.name.trim();
-          }
+        // Fetch names via REST API individual creative lookup
+        const batchSize = 10;
+        let namesResolved = 0;
 
-          // Try nested creative content/variables
-          const variables = creative.variables || {};
-          const data = variables.data || {};
+        for (let i = 0; i < creativeUrns.length; i += batchSize) {
+          const batch = creativeUrns.slice(i, i + batchSize);
 
-          // Check for creativeDscName in nested structure
-          if (data.creativeDscName && typeof data.creativeDscName === 'string' && data.creativeDscName.trim()) {
-            return data.creativeDscName.trim();
-          }
+          await Promise.all(batch.map(async (creativeUrn) => {
+            try {
+              const creativeId = creativeUrn.split(':').pop() || '';
+              if (!creativeId) return;
 
-          // Check for text-based creative content
-          if (data.com?.linkedin?.ads?.TextAdCreativeVariables?.text) {
-            return data.com.linkedin.ads.TextAdCreativeVariables.text;
-          }
+              // Use REST API endpoint which returns the name field
+              const encodedUrn = encodeURIComponent(creativeUrn);
+              const creativeUrl = `https://api.linkedin.com/rest/adAccounts/${accountId}/creatives/${encodedUrn}`;
 
-          // Check for InMail subject
-          if (data.com?.linkedin?.ads?.MessageAdCreativeVariables?.subject) {
-            return data.com.linkedin.ads.MessageAdCreativeVariables.subject;
-          }
+              const creativeResp = await fetch(creativeUrl, {
+                headers: {
+                  'Authorization': `Bearer ${accessToken}`,
+                  'LinkedIn-Version': '202501',
+                  'X-Restli-Protocol-Version': '2.0.0'
+                }
+              });
 
-          // Check for carousel headline
-          if (data.com?.linkedin?.ads?.CarouselAdCreativeVariables?.headline) {
-            return data.com.linkedin.ads.CarouselAdCreativeVariables.headline;
-          }
-
-          // Check for sponsored content introductory text
-          const introText = data.com?.linkedin?.ads?.SponsoredContentCreativeVariables?.introductoryText ||
-                          data.com?.linkedin?.ads?.SponsoredVideoCreativeVariables?.introductoryText ||
-                          data.com?.linkedin?.ads?.SponsoredUpdateCreativeVariables?.introductoryText;
-          if (introText && typeof introText === 'string') {
-            // Return first 50 chars of intro text as name
-            return introText.slice(0, 50) + (introText.length > 50 ? '...' : '');
-          }
-
-          return null;
-        };
-
-        try {
-          // Paginated fetch for all creatives
-          let startOffset = 0;
-          let hasMore = true;
-
-          while (hasMore) {
-            const creativesUrl = `https://api.linkedin.com/v2/adCreativesV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=500&start=${startOffset}`;
-            const response = await fetch(creativesUrl, {
-              headers: { 'Authorization': `Bearer ${accessToken}` }
-            });
-
-            if (response.ok) {
-              const data = await response.json();
-              const elements = data.elements || [];
-
-              for (const c of elements) {
-                const id = c.id?.toString();
-                if (id) {
-                  const name = extractName(c);
-                  const urn = `urn:li:sponsoredCreative:${id}`;
-
-                  if (name) {
-                    creativeNames.set(urn, name);
-                  }
-
-                  // Also extract campaign info
-                  const campaignUrn = c.campaign || '';
-                  const campaignId = campaignUrn.split(':').pop() || '';
-                  if (campaignId) {
-                    creativeCampaigns.set(urn, campaignId);
-                  }
+              if (creativeResp.ok) {
+                const creativeDetail = await creativeResp.json();
+                if (creativeDetail.name && typeof creativeDetail.name === 'string') {
+                  creativeNames.set(creativeUrn, creativeDetail.name);
+                  namesResolved++;
                 }
               }
-
-              console.log(`[get_creative_fatigue] Fetched ${elements.length} creatives at offset ${startOffset}, names resolved: ${creativeNames.size}`);
-
-              if (elements.length < 500) {
-                hasMore = false;
-              } else {
-                startOffset += 500;
-              }
-            } else {
-              console.log(`[get_creative_fatigue] Creative fetch failed at offset ${startOffset}: ${response.status}`);
-              hasMore = false;
+            } catch (err) {
+              // Silently continue on error
             }
-          }
-        } catch (err) {
-          console.error('[get_creative_fatigue] Creative names fetch error:', err);
+          }));
         }
 
-        console.log(`[get_creative_fatigue] Resolved ${creativeNames.size} creative names`);
+        console.log(`[get_creative_fatigue] Resolved ${namesResolved} creative names via REST API`);
 
         // Step 3: Analyze each creative for fatigue signals
         const fatigueAnalysis: Array<{
