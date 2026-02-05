@@ -6932,71 +6932,59 @@ serve(async (req) => {
         let namesResolutionFailed = false;
         let namesResolutionError: string | null = null;
 
-        // Use individual organization lookups for missing IDs (using REST API)
+        // Use batch organizationsLookup for missing IDs (same approach as working get_company_demographic)
         if (idsMissing.length > 0) {
-          console.log(`[get_company_influence] Resolving ${idsMissing.length} org names via individual lookups...`);
+          console.log(`[get_company_influence] Resolving ${idsMissing.length} org names via batch lookup...`);
 
-          const idsToResolve = idsMissing.slice(0, 100);
+          const idsToResolve = idsMissing.slice(0, 500);
           let successCount = 0;
-          let failCount = 0;
           const newlyResolved: Array<{ id: string; name: string; vanityName: string | null }> = [];
 
-          // Process in parallel batches of 10
-          const parallelBatchSize = 10;
-          for (let i = 0; i < idsToResolve.length; i += parallelBatchSize) {
-            const batch = idsToResolve.slice(i, i + parallelBatchSize);
+          // Batch fetch organization data (same as get_company_demographic)
+          const batchSize = 50;
+          for (let i = 0; i < idsToResolve.length; i += batchSize) {
+            const batch = idsToResolve.slice(i, i + batchSize);
+            const idsParam = batch.map((id, idx) => `ids[${idx}]=${id}`).join('&');
 
-            const results = await Promise.allSettled(
-              batch.map(async (id) => {
-                try {
-                  const orgUrl = `https://api.linkedin.com/rest/organizations/${id}?fields=id,localizedName,vanityName`;
-                  const orgResponse = await fetch(orgUrl, {
-                    headers: {
-                      'Authorization': `Bearer ${accessToken}`,
-                      'LinkedIn-Version': '202501',
-                      'X-Restli-Protocol-Version': '2.0.0',
-                    }
-                  });
+            try {
+              const orgResponse = await fetch(
+                `https://api.linkedin.com/v2/organizationsLookup?${idsParam}&projection=(results*(id,localizedName,localizedWebsite,vanityName))`,
+                { headers: { 'Authorization': `Bearer ${accessToken}` } }
+              );
 
-                  if (orgResponse.ok) {
-                    const orgData = await orgResponse.json();
-                    const name = orgData.localizedName || orgData.vanityName;
-                    const vanityName = orgData.vanityName || null;
-                    if (name) {
-                      return { id, name, vanityName, success: true };
-                    }
-                  } else if (orgResponse.status === 403) {
-                    return { id, success: false, status: 403 };
+              if (orgResponse.ok) {
+                const orgData = await orgResponse.json();
+                const results = orgData.results || {};
+
+                Object.entries(results).forEach(([id, org]: [string, any]) => {
+                  const originalUrn = orgIdToUrn.get(id);
+                  const name = org?.localizedName || org?.vanityName;
+                  const vanityName = org?.vanityName || null;
+
+                  if (name) {
+                    if (originalUrn) companyNames.set(originalUrn, name);
+                    companyNames.set(`urn:li:organization:${id}`, name);
+                    companyNames.set(`urn:li:company:${id}`, name);
+                    companyNames.set(`urn:li:memberCompany:${id}`, name);
+                    companyNames.set(id, name);
+                    successCount++;
+                    newlyResolved.push({ id, name, vanityName });
                   }
-                  return { id, success: false };
-                } catch (e) {
-                  return { id, success: false, error: e };
-                }
-              })
-            );
-            
-            // Process results
-            results.forEach((result) => {
-              if (result.status === 'fulfilled' && result.value.success) {
-                const { id, name, vanityName } = result.value;
-                const originalUrn = orgIdToUrn.get(id);
-                if (originalUrn) companyNames.set(originalUrn, name);
-                companyNames.set(`urn:li:organization:${id}`, name);
-                companyNames.set(`urn:li:company:${id}`, name);
-                companyNames.set(`urn:li:memberCompany:${id}`, name);
-                companyNames.set(id, name);
-                successCount++;
-                newlyResolved.push({ id, name, vanityName });
+                });
               } else {
-                failCount++;
-                if (result.status === 'fulfilled' && result.value.status === 403) {
+                const errorText = await orgResponse.text();
+                console.log(`[get_company_influence] Org lookup batch failed: ${orgResponse.status}`, errorText.slice(0, 200));
+                if (orgResponse.status === 403) {
                   namesResolutionFailed = true;
+                  namesResolutionError = errorText.slice(0, 200);
                 }
               }
-            });
+            } catch (e) {
+              console.log('[get_company_influence] Organization lookup failed:', e);
+            }
           }
-          
-          console.log(`[get_company_influence] Individual lookups complete: ${successCount} resolved, ${failCount} failed`);
+
+          console.log(`[get_company_influence] Batch lookups complete: ${successCount} resolved`);
           
           // Step 3C: Upsert newly resolved names to cache
           if (newlyResolved.length > 0) {
@@ -7400,69 +7388,57 @@ serve(async (req) => {
         console.log(`[get_company_engagement_timeline] ${orgIds.length - idsMissing.length} from cache, ${idsMissing.length} need API lookup`);
 
         if (idsMissing.length > 0) {
-          console.log(`[get_company_engagement_timeline] Resolving ${idsMissing.length} org names via individual lookups...`);
+          console.log(`[get_company_engagement_timeline] Resolving ${idsMissing.length} org names via batch lookup...`);
 
-          const idsToResolve = idsMissing.slice(0, 100);
+          const idsToResolve = idsMissing.slice(0, 500);
           let successCount = 0;
-          let failCount = 0;
           const newlyResolved: Array<{ id: string; name: string; vanityName: string | null }> = [];
 
-          // Process in parallel batches of 10 (using REST API)
-          const parallelBatchSize = 10;
-          for (let i = 0; i < idsToResolve.length; i += parallelBatchSize) {
-            const batch = idsToResolve.slice(i, i + parallelBatchSize);
+          // Batch fetch organization data (same as get_company_demographic)
+          const batchSize = 50;
+          for (let i = 0; i < idsToResolve.length; i += batchSize) {
+            const batch = idsToResolve.slice(i, i + batchSize);
+            const idsParam = batch.map((id, idx) => `ids[${idx}]=${id}`).join('&');
 
-            const results = await Promise.allSettled(
-              batch.map(async (id) => {
-                try {
-                  const orgUrl = `https://api.linkedin.com/rest/organizations/${id}?fields=id,localizedName,vanityName`;
-                  const orgResponse = await fetch(orgUrl, {
-                    headers: {
-                      'Authorization': `Bearer ${accessToken}`,
-                      'LinkedIn-Version': '202501',
-                      'X-Restli-Protocol-Version': '2.0.0',
-                    }
-                  });
+            try {
+              const orgResponse = await fetch(
+                `https://api.linkedin.com/v2/organizationsLookup?${idsParam}&projection=(results*(id,localizedName,localizedWebsite,vanityName))`,
+                { headers: { 'Authorization': `Bearer ${accessToken}` } }
+              );
 
-                  if (orgResponse.ok) {
-                    const orgData = await orgResponse.json();
-                    const name = orgData.localizedName || orgData.vanityName;
-                    const vanityName = orgData.vanityName || null;
-                    if (name) {
-                      return { id, name, vanityName, success: true };
-                    }
-                  } else if (orgResponse.status === 403) {
-                    return { id, success: false, status: 403 };
+              if (orgResponse.ok) {
+                const orgData = await orgResponse.json();
+                const results = orgData.results || {};
+
+                Object.entries(results).forEach(([id, org]: [string, any]) => {
+                  const originalUrn = orgIdToUrn.get(id);
+                  const name = org?.localizedName || org?.vanityName;
+                  const vanityName = org?.vanityName || null;
+
+                  if (name) {
+                    if (originalUrn) companyNames.set(originalUrn, name);
+                    companyNames.set(`urn:li:organization:${id}`, name);
+                    companyNames.set(`urn:li:company:${id}`, name);
+                    companyNames.set(`urn:li:memberCompany:${id}`, name);
+                    companyNames.set(id, name);
+                    successCount++;
+                    newlyResolved.push({ id, name, vanityName });
                   }
-                  return { id, success: false };
-                } catch (e) {
-                  return { id, success: false, error: e };
-                }
-              })
-            );
-            
-            // Process results
-            results.forEach((result) => {
-              if (result.status === 'fulfilled' && result.value.success) {
-                const { id, name, vanityName } = result.value;
-                const originalUrn = orgIdToUrn.get(id);
-                if (originalUrn) companyNames.set(originalUrn, name);
-                companyNames.set(`urn:li:organization:${id}`, name);
-                companyNames.set(`urn:li:company:${id}`, name);
-                companyNames.set(`urn:li:memberCompany:${id}`, name);
-                companyNames.set(id, name);
-                successCount++;
-                newlyResolved.push({ id, name, vanityName });
+                });
               } else {
-                failCount++;
-                if (result.status === 'fulfilled' && result.value.status === 403) {
+                const errorText = await orgResponse.text();
+                console.log(`[get_company_engagement_timeline] Org lookup batch failed: ${orgResponse.status}`, errorText.slice(0, 200));
+                if (orgResponse.status === 403) {
                   namesResolutionFailed = true;
+                  namesResolutionError = errorText.slice(0, 200);
                 }
               }
-            });
+            } catch (e) {
+              console.log('[get_company_engagement_timeline] Organization lookup failed:', e);
+            }
           }
-          
-          console.log(`[get_company_engagement_timeline] Individual lookups complete: ${successCount} resolved, ${failCount} failed`);
+
+          console.log(`[get_company_engagement_timeline] Batch lookups complete: ${successCount} resolved`);
           
           // Step 3C: Upsert newly resolved names to cache
           if (newlyResolved.length > 0) {
@@ -7745,39 +7721,23 @@ serve(async (req) => {
           const batchSize = 50;
           for (let i = 0; i < orgIds.length; i += batchSize) {
             const batch = orgIds.slice(i, i + batchSize);
-            // Use REST API format for organization lookup
-            const idsParam = `ids=List(${batch.join(',')})`;
+            // Use v2 organizationsLookup format (same as working get_company_demographic)
+            const idsParam = batch.map((id, idx) => `ids[${idx}]=${id}`).join('&');
 
             try {
               const orgResponse = await fetch(
-                `https://api.linkedin.com/rest/organizations?${idsParam}&fields=id,localizedName,vanityName`,
+                `https://api.linkedin.com/v2/organizationsLookup?${idsParam}&projection=(results*(id,localizedName,localizedWebsite,vanityName))`,
                 {
                   headers: {
                     'Authorization': `Bearer ${accessToken}`,
-                    'LinkedIn-Version': '202501',
-                    'X-Restli-Protocol-Version': '2.0.0',
                   }
                 }
               );
 
               if (orgResponse.ok) {
                 const orgData = await orgResponse.json();
-                // REST API returns elements array or results object
-                const elements = orgData.elements || [];
                 const results = orgData.results || {};
 
-                // Handle array response format
-                if (elements.length > 0) {
-                  elements.forEach((org: any) => {
-                    const id = org.id?.toString();
-                    if (id && org.localizedName) {
-                      const urn = orgIdToUrn.get(id);
-                      if (urn) companyNames.set(urn, org.localizedName);
-                    }
-                  });
-                }
-
-                // Handle object response format
                 Object.entries(results).forEach(([id, org]: [string, any]) => {
                   const urn = orgIdToUrn.get(id);
                   if (!urn) return;
