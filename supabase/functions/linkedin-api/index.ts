@@ -6407,40 +6407,36 @@ serve(async (req) => {
 
         console.log(`[get_creative_fatigue] FINAL: Resolved ${namesResolved} creative names out of ${creativeUrns.length}`);
 
-        // Step 2D: Fetch campaign objectives for filtering
+        // Step 2D: Fetch ALL campaigns for this account to get objectives
+        // Use V2 API which is more reliable for campaign metadata
         const campaignObjectives = new Map<string, string>();
-        const uniqueCampaignUrns = new Set<string>();
-        for (const meta of creativeMetadata.values()) {
-          if (meta.campaignUrn) uniqueCampaignUrns.add(meta.campaignUrn);
-        }
-        console.log(`[get_creative_fatigue] Found ${uniqueCampaignUrns.size} unique campaigns to fetch objectives`);
 
-        // Batch fetch campaign metadata
-        if (uniqueCampaignUrns.size > 0) {
-          try {
-            const campaignsUrl = `https://api.linkedin.com/rest/adAccounts/${accountId}/adCampaigns?q=search&search.status.values[0]=ACTIVE&search.status.values[1]=PAUSED&search.status.values[2]=ARCHIVED&count=500`;
-            const campaignsResp = await fetch(campaignsUrl, {
-              headers: {
-                'Authorization': `Bearer ${accessToken}`,
-                'LinkedIn-Version': '202511',
-                'X-Restli-Protocol-Version': '2.0.0'
-              }
-            });
-
-            if (campaignsResp.ok) {
-              const campaignsData = await campaignsResp.json();
-              for (const campaign of (campaignsData.elements || [])) {
-                const campaignUrn = `urn:li:sponsoredCampaign:${campaign.id}`;
-                const objectiveType = campaign.objectiveType || campaign.type || '';
-                if (objectiveType) {
-                  campaignObjectives.set(campaignUrn, objectiveType);
-                }
-              }
-              console.log(`[get_creative_fatigue] Got objectives for ${campaignObjectives.size} campaigns`);
+        try {
+          const campaignsUrl = `https://api.linkedin.com/v2/adCampaignsV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=500`;
+          const campaignsResp = await fetch(campaignsUrl, {
+            headers: {
+              'Authorization': `Bearer ${accessToken}`
             }
-          } catch (err) {
-            console.error('[get_creative_fatigue] Campaign objectives fetch error:', err);
+          });
+
+          if (campaignsResp.ok) {
+            const campaignsData = await campaignsResp.json();
+            for (const campaign of (campaignsData.elements || [])) {
+              const campaignId = campaign.id?.toString() || '';
+              const campaignUrn = `urn:li:sponsoredCampaign:${campaignId}`;
+              const objectiveType = campaign.objectiveType || campaign.type || '';
+              if (campaignId && objectiveType) {
+                campaignObjectives.set(campaignUrn, objectiveType);
+                // Also store by ID for fallback
+                campaignObjectives.set(campaignId, objectiveType);
+              }
+            }
+            console.log(`[get_creative_fatigue] Got objectives for ${campaignObjectives.size / 2} campaigns`);
+          } else {
+            console.log(`[get_creative_fatigue] Campaigns API returned ${campaignsResp.status}`);
           }
+        } catch (err) {
+          console.error('[get_creative_fatigue] Campaign objectives fetch error:', err);
         }
 
         // Step 3: Analyze each creative for fatigue signals
@@ -6509,7 +6505,8 @@ serve(async (req) => {
           const creativeMeta = creativeMetadata.get(creativeUrn);
           const campaignUrn = creativeMeta?.campaignUrn || '';
           const campaignId = campaignUrn.split(':').pop() || '';
-          const objectiveType = campaignUrn ? campaignObjectives.get(campaignUrn) || '' : '';
+          // Try both URN and ID lookup for objectiveType
+          const objectiveType = campaignObjectives.get(campaignUrn) || campaignObjectives.get(campaignId) || '';
 
           // Detect fatigue signals - OBJECTIVE-SPECIFIC LOGIC
           const signals: string[] = [];
@@ -6626,13 +6623,17 @@ serve(async (req) => {
           healthy: fatigueAnalysis.filter(c => c.status === 'healthy').length,
         };
 
-        console.log(`[get_creative_fatigue] Complete. ${summary.fatigued} fatigued, ${summary.warning} warning, ${summary.healthy} healthy`);
+        // Get unique objectives from creatives for the filter dropdown
+        const uniqueObjectives = [...new Set(fatigueAnalysis.map(c => c.objectiveType).filter(Boolean))].sort();
+
+        console.log(`[get_creative_fatigue] Complete. ${summary.fatigued} fatigued, ${summary.warning} warning, ${summary.healthy} healthy. Objectives: ${uniqueObjectives.join(', ')}`);
 
         return new Response(JSON.stringify({
           period: { start: startDate, end: endDate },
           thresholds: { ctrDeclineThreshold, cplIncreaseThreshold, minImpressions },
           summary,
           creatives: fatigueAnalysis,
+          availableObjectives: uniqueObjectives,
         }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
