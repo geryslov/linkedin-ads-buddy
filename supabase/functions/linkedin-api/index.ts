@@ -6760,11 +6760,10 @@ serve(async (req) => {
       }
 
       case 'get_company_influence': {
-        // Company Influence Report - aggregates company engagement across campaigns/objectives
+        // Company Influence Report - uses EXACT same pattern as working get_company_demographic
         const { accountId, dateRange, minImpressions } = params || {};
-        const now = new Date();
-        const startDate = dateRange?.start || new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-        const endDate = dateRange?.end || now.toISOString().split('T')[0];
+        const startDate = dateRange?.start || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        const endDate = dateRange?.end || new Date().toISOString().split('T')[0];
         const impressionThreshold = minImpressions || 100;
 
         const [startYear, startMonth, startDay] = startDate.split('-').map(Number);
@@ -6772,17 +6771,13 @@ serve(async (req) => {
 
         console.log(`[get_company_influence] Account ${accountId}, period: ${startDate} to ${endDate}`);
 
-        // Step 1: Fetch all campaigns to get objective types (using REST API)
-        const campaignsUrl = `https://api.linkedin.com/rest/adCampaigns?q=search&search=(account:(values:List(urn:li:sponsoredAccount:${accountId})))&count=200`;
+        // Step 1: Fetch all campaigns to get objective types (v2 API)
+        const campaignsUrl = `https://api.linkedin.com/v2/adCampaignsV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=200`;
         const campaignMeta = new Map<string, { name: string; objective: string; status: string }>();
 
         try {
           const response = await fetch(campaignsUrl, {
-            headers: {
-              'Authorization': `Bearer ${accessToken}`,
-              'LinkedIn-Version': '202501',
-              'X-Restli-Protocol-Version': '2.0.0',
-            }
+            headers: { 'Authorization': `Bearer ${accessToken}` }
           });
           if (response.ok) {
             const data = await response.json();
@@ -6803,7 +6798,7 @@ serve(async (req) => {
 
         console.log(`[get_company_influence] Found ${campaignMeta.size} campaigns`);
 
-        // Step 2: Fetch company analytics using account-level single-pivot query
+        // Step 2: Fetch company analytics (v2 API - same as demographic)
         const companyData = new Map<string, {
           companyUrn: string;
           companyName: string;
@@ -6815,20 +6810,22 @@ serve(async (req) => {
           objectiveMix: Set<string>;
         }>();
 
-        // Single pivot query for company data (works with standard API access)
-        // Using REST API format with proper dateRange and accounts syntax
-        const analyticsUrl = `https://api.linkedin.com/rest/adAnalytics?q=analytics&` +
-          `dateRange=(start:(year:${startYear},month:${startMonth},day:${startDay}),end:(year:${endYear},month:${endMonth},day:${endDay}))&` +
-          `timeGranularity=ALL&pivot=MEMBER_COMPANY&accounts=List(urn:li:sponsoredAccount:${accountId})&` +
-          `fields=pivotValues,impressions,clicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions,oneClickLeadFormOpens&count=10000`;
+        const analyticsUrl = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
+          `dateRange.start.day=${startDay}&` +
+          `dateRange.start.month=${startMonth}&` +
+          `dateRange.start.year=${startYear}&` +
+          `dateRange.end.day=${endDay}&` +
+          `dateRange.end.month=${endMonth}&` +
+          `dateRange.end.year=${endYear}&` +
+          `timeGranularity=ALL&` +
+          `pivot=MEMBER_COMPANY&` +
+          `accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
+          `fields=impressions,clicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions,oneClickLeadFormOpens,pivotValue&` +
+          `count=10000`;
 
         try {
           const response = await fetch(analyticsUrl, {
-            headers: {
-              'Authorization': `Bearer ${accessToken}`,
-              'LinkedIn-Version': '202501',
-              'X-Restli-Protocol-Version': '2.0.0',
-            }
+            headers: { 'Authorization': `Bearer ${accessToken}` }
           });
 
           if (response.ok) {
@@ -6836,8 +6833,7 @@ serve(async (req) => {
             console.log(`[get_company_influence] Analytics returned ${(data.elements || []).length} entries`);
 
             for (const el of (data.elements || [])) {
-              // REST API returns pivotValues as array
-              const companyUrn = el.pivotValues?.[0] || el.pivotValue || '';
+              const companyUrn = el.pivotValue || '';
               if (!companyUrn) continue;
 
               const impressions = el.impressions || 0;
@@ -7226,31 +7222,34 @@ serve(async (req) => {
       }
 
       case 'get_company_engagement_timeline': {
-        // Company Engagement Timeline - daily engagement metrics for companies over time
+        // Company Engagement Timeline - uses EXACT same v2 API pattern as working get_company_demographic
         const { accountId, dateRange, companyIds } = params || {};
-        const now = new Date();
-        const startDate = dateRange?.start || new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-        const endDate = dateRange?.end || now.toISOString().split('T')[0];
+        const startDate = dateRange?.start || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        const endDate = dateRange?.end || new Date().toISOString().split('T')[0];
 
         const [startYear, startMonth, startDay] = startDate.split('-').map(Number);
         const [endYear, endMonth, endDay] = endDate.split('-').map(Number);
 
         console.log(`[get_company_engagement_timeline] Account ${accountId}, period: ${startDate} to ${endDate}`);
 
-        // Step 1: Fetch daily company analytics with MEMBER_COMPANY pivot (using REST API)
-        const analyticsUrl = `https://api.linkedin.com/rest/adAnalytics?q=analytics&` +
-          `dateRange=(start:(year:${startYear},month:${startMonth},day:${startDay}),end:(year:${endYear},month:${endMonth},day:${endDay}))&` +
-          `timeGranularity=DAILY&pivot=MEMBER_COMPANY&accounts=List(urn:li:sponsoredAccount:${accountId})&` +
-          `fields=dateRange,pivotValues,impressions,clicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions&count=10000`;
+        // Step 1: Fetch daily company analytics with MEMBER_COMPANY pivot (v2 API - same as demographic)
+        const analyticsUrl = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
+          `dateRange.start.day=${startDay}&` +
+          `dateRange.start.month=${startMonth}&` +
+          `dateRange.start.year=${startYear}&` +
+          `dateRange.end.day=${endDay}&` +
+          `dateRange.end.month=${endMonth}&` +
+          `dateRange.end.year=${endYear}&` +
+          `timeGranularity=DAILY&` +
+          `pivot=MEMBER_COMPANY&` +
+          `accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
+          `fields=dateRange,pivotValue,impressions,clicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions&` +
+          `count=10000`;
 
         let allElements: any[] = [];
         try {
           const response = await fetch(analyticsUrl, {
-            headers: {
-              'Authorization': `Bearer ${accessToken}`,
-              'LinkedIn-Version': '202501',
-              'X-Restli-Protocol-Version': '2.0.0',
-            }
+            headers: { 'Authorization': `Bearer ${accessToken}` }
           });
 
           if (response.ok) {
@@ -7260,7 +7259,7 @@ serve(async (req) => {
           } else {
             const errorText = await response.text();
             console.error(`[get_company_engagement_timeline] API error: ${response.status}`, errorText.slice(0, 300));
-            return new Response(JSON.stringify({ 
+            return new Response(JSON.stringify({
               error: `LinkedIn API error: ${response.status}`,
               details: errorText.slice(0, 200)
             }), {
@@ -7295,8 +7294,8 @@ serve(async (req) => {
         }>();
 
         for (const el of allElements) {
-          // REST API returns pivotValues as array
-          const companyUrn = el.pivotValues?.[0] || el.pivotValue || '';
+          // v2 API returns pivotValue
+          const companyUrn = el.pivotValue || '';
           if (!companyUrn) continue;
 
           // Extract date from dateRange
@@ -7589,58 +7588,93 @@ serve(async (req) => {
       }
 
       case 'get_company_engagement_report': {
-        // Combined Company Engagement Report - demographic data + influence features
-        // Uses the same name resolution as get_company_demographic (which works)
-        const { accountId, dateRange, minImpressions } = params || {};
-        const now = new Date();
-        const startDate = dateRange?.start || new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-        const endDate = dateRange?.end || now.toISOString().split('T')[0];
+        // Combined Company Engagement Report - uses EXACT same pattern as working get_company_demographic
+        const { accountId, dateRange, minImpressions, campaignIds } = params || {};
+        const startDate = dateRange?.start || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        const endDate = dateRange?.end || new Date().toISOString().split('T')[0];
         const impressionThreshold = minImpressions || 100;
 
+        // Parse date strings directly (same as demographic)
         const [startYear, startMonth, startDay] = startDate.split('-').map(Number);
         const [endYear, endMonth, endDay] = endDate.split('-').map(Number);
 
         console.log(`[get_company_engagement_report] Account ${accountId}, period: ${startDate} to ${endDate}`);
 
-        // Step 1: Fetch all campaigns to get objective types (using REST API)
-        const campaignsUrl = `https://api.linkedin.com/rest/adCampaigns?q=search&search=(account:(values:List(urn:li:sponsoredAccount:${accountId})))&count=200`;
-        const campaignMeta = new Map<string, { name: string; objective: string; status: string }>();
+        // Step 1: Fetch company analytics with MEMBER_COMPANY pivot (SAME as demographic)
+        let analyticsUrl = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
+          `dateRange.start.day=${startDay}&` +
+          `dateRange.start.month=${startMonth}&` +
+          `dateRange.start.year=${startYear}&` +
+          `dateRange.end.day=${endDay}&` +
+          `dateRange.end.month=${endMonth}&` +
+          `dateRange.end.year=${endYear}&` +
+          `timeGranularity=ALL&` +
+          `pivot=MEMBER_COMPANY&` +
+          `accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
+          `fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,oneClickLeadFormOpens,pivotValue&` +
+          `count=10000`;
 
-        try {
-          const response = await fetch(campaignsUrl, {
-            headers: {
-              'Authorization': `Bearer ${accessToken}`,
-              'LinkedIn-Version': '202501',
-              'X-Restli-Protocol-Version': '2.0.0',
-            }
+        // Add campaign filter if provided
+        if (campaignIds && campaignIds.length > 0) {
+          campaignIds.forEach((id: string, i: number) => {
+            analyticsUrl += `&campaigns[${i}]=urn:li:sponsoredCampaign:${id}`;
           });
-          if (response.ok) {
-            const data = await response.json();
-            for (const c of (data.elements || [])) {
-              const id = c.id?.toString();
-              if (id) {
-                campaignMeta.set(id, {
-                  name: c.name || `Campaign ${id}`,
-                  objective: c.objectiveType || 'UNKNOWN',
-                  status: c.status || 'UNKNOWN',
-                });
-              }
-            }
-          }
-        } catch (err) {
-          console.error('[get_company_engagement_report] Campaign fetch error:', err);
         }
 
-        console.log(`[get_company_engagement_report] Found ${campaignMeta.size} campaigns`);
+        console.log('[get_company_engagement_report] Step 1: Fetching company analytics...');
 
-        // Step 2: Fetch company analytics with MEMBER_COMPANY pivot (using REST API)
-        const analyticsUrl = `https://api.linkedin.com/rest/adAnalytics?q=analytics&` +
-          `dateRange=(start:(year:${startYear},month:${startMonth},day:${startDay}),end:(year:${endYear},month:${endMonth},day:${endDay}))&` +
-          `timeGranularity=ALL&pivot=MEMBER_COMPANY&accounts=List(urn:li:sponsoredAccount:${accountId})&` +
-          `fields=pivotValues,impressions,clicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions,oneClickLeadFormOpens&count=10000`;
+        // Paginated fetch (same as demographic)
+        let allElements: any[] = [];
+        let startOffset = 0;
+        const pageSize = 10000;
+        let hasMore = true;
 
-        const companyData = new Map<string, {
-          companyUrn: string;
+        while (hasMore) {
+          const paginatedUrl = `${analyticsUrl}&start=${startOffset}`;
+
+          const analyticsResponse = await fetch(paginatedUrl, {
+            headers: { 'Authorization': `Bearer ${accessToken}` },
+          });
+
+          if (!analyticsResponse.ok) {
+            const errorText = await analyticsResponse.text();
+            console.error('[get_company_engagement_report] Analytics error:', analyticsResponse.status, errorText);
+            return new Response(JSON.stringify({
+              error: 'Failed to fetch company analytics',
+              details: errorText,
+              companies: []
+            }), {
+              status: analyticsResponse.status,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+
+          const analyticsData = await analyticsResponse.json();
+          const pageElements = analyticsData.elements || [];
+          allElements = allElements.concat(pageElements);
+
+          console.log(`[get_company_engagement_report] Page at offset ${startOffset}: ${pageElements.length} records, total: ${allElements.length}`);
+
+          // Check pagination
+          const paging = analyticsData.paging;
+          if (paging && paging.total && (startOffset + pageElements.length) < paging.total) {
+            startOffset += pageSize;
+          } else if (pageElements.length === pageSize) {
+            startOffset += pageSize;
+          } else {
+            hasMore = false;
+          }
+
+          if (startOffset > 100000) {
+            hasMore = false;
+          }
+        }
+
+        console.log(`[get_company_engagement_report] Total: ${allElements.length} company records`);
+
+        // Aggregate by company URN (same as demographic)
+        const companyMap = new Map<string, {
+          entityUrn: string;
           impressions: number;
           clicks: number;
           spend: number;
@@ -7648,63 +7682,35 @@ serve(async (req) => {
           formOpens: number;
         }>();
 
-        try {
-          const response = await fetch(analyticsUrl, {
-            headers: {
-              'Authorization': `Bearer ${accessToken}`,
-              'LinkedIn-Version': '202501',
-              'X-Restli-Protocol-Version': '2.0.0',
-            }
+        allElements.forEach((el: any) => {
+          const entityUrn = el.pivotValue || '';
+          if (!entityUrn) return;
+
+          const existing = companyMap.get(entityUrn) || {
+            entityUrn,
+            impressions: 0,
+            clicks: 0,
+            spend: 0,
+            leads: 0,
+            formOpens: 0,
+          };
+          companyMap.set(entityUrn, {
+            entityUrn,
+            impressions: existing.impressions + (el.impressions || 0),
+            clicks: existing.clicks + (el.clicks || 0),
+            spend: existing.spend + parseFloat(el.costInLocalCurrency || '0'),
+            leads: existing.leads + (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0),
+            formOpens: existing.formOpens + (el.oneClickLeadFormOpens || 0),
           });
+        });
 
-          if (response.ok) {
-            const data = await response.json();
-            console.log(`[get_company_engagement_report] Analytics returned ${(data.elements || []).length} entries`);
+        console.log(`[get_company_engagement_report] Aggregated ${companyMap.size} unique companies`);
 
-            for (const el of (data.elements || [])) {
-              // REST API returns pivotValues as array
-              const companyUrn = el.pivotValues?.[0] || el.pivotValue || '';
-              if (!companyUrn) continue;
-
-              const impressions = el.impressions || 0;
-              const clicks = el.clicks || 0;
-              const spend = parseFloat(el.costInLocalCurrency || '0');
-              const leads = (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
-              const formOpens = el.oneClickLeadFormOpens || 0;
-
-              const existing = companyData.get(companyUrn);
-              if (existing) {
-                existing.impressions += impressions;
-                existing.clicks += clicks;
-                existing.spend += spend;
-                existing.leads += leads;
-                existing.formOpens += formOpens;
-              } else {
-                companyData.set(companyUrn, {
-                  companyUrn,
-                  impressions,
-                  clicks,
-                  spend,
-                  leads,
-                  formOpens,
-                });
-              }
-            }
-          } else {
-            const errorText = await response.text();
-            console.error(`[get_company_engagement_report] Analytics API error: ${response.status}`, errorText);
-          }
-        } catch (err) {
-          console.error('[get_company_engagement_report] Analytics fetch error:', err);
-        }
-
-        console.log(`[get_company_engagement_report] Found ${companyData.size} unique companies`);
-
-        // Step 3: Resolve company names - SAME APPROACH AS get_company_demographic
+        // Step 2: Resolve company names via Organization Lookup (SAME as demographic)
         const companyNames = new Map<string, string>();
-        const companyUrns = Array.from(companyData.keys());
+        const companyUrns = Array.from(companyMap.keys());
 
-        // Extract organization IDs from URNs (same as demographic)
+        // Extract organization IDs from URNs
         const orgIdToUrn = new Map<string, string>();
         companyUrns.forEach(urn => {
           const match = urn.match(/^urn:li:organization:(\d+)$/);
@@ -7714,24 +7720,19 @@ serve(async (req) => {
         });
 
         const orgIds = Array.from(orgIdToUrn.keys());
-        console.log(`[get_company_engagement_report] Resolving ${orgIds.length} organization IDs...`);
+        console.log(`[get_company_engagement_report] Step 2: Resolving ${orgIds.length} organization names...`);
 
-        // Batch fetch organization data - SAME AS DEMOGRAPHIC
+        // Batch fetch organization data (SAME as demographic)
         if (orgIds.length > 0) {
           const batchSize = 50;
           for (let i = 0; i < orgIds.length; i += batchSize) {
             const batch = orgIds.slice(i, i + batchSize);
-            // Use v2 organizationsLookup format (same as working get_company_demographic)
             const idsParam = batch.map((id, idx) => `ids[${idx}]=${id}`).join('&');
 
             try {
               const orgResponse = await fetch(
                 `https://api.linkedin.com/v2/organizationsLookup?${idsParam}&projection=(results*(id,localizedName,localizedWebsite,vanityName))`,
-                {
-                  headers: {
-                    'Authorization': `Bearer ${accessToken}`,
-                  }
-                }
+                { headers: { 'Authorization': `Bearer ${accessToken}` } }
               );
 
               if (orgResponse.ok) {
@@ -7747,17 +7748,17 @@ serve(async (req) => {
                   }
                 });
               } else {
-                console.log(`[get_company_engagement_report] Org lookup failed: ${orgResponse.status}`);
+                console.log(`[get_company_engagement_report] Org lookup batch failed: ${orgResponse.status}`);
               }
             } catch (e) {
-              console.log('[get_company_engagement_report] Organization lookup failed:', e);
+              console.log('[get_company_engagement_report] Organization lookup error:', e);
             }
           }
         }
 
         console.log(`[get_company_engagement_report] Resolved ${companyNames.size} company names`);
 
-        // Step 4: Build final report with engagement scoring
+        // Step 3: Build final report with engagement scoring
         const companies: Array<{
           companyUrn: string;
           companyName: string;
@@ -7773,14 +7774,14 @@ serve(async (req) => {
           cpl: number;
         }> = [];
 
-        for (const [companyUrn, data] of companyData.entries()) {
+        for (const [companyUrn, data] of companyMap.entries()) {
           // Filter by minimum impressions
           if (data.impressions < impressionThreshold) continue;
 
-          // Calculate engagement score (same as influence)
+          // Calculate engagement score
           const engagementScore = (data.leads * 100) + (data.clicks * 5) + (data.impressions * 0.01);
 
-          // Get company name
+          // Get company name - use resolved name or extract from URN
           const companyName = companyNames.get(companyUrn) || extractNameFromUrn(companyUrn);
 
           // Calculate metrics
@@ -7844,7 +7845,6 @@ serve(async (req) => {
           metadata: {
             accountId,
             impressionThreshold,
-            totalCampaignsAnalyzed: campaignMeta.size,
             namesResolved: companyNames.size,
             namesUnresolved: companies.length - companyNames.size,
           }
