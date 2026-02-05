@@ -15,11 +15,6 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '@/components/ui/collapsible';
-import {
   LineChart,
   Line,
   XAxis,
@@ -78,14 +73,12 @@ function CreativeRow({ creative }: { creative: CreativeFatigueItem }) {
   const [isOpen, setIsOpen] = useState(false);
 
   return (
-    <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+    <>
       <TableRow className="hover:bg-muted/50 cursor-pointer" onClick={() => setIsOpen(!isOpen)}>
         <TableCell className="w-10">
-          <CollapsibleTrigger asChild>
-            <Button variant="ghost" size="sm" className="h-6 w-6 p-0">
-              {isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-            </Button>
-          </CollapsibleTrigger>
+          <Button variant="ghost" size="sm" className="h-6 w-6 p-0">
+            {isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+          </Button>
         </TableCell>
         <TableCell className="w-24">
           <StatusBadge status={creative.status} />
@@ -107,9 +100,9 @@ function CreativeRow({ creative }: { creative: CreativeFatigueItem }) {
           {creative.metrics.totalLeads > 0 ? <TrendIndicator value={creative.metrics.cplTrend} inverted /> : '-'}
         </TableCell>
       </TableRow>
-      <CollapsibleContent asChild>
-        <tr>
-          <td colSpan={10} className="p-0">
+      {isOpen && (
+        <TableRow>
+          <TableCell colSpan={10} className="p-0">
             <div className="bg-muted/30 p-4 space-y-4">
               {/* Signals */}
               {creative.signals.length > 0 && (
@@ -150,10 +143,10 @@ function CreativeRow({ creative }: { creative: CreativeFatigueItem }) {
                 </div>
               )}
             </div>
-          </td>
-        </tr>
-      </CollapsibleContent>
-    </Collapsible>
+          </TableCell>
+        </TableRow>
+      )}
+    </>
   );
 }
 
