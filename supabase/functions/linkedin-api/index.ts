@@ -6505,31 +6505,82 @@ serve(async (req) => {
           const cplTrend = prev7Cpl > 0 ? ((last7Cpl - prev7Cpl) / prev7Cpl) * 100 : 0;
           const impressionTrend = prev7Impr > 0 ? ((last7Impr - prev7Impr) / prev7Impr) * 100 : 0;
 
-          // Detect fatigue signals
+          // Get campaign/objective info for this creative (needed for objective-specific fatigue detection)
+          const creativeMeta = creativeMetadata.get(creativeUrn);
+          const campaignUrn = creativeMeta?.campaignUrn || '';
+          const campaignId = campaignUrn.split(':').pop() || '';
+          const objectiveType = campaignUrn ? campaignObjectives.get(campaignUrn) || '' : '';
+
+          // Detect fatigue signals - OBJECTIVE-SPECIFIC LOGIC
           const signals: string[] = [];
           let status: 'healthy' | 'warning' | 'fatigued' = 'healthy';
+          let primaryMetric = 'CTR'; // Default primary metric
 
-          if (ctrTrend < -ctrDeclineThreshold) {
-            signals.push(`CTR declined ${Math.abs(ctrTrend).toFixed(0)}% (${prev7Ctr.toFixed(2)}% → ${last7Ctr.toFixed(2)}%)`);
-            status = ctrTrend < -ctrDeclineThreshold * 1.5 ? 'fatigued' : 'warning';
+          // Apply different thresholds and focus metrics based on campaign objective
+          if (objectiveType === 'LEAD_GENERATION') {
+            // Lead Generation: Focus primarily on CPL (Cost Per Lead)
+            primaryMetric = 'CPL';
+            const cplThreshold = cplIncreaseThreshold * 0.8; // More sensitive to CPL changes (24% instead of 30%)
+
+            if (cplTrend > cplThreshold && totalLeads > 0) {
+              signals.push(`CPL increased ${cplTrend.toFixed(0)}% ($${prev7Cpl.toFixed(0)} → $${last7Cpl.toFixed(0)}) - Lead costs rising`);
+              status = cplTrend > cplThreshold * 1.5 ? 'fatigued' : 'warning';
+            }
+            // Secondary check: CTR with higher tolerance
+            if (ctrTrend < -ctrDeclineThreshold * 1.25 && status !== 'fatigued') {
+              signals.push(`CTR declined ${Math.abs(ctrTrend).toFixed(0)}% (${prev7Ctr.toFixed(2)}% → ${last7Ctr.toFixed(2)}%)`);
+              if (status === 'healthy') status = 'warning';
+            }
+          } else if (objectiveType === 'ENGAGEMENT') {
+            // Engagement: Focus primarily on CTR (Click-Through Rate)
+            primaryMetric = 'CTR';
+            const ctrThreshold = ctrDeclineThreshold * 0.8; // More sensitive to CTR changes (16% instead of 20%)
+
+            if (ctrTrend < -ctrThreshold) {
+              signals.push(`CTR declined ${Math.abs(ctrTrend).toFixed(0)}% (${prev7Ctr.toFixed(2)}% → ${last7Ctr.toFixed(2)}%) - Engagement dropping`);
+              status = ctrTrend < -ctrThreshold * 1.5 ? 'fatigued' : 'warning';
+            }
+            // Secondary check: Impression trend
+            if (impressionTrend < -30 && status !== 'fatigued') {
+              signals.push(`Impressions dropped ${Math.abs(impressionTrend).toFixed(0)}% - Reach declining`);
+              if (status === 'healthy') status = 'warning';
+            }
+          } else {
+            // Default/Other objectives: Use balanced approach
+            if (ctrTrend < -ctrDeclineThreshold) {
+              signals.push(`CTR declined ${Math.abs(ctrTrend).toFixed(0)}% (${prev7Ctr.toFixed(2)}% → ${last7Ctr.toFixed(2)}%)`);
+              status = ctrTrend < -ctrDeclineThreshold * 1.5 ? 'fatigued' : 'warning';
+            }
+
+            if (cplTrend > cplIncreaseThreshold && totalLeads > 0) {
+              signals.push(`CPL increased ${cplTrend.toFixed(0)}% ($${prev7Cpl.toFixed(0)} → $${last7Cpl.toFixed(0)})`);
+              status = cplTrend > cplIncreaseThreshold * 1.5 ? 'fatigued' : status === 'fatigued' ? 'fatigued' : 'warning';
+            }
+
+            if (impressionTrend < -30 && last7Impr < 500) {
+              signals.push(`Impressions dropped ${Math.abs(impressionTrend).toFixed(0)}% - losing auction competitiveness`);
+              if (status !== 'fatigued') status = 'warning';
+            }
           }
 
-          if (cplTrend > cplIncreaseThreshold && totalLeads > 0) {
-            signals.push(`CPL increased ${cplTrend.toFixed(0)}% ($${prev7Cpl.toFixed(0)} → $${last7Cpl.toFixed(0)})`);
-            status = cplTrend > cplIncreaseThreshold * 1.5 ? 'fatigued' : status === 'fatigued' ? 'fatigued' : 'warning';
-          }
-
-          if (impressionTrend < -30 && last7Impr < 500) {
-            signals.push(`Impressions dropped ${Math.abs(impressionTrend).toFixed(0)}% - losing auction competitiveness`);
-            if (status !== 'fatigued') status = 'warning';
-          }
-
-          // Generate recommendation
+          // Generate objective-specific recommendation
           let recommendation = 'Creative performing well - no action needed';
           if (status === 'fatigued') {
-            recommendation = 'Consider pausing this creative and launching new variants';
+            if (objectiveType === 'LEAD_GENERATION') {
+              recommendation = 'Lead costs too high - pause and test new creative variants with different messaging';
+            } else if (objectiveType === 'ENGAGEMENT') {
+              recommendation = 'Engagement declining - refresh creative with new visuals or copy';
+            } else {
+              recommendation = 'Consider pausing this creative and launching new variants';
+            }
           } else if (status === 'warning') {
-            recommendation = 'Monitor closely - prepare replacement creative';
+            if (objectiveType === 'LEAD_GENERATION') {
+              recommendation = 'Monitor CPL closely - prepare replacement creative optimized for leads';
+            } else if (objectiveType === 'ENGAGEMENT') {
+              recommendation = 'Monitor CTR closely - prepare replacement creative to maintain engagement';
+            } else {
+              recommendation = 'Monitor closely - prepare replacement creative';
+            }
           }
 
           // Daily CTR/CPL for charts
@@ -6540,17 +6591,12 @@ serve(async (req) => {
             impressions: d.impressions,
           }));
 
-          // Get campaign/objective info for this creative
-          const creativeMeta = creativeMetadata.get(creativeUrn);
-          const campaignUrn = creativeMeta?.campaignUrn || '';
-          const campaignId = campaignUrn.split(':').pop() || '';
-          const objectiveType = campaignUrn ? campaignObjectives.get(campaignUrn) || '' : '';
-
           fatigueAnalysis.push({
             creativeId: creativeUrn.split(':').pop() || '',
             creativeName: creativeNames.get(creativeUrn) || `Creative ${creativeUrn.split(':').pop()}`,
             campaignId,
             objectiveType,
+            primaryMetric,
             status,
             signals,
             metrics: {

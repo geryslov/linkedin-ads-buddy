@@ -14,6 +14,7 @@ export interface CreativeFatigueItem {
   campaignId?: string;
   campaignName?: string;
   objectiveType?: string;
+  primaryMetric?: string; // CPL for Lead Gen, CTR for Engagement
   status: 'healthy' | 'warning' | 'fatigued';
   signals: string[];
   metrics: {
