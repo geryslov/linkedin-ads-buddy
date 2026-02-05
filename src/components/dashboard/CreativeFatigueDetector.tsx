@@ -1,9 +1,9 @@
-import { useEffect } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { RefreshCw, AlertTriangle, AlertCircle, CheckCircle, TrendingDown, TrendingUp } from 'lucide-react';
+import { RefreshCw, AlertTriangle, AlertCircle, CheckCircle, TrendingDown, TrendingUp, ChevronDown, ChevronRight } from 'lucide-react';
 import { useCreativeFatigue, CreativeFatigueItem } from '@/hooks/useCreativeFatigue';
 import { TimeFrameSelector } from './TimeFrameSelector';
 import {
@@ -15,6 +15,13 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
   LineChart,
   Line,
   XAxis,
@@ -23,12 +30,23 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from 'recharts';
-import { useState } from 'react';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+
+type ObjectiveFilter = 'all' | 'LEAD_GENERATION' | 'ENGAGEMENT';
+
+const OBJECTIVE_OPTIONS: { value: ObjectiveFilter; label: string; focusMetric: string }[] = [
+  { value: 'all', label: 'All Objectives', focusMetric: 'CTR & CPL' },
+  { value: 'LEAD_GENERATION', label: 'Lead Generation', focusMetric: 'CPL' },
+  { value: 'ENGAGEMENT', label: 'Engagement', focusMetric: 'CTR' },
+];
 
 interface CreativeFatigueDetectorProps {
   accessToken: string | null;
   selectedAccount: string | null;
+}
+
+interface CreativeRowProps {
+  creative: CreativeFatigueItem;
+  objectiveFilter: ObjectiveFilter;
 }
 
 function StatusBadge({ status }: { status: 'healthy' | 'warning' | 'fatigued' }) {
@@ -69,8 +87,18 @@ function TrendIndicator({ value, inverted = false }: { value: number; inverted?:
   );
 }
 
-function CreativeRow({ creative }: { creative: CreativeFatigueItem }) {
+function CreativeRow({ creative, objectiveFilter }: CreativeRowProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const showCpl = objectiveFilter === 'all' || objectiveFilter === 'LEAD_GENERATION';
+  const showCtr = objectiveFilter === 'all' || objectiveFilter === 'ENGAGEMENT';
+  const colSpan = 6 + (showCtr ? 2 : 0) + (showCpl ? 2 : 0);
+
+  // Determine which chart to show based on objective
+  const chartMetric = objectiveFilter === 'LEAD_GENERATION' ? 'cpl' : 'ctr';
+  const chartLabel = objectiveFilter === 'LEAD_GENERATION' ? 'CPL' : 'CTR';
+  const chartFormatter = objectiveFilter === 'LEAD_GENERATION' 
+    ? (value: number) => [`$${value.toFixed(2)}`, 'CPL']
+    : (value: number) => [`${value.toFixed(2)}%`, 'CTR'];
 
   return (
     <>
@@ -83,26 +111,34 @@ function CreativeRow({ creative }: { creative: CreativeFatigueItem }) {
         <TableCell className="w-24">
           <StatusBadge status={creative.status} />
         </TableCell>
-        <TableCell className="w-48 font-medium truncate" title={creative.creativeName}>
+        <TableCell className="font-medium truncate max-w-[200px]" title={creative.creativeName}>
           {creative.creativeName}
         </TableCell>
-        <TableCell className="w-28 text-right">{creative.metrics.totalImpressions.toLocaleString()}</TableCell>
-        <TableCell className="w-24 text-right">${creative.metrics.totalSpend.toFixed(2)}</TableCell>
-        <TableCell className="w-16 text-right">{creative.metrics.totalLeads}</TableCell>
-        <TableCell className="w-16 text-right">{creative.metrics.avgCtr.toFixed(2)}%</TableCell>
-        <TableCell className="w-24 text-right">
-          <TrendIndicator value={creative.metrics.ctrTrend} />
-        </TableCell>
-        <TableCell className="w-20 text-right">
-          {creative.metrics.totalLeads > 0 ? `$${creative.metrics.avgCpl.toFixed(2)}` : '-'}
-        </TableCell>
-        <TableCell className="w-24 text-right">
-          {creative.metrics.totalLeads > 0 ? <TrendIndicator value={creative.metrics.cplTrend} inverted /> : '-'}
-        </TableCell>
+        <TableCell className="text-right">{creative.metrics.totalImpressions.toLocaleString()}</TableCell>
+        <TableCell className="text-right">${creative.metrics.totalSpend.toFixed(2)}</TableCell>
+        <TableCell className="text-right">{creative.metrics.totalLeads}</TableCell>
+        {showCtr && (
+          <>
+            <TableCell className="text-right">{creative.metrics.avgCtr.toFixed(2)}%</TableCell>
+            <TableCell className="text-right">
+              <TrendIndicator value={creative.metrics.ctrTrend} />
+            </TableCell>
+          </>
+        )}
+        {showCpl && (
+          <>
+            <TableCell className="text-right">
+              {creative.metrics.totalLeads > 0 ? `$${creative.metrics.avgCpl.toFixed(2)}` : '-'}
+            </TableCell>
+            <TableCell className="text-right">
+              {creative.metrics.totalLeads > 0 ? <TrendIndicator value={creative.metrics.cplTrend} inverted /> : '-'}
+            </TableCell>
+          </>
+        )}
       </TableRow>
       {isOpen && (
         <TableRow>
-          <TableCell colSpan={10} className="p-0">
+          <TableCell colSpan={colSpan} className="p-0">
             <div className="bg-muted/30 p-4 space-y-4">
               {/* Signals */}
               {creative.signals.length > 0 && (
@@ -111,7 +147,7 @@ function CreativeRow({ creative }: { creative: CreativeFatigueItem }) {
                   <ul className="space-y-1">
                     {creative.signals.map((signal, i) => (
                       <li key={i} className="text-sm text-muted-foreground flex items-center gap-2">
-                        <AlertCircle className="h-3 w-3 text-yellow-600" />
+                        <AlertCircle className="h-3 w-3 text-destructive" />
                         {signal}
                       </li>
                     ))}
@@ -124,10 +160,10 @@ function CreativeRow({ creative }: { creative: CreativeFatigueItem }) {
                 <p className="text-sm"><strong>Recommendation:</strong> {creative.recommendation}</p>
               </div>
 
-              {/* CTR Trend Chart */}
+              {/* Trend Chart - show CPL for lead gen, CTR for engagement */}
               {creative.dailyData.length > 0 && (
                 <div>
-                  <h4 className="text-sm font-medium mb-2">CTR Trend (Last 30 Days)</h4>
+                  <h4 className="text-sm font-medium mb-2">{chartLabel} Trend (Last 30 Days)</h4>
                   <ResponsiveContainer width="100%" height={150}>
                     <LineChart data={creative.dailyData}>
                       <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
@@ -135,9 +171,9 @@ function CreativeRow({ creative }: { creative: CreativeFatigueItem }) {
                       <YAxis tick={{ fontSize: 10 }} />
                       <Tooltip
                         contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))' }}
-                        formatter={(value: number) => [`${value.toFixed(2)}%`, 'CTR']}
+                        formatter={chartFormatter}
                       />
-                      <Line type="monotone" dataKey="ctr" stroke="hsl(var(--primary))" strokeWidth={2} dot={false} />
+                      <Line type="monotone" dataKey={chartMetric} stroke="hsl(var(--primary))" strokeWidth={2} dot={false} />
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
@@ -151,6 +187,8 @@ function CreativeRow({ creative }: { creative: CreativeFatigueItem }) {
 }
 
 export function CreativeFatigueDetector({ accessToken, selectedAccount }: CreativeFatigueDetectorProps) {
+  const [objectiveFilter, setObjectiveFilter] = useState<ObjectiveFilter>('all');
+  
   const {
     data,
     isLoading,
@@ -158,10 +196,24 @@ export function CreativeFatigueDetector({ accessToken, selectedAccount }: Creati
     fetchCreativeFatigue,
     dateRange,
     setDateRange,
-    fatiguedCreatives,
-    warningCreatives,
-    healthyCreatives,
   } = useCreativeFatigue(accessToken);
+
+  // Filter creatives by objective
+  const filteredCreatives = useMemo(() => {
+    if (!data?.creatives) return [];
+    if (objectiveFilter === 'all') return data.creatives;
+    return data.creatives.filter(c => c.objectiveType === objectiveFilter);
+  }, [data?.creatives, objectiveFilter]);
+
+  // Compute summary from filtered creatives
+  const filteredSummary = useMemo(() => {
+    return {
+      total: filteredCreatives.length,
+      fatigued: filteredCreatives.filter(c => c.status === 'fatigued').length,
+      warning: filteredCreatives.filter(c => c.status === 'warning').length,
+      healthy: filteredCreatives.filter(c => c.status === 'healthy').length,
+    };
+  }, [filteredCreatives]);
 
   useEffect(() => {
     if (selectedAccount) {
@@ -190,6 +242,10 @@ export function CreativeFatigueDetector({ accessToken, selectedAccount }: Creati
     });
   };
 
+  const showCpl = objectiveFilter === 'all' || objectiveFilter === 'LEAD_GENERATION';
+  const showCtr = objectiveFilter === 'all' || objectiveFilter === 'ENGAGEMENT';
+  const focusMetricLabel = OBJECTIVE_OPTIONS.find(o => o.value === objectiveFilter)?.focusMetric || 'CTR & CPL';
+
   if (isLoading) {
     return (
       <div className="space-y-4">
@@ -215,20 +271,39 @@ export function CreativeFatigueDetector({ accessToken, selectedAccount }: Creati
       <Card className="bg-card/50 backdrop-blur-sm border-border/50">
         <CardContent className="pt-4">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-            <TimeFrameSelector
-              timeFrameOptions={timeFrameOptions}
-              selectedTimeFrame="last_30_days"
-              onTimeFrameChange={handleTimeFrameChange}
-              timeGranularity="ALL"
-              onGranularityChange={() => {}}
-              dateRange={dateRange}
-              onCustomDateChange={(start, end) => {
-                setDateRange({
-                  start: start.toISOString().split('T')[0],
-                  end: end.toISOString().split('T')[0],
-                });
-              }}
-            />
+            <div className="flex flex-wrap items-center gap-3">
+              <TimeFrameSelector
+                timeFrameOptions={timeFrameOptions}
+                selectedTimeFrame="last_30_days"
+                onTimeFrameChange={handleTimeFrameChange}
+                timeGranularity="ALL"
+                onGranularityChange={() => {}}
+                dateRange={dateRange}
+                onCustomDateChange={(start, end) => {
+                  setDateRange({
+                    start: start.toISOString().split('T')[0],
+                    end: end.toISOString().split('T')[0],
+                  });
+                }}
+              />
+              <Select value={objectiveFilter} onValueChange={(v) => setObjectiveFilter(v as ObjectiveFilter)}>
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue placeholder="Filter by Objective" />
+                </SelectTrigger>
+                <SelectContent>
+                  {OBJECTIVE_OPTIONS.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {objectiveFilter !== 'all' && (
+                <Badge variant="secondary" className="text-xs">
+                  Focus: {focusMetricLabel}
+                </Badge>
+              )}
+            </div>
             <Button variant="outline" onClick={handleRefresh}>
               <RefreshCw className="h-4 w-4 mr-2" />
               Refresh
@@ -242,25 +317,25 @@ export function CreativeFatigueDetector({ accessToken, selectedAccount }: Creati
         <Card className="bg-card/50">
           <CardContent className="pt-4">
             <div className="text-xs text-muted-foreground">Total Analyzed</div>
-            <div className="text-2xl font-bold">{data?.summary?.total || 0}</div>
+            <div className="text-2xl font-bold">{filteredSummary.total}</div>
           </CardContent>
         </Card>
-        <Card className="bg-red-50 dark:bg-red-950 border-red-200 dark:border-red-800">
+        <Card className="bg-destructive/10 border-destructive/30">
           <CardContent className="pt-4">
-            <div className="text-xs text-red-600 dark:text-red-400">Fatigued</div>
-            <div className="text-2xl font-bold text-red-700 dark:text-red-300">{data?.summary?.fatigued || 0}</div>
+            <div className="text-xs text-destructive">Fatigued</div>
+            <div className="text-2xl font-bold text-destructive">{filteredSummary.fatigued}</div>
           </CardContent>
         </Card>
-        <Card className="bg-yellow-50 dark:bg-yellow-950 border-yellow-200 dark:border-yellow-800">
+        <Card className="bg-secondary border-secondary">
           <CardContent className="pt-4">
-            <div className="text-xs text-yellow-600 dark:text-yellow-400">Warning</div>
-            <div className="text-2xl font-bold text-yellow-700 dark:text-yellow-300">{data?.summary?.warning || 0}</div>
+            <div className="text-xs text-muted-foreground">Warning</div>
+            <div className="text-2xl font-bold">{filteredSummary.warning}</div>
           </CardContent>
         </Card>
-        <Card className="bg-green-50 dark:bg-green-950 border-green-200 dark:border-green-800">
+        <Card className="bg-accent border-accent">
           <CardContent className="pt-4">
-            <div className="text-xs text-green-600 dark:text-green-400">Healthy</div>
-            <div className="text-2xl font-bold text-green-700 dark:text-green-300">{data?.summary?.healthy || 0}</div>
+            <div className="text-xs text-muted-foreground">Healthy</div>
+            <div className="text-2xl font-bold">{filteredSummary.healthy}</div>
           </CardContent>
         </Card>
       </div>
@@ -274,29 +349,38 @@ export function CreativeFatigueDetector({ accessToken, selectedAccount }: Creati
           </CardTitle>
           <CardDescription>
             Creatives showing declining performance over time. Click a row to see details and trends.
+            {objectiveFilter !== 'all' && ` Filtered by ${OBJECTIVE_OPTIONS.find(o => o.value === objectiveFilter)?.label}.`}
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {data?.creatives && data.creatives.length > 0 ? (
-            <div className="rounded-md border">
-              <Table className="table-fixed w-full">
+          {filteredCreatives.length > 0 ? (
+            <div className="rounded-md border overflow-x-auto">
+              <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-10"></TableHead>
                     <TableHead className="w-24">Status</TableHead>
-                    <TableHead className="w-48">Creative</TableHead>
-                    <TableHead className="w-28 text-right">Impressions</TableHead>
-                    <TableHead className="w-24 text-right">Spend</TableHead>
-                    <TableHead className="w-16 text-right">Leads</TableHead>
-                    <TableHead className="w-16 text-right">CTR</TableHead>
-                    <TableHead className="w-24 text-right">CTR Trend</TableHead>
-                    <TableHead className="w-20 text-right">CPL</TableHead>
-                    <TableHead className="w-24 text-right">CPL Trend</TableHead>
+                    <TableHead>Creative</TableHead>
+                    <TableHead className="text-right">Impressions</TableHead>
+                    <TableHead className="text-right">Spend</TableHead>
+                    <TableHead className="text-right">Leads</TableHead>
+                    {showCtr && (
+                      <>
+                        <TableHead className="text-right">CTR</TableHead>
+                        <TableHead className="text-right">CTR Trend</TableHead>
+                      </>
+                    )}
+                    {showCpl && (
+                      <>
+                        <TableHead className="text-right">CPL</TableHead>
+                        <TableHead className="text-right">CPL Trend</TableHead>
+                      </>
+                    )}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {data.creatives.map((creative) => (
-                    <CreativeRow key={creative.creativeId} creative={creative} />
+                  {filteredCreatives.map((creative) => (
+                    <CreativeRow key={creative.creativeId} creative={creative} objectiveFilter={objectiveFilter} />
                   ))}
                 </TableBody>
               </Table>
