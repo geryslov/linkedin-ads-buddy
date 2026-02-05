@@ -11,6 +11,9 @@ export interface CreativeDailyData {
 export interface CreativeFatigueItem {
   creativeId: string;
   creativeName: string;
+  campaignId?: string;
+  campaignName?: string;
+  objectiveType?: string;
   status: 'healthy' | 'warning' | 'fatigued';
   signals: string[];
   metrics: {

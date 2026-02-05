@@ -6270,7 +6270,7 @@ serve(async (req) => {
 
         // Step 2: Fetch creative names using multi-stage resolution (matching creative report approach)
         const creativeNames = new Map<string, string>();
-        const creativeMetadata = new Map<string, { name: string; reference: string }>();
+        const creativeMetadata = new Map<string, { name: string; reference: string; campaignUrn: string }>();
         const creativeUrns = Array.from(creativeDaily.keys());
         console.log(`[get_creative_fatigue] Need names for ${creativeUrns.length} creatives`);
 
@@ -6293,8 +6293,9 @@ serve(async (req) => {
               const creativeId = creative.id?.toString() || '';
               const name = creative.name || creative.creativeDscName || '';
               const reference = creative.reference || '';
+              const campaignUrn = creative.campaign || '';
               const urn = `urn:li:sponsoredCreative:${creativeId}`;
-              creativeMetadata.set(urn, { name, reference });
+              creativeMetadata.set(urn, { name, reference, campaignUrn });
               
               if (name) {
                 creativeNames.set(urn, name);
@@ -6336,9 +6337,13 @@ serve(async (req) => {
                   creativeNames.set(creativeUrn, creativeDetail.name);
                   namesResolved++;
                 }
-                // Store reference for share/ugc fallback
-                if (creativeDetail.reference && !creativeMetadata.has(creativeUrn)) {
-                  creativeMetadata.set(creativeUrn, { name: creativeDetail.name || '', reference: creativeDetail.reference });
+                // Store reference and campaign for share/ugc fallback
+                if (!creativeMetadata.has(creativeUrn)) {
+                  creativeMetadata.set(creativeUrn, { 
+                    name: creativeDetail.name || '', 
+                    reference: creativeDetail.reference || '',
+                    campaignUrn: creativeDetail.campaign || ''
+                  });
                 }
               }
             } catch (err) {
@@ -6402,10 +6407,48 @@ serve(async (req) => {
 
         console.log(`[get_creative_fatigue] FINAL: Resolved ${namesResolved} creative names out of ${creativeUrns.length}`);
 
+        // Step 2D: Fetch campaign objectives for filtering
+        const campaignObjectives = new Map<string, string>();
+        const uniqueCampaignUrns = new Set<string>();
+        for (const meta of creativeMetadata.values()) {
+          if (meta.campaignUrn) uniqueCampaignUrns.add(meta.campaignUrn);
+        }
+        console.log(`[get_creative_fatigue] Found ${uniqueCampaignUrns.size} unique campaigns to fetch objectives`);
+
+        // Batch fetch campaign metadata
+        if (uniqueCampaignUrns.size > 0) {
+          try {
+            const campaignsUrl = `https://api.linkedin.com/rest/adAccounts/${accountId}/adCampaigns?q=search&search.status.values[0]=ACTIVE&search.status.values[1]=PAUSED&search.status.values[2]=ARCHIVED&count=500`;
+            const campaignsResp = await fetch(campaignsUrl, {
+              headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'LinkedIn-Version': '202511',
+                'X-Restli-Protocol-Version': '2.0.0'
+              }
+            });
+
+            if (campaignsResp.ok) {
+              const campaignsData = await campaignsResp.json();
+              for (const campaign of (campaignsData.elements || [])) {
+                const campaignUrn = `urn:li:sponsoredCampaign:${campaign.id}`;
+                const objectiveType = campaign.objectiveType || campaign.type || '';
+                if (objectiveType) {
+                  campaignObjectives.set(campaignUrn, objectiveType);
+                }
+              }
+              console.log(`[get_creative_fatigue] Got objectives for ${campaignObjectives.size} campaigns`);
+            }
+          } catch (err) {
+            console.error('[get_creative_fatigue] Campaign objectives fetch error:', err);
+          }
+        }
+
         // Step 3: Analyze each creative for fatigue signals
         const fatigueAnalysis: Array<{
           creativeId: string;
           creativeName: string;
+          campaignId?: string;
+          objectiveType?: string;
           status: 'healthy' | 'warning' | 'fatigued';
           signals: string[];
           metrics: {
@@ -6497,9 +6540,17 @@ serve(async (req) => {
             impressions: d.impressions,
           }));
 
+          // Get campaign/objective info for this creative
+          const creativeMeta = creativeMetadata.get(creativeUrn);
+          const campaignUrn = creativeMeta?.campaignUrn || '';
+          const campaignId = campaignUrn.split(':').pop() || '';
+          const objectiveType = campaignUrn ? campaignObjectives.get(campaignUrn) || '' : '';
+
           fatigueAnalysis.push({
             creativeId: creativeUrn.split(':').pop() || '',
             creativeName: creativeNames.get(creativeUrn) || `Creative ${creativeUrn.split(':').pop()}`,
+            campaignId,
+            objectiveType,
             status,
             signals,
             metrics: {
