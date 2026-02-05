@@ -6268,33 +6268,64 @@ serve(async (req) => {
 
         console.log(`[get_creative_fatigue] Found ${creativeDaily.size} creatives with daily data`);
 
-        // Step 2: Fetch creative names via REST API individual lookup (this works reliably)
+        // Step 2: Fetch creative names using multi-stage resolution (matching creative report approach)
         const creativeNames = new Map<string, string>();
-
-        // Get the list of creative URNs we need names for
+        const creativeMetadata = new Map<string, { name: string; reference: string }>();
         const creativeUrns = Array.from(creativeDaily.keys());
         console.log(`[get_creative_fatigue] Need names for ${creativeUrns.length} creatives`);
 
-        // Fetch names via REST API individual creative lookup
-        const batchSize = 10;
         let namesResolved = 0;
 
-        for (let i = 0; i < creativeUrns.length; i += batchSize) {
-          const batch = creativeUrns.slice(i, i + batchSize);
+        // Step 2A: Try batch fetch from adCreativesV2 API first (fast batch fetch)
+        try {
+          const batchUrl = `https://api.linkedin.com/v2/adCreativesV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=500`;
+          const batchResp = await fetch(batchUrl, {
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+              'LinkedIn-Version': '202511',
+              'X-Restli-Protocol-Version': '2.0.0'
+            }
+          });
+
+          if (batchResp.ok) {
+            const batchData = await batchResp.json();
+            for (const creative of (batchData.elements || [])) {
+              const creativeId = creative.id?.toString() || '';
+              const name = creative.name || creative.creativeDscName || '';
+              const reference = creative.reference || '';
+              const urn = `urn:li:sponsoredCreative:${creativeId}`;
+              creativeMetadata.set(urn, { name, reference });
+              
+              if (name) {
+                creativeNames.set(urn, name);
+                namesResolved++;
+              }
+            }
+            console.log(`[get_creative_fatigue] adCreativesV2 batch: got metadata for ${creativeMetadata.size} creatives, ${namesResolved} with names`);
+          } else {
+            console.log(`[get_creative_fatigue] adCreativesV2 batch returned ${batchResp.status}`);
+          }
+        } catch (err) {
+          console.error('[get_creative_fatigue] adCreativesV2 batch fetch error:', err);
+        }
+
+        // Step 2B: Individual REST API lookup for creatives without names
+        const needsLookup = creativeUrns.filter(urn => !creativeNames.has(urn));
+        console.log(`[get_creative_fatigue] Need individual lookup for ${needsLookup.length} creatives`);
+
+        const batchSize = 10;
+        for (let i = 0; i < needsLookup.length && i < 50; i += batchSize) {
+          const batch = needsLookup.slice(i, i + batchSize);
 
           await Promise.all(batch.map(async (creativeUrn) => {
             try {
-              const creativeId = creativeUrn.split(':').pop() || '';
-              if (!creativeId) return;
-
-              // Use REST API endpoint which returns the name field
               const encodedUrn = encodeURIComponent(creativeUrn);
               const creativeUrl = `https://api.linkedin.com/rest/adAccounts/${accountId}/creatives/${encodedUrn}`;
 
               const creativeResp = await fetch(creativeUrl, {
                 headers: {
                   'Authorization': `Bearer ${accessToken}`,
-                  'LinkedIn-Version': '202501',
+                  'LinkedIn-Version': '202511',
                   'X-Restli-Protocol-Version': '2.0.0'
                 }
               });
@@ -6305,6 +6336,10 @@ serve(async (req) => {
                   creativeNames.set(creativeUrn, creativeDetail.name);
                   namesResolved++;
                 }
+                // Store reference for share/ugc fallback
+                if (creativeDetail.reference && !creativeMetadata.has(creativeUrn)) {
+                  creativeMetadata.set(creativeUrn, { name: creativeDetail.name || '', reference: creativeDetail.reference });
+                }
               }
             } catch (err) {
               // Silently continue on error
@@ -6312,7 +6347,60 @@ serve(async (req) => {
           }));
         }
 
-        console.log(`[get_creative_fatigue] Resolved ${namesResolved} creative names via REST API`);
+        console.log(`[get_creative_fatigue] After REST lookups: ${namesResolved} names resolved`);
+
+        // Step 2C: Share/UGC text fallback for creatives with reference but no name
+        const needsShareFallback = creativeUrns.filter(urn => {
+          if (creativeNames.has(urn)) return false;
+          const meta = creativeMetadata.get(urn);
+          return meta?.reference && (meta.reference.includes('share') || meta.reference.includes('ugcPost'));
+        });
+
+        console.log(`[get_creative_fatigue] Trying share/UGC fallback for ${needsShareFallback.length} creatives`);
+
+        for (let i = 0; i < needsShareFallback.length && i < 30; i += 5) {
+          const batch = needsShareFallback.slice(i, i + 5);
+
+          await Promise.all(batch.map(async (creativeUrn) => {
+            const meta = creativeMetadata.get(creativeUrn);
+            if (!meta?.reference) return;
+
+            try {
+              const isUgc = meta.reference.includes('ugcPost');
+              const endpoint = isUgc
+                ? `https://api.linkedin.com/v2/ugcPosts/${encodeURIComponent(meta.reference)}`
+                : `https://api.linkedin.com/v2/shares/${encodeURIComponent(meta.reference)}`;
+
+              const resp = await fetch(endpoint, {
+                headers: {
+                  'Authorization': `Bearer ${accessToken}`,
+                  'LinkedIn-Version': '202511',
+                  'X-Restli-Protocol-Version': '2.0.0'
+                }
+              });
+
+              if (resp.ok) {
+                const data = await resp.json();
+                let text = '';
+                if (isUgc) {
+                  text = data.specificContent?.['com.linkedin.ugc.ShareContent']?.shareCommentary?.text || '';
+                } else {
+                  text = data.text?.text || '';
+                }
+                if (text) {
+                  // Truncate to first 60 chars
+                  const truncatedText = text.slice(0, 60) + (text.length > 60 ? '...' : '');
+                  creativeNames.set(creativeUrn, truncatedText);
+                  namesResolved++;
+                }
+              }
+            } catch (e) {
+              // Continue on error
+            }
+          }));
+        }
+
+        console.log(`[get_creative_fatigue] FINAL: Resolved ${namesResolved} creative names out of ${creativeUrns.length}`);
 
         // Step 3: Analyze each creative for fatigue signals
         const fatigueAnalysis: Array<{
@@ -7033,7 +7121,7 @@ serve(async (req) => {
           }
           
           // Only mark as failed if ALL lookups failed with 403
-          if (successCount === 0 && failCount > 0 && namesResolutionFailed) {
+          if (successCount === 0 && namesResolutionFailed) {
             namesResolutionError = 'All organization lookups returned 403 Forbidden';
           } else if (successCount > 0) {
             namesResolutionFailed = false;
@@ -7499,7 +7587,7 @@ serve(async (req) => {
           
           // Only mark as failed if we have NO names at all (from cache or API)
           const totalNamesResolved = companyNames.size;
-          if (totalNamesResolved === 0 && failCount > 0) {
+          if (totalNamesResolved === 0 && namesResolutionFailed) {
             namesResolutionFailed = true;
             namesResolutionError = 'All organization lookups returned 403 Forbidden and no cached names available';
           } else if (totalNamesResolved > 0) {
