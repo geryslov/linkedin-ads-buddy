@@ -11,9 +11,9 @@ import {
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { ArrowUpDown, Search, Building2, ExternalLink, Globe, AlertCircle, CheckCircle } from 'lucide-react';
+import { ArrowUpDown, Search, Building2, ExternalLink, Globe, AlertCircle, CheckCircle, ChevronRight, ChevronDown, Target } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
-import { CompanyDemographicItem } from '@/hooks/useCompanyDemographic';
+import { CompanyDemographicItem, ObjectiveBreakdownItem } from '@/hooks/useCompanyDemographic';
 
 interface CompanyDemographicTableProps {
   data: CompanyDemographicItem[];
@@ -23,10 +23,25 @@ interface CompanyDemographicTableProps {
 type SortField = 'entityName' | 'impressions' | 'clicks' | 'spent' | 'leads' | 'ctr' | 'cpc' | 'cpm' | 'enrichmentStatus';
 type SortDirection = 'asc' | 'desc';
 
+const OBJECTIVE_LABELS: Record<string, string> = {
+  LEAD_GENERATION: 'Lead Generation',
+  ENGAGEMENT: 'Engagement',
+  BRAND_AWARENESS: 'Brand Awareness',
+  WEBSITE_VISITS: 'Website Visits',
+  VIDEO_VIEWS: 'Video Views',
+  JOB_APPLICANTS: 'Job Applicants',
+  WEBSITE_CONVERSIONS: 'Website Conversions',
+};
+
+function formatObjective(objective: string): string {
+  return OBJECTIVE_LABELS[objective] || objective.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
 export function CompanyDemographicTable({ data, isLoading }: CompanyDemographicTableProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [sortField, setSortField] = useState<SortField>('impressions');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -35,6 +50,18 @@ export function CompanyDemographicTable({ data, isLoading }: CompanyDemographicT
       setSortField(field);
       setSortDirection('desc');
     }
+  };
+
+  const toggleRow = (entityUrn: string) => {
+    setExpandedRows(prev => {
+      const next = new Set(prev);
+      if (next.has(entityUrn)) {
+        next.delete(entityUrn);
+      } else {
+        next.add(entityUrn);
+      }
+      return next;
+    });
   };
 
   const filteredAndSortedData = useMemo(() => {
@@ -194,66 +221,123 @@ export function CompanyDemographicTable({ data, isLoading }: CompanyDemographicT
                 </TableCell>
               </TableRow>
             ) : (
-              filteredAndSortedData.map((item, index) => (
-                <TableRow key={item.entityUrn || index} className="hover:bg-muted/20">
-                  <TableCell className="font-medium">
-                    <div className="flex items-center gap-2">
-                      <Building2 className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                      <span className="truncate max-w-[160px]" title={item.entityName}>
-                        {item.entityName}
-                      </span>
-                      {item.linkedInUrl && (
-                        <a 
-                          href={item.linkedInUrl} 
-                          target="_blank" 
-                          rel="noopener noreferrer"
-                          className="text-primary hover:text-primary/80"
-                        >
-                          <ExternalLink className="h-3 w-3" />
-                        </a>
-                      )}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    {item.website ? (
-                      <a 
-                        href={item.website.startsWith('http') ? item.website : `https://${item.website}`} 
-                        target="_blank" 
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-1 text-primary hover:underline text-sm"
+              filteredAndSortedData.map((item, index) => {
+                const isExpanded = expandedRows.has(item.entityUrn);
+                const hasBreakdown = item.objectiveBreakdown && item.objectiveBreakdown.length > 0;
+                
+                return (
+                  <>
+                    <TableRow 
+                      key={item.entityUrn || index} 
+                      className={`hover:bg-muted/20 ${hasBreakdown ? 'cursor-pointer' : ''} ${isExpanded ? 'bg-muted/10' : ''}`}
+                      onClick={() => hasBreakdown && toggleRow(item.entityUrn)}
+                    >
+                      <TableCell className="font-medium">
+                        <div className="flex items-center gap-2">
+                          {hasBreakdown ? (
+                            isExpanded ? (
+                              <ChevronDown className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                            ) : (
+                              <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                            )
+                          ) : (
+                            <Building2 className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                          )}
+                          <span className="truncate max-w-[160px]" title={item.entityName}>
+                            {item.entityName}
+                          </span>
+                          {item.linkedInUrl && (
+                            <a 
+                              href={item.linkedInUrl} 
+                              target="_blank" 
+                              rel="noopener noreferrer"
+                              className="text-primary hover:text-primary/80"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <ExternalLink className="h-3 w-3" />
+                            </a>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        {item.website ? (
+                          <a 
+                            href={item.website.startsWith('http') ? item.website : `https://${item.website}`} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-1 text-primary hover:underline text-sm"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <Globe className="h-3 w-3 flex-shrink-0" />
+                            <span className="truncate max-w-[120px]">
+                              {item.website.replace(/^https?:\/\//, '')}
+                            </span>
+                          </a>
+                        ) : (
+                          getStatusBadge(item.enrichmentStatus)
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {item.impressions.toLocaleString()}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {item.clicks.toLocaleString()}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        ${item.spent.toFixed(2)}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {item.leads.toLocaleString()}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {item.ctr.toFixed(2)}%
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        ${item.cpc.toFixed(2)}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        ${item.cpm.toFixed(2)}
+                      </TableCell>
+                    </TableRow>
+                    {isExpanded && hasBreakdown && item.objectiveBreakdown!.map((breakdown, bIdx) => (
+                      <TableRow 
+                        key={`${item.entityUrn}-obj-${bIdx}`} 
+                        className="bg-muted/5 hover:bg-muted/15 border-l-2 border-l-primary/20"
                       >
-                        <Globe className="h-3 w-3 flex-shrink-0" />
-                        <span className="truncate max-w-[120px]">
-                          {item.website.replace(/^https?:\/\//, '')}
-                        </span>
-                      </a>
-                    ) : (
-                      getStatusBadge(item.enrichmentStatus)
-                    )}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {item.impressions.toLocaleString()}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {item.clicks.toLocaleString()}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    ${item.spent.toFixed(2)}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {item.leads.toLocaleString()}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {item.ctr.toFixed(2)}%
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    ${item.cpc.toFixed(2)}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    ${item.cpm.toFixed(2)}
-                  </TableCell>
-                </TableRow>
-              ))
+                        <TableCell colSpan={2} className="pl-10">
+                          <div className="flex items-center gap-2">
+                            <Target className="h-3.5 w-3.5 text-primary/60 flex-shrink-0" />
+                            <span className="text-sm text-muted-foreground">
+                              {formatObjective(breakdown.objective)}
+                            </span>
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums text-sm text-muted-foreground">
+                          {breakdown.impressions.toLocaleString()}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums text-sm text-muted-foreground">
+                          {breakdown.clicks.toLocaleString()}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums text-sm text-muted-foreground">
+                          ${breakdown.spent.toFixed(2)}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums text-sm text-muted-foreground">
+                          {breakdown.leads.toLocaleString()}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums text-sm text-muted-foreground">
+                          {breakdown.ctr.toFixed(2)}%
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums text-sm text-muted-foreground">
+                          ${breakdown.cpc.toFixed(2)}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums text-sm text-muted-foreground">
+                          ${breakdown.cpm.toFixed(2)}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </>
+                );
+              })
             )}
           </TableBody>
           {filteredAndSortedData.length > 0 && (

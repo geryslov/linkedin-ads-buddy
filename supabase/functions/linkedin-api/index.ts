@@ -2313,6 +2313,144 @@ serve(async (req) => {
           }
         }
 
+        // Step 4: Fetch campaigns to build objective breakdown
+        let objectiveBreakdownMap = new Map<string, Array<{ objective: string; impressions: number; clicks: number; spent: number; leads: number }>>();
+        
+        try {
+          console.log(`[get_company_demographic] Step 4: Fetching campaigns for objective breakdown...`);
+          
+          // Fetch all campaigns with pagination
+          const allCampaigns: any[] = [];
+          let campStart = 0;
+          const campPageSize = 500;
+          let hasMoreCamps = true;
+          
+          while (hasMoreCamps) {
+            const campUrl = `https://api.linkedin.com/v2/adCampaignsV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=${campPageSize}&start=${campStart}`;
+            const campResponse = await fetch(campUrl, {
+              headers: { 'Authorization': `Bearer ${accessToken}` }
+            });
+            
+            if (!campResponse.ok) {
+              console.log(`[get_company_demographic] Campaign fetch failed at offset ${campStart}, skipping objective breakdown`);
+              hasMoreCamps = false;
+              break;
+            }
+            
+            const campData = await campResponse.json();
+            const pageCamps = campData.elements || [];
+            allCampaigns.push(...pageCamps);
+            
+            if (pageCamps.length < campPageSize) {
+              hasMoreCamps = false;
+            } else {
+              campStart += campPageSize;
+            }
+          }
+          
+          console.log(`[get_company_demographic] Fetched ${allCampaigns.length} campaigns`);
+          
+          // Group campaigns by objective type
+          const objectiveToCampaigns = new Map<string, string[]>();
+          for (const campaign of allCampaigns) {
+            const objective = campaign.objectiveType || campaign.type || 'UNKNOWN';
+            const campaignId = campaign.id?.toString() || '';
+            if (!campaignId || objective === 'UNKNOWN') continue;
+            
+            const existing = objectiveToCampaigns.get(objective) || [];
+            existing.push(campaignId);
+            objectiveToCampaigns.set(objective, existing);
+          }
+          
+          const uniqueObjectives = Array.from(objectiveToCampaigns.keys());
+          console.log(`[get_company_demographic] Found ${uniqueObjectives.length} unique objectives: ${uniqueObjectives.join(', ')}`);
+          
+          // If user filtered by specific campaigns, also filter the objective groups
+          const filteredCampaignSet = campaignIds && campaignIds.length > 0 ? new Set(campaignIds.map(String)) : null;
+          
+          // For each objective, query MEMBER_COMPANY analytics filtered to those campaigns
+          for (const objective of uniqueObjectives) {
+            let objCampaignIds = objectiveToCampaigns.get(objective) || [];
+            
+            // If user filtered campaigns, intersect
+            if (filteredCampaignSet) {
+              objCampaignIds = objCampaignIds.filter(id => filteredCampaignSet.has(id));
+              if (objCampaignIds.length === 0) continue;
+            }
+            
+            // Build analytics URL for this objective's campaigns
+            let objAnalyticsUrl = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
+              `dateRange.start.day=${startDay}&` +
+              `dateRange.start.month=${startMonth}&` +
+              `dateRange.start.year=${startYear}&` +
+              `dateRange.end.day=${endDay}&` +
+              `dateRange.end.month=${endMonth}&` +
+              `dateRange.end.year=${endYear}&` +
+              `timeGranularity=${granularity === 'ALL' ? 'ALL' : granularity}&` +
+              `pivot=MEMBER_COMPANY&` +
+              `accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
+              `fields=impressions,clicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions,pivotValue&` +
+              `count=10000`;
+            
+            // Add campaign filter
+            objCampaignIds.forEach((id: string, i: number) => {
+              objAnalyticsUrl += `&campaigns[${i}]=urn:li:sponsoredCampaign:${id}`;
+            });
+            
+            try {
+              const objResponse = await fetch(objAnalyticsUrl, {
+                headers: { 'Authorization': `Bearer ${accessToken}` },
+              });
+              
+              if (!objResponse.ok) {
+                console.log(`[get_company_demographic] Objective ${objective} analytics failed: ${objResponse.status}`);
+                continue;
+              }
+              
+              const objData = await objResponse.json();
+              const objElements = objData.elements || [];
+              
+              console.log(`[get_company_demographic] Objective ${objective}: ${objElements.length} records`);
+              
+              // Aggregate per company for this objective
+              for (const el of objElements) {
+                const entityUrn = el.pivotValue || '';
+                if (!entityUrn) continue;
+                
+                const impressions = el.impressions || 0;
+                const clicks = el.clicks || 0;
+                const spent = parseFloat(el.costInLocalCurrency || '0');
+                const leads = (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
+                
+                // Skip all-zero entries
+                if (impressions === 0 && clicks === 0 && spent === 0 && leads === 0) continue;
+                
+                const existing = objectiveBreakdownMap.get(entityUrn) || [];
+                
+                // Check if this objective already has an entry for this company (from pagination)
+                const existingEntry = existing.find(e => e.objective === objective);
+                if (existingEntry) {
+                  existingEntry.impressions += impressions;
+                  existingEntry.clicks += clicks;
+                  existingEntry.spent += spent;
+                  existingEntry.leads += leads;
+                } else {
+                  existing.push({ objective, impressions, clicks, spent, leads });
+                }
+                
+                objectiveBreakdownMap.set(entityUrn, existing);
+              }
+            } catch (e) {
+              console.log(`[get_company_demographic] Objective ${objective} query error:`, e);
+            }
+          }
+          
+          console.log(`[get_company_demographic] Objective breakdown populated for ${objectiveBreakdownMap.size} companies`);
+        } catch (e) {
+          console.log(`[get_company_demographic] Objective breakdown failed (non-fatal):`, e);
+          // objectiveBreakdownMap stays empty — report works without breakdown
+        }
+
         // Build final report
         const reportElements: any[] = [];
         companyMap.forEach((metrics, entityUrn) => {
@@ -2322,6 +2460,19 @@ serve(async (req) => {
           const ctr = metrics.impressions > 0 ? (metrics.clicks / metrics.impressions) * 100 : 0;
           const cpc = metrics.clicks > 0 ? metrics.spent / metrics.clicks : 0;
           const cpm = metrics.impressions > 0 ? (metrics.spent / metrics.impressions) * 1000 : 0;
+          
+          // Build objective breakdown for this company
+          const rawBreakdown = objectiveBreakdownMap.get(entityUrn) || [];
+          const objectiveBreakdown = rawBreakdown.map(b => ({
+            objective: b.objective,
+            impressions: b.impressions,
+            clicks: b.clicks,
+            spent: parseFloat(b.spent.toFixed(2)),
+            leads: b.leads,
+            ctr: b.impressions > 0 ? parseFloat(((b.clicks / b.impressions) * 100).toFixed(2)) : 0,
+            cpc: b.clicks > 0 ? parseFloat((b.spent / b.clicks).toFixed(2)) : 0,
+            cpm: b.impressions > 0 ? parseFloat(((b.spent / b.impressions) * 1000).toFixed(2)) : 0,
+          }));
           
           reportElements.push({
             entityUrn,
@@ -2337,6 +2488,7 @@ serve(async (req) => {
             ctr: ctr.toFixed(2),
             cpc: cpc.toFixed(2),
             cpm: cpm.toFixed(2),
+            objectiveBreakdown: objectiveBreakdown.length > 0 ? objectiveBreakdown : undefined,
           });
         });
 
