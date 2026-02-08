@@ -2063,14 +2063,12 @@ serve(async (req) => {
         const endDate = dateRange?.end || new Date().toISOString().split('T')[0];
         const granularity = timeGranularity || 'ALL';
         
-        // Parse date strings directly to avoid timezone issues
         const [startYear, startMonth, startDay] = startDate.split('-').map(Number);
         const [endYear, endMonth, endDay] = endDate.split('-').map(Number);
         
         console.log(`[get_company_demographic] Starting for account ${accountId}, date range: ${startDate} to ${endDate}, campaigns: ${campaignIds?.length || 'all'}`);
-        console.log(`[get_company_demographic] Parsed dates: start=${startYear}-${startMonth}-${startDay}, end=${endYear}-${endMonth}-${endDay}`);
 
-        // Step 1: Fetch demographic analytics with MEMBER_COMPANY pivot
+        // Step 1: Fetch demographic analytics with MEMBER_COMPANY pivot (account-level aggregation)
         let analyticsUrl = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
           `dateRange.start.day=${startDay}&` +
           `dateRange.start.month=${startMonth}&` +
@@ -2084,17 +2082,14 @@ serve(async (req) => {
           `fields=impressions,clicks,costInLocalCurrency,costInUsd,externalWebsiteConversions,oneClickLeads,pivotValue&` +
           `count=10000`;
         
-        // Add campaign filter if provided
         if (campaignIds && campaignIds.length > 0) {
           campaignIds.forEach((id: string, i: number) => {
             analyticsUrl += `&campaigns[${i}]=urn:li:sponsoredCampaign:${id}`;
           });
-          console.log(`[get_company_demographic] Filtering by ${campaignIds.length} campaigns`);
         }
 
         console.log('[get_company_demographic] Step 1: Fetching company demographic analytics...');
         
-        // Paginated fetch to get all company demographic records
         let allElements: any[] = [];
         let startOffset = 0;
         const pageSize = 10000;
@@ -2102,8 +2097,6 @@ serve(async (req) => {
         
         while (hasMore) {
           const paginatedUrl = `${analyticsUrl}&start=${startOffset}`;
-          console.log(`[get_company_demographic] Fetching page at offset ${startOffset}...`);
-          
           const analyticsResponse = await fetch(paginatedUrl, {
             headers: { 'Authorization': `Bearer ${accessToken}` },
           });
@@ -2111,7 +2104,6 @@ serve(async (req) => {
           if (!analyticsResponse.ok) {
             const errorText = await analyticsResponse.text();
             console.error('[Error] Failed to fetch company demographic:', analyticsResponse.status, errorText);
-            
             return new Response(JSON.stringify({ 
               error: 'MEMBER_COMPANY pivot may not be available for this account',
               details: errorText,
@@ -2126,22 +2118,16 @@ serve(async (req) => {
           const pageElements = analyticsData.elements || [];
           allElements = allElements.concat(pageElements);
           
-          console.log(`[get_company_demographic] Page returned ${pageElements.length} records, total so far: ${allElements.length}`);
-          
-          // Check if there are more pages
           const paging = analyticsData.paging;
           if (paging && paging.total && (startOffset + pageElements.length) < paging.total) {
             startOffset += pageSize;
           } else if (pageElements.length === pageSize) {
-            // No paging info but got full page, try fetching more
             startOffset += pageSize;
           } else {
             hasMore = false;
           }
           
-          // Safety limit to prevent infinite loops
           if (startOffset > 100000) {
-            console.log(`[get_company_demographic] Reached safety limit at offset ${startOffset}`);
             hasMore = false;
           }
         }
@@ -2163,12 +2149,7 @@ serve(async (req) => {
           if (!entityUrn) return;
           
           const existing = companyMap.get(entityUrn) || { 
-            entityUrn,
-            impressions: 0, 
-            clicks: 0, 
-            spent: 0, 
-            spentUsd: 0, 
-            leads: 0 
+            entityUrn, impressions: 0, clicks: 0, spent: 0, spentUsd: 0, leads: 0 
           };
           companyMap.set(entityUrn, {
             entityUrn,
@@ -2182,312 +2163,253 @@ serve(async (req) => {
 
         console.log(`[get_company_demographic] Aggregated data for ${companyMap.size} unique companies`);
 
-        // Step 2: Resolve company names via Organization Lookup
+        // Run name resolution (Steps 2+3) and objective breakdown (Step 4) in PARALLEL
+        const companyUrns = Array.from(companyMap.keys());
         const companyNames = new Map<string, string>();
         const companyWebsites = new Map<string, { website: string | null; linkedInUrl: string | null; status: string }>();
-        const companyUrns = Array.from(companyMap.keys());
-        
-        // Extract organization IDs from URNs
-        const orgIdToUrn = new Map<string, string>();
-        companyUrns.forEach(urn => {
-          const match = urn.match(/^urn:li:organization:(\d+)$/);
-          if (match) {
-            orgIdToUrn.set(match[1], urn);
-          }
-        });
-        
-        const orgIds = Array.from(orgIdToUrn.keys());
-        console.log(`[get_company_demographic] Step 2: Resolving ${orgIds.length} organization IDs...`);
 
-        // Batch fetch organization data
-        if (orgIds.length > 0) {
-          const batchSize = 50;
-          for (let i = 0; i < orgIds.length; i += batchSize) {
-            const batch = orgIds.slice(i, i + batchSize);
-            const idsParam = batch.map((id, idx) => `ids[${idx}]=${id}`).join('&');
-            
-            try {
-              const orgResponse = await fetch(
-                `https://api.linkedin.com/v2/organizationsLookup?${idsParam}&projection=(results*(id,localizedName,localizedWebsite,vanityName))`,
-                { headers: { 'Authorization': `Bearer ${accessToken}` } }
-              );
-              
-              if (orgResponse.ok) {
-                const orgData = await orgResponse.json();
-                const results = orgData.results || {};
-                
-                Object.entries(results).forEach(([id, org]: [string, any]) => {
-                  const urn = orgIdToUrn.get(id);
-                  if (!urn) return;
-                  
-                  if (org?.localizedName) {
-                    companyNames.set(urn, org.localizedName);
-                  }
-                  
-                  // Extract website from organization data
-                  const website = org?.localizedWebsite || null;
-                  const vanityName = org?.vanityName || null;
-                  const linkedInUrl = vanityName ? `https://www.linkedin.com/company/${vanityName}` : null;
-                  
-                  companyWebsites.set(urn, {
-                    website,
-                    linkedInUrl,
-                    status: website ? 'resolved' : (vanityName ? 'fallback' : 'unresolved'),
-                  });
-                });
-              } else {
-                console.log(`[Warning] Organization lookup batch failed: ${orgResponse.status}`);
-              }
-            } catch (e) {
-              console.log('[Warning] Organization lookup failed:', e);
-            }
-          }
-        }
-        
-        console.log(`[get_company_demographic] Resolved ${companyNames.size} company names, ${companyWebsites.size} with website info`);
-
-        // Step 3: For companies without website, try vanity name lookup
-        const unresolvedUrns = companyUrns.filter(urn => {
-          const info = companyWebsites.get(urn);
-          return !info || info.status === 'unresolved';
-        });
-        
-        if (unresolvedUrns.length > 0) {
-          console.log(`[get_company_demographic] Step 3: Attempting vanity lookup for ${unresolvedUrns.length} unresolved companies...`);
+        // Name resolution task (Steps 2+3)
+        const nameResolutionTask = async () => {
+          const orgIdToUrn = new Map<string, string>();
+          companyUrns.forEach(urn => {
+            const match = urn.match(/^urn:li:organization:(\d+)$/);
+            if (match) orgIdToUrn.set(match[1], urn);
+          });
           
-          // For each unresolved company, try to guess vanity name and look it up
-          const batchSize = 10;
-          for (let i = 0; i < Math.min(unresolvedUrns.length, 50); i += batchSize) {
-            const batch = unresolvedUrns.slice(i, i + batchSize);
-            
-            const vanityPromises = batch.map(async (urn) => {
-              const companyName = companyNames.get(urn);
-              if (!companyName) return { urn, result: null };
-              
-              // Create vanity name guess: lowercase, hyphenated, URL encoded
-              const vanityGuess = companyName
-                .toLowerCase()
-                .replace(/[^\w\s-]/g, '')
-                .replace(/\s+/g, '-')
-                .slice(0, 50);
+          const orgIds = Array.from(orgIdToUrn.keys());
+          console.log(`[get_company_demographic] Step 2: Resolving ${orgIds.length} organization IDs...`);
+
+          if (orgIds.length > 0) {
+            const batchSize = 50;
+            for (let i = 0; i < orgIds.length; i += batchSize) {
+              const batch = orgIds.slice(i, i + batchSize);
+              const idsParam = batch.map((id, idx) => `ids[${idx}]=${id}`).join('&');
               
               try {
-                const vanityResponse = await fetch(
-                  `https://api.linkedin.com/rest/organizations?q=vanityName&vanityName=${encodeURIComponent(vanityGuess)}`,
-                  { 
-                    headers: { 
-                      'Authorization': `Bearer ${accessToken}`,
-                      'LinkedIn-Version': '202511',
-                      'X-Restli-Protocol-Version': '2.0.0',
-                    } 
-                  }
+                const orgResponse = await fetch(
+                  `https://api.linkedin.com/v2/organizationsLookup?${idsParam}&projection=(results*(id,localizedName,localizedWebsite,vanityName))`,
+                  { headers: { 'Authorization': `Bearer ${accessToken}` } }
                 );
                 
-                if (vanityResponse.ok) {
-                  const vanityData = await vanityResponse.json();
-                  if (vanityData.elements && vanityData.elements.length > 0) {
-                    const org = vanityData.elements[0];
-                    return {
-                      urn,
-                      result: {
-                        website: org.localizedWebsite || null,
-                        linkedInUrl: org.vanityName ? `https://www.linkedin.com/company/${org.vanityName}` : null,
-                        status: org.localizedWebsite ? 'resolved' : 'fallback',
-                      }
-                    };
-                  }
+                if (orgResponse.ok) {
+                  const orgData = await orgResponse.json();
+                  const results = orgData.results || {};
+                  
+                  Object.entries(results).forEach(([id, org]: [string, any]) => {
+                    const urn = orgIdToUrn.get(id);
+                    if (!urn) return;
+                    if (org?.localizedName) companyNames.set(urn, org.localizedName);
+                    const website = org?.localizedWebsite || null;
+                    const vanityName = org?.vanityName || null;
+                    const linkedInUrl = vanityName ? `https://www.linkedin.com/company/${vanityName}` : null;
+                    companyWebsites.set(urn, {
+                      website, linkedInUrl,
+                      status: website ? 'resolved' : (vanityName ? 'fallback' : 'unresolved'),
+                    });
+                  });
                 }
-                return { urn, result: null };
               } catch (e) {
-                console.log(`[Warning] Vanity lookup failed for ${companyName}:`, e);
-                return { urn, result: null };
+                console.log('[Warning] Organization lookup failed:', e);
               }
-            });
-            
-            const results = await Promise.all(vanityPromises);
-            results.forEach(({ urn, result }) => {
-              if (result) {
-                companyWebsites.set(urn, result);
-              }
-            });
+            }
           }
-        }
+          
+          console.log(`[get_company_demographic] Resolved ${companyNames.size} company names`);
 
-        // Step 4: Fetch campaigns to build objective + campaign breakdown
+          // Step 3: Vanity lookups for unresolved companies
+          const unresolvedUrns = companyUrns.filter(urn => {
+            const info = companyWebsites.get(urn);
+            return !info || info.status === 'unresolved';
+          });
+          
+          if (unresolvedUrns.length > 0) {
+            console.log(`[get_company_demographic] Step 3: Vanity lookup for ${unresolvedUrns.length} unresolved companies...`);
+            const batchSize = 10;
+            for (let i = 0; i < Math.min(unresolvedUrns.length, 50); i += batchSize) {
+              const batch = unresolvedUrns.slice(i, i + batchSize);
+              const vanityPromises = batch.map(async (urn) => {
+                const companyName = companyNames.get(urn);
+                if (!companyName) return { urn, result: null };
+                const vanityGuess = companyName.toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-').slice(0, 50);
+                try {
+                  const vanityResponse = await fetch(
+                    `https://api.linkedin.com/rest/organizations?q=vanityName&vanityName=${encodeURIComponent(vanityGuess)}`,
+                    { headers: { 'Authorization': `Bearer ${accessToken}`, 'LinkedIn-Version': '202511', 'X-Restli-Protocol-Version': '2.0.0' } }
+                  );
+                  if (vanityResponse.ok) {
+                    const vanityData = await vanityResponse.json();
+                    if (vanityData.elements && vanityData.elements.length > 0) {
+                      const org = vanityData.elements[0];
+                      return { urn, result: { website: org.localizedWebsite || null, linkedInUrl: org.vanityName ? `https://www.linkedin.com/company/${org.vanityName}` : null, status: org.localizedWebsite ? 'resolved' : 'fallback' } };
+                    }
+                  }
+                  return { urn, result: null };
+                } catch (e) { return { urn, result: null }; }
+              });
+              const results = await Promise.all(vanityPromises);
+              results.forEach(({ urn, result }) => { if (result) companyWebsites.set(urn, result); });
+            }
+          }
+        };
+
+        // Objective breakdown task (Step 4) - queries per OBJECTIVE GROUP, not per campaign
         let objectiveBreakdownMap = new Map<string, Array<{ objective: string; impressions: number; clicks: number; spent: number; leads: number }>>();
-        // campaignBreakdownMap: entityUrn -> objective -> [{ campaignId, campaignName, impressions, clicks, spent, leads }]
-        let campaignBreakdownMap = new Map<string, Map<string, Array<{ campaignId: string; campaignName: string; impressions: number; clicks: number; spent: number; leads: number }>>>();
-        
-        try {
-          console.log(`[get_company_demographic] Step 4: Fetching campaigns for objective + campaign breakdown...`);
-          
-          // Fetch all campaigns with pagination
-          const allCampaigns: any[] = [];
-          let campStart = 0;
-          const campPageSize = 500;
-          let hasMoreCamps = true;
-          
-          while (hasMoreCamps) {
-            const campUrl = `https://api.linkedin.com/v2/adCampaignsV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=${campPageSize}&start=${campStart}`;
-            const campResponse = await fetch(campUrl, {
-              headers: { 'Authorization': `Bearer ${accessToken}` }
-            });
+        // Also store which campaigns belong to each objective so the frontend can request campaign breakdown lazily
+        let objectiveCampaignMap = new Map<string, { campaignIds: string[]; campaignNames: Record<string, string> }>();
+
+        const objectiveBreakdownTask = async () => {
+          try {
+            console.log(`[get_company_demographic] Step 4: Fetching campaigns for objective breakdown...`);
             
-            if (!campResponse.ok) {
-              console.log(`[get_company_demographic] Campaign fetch failed at offset ${campStart}, skipping breakdown`);
-              hasMoreCamps = false;
-              break;
+            // Fetch all campaigns with pagination
+            const allCampaigns: any[] = [];
+            let campStart = 0;
+            const campPageSize = 500;
+            let hasMoreCamps = true;
+            
+            while (hasMoreCamps) {
+              const campUrl = `https://api.linkedin.com/v2/adCampaignsV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=${campPageSize}&start=${campStart}`;
+              const campResponse = await fetch(campUrl, {
+                headers: { 'Authorization': `Bearer ${accessToken}` }
+              });
+              if (!campResponse.ok) { hasMoreCamps = false; break; }
+              const campData = await campResponse.json();
+              const pageCamps = campData.elements || [];
+              allCampaigns.push(...pageCamps);
+              if (pageCamps.length < campPageSize) { hasMoreCamps = false; } else { campStart += campPageSize; }
             }
             
-            const campData = await campResponse.json();
-            const pageCamps = campData.elements || [];
-            allCampaigns.push(...pageCamps);
+            console.log(`[get_company_demographic] Fetched ${allCampaigns.length} campaigns`);
             
-            if (pageCamps.length < campPageSize) {
-              hasMoreCamps = false;
-            } else {
-              campStart += campPageSize;
-            }
-          }
-          
-          console.log(`[get_company_demographic] Fetched ${allCampaigns.length} campaigns`);
-          
-          // Build campaign metadata maps
-          const campaignNameMap = new Map<string, string>();
-          const objectiveToCampaigns = new Map<string, string[]>();
-          
-          for (const campaign of allCampaigns) {
-            const objective = campaign.objectiveType || campaign.type || 'UNKNOWN';
-            const campaignId = campaign.id?.toString() || '';
-            const campaignName = campaign.name || `Campaign ${campaignId}`;
-            if (!campaignId || objective === 'UNKNOWN') continue;
+            // Group campaigns by objective
+            const objectiveToCampaigns = new Map<string, string[]>();
+            const campaignNameMap = new Map<string, string>();
+            const filteredCampaignSet = campaignIds && campaignIds.length > 0 ? new Set(campaignIds.map(String)) : null;
             
-            campaignNameMap.set(campaignId, campaignName);
-            const existing = objectiveToCampaigns.get(objective) || [];
-            existing.push(campaignId);
-            objectiveToCampaigns.set(objective, existing);
-          }
-          
-          const uniqueObjectives = Array.from(objectiveToCampaigns.keys());
-          console.log(`[get_company_demographic] Found ${uniqueObjectives.length} unique objectives: ${uniqueObjectives.join(', ')}`);
-          
-          // If user filtered by specific campaigns, also filter
-          const filteredCampaignSet = campaignIds && campaignIds.length > 0 ? new Set(campaignIds.map(String)) : null;
-          
-          // Build list of campaigns to query individually
-          const campaignsToQuery: Array<{ campaignId: string; objective: string }> = [];
-          for (const [objective, campIds] of objectiveToCampaigns) {
-            let filtered = campIds;
-            if (filteredCampaignSet) {
-              filtered = campIds.filter(id => filteredCampaignSet.has(id));
+            for (const campaign of allCampaigns) {
+              const objective = campaign.objectiveType || campaign.type || 'UNKNOWN';
+              const campaignId = campaign.id?.toString() || '';
+              const campaignName = campaign.name || `Campaign ${campaignId}`;
+              if (!campaignId || objective === 'UNKNOWN') continue;
+              if (filteredCampaignSet && !filteredCampaignSet.has(campaignId)) continue;
+              
+              campaignNameMap.set(campaignId, campaignName);
+              const existing = objectiveToCampaigns.get(objective) || [];
+              existing.push(campaignId);
+              objectiveToCampaigns.set(objective, existing);
             }
-            for (const id of filtered) {
-              campaignsToQuery.push({ campaignId: id, objective });
+            
+            const uniqueObjectives = Array.from(objectiveToCampaigns.keys());
+            console.log(`[get_company_demographic] Found ${uniqueObjectives.length} unique objectives: ${uniqueObjectives.join(', ')}`);
+            
+            // Store campaign mapping per objective for lazy loading
+            for (const [objective, campIds] of objectiveToCampaigns) {
+              const names: Record<string, string> = {};
+              campIds.forEach(id => { names[id] = campaignNameMap.get(id) || `Campaign ${id}`; });
+              objectiveCampaignMap.set(objective, { campaignIds: campIds, campaignNames: names });
             }
-          }
-          
-          console.log(`[get_company_demographic] Querying ${campaignsToQuery.length} campaigns individually for per-campaign breakdown`);
-          
-          // Query each campaign individually with MEMBER_COMPANY pivot, in batches of 5
-          const BATCH_SIZE = 5;
-          const allCampaignResults: Array<{ campaignId: string; objective: string; elements: any[] }> = [];
-          
-          for (let i = 0; i < campaignsToQuery.length; i += BATCH_SIZE) {
-            const batch = campaignsToQuery.slice(i, i + BATCH_SIZE);
-            const promises = batch.map(async ({ campaignId, objective }) => {
+            
+            // Query per OBJECTIVE GROUP (not per campaign) — one API call per unique objective
+            const objectiveQueryPromises = uniqueObjectives.map(async (objective) => {
+              const campIds = objectiveToCampaigns.get(objective) || [];
+              if (campIds.length === 0) return { objective, elements: [] };
+              
               try {
-                const url = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
-                  `dateRange.start.day=${startDay}&` +
-                  `dateRange.start.month=${startMonth}&` +
-                  `dateRange.start.year=${startYear}&` +
-                  `dateRange.end.day=${endDay}&` +
-                  `dateRange.end.month=${endMonth}&` +
-                  `dateRange.end.year=${endYear}&` +
-                  `timeGranularity=${granularity === 'ALL' ? 'ALL' : granularity}&` +
-                  `pivot=MEMBER_COMPANY&` +
-                  `accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
-                  `campaigns[0]=urn:li:sponsoredCampaign:${campaignId}&` +
-                  `fields=impressions,clicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions,pivotValue&` +
-                  `count=10000`;
+                // Build URL with all campaigns for this objective
+                const params = new URLSearchParams();
+                params.set('q', 'analytics');
+                params.set('dateRange.start.day', String(startDay));
+                params.set('dateRange.start.month', String(startMonth));
+                params.set('dateRange.start.year', String(startYear));
+                params.set('dateRange.end.day', String(endDay));
+                params.set('dateRange.end.month', String(endMonth));
+                params.set('dateRange.end.year', String(endYear));
+                params.set('timeGranularity', granularity === 'ALL' ? 'ALL' : granularity);
+                params.set('pivot', 'MEMBER_COMPANY');
+                params.set('accounts[0]', `urn:li:sponsoredAccount:${accountId}`);
+                params.set('fields', 'impressions,clicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions,pivotValue');
+                params.set('count', '10000');
                 
-                const response = await fetch(url, {
-                  headers: { 'Authorization': `Bearer ${accessToken}` },
+                campIds.forEach((id, idx) => {
+                  params.set(`campaigns[${idx}]`, `urn:li:sponsoredCampaign:${id}`);
                 });
                 
+                const queryString = params.toString();
+                const baseUrl = 'https://api.linkedin.com/v2/adAnalyticsV2';
+                const fullUrl = `${baseUrl}?${queryString}`;
+                
+                let response: Response;
+                
+                // Use query tunneling if URL is too long
+                if (fullUrl.length > 4000) {
+                  console.log(`[get_company_demographic] Objective ${objective}: URL too long (${fullUrl.length}), using query tunneling`);
+                  response = await fetch(baseUrl, {
+                    method: 'POST',
+                    headers: {
+                      'Authorization': `Bearer ${accessToken}`,
+                      'Content-Type': 'application/x-www-form-urlencoded',
+                      'X-HTTP-Method-Override': 'GET',
+                    },
+                    body: queryString,
+                  });
+                } else {
+                  response = await fetch(fullUrl, {
+                    headers: { 'Authorization': `Bearer ${accessToken}` },
+                  });
+                }
+                
                 if (!response.ok) {
-                  console.log(`[get_company_demographic] Campaign ${campaignId} analytics failed: ${response.status}`);
-                  return { campaignId, objective, elements: [] };
+                  console.log(`[get_company_demographic] Objective ${objective} analytics failed: ${response.status}`);
+                  return { objective, elements: [] };
                 }
                 
                 const data = await response.json();
-                return { campaignId, objective, elements: data.elements || [] };
+                return { objective, elements: data.elements || [] };
               } catch (e) {
-                console.log(`[get_company_demographic] Campaign ${campaignId} query error:`, e);
-                return { campaignId, objective, elements: [] };
+                console.log(`[get_company_demographic] Objective ${objective} query error:`, e);
+                return { objective, elements: [] };
               }
             });
             
-            const results = await Promise.all(promises);
-            allCampaignResults.push(...results);
-          }
-          
-          console.log(`[get_company_demographic] Completed ${allCampaignResults.length} campaign queries`);
-          
-          // Process results: build both objective-level and campaign-level breakdowns
-          for (const { campaignId, objective, elements } of allCampaignResults) {
-            const campName = campaignNameMap.get(campaignId) || `Campaign ${campaignId}`;
+            // Run all objective queries in parallel
+            const objectiveResults = await Promise.all(objectiveQueryPromises);
             
-            for (const el of elements) {
-              const entityUrn = el.pivotValue || '';
-              if (!entityUrn) continue;
-              
-              const impressions = el.impressions || 0;
-              const clicks = el.clicks || 0;
-              const spent = parseFloat(el.costInLocalCurrency || '0');
-              const leads = (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
-              
-              // Skip all-zero entries
-              if (impressions === 0 && clicks === 0 && spent === 0 && leads === 0) continue;
-              
-              // --- Objective-level aggregation ---
-              const objEntries = objectiveBreakdownMap.get(entityUrn) || [];
-              const existingObj = objEntries.find(e => e.objective === objective);
-              if (existingObj) {
-                existingObj.impressions += impressions;
-                existingObj.clicks += clicks;
-                existingObj.spent += spent;
-                existingObj.leads += leads;
-              } else {
-                objEntries.push({ objective, impressions, clicks, spent, leads });
-              }
-              objectiveBreakdownMap.set(entityUrn, objEntries);
-              
-              // --- Campaign-level breakdown ---
-              if (!campaignBreakdownMap.has(entityUrn)) {
-                campaignBreakdownMap.set(entityUrn, new Map());
-              }
-              const companyObjMap = campaignBreakdownMap.get(entityUrn)!;
-              if (!companyObjMap.has(objective)) {
-                companyObjMap.set(objective, []);
-              }
-              const campEntries = companyObjMap.get(objective)!;
-              const existingCamp = campEntries.find(e => e.campaignId === campaignId);
-              if (existingCamp) {
-                existingCamp.impressions += impressions;
-                existingCamp.clicks += clicks;
-                existingCamp.spent += spent;
-                existingCamp.leads += leads;
-              } else {
-                campEntries.push({ campaignId, campaignName: campName, impressions, clicks, spent, leads });
+            // Process results into objective-level breakdown
+            for (const { objective, elements } of objectiveResults) {
+              for (const el of elements) {
+                const entityUrn = el.pivotValue || '';
+                if (!entityUrn) continue;
+                
+                const impressions = el.impressions || 0;
+                const clicks = el.clicks || 0;
+                const spent = parseFloat(el.costInLocalCurrency || '0');
+                const leads = (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
+                
+                if (impressions === 0 && clicks === 0 && spent === 0 && leads === 0) continue;
+                
+                const objEntries = objectiveBreakdownMap.get(entityUrn) || [];
+                const existingObj = objEntries.find(e => e.objective === objective);
+                if (existingObj) {
+                  existingObj.impressions += impressions;
+                  existingObj.clicks += clicks;
+                  existingObj.spent += spent;
+                  existingObj.leads += leads;
+                } else {
+                  objEntries.push({ objective, impressions, clicks, spent, leads });
+                }
+                objectiveBreakdownMap.set(entityUrn, objEntries);
               }
             }
+            
+            console.log(`[get_company_demographic] Objective breakdown populated for ${objectiveBreakdownMap.size} companies with ${uniqueObjectives.length} objective queries (instead of ${Array.from(objectiveToCampaigns.values()).reduce((s, a) => s + a.length, 0)} individual campaign queries)`);
+          } catch (e) {
+            console.log(`[get_company_demographic] Objective breakdown failed (non-fatal):`, e);
           }
-          
-          console.log(`[get_company_demographic] Objective breakdown populated for ${objectiveBreakdownMap.size} companies, campaign breakdown for ${campaignBreakdownMap.size} companies`);
-        } catch (e) {
-          console.log(`[get_company_demographic] Breakdown failed (non-fatal):`, e);
-          // maps stay empty — report works without breakdown
-        }
+        };
+
+        // Run name resolution and objective breakdown IN PARALLEL
+        console.log(`[get_company_demographic] Running name resolution and objective breakdown in parallel...`);
+        await Promise.all([nameResolutionTask(), objectiveBreakdownTask()]);
 
         // Build final report
         const reportElements: any[] = [];
@@ -2499,40 +2421,24 @@ serve(async (req) => {
           const cpc = metrics.clicks > 0 ? metrics.spent / metrics.clicks : 0;
           const cpm = metrics.impressions > 0 ? (metrics.spent / metrics.impressions) * 1000 : 0;
           
-          // Build objective breakdown with nested campaign breakdown for this company
+          // Build objective breakdown (no campaign breakdown — that's lazy loaded now)
           const rawBreakdown = objectiveBreakdownMap.get(entityUrn) || [];
-          const companyCampMap = campaignBreakdownMap.get(entityUrn);
-          const objectiveBreakdown = rawBreakdown.map(b => {
-            // Build campaign breakdown for this objective
-            const rawCamps = companyCampMap?.get(b.objective) || [];
-            const campaignBreakdown = rawCamps.map(c => ({
-              campaignId: c.campaignId,
-              campaignName: c.campaignName,
-              impressions: c.impressions,
-              clicks: c.clicks,
-              spent: parseFloat(c.spent.toFixed(2)),
-              leads: c.leads,
-              ctr: c.impressions > 0 ? parseFloat(((c.clicks / c.impressions) * 100).toFixed(2)) : 0,
-              cpc: c.clicks > 0 ? parseFloat((c.spent / c.clicks).toFixed(2)) : 0,
-              cpm: c.impressions > 0 ? parseFloat(((c.spent / c.impressions) * 1000).toFixed(2)) : 0,
-            }));
-            
-            return {
-              objective: b.objective,
-              impressions: b.impressions,
-              clicks: b.clicks,
-              spent: parseFloat(b.spent.toFixed(2)),
-              leads: b.leads,
-              ctr: b.impressions > 0 ? parseFloat(((b.clicks / b.impressions) * 100).toFixed(2)) : 0,
-              cpc: b.clicks > 0 ? parseFloat((b.spent / b.clicks).toFixed(2)) : 0,
-              cpm: b.impressions > 0 ? parseFloat(((b.spent / b.impressions) * 1000).toFixed(2)) : 0,
-              campaignBreakdown: campaignBreakdown.length > 0 ? campaignBreakdown : undefined,
-            };
-          });
+          const objectiveBreakdown = rawBreakdown.map(b => ({
+            objective: b.objective,
+            impressions: b.impressions,
+            clicks: b.clicks,
+            spent: parseFloat(b.spent.toFixed(2)),
+            leads: b.leads,
+            ctr: b.impressions > 0 ? parseFloat(((b.clicks / b.impressions) * 100).toFixed(2)) : 0,
+            cpc: b.clicks > 0 ? parseFloat((b.spent / b.clicks).toFixed(2)) : 0,
+            cpm: b.impressions > 0 ? parseFloat(((b.spent / b.impressions) * 1000).toFixed(2)) : 0,
+            // Include campaign IDs for this objective so frontend can request lazy breakdown
+            campaignIds: objectiveCampaignMap.get(b.objective)?.campaignIds || [],
+            campaignNames: objectiveCampaignMap.get(b.objective)?.campaignNames || {},
+          }));
           
           reportElements.push({
-            entityUrn,
-            entityName,
+            entityUrn, entityName,
             website: websiteInfo.website,
             linkedInUrl: websiteInfo.linkedInUrl,
             enrichmentStatus: websiteInfo.status,
@@ -2541,24 +2447,20 @@ serve(async (req) => {
             costInLocalCurrency: metrics.spent.toFixed(2),
             costInUsd: metrics.spentUsd.toFixed(2),
             leads: metrics.leads,
-            ctr: ctr.toFixed(2),
-            cpc: cpc.toFixed(2),
-            cpm: cpm.toFixed(2),
+            ctr: ctr.toFixed(2), cpc: cpc.toFixed(2), cpm: cpm.toFixed(2),
             objectiveBreakdown: objectiveBreakdown.length > 0 ? objectiveBreakdown : undefined,
           });
         });
 
-        // Filter out companies with all-zero metrics
         const filteredElements = reportElements.filter(r => 
           r.impressions > 0 || r.clicks > 0 || parseFloat(r.costInLocalCurrency) > 0 || r.leads > 0
         );
-        
         filteredElements.sort((a, b) => b.impressions - a.impressions);
         
         const resolvedCount = filteredElements.filter(r => r.enrichmentStatus === 'resolved').length;
         const unresolvedCount = filteredElements.filter(r => r.enrichmentStatus === 'unresolved').length;
         
-        console.log(`[get_company_demographic] Complete. Total: ${filteredElements.length} (filtered from ${reportElements.length}), Resolved: ${resolvedCount}, Unresolved: ${unresolvedCount}`);
+        console.log(`[get_company_demographic] Complete. Total: ${filteredElements.length}, Resolved: ${resolvedCount}, Unresolved: ${unresolvedCount}`);
         
         return new Response(JSON.stringify({ 
           elements: filteredElements,
@@ -2567,10 +2469,119 @@ serve(async (req) => {
             dateRange: { start: startDate, end: endDate },
             timeGranularity: granularity,
             totalCompanies: filteredElements.length,
-            resolvedCount,
-            unresolvedCount,
+            resolvedCount, unresolvedCount,
           }
         }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      case 'get_company_campaign_breakdown': {
+        // Lazy-load campaign-level breakdown for a specific objective's campaigns
+        const { accountId, dateRange, campaignIds: objCampaignIds, campaignNames: objCampaignNames } = params || {};
+        const startDate = dateRange?.start || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        const endDate = dateRange?.end || new Date().toISOString().split('T')[0];
+        
+        const [startYear, startMonth, startDay] = startDate.split('-').map(Number);
+        const [endYear, endMonth, endDay] = endDate.split('-').map(Number);
+        
+        console.log(`[get_company_campaign_breakdown] Starting for ${objCampaignIds?.length || 0} campaigns`);
+        
+        if (!objCampaignIds || objCampaignIds.length === 0) {
+          return new Response(JSON.stringify({ breakdowns: {} }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+        
+        // Query each campaign individually with MEMBER_COMPANY pivot, in batches of 5
+        const BATCH_SIZE = 5;
+        const allResults: Array<{ campaignId: string; elements: any[] }> = [];
+        
+        for (let i = 0; i < objCampaignIds.length; i += BATCH_SIZE) {
+          const batch = objCampaignIds.slice(i, i + BATCH_SIZE);
+          const promises = batch.map(async (campaignId: string) => {
+            try {
+              const url = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
+                `dateRange.start.day=${startDay}&` +
+                `dateRange.start.month=${startMonth}&` +
+                `dateRange.start.year=${startYear}&` +
+                `dateRange.end.day=${endDay}&` +
+                `dateRange.end.month=${endMonth}&` +
+                `dateRange.end.year=${endYear}&` +
+                `timeGranularity=ALL&` +
+                `pivot=MEMBER_COMPANY&` +
+                `accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
+                `campaigns[0]=urn:li:sponsoredCampaign:${campaignId}&` +
+                `fields=impressions,clicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions,pivotValue&` +
+                `count=10000`;
+              
+              const response = await fetch(url, {
+                headers: { 'Authorization': `Bearer ${accessToken}` },
+              });
+              
+              if (!response.ok) return { campaignId, elements: [] };
+              const data = await response.json();
+              return { campaignId, elements: data.elements || [] };
+            } catch (e) {
+              return { campaignId, elements: [] };
+            }
+          });
+          
+          const results = await Promise.all(promises);
+          allResults.push(...results);
+        }
+        
+        console.log(`[get_company_campaign_breakdown] Completed ${allResults.length} campaign queries`);
+        
+        // Build breakdowns: companyUrn -> [{ campaignId, campaignName, metrics }]
+        const breakdowns: Record<string, Array<{ campaignId: string; campaignName: string; impressions: number; clicks: number; spent: number; leads: number; ctr: number; cpc: number; cpm: number }>> = {};
+        const nameMap = objCampaignNames || {};
+        
+        for (const { campaignId, elements } of allResults) {
+          const campName = nameMap[campaignId] || `Campaign ${campaignId}`;
+          
+          for (const el of elements) {
+            const entityUrn = el.pivotValue || '';
+            if (!entityUrn) continue;
+            
+            const impressions = el.impressions || 0;
+            const clicks = el.clicks || 0;
+            const spent = parseFloat(el.costInLocalCurrency || '0');
+            const leads = (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
+            
+            if (impressions === 0 && clicks === 0 && spent === 0 && leads === 0) continue;
+            
+            if (!breakdowns[entityUrn]) breakdowns[entityUrn] = [];
+            
+            const existing = breakdowns[entityUrn].find(e => e.campaignId === campaignId);
+            if (existing) {
+              existing.impressions += impressions;
+              existing.clicks += clicks;
+              existing.spent += spent;
+              existing.leads += leads;
+              // Recalculate derived metrics
+              existing.ctr = existing.impressions > 0 ? parseFloat(((existing.clicks / existing.impressions) * 100).toFixed(2)) : 0;
+              existing.cpc = existing.clicks > 0 ? parseFloat((existing.spent / existing.clicks).toFixed(2)) : 0;
+              existing.cpm = existing.impressions > 0 ? parseFloat(((existing.spent / existing.impressions) * 1000).toFixed(2)) : 0;
+            } else {
+              breakdowns[entityUrn].push({
+                campaignId,
+                campaignName: campName,
+                impressions,
+                clicks,
+                spent: parseFloat(spent.toFixed(2)),
+                leads,
+                ctr: impressions > 0 ? parseFloat(((clicks / impressions) * 100).toFixed(2)) : 0,
+                cpc: clicks > 0 ? parseFloat((spent / clicks).toFixed(2)) : 0,
+                cpm: impressions > 0 ? parseFloat(((spent / impressions) * 1000).toFixed(2)) : 0,
+              });
+            }
+          }
+        }
+        
+        console.log(`[get_company_campaign_breakdown] Built breakdowns for ${Object.keys(breakdowns).length} companies`);
+        
+        return new Response(JSON.stringify({ breakdowns }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
