@@ -6444,7 +6444,8 @@ serve(async (req) => {
           creativeId: string;
           creativeName: string;
           campaignId?: string;
-          objectiveType?: string;
+           objectiveType?: string;
+          primaryMetric?: string;
           status: 'healthy' | 'warning' | 'fatigued';
           signals: string[];
           metrics: {
