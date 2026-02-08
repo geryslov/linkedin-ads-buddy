@@ -11,9 +11,9 @@ import {
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { ArrowUpDown, Search, Building2, ExternalLink, Globe, AlertCircle, CheckCircle, ChevronRight, ChevronDown, Target } from 'lucide-react';
+import { ArrowUpDown, Search, Building2, ExternalLink, Globe, AlertCircle, CheckCircle, ChevronRight, ChevronDown, Target, Megaphone } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
-import { CompanyDemographicItem, ObjectiveBreakdownItem } from '@/hooks/useCompanyDemographic';
+import { CompanyDemographicItem, ObjectiveBreakdownItem, CampaignBreakdownItem } from '@/hooks/useCompanyDemographic';
 
 interface CompanyDemographicTableProps {
   data: CompanyDemographicItem[];
@@ -41,7 +41,8 @@ export function CompanyDemographicTable({ data, isLoading }: CompanyDemographicT
   const [searchQuery, setSearchQuery] = useState('');
   const [sortField, setSortField] = useState<SortField>('impressions');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
-  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+  const [expandedCompanies, setExpandedCompanies] = useState<Set<string>>(new Set());
+  const [expandedObjectives, setExpandedObjectives] = useState<Set<string>>(new Set());
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -52,13 +53,36 @@ export function CompanyDemographicTable({ data, isLoading }: CompanyDemographicT
     }
   };
 
-  const toggleRow = (entityUrn: string) => {
-    setExpandedRows(prev => {
+  const toggleCompany = (entityUrn: string) => {
+    setExpandedCompanies(prev => {
       const next = new Set(prev);
       if (next.has(entityUrn)) {
         next.delete(entityUrn);
+        // Also collapse any expanded objectives for this company
+        setExpandedObjectives(prevObj => {
+          const nextObj = new Set(prevObj);
+          for (const key of prevObj) {
+            if (key.startsWith(entityUrn + '::')) {
+              nextObj.delete(key);
+            }
+          }
+          return nextObj;
+        });
       } else {
         next.add(entityUrn);
+      }
+      return next;
+    });
+  };
+
+  const toggleObjective = (companyUrn: string, objective: string) => {
+    const key = `${companyUrn}::${objective}`;
+    setExpandedObjectives(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
       }
       return next;
     });
@@ -222,20 +246,21 @@ export function CompanyDemographicTable({ data, isLoading }: CompanyDemographicT
               </TableRow>
             ) : (
               filteredAndSortedData.map((item, index) => {
-                const isExpanded = expandedRows.has(item.entityUrn);
+                const isCompanyExpanded = expandedCompanies.has(item.entityUrn);
                 const hasBreakdown = item.objectiveBreakdown && item.objectiveBreakdown.length > 0;
                 
                 return (
                   <>
+                    {/* Company row */}
                     <TableRow 
                       key={item.entityUrn || index} 
-                      className={`hover:bg-muted/20 ${hasBreakdown ? 'cursor-pointer' : ''} ${isExpanded ? 'bg-muted/10' : ''}`}
-                      onClick={() => hasBreakdown && toggleRow(item.entityUrn)}
+                      className={`hover:bg-muted/20 ${hasBreakdown ? 'cursor-pointer' : ''} ${isCompanyExpanded ? 'bg-muted/10' : ''}`}
+                      onClick={() => hasBreakdown && toggleCompany(item.entityUrn)}
                     >
                       <TableCell className="font-medium">
                         <div className="flex items-center gap-2">
                           {hasBreakdown ? (
-                            isExpanded ? (
+                            isCompanyExpanded ? (
                               <ChevronDown className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                             ) : (
                               <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
@@ -299,42 +324,103 @@ export function CompanyDemographicTable({ data, isLoading }: CompanyDemographicT
                         ${item.cpm.toFixed(2)}
                       </TableCell>
                     </TableRow>
-                    {isExpanded && hasBreakdown && item.objectiveBreakdown!.map((breakdown, bIdx) => (
-                      <TableRow 
-                        key={`${item.entityUrn}-obj-${bIdx}`} 
-                        className="bg-muted/5 hover:bg-muted/15 border-l-2 border-l-primary/20"
-                      >
-                        <TableCell colSpan={2} className="pl-10">
-                          <div className="flex items-center gap-2">
-                            <Target className="h-3.5 w-3.5 text-primary/60 flex-shrink-0" />
-                            <span className="text-sm text-muted-foreground">
-                              {formatObjective(breakdown.objective)}
-                            </span>
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums text-sm text-muted-foreground">
-                          {breakdown.impressions.toLocaleString()}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums text-sm text-muted-foreground">
-                          {breakdown.clicks.toLocaleString()}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums text-sm text-muted-foreground">
-                          ${breakdown.spent.toFixed(2)}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums text-sm text-muted-foreground">
-                          {breakdown.leads.toLocaleString()}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums text-sm text-muted-foreground">
-                          {breakdown.ctr.toFixed(2)}%
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums text-sm text-muted-foreground">
-                          ${breakdown.cpc.toFixed(2)}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums text-sm text-muted-foreground">
-                          ${breakdown.cpm.toFixed(2)}
-                        </TableCell>
-                      </TableRow>
-                    ))}
+
+                    {/* Objective breakdown rows */}
+                    {isCompanyExpanded && hasBreakdown && item.objectiveBreakdown!.map((breakdown, bIdx) => {
+                      const objKey = `${item.entityUrn}::${breakdown.objective}`;
+                      const isObjExpanded = expandedObjectives.has(objKey);
+                      const hasCampaigns = breakdown.campaignBreakdown && breakdown.campaignBreakdown.length > 0;
+                      
+                      return (
+                        <>
+                          <TableRow 
+                            key={`${item.entityUrn}-obj-${bIdx}`} 
+                            className={`bg-muted/5 hover:bg-muted/15 border-l-2 border-l-primary/20 ${hasCampaigns ? 'cursor-pointer' : ''} ${isObjExpanded ? 'bg-muted/10' : ''}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (hasCampaigns) toggleObjective(item.entityUrn, breakdown.objective);
+                            }}
+                          >
+                            <TableCell colSpan={2} className="pl-10">
+                              <div className="flex items-center gap-2">
+                                {hasCampaigns ? (
+                                  isObjExpanded ? (
+                                    <ChevronDown className="h-3.5 w-3.5 text-primary/60 flex-shrink-0" />
+                                  ) : (
+                                    <ChevronRight className="h-3.5 w-3.5 text-primary/60 flex-shrink-0" />
+                                  )
+                                ) : (
+                                  <Target className="h-3.5 w-3.5 text-primary/60 flex-shrink-0" />
+                                )}
+                                <span className="text-sm text-muted-foreground">
+                                  {formatObjective(breakdown.objective)}
+                                </span>
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums text-sm text-muted-foreground">
+                              {breakdown.impressions.toLocaleString()}
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums text-sm text-muted-foreground">
+                              {breakdown.clicks.toLocaleString()}
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums text-sm text-muted-foreground">
+                              ${breakdown.spent.toFixed(2)}
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums text-sm text-muted-foreground">
+                              {breakdown.leads.toLocaleString()}
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums text-sm text-muted-foreground">
+                              {breakdown.ctr.toFixed(2)}%
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums text-sm text-muted-foreground">
+                              ${breakdown.cpc.toFixed(2)}
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums text-sm text-muted-foreground">
+                              ${breakdown.cpm.toFixed(2)}
+                            </TableCell>
+                          </TableRow>
+
+                          {/* Campaign breakdown rows */}
+                          {isObjExpanded && hasCampaigns && breakdown.campaignBreakdown!.map((camp, cIdx) => (
+                            <TableRow 
+                              key={`${item.entityUrn}-obj-${bIdx}-camp-${cIdx}`} 
+                              className="bg-muted/[0.02] hover:bg-muted/10 border-l-4 border-l-primary/10"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <TableCell colSpan={2} className="pl-16">
+                                <div className="flex items-center gap-2">
+                                  <Megaphone className="h-3 w-3 text-muted-foreground/60 flex-shrink-0" />
+                                  <span className="text-xs text-muted-foreground truncate max-w-[200px]" title={camp.campaignName}>
+                                    {camp.campaignName}
+                                  </span>
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-right tabular-nums text-xs text-muted-foreground">
+                                {camp.impressions.toLocaleString()}
+                              </TableCell>
+                              <TableCell className="text-right tabular-nums text-xs text-muted-foreground">
+                                {camp.clicks.toLocaleString()}
+                              </TableCell>
+                              <TableCell className="text-right tabular-nums text-xs text-muted-foreground">
+                                ${camp.spent.toFixed(2)}
+                              </TableCell>
+                              <TableCell className="text-right tabular-nums text-xs text-muted-foreground">
+                                {camp.leads.toLocaleString()}
+                              </TableCell>
+                              <TableCell className="text-right tabular-nums text-xs text-muted-foreground">
+                                {camp.ctr.toFixed(2)}%
+                              </TableCell>
+                              <TableCell className="text-right tabular-nums text-xs text-muted-foreground">
+                                ${camp.cpc.toFixed(2)}
+                              </TableCell>
+                              <TableCell className="text-right tabular-nums text-xs text-muted-foreground">
+                                ${camp.cpm.toFixed(2)}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </>
+                      );
+                    })}
                   </>
                 );
               })
