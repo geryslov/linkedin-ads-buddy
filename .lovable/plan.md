@@ -1,92 +1,111 @@
 
+# Speed Up Company Demographic Report
 
-# Add Objective Breakdown to Company Demographic Report
+## Problem
 
-## Overview
+The report is slow because it queries **every campaign individually** with the MEMBER_COMPANY pivot (batches of 5). If an account has 50 campaigns, that's 10 sequential batch rounds of LinkedIn API calls -- all before the report can load.
 
-Each company row in the Company Demographic table will become expandable. When clicked, it reveals a sub-table showing how that company's metrics break down by campaign objective (e.g., Lead Generation, Engagement, Brand Awareness, Website Visits).
+## Solution: Two-Phase Architecture
 
-## How It Works
+Split the work into a fast initial load and lazy on-demand loading:
 
-The LinkedIn Analytics API uses a `MEMBER_COMPANY` pivot to show which companies saw your ads. Currently, this is fetched at the account level, producing one row per company with aggregated totals.
+**Phase 1 (initial load -- fast):** Fetch company data + objective-level breakdown only. Instead of querying each campaign individually, query once per **objective group** (all campaigns sharing the same objective in a single query). Accounts typically have 2-4 unique objectives, so this means 2-4 API calls instead of 50+.
 
-To add an objective breakdown, the backend will:
-1. Fetch all campaigns for the account to build a mapping of campaign ID to objective type
-2. For each unique objective, make a separate analytics query filtered to only the campaigns with that objective
-3. Return the per-objective data alongside the aggregated company data
+**Phase 2 (on-demand -- lazy):** When a user clicks to expand an objective row, fetch the campaign-level breakdown for just that objective's campaigns at that point. This defers the expensive per-campaign work until it's actually needed.
 
-The frontend will render expandable rows: click a company to see its metrics split by objective.
+Additionally, run name resolution (Step 2/3) in parallel with the objective breakdown queries (Step 4), since they are independent.
 
 ## Changes
 
-### 1. Backend: Edge Function Enhancement
+### 1. Edge Function: Optimize `get_company_demographic`
 
-**File:** `supabase/functions/linkedin-api/index.ts` (within `get_company_demographic` action)
+**File:** `supabase/functions/linkedin-api/index.ts`
 
-After the existing company-level aggregation (Step 1), add:
+Current Step 4 (the bottleneck):
+- Fetches campaign metadata
+- Queries EACH campaign individually with MEMBER_COMPANY pivot, batches of 5
+- Builds both objective AND campaign breakdown
 
-- **Fetch campaign metadata**: Call `adCampaignsV2` API to get all campaigns and their `objectiveType`
-- **Group campaigns by objective**: Create a map of objective type to campaign IDs
-- **Per-objective analytics queries**: For each objective group, make a separate `adAnalyticsV2` call with `pivot=MEMBER_COMPANY` filtered to those campaigns
-- **Attach breakdown to each company**: Each company in the response gets a new `objectiveBreakdown` array field
+New Step 4:
+- Fetches campaign metadata (same)
+- Queries per-OBJECTIVE GROUP (not per-campaign): one API call per unique objective, with all campaigns of that objective as filters
+- Builds objective-level breakdown only (no campaign breakdown)
+- Remove the `campaignBreakdownMap` entirely from this action
 
-The response structure per company will change from:
-```
-{ entityName, impressions, clicks, spent, leads, ... }
-```
-to:
-```
-{
-  entityName, impressions, clicks, spent, leads, ...,
-  objectiveBreakdown: [
-    { objective: "LEAD_GENERATION", impressions: 500, clicks: 20, spent: 150, leads: 5 },
-    { objective: "ENGAGEMENT", impressions: 300, clicks: 45, spent: 80, leads: 0 },
-  ]
-}
-```
+Also parallelize: Run Steps 2+3 (name resolution) and Step 4 (objective breakdown) concurrently using `Promise.all`, since they don't depend on each other.
 
-### 2. Frontend: Data Model Update
+### 2. Edge Function: New `get_company_campaign_breakdown` action
+
+**File:** `supabase/functions/linkedin-api/index.ts`
+
+Add a new lightweight action that accepts:
+- `accountId`, `dateRange`, `campaignIds` (for that objective), `campaignNames` (map)
+
+It queries each campaign individually (batches of 5, same as today) but only for the specific objective being expanded -- typically 5-15 campaigns, not 50+. Returns an array of `{ campaignId, campaignName, impressions, clicks, spent, leads, ctr, cpc, cpm }` per company URN.
+
+### 3. Hook: Add lazy loading function
 
 **File:** `src/hooks/useCompanyDemographic.ts`
 
-- Add a new `ObjectiveBreakdownItem` interface with fields: `objective`, `impressions`, `clicks`, `spent`, `leads`, `ctr`, `cpc`, `cpm`
-- Add `objectiveBreakdown` field to `CompanyDemographicItem` interface
-- Map the new field from the API response
+- Remove `campaignBreakdown` from the initial data mapping (it won't be in the response anymore)
+- Add a new `fetchCampaignBreakdown` function that calls the new edge function action
+- Add state to store lazily-loaded campaign breakdowns per company+objective key
+- Add a `loadingObjectives` state (Set of keys) so the UI can show a spinner
 
-### 3. Frontend: Expandable Table Rows
+### 4. Frontend: Trigger lazy load on objective expand
 
 **File:** `src/components/dashboard/CompanyDemographicTable.tsx`
 
-- Make each company row clickable to expand/collapse
-- Add a chevron icon indicator (right/down) to show expand state
-- When expanded, show a sub-table below the company row with one row per objective
-- Each objective row displays: objective name (formatted nicely), impressions, clicks, spent, leads, CTR, CPC, CPM
-- Sub-rows are styled with a slightly indented/lighter background to visually distinguish them from parent rows
-- Objective names are formatted for readability (e.g., "LEAD_GENERATION" becomes "Lead Generation")
+- When expanding an objective row, call `fetchCampaignBreakdown` if data isn't already loaded
+- Show a small loading spinner in the campaign area while fetching
+- Once loaded, display campaign rows as before
+- Cache the loaded data so re-expanding doesn't re-fetch
+
+## Performance Impact
+
+| Scenario | Before | After |
+|---|---|---|
+| 50 campaigns, 3 objectives | ~10 sequential batch rounds | 3 parallel API calls |
+| Initial load API calls | N campaigns / 5 per batch | N objectives (2-4) |
+| Name resolution | Sequential after analytics | Parallel with objective queries |
+| Campaign drill-down | Pre-loaded (slow) | On-demand (instant feel) |
+
+Expected improvement: initial load time reduced by roughly 80-90% for typical accounts.
 
 ## Technical Details
 
-### API Call Strategy
+### Per-objective query (replacing per-campaign)
 
-Rather than making one query per objective (which could be slow with many objectives), the approach groups campaigns by objective first:
-
-```text
-Step 1: Fetch campaigns -> { LEAD_GENERATION: [c1, c2], ENGAGEMENT: [c3, c4], BRAND_AWARENESS: [c5] }
-Step 2: For each objective group, query adAnalyticsV2 with MEMBER_COMPANY pivot + campaign filter
-Step 3: Merge results into per-company breakdown arrays
+Instead of:
+```
+// OLD: One query per campaign
+campaigns[0]=urn:li:sponsoredCampaign:123  (query 1)
+campaigns[0]=urn:li:sponsoredCampaign:456  (query 2)
+...50 more queries
 ```
 
-Typically there are only 2-4 unique objectives per account, so this adds 2-4 extra API calls -- a minimal overhead.
+Now:
+```
+// NEW: One query per objective group
+campaigns[0]=urn:li:sponsoredCampaign:123&campaigns[1]=urn:li:sponsoredCampaign:456&...  (all Lead Gen campaigns in 1 query)
+campaigns[0]=urn:li:sponsoredCampaign:789&campaigns[1]=...  (all Engagement campaigns in 1 query)
+```
 
-### Safety Measures
+This gives us per-company metrics broken down by objective without needing individual campaign queries.
 
-- If the campaign metadata fetch fails, the report still works as before (just without the breakdown)
-- Empty objective breakdowns (all-zero metrics for a company under an objective) are filtered out
-- The expanded view only shows objectives that have actual data for that company
+### Lazy load contract
+
+The `fetchCampaignBreakdown` function will accept:
+- `accountId`, `dateRange`, `objectiveCampaignIds` (campaign IDs for one objective)
+
+It returns a map of `companyUrn -> campaignMetrics[]`, which gets merged into the existing data.
+
+### Query tunneling safety
+
+Since per-objective queries may include many campaign URNs, the existing query tunneling fallback (POST with `X-HTTP-Method-Override: GET`) will be used if the URL exceeds length limits.
 
 ## Files to Modify
 
-1. `supabase/functions/linkedin-api/index.ts` -- Add objective grouping and per-objective queries to `get_company_demographic`
-2. `src/hooks/useCompanyDemographic.ts` -- Add `ObjectiveBreakdownItem` interface and map new field
-3. `src/components/dashboard/CompanyDemographicTable.tsx` -- Add expandable rows with objective breakdown sub-table
-
+1. `supabase/functions/linkedin-api/index.ts` -- Restructure Step 4 to per-objective queries, add `get_company_campaign_breakdown` action
+2. `src/hooks/useCompanyDemographic.ts` -- Add lazy loading function and state
+3. `src/components/dashboard/CompanyDemographicTable.tsx` -- Trigger lazy load on objective expand, show loading indicator
