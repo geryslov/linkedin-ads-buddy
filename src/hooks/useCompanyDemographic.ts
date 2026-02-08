@@ -2,6 +2,17 @@ import { useState, useCallback, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 
+export interface ObjectiveBreakdownItem {
+  objective: string;
+  impressions: number;
+  clicks: number;
+  spent: number;
+  leads: number;
+  ctr: number;
+  cpc: number;
+  cpm: number;
+}
+
 export interface CompanyDemographicItem {
   entityUrn: string;
   entityName: string;
@@ -15,6 +26,7 @@ export interface CompanyDemographicItem {
   ctr: number;
   cpc: number;
   cpm: number;
+  objectiveBreakdown?: ObjectiveBreakdownItem[];
 }
 
 export type TimeGranularity = 'DAILY' | 'MONTHLY' | 'ALL';
@@ -126,6 +138,16 @@ export function useCompanyDemographic(accessToken: string | null) {
         ctr: parseFloat(el.ctr || '0'),
         cpc: parseFloat(el.cpc || '0'),
         cpm: parseFloat(el.cpm || '0'),
+        objectiveBreakdown: el.objectiveBreakdown?.map((b: any) => ({
+          objective: b.objective || 'UNKNOWN',
+          impressions: b.impressions || 0,
+          clicks: b.clicks || 0,
+          spent: b.spent || 0,
+          leads: b.leads || 0,
+          ctr: b.ctr || 0,
+          cpc: b.cpc || 0,
+          cpm: b.cpm || 0,
+        })) || undefined,
       }));
       
       setCompanyData(companies);
