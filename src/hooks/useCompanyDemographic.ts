@@ -23,6 +23,10 @@ export interface ObjectiveBreakdownItem {
   ctr: number;
   cpc: number;
   cpm: number;
+  // Campaign IDs and names for lazy loading
+  campaignIds?: string[];
+  campaignNames?: Record<string, string>;
+  // Campaign breakdown is lazily loaded
   campaignBreakdown?: CampaignBreakdownItem[];
 }
 
@@ -61,47 +65,21 @@ export function useCompanyDemographic(accessToken: string | null) {
     end: new Date().toISOString().split('T')[0],
   });
   const [selectedCampaignIds, setSelectedCampaignIds] = useState<string[]>([]);
+  // Track which objective keys are currently loading campaign breakdowns
+  const [loadingObjectives, setLoadingObjectives] = useState<Set<string>>(new Set());
+  // Cache loaded campaign breakdowns by key: "entityUrn::objective"
+  const [campaignBreakdownCache, setCampaignBreakdownCache] = useState<Map<string, CampaignBreakdownItem[]>>(new Map());
   const { toast } = useToast();
 
   const timeFrameOptions: TimeFrameOption[] = useMemo(() => {
     const today = new Date();
     return [
-      {
-        label: 'Last 7 days',
-        value: '7d',
-        startDate: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
-        endDate: today,
-      },
-      {
-        label: 'Last 14 days',
-        value: '14d',
-        startDate: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000),
-        endDate: today,
-      },
-      {
-        label: 'Last 30 days',
-        value: '30d',
-        startDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
-        endDate: today,
-      },
-      {
-        label: 'Last 90 days',
-        value: '90d',
-        startDate: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000),
-        endDate: today,
-      },
-      {
-        label: 'This month',
-        value: 'this_month',
-        startDate: new Date(today.getFullYear(), today.getMonth(), 1),
-        endDate: today,
-      },
-      {
-        label: 'Last month',
-        value: 'last_month',
-        startDate: new Date(today.getFullYear(), today.getMonth() - 1, 1),
-        endDate: new Date(today.getFullYear(), today.getMonth(), 0),
-      },
+      { label: 'Last 7 days', value: '7d', startDate: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000), endDate: today },
+      { label: 'Last 14 days', value: '14d', startDate: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000), endDate: today },
+      { label: 'Last 30 days', value: '30d', startDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), endDate: today },
+      { label: 'Last 90 days', value: '90d', startDate: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000), endDate: today },
+      { label: 'This month', value: 'this_month', startDate: new Date(today.getFullYear(), today.getMonth(), 1), endDate: today },
+      { label: 'Last month', value: 'last_month', startDate: new Date(today.getFullYear(), today.getMonth() - 1, 1), endDate: new Date(today.getFullYear(), today.getMonth(), 0) },
     ];
   }, []);
 
@@ -109,6 +87,9 @@ export function useCompanyDemographic(accessToken: string | null) {
     if (!accessToken || !accountId) return;
     setIsLoading(true);
     setError(null);
+    // Clear campaign breakdown cache on new fetch
+    setCampaignBreakdownCache(new Map());
+    setLoadingObjectives(new Set());
     
     const campaignsToFilter = campaignIds || selectedCampaignIds;
     
@@ -160,17 +141,9 @@ export function useCompanyDemographic(accessToken: string | null) {
           ctr: b.ctr || 0,
           cpc: b.cpc || 0,
           cpm: b.cpm || 0,
-          campaignBreakdown: b.campaignBreakdown?.map((c: any) => ({
-            campaignId: c.campaignId || '',
-            campaignName: c.campaignName || 'Unknown Campaign',
-            impressions: c.impressions || 0,
-            clicks: c.clicks || 0,
-            spent: c.spent || 0,
-            leads: c.leads || 0,
-            ctr: c.ctr || 0,
-            cpc: c.cpc || 0,
-            cpm: c.cpm || 0,
-          })) || undefined,
+          campaignIds: b.campaignIds || [],
+          campaignNames: b.campaignNames || {},
+          // No campaignBreakdown in initial load — it's lazy loaded
         })) || undefined,
       }));
       
@@ -187,6 +160,72 @@ export function useCompanyDemographic(accessToken: string | null) {
       setIsLoading(false);
     }
   }, [accessToken, dateRange, timeGranularity, selectedCampaignIds, toast]);
+
+  // Lazy load campaign breakdown for a specific company + objective
+  const fetchCampaignBreakdown = useCallback(async (
+    accountId: string,
+    entityUrn: string,
+    objective: string,
+    campaignIds: string[],
+    campaignNames: Record<string, string>,
+  ) => {
+    if (!accessToken || !accountId || campaignIds.length === 0) return;
+    
+    const cacheKey = `${entityUrn}::${objective}`;
+    
+    // Already cached
+    if (campaignBreakdownCache.has(cacheKey)) return;
+    
+    // Already loading
+    if (loadingObjectives.has(cacheKey)) return;
+    
+    setLoadingObjectives(prev => new Set(prev).add(cacheKey));
+    
+    try {
+      console.log(`Fetching campaign breakdown for ${entityUrn} / ${objective} (${campaignIds.length} campaigns)`);
+      
+      const { data, error: fetchError } = await supabase.functions.invoke('linkedin-api', {
+        body: {
+          action: 'get_company_campaign_breakdown',
+          accessToken,
+          params: {
+            accountId,
+            dateRange,
+            campaignIds,
+            campaignNames,
+          }
+        }
+      });
+      
+      if (fetchError) throw fetchError;
+      
+      const breakdowns = data?.breakdowns || {};
+      
+      // Update cache for ALL companies returned (not just the one that triggered it)
+      setCampaignBreakdownCache(prev => {
+        const next = new Map(prev);
+        for (const [companyUrn, campaigns] of Object.entries(breakdowns)) {
+          const key = `${companyUrn}::${objective}`;
+          next.set(key, campaigns as CampaignBreakdownItem[]);
+        }
+        // Also set empty array for the requesting company if no data returned
+        if (!breakdowns[entityUrn]) {
+          next.set(cacheKey, []);
+        }
+        return next;
+      });
+    } catch (err: any) {
+      console.error('Fetch campaign breakdown error:', err);
+      // Set empty to prevent re-fetching
+      setCampaignBreakdownCache(prev => new Map(prev).set(cacheKey, []));
+    } finally {
+      setLoadingObjectives(prev => {
+        const next = new Set(prev);
+        next.delete(cacheKey);
+        return next;
+      });
+    }
+  }, [accessToken, dateRange, campaignBreakdownCache, loadingObjectives]);
 
   const totals = useMemo(() => {
     return companyData.reduce(
@@ -223,5 +262,8 @@ export function useCompanyDemographic(accessToken: string | null) {
     selectedCampaignIds,
     setSelectedCampaignIds,
     fetchCompanyDemographic,
+    fetchCampaignBreakdown,
+    campaignBreakdownCache,
+    loadingObjectives,
   };
 }

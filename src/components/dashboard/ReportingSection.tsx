@@ -757,6 +757,13 @@ export function ReportingSection({ accessToken, selectedAccount, canWrite = fals
               <CompanyDemographicTable 
                 data={companyDemographic.companyData} 
                 isLoading={companyDemographic.isLoading}
+                onExpandObjective={(entityUrn, objective, campaignIds, campaignNames) => {
+                  if (selectedAccount) {
+                    companyDemographic.fetchCampaignBreakdown(selectedAccount, entityUrn, objective, campaignIds, campaignNames);
+                  }
+                }}
+                campaignBreakdownCache={companyDemographic.campaignBreakdownCache}
+                loadingObjectives={companyDemographic.loadingObjectives}
               />
             </CardContent>
           </Card>
