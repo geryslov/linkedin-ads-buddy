@@ -2,6 +2,18 @@ import { useState, useCallback, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 
+export interface CampaignBreakdownItem {
+  campaignId: string;
+  campaignName: string;
+  impressions: number;
+  clicks: number;
+  spent: number;
+  leads: number;
+  ctr: number;
+  cpc: number;
+  cpm: number;
+}
+
 export interface ObjectiveBreakdownItem {
   objective: string;
   impressions: number;
@@ -11,6 +23,7 @@ export interface ObjectiveBreakdownItem {
   ctr: number;
   cpc: number;
   cpm: number;
+  campaignBreakdown?: CampaignBreakdownItem[];
 }
 
 export interface CompanyDemographicItem {
@@ -147,6 +160,17 @@ export function useCompanyDemographic(accessToken: string | null) {
           ctr: b.ctr || 0,
           cpc: b.cpc || 0,
           cpm: b.cpm || 0,
+          campaignBreakdown: b.campaignBreakdown?.map((c: any) => ({
+            campaignId: c.campaignId || '',
+            campaignName: c.campaignName || 'Unknown Campaign',
+            impressions: c.impressions || 0,
+            clicks: c.clicks || 0,
+            spent: c.spent || 0,
+            leads: c.leads || 0,
+            ctr: c.ctr || 0,
+            cpc: c.cpc || 0,
+            cpm: c.cpm || 0,
+          })) || undefined,
         })) || undefined,
       }));
       
