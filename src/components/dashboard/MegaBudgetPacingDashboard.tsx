@@ -215,15 +215,10 @@ export function MegaBudgetPacingDashboard({ accessToken, adAccounts }: Props) {
                   </TableCell>
                   <TableCell>
                     {(s.last3Days?.length ?? 0) > 0 ? (
-                      <div className="w-20 h-8">
+                      <div className="w-20 h-8" title={s.last3Days?.map(d => `${d.date.slice(5)}: $${d.spend.toLocaleString(undefined, { maximumFractionDigits: 0 })}`).join(' | ')}>
                         <ResponsiveContainer width="100%" height="100%">
                           <LineChart data={s.last3Days}>
-                            <Line type="monotone" dataKey="spend" stroke="hsl(var(--primary))" strokeWidth={1.5} dot={false} />
-                            <Tooltip
-                              contentStyle={{ fontSize: '11px', padding: '4px 8px', backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))' }}
-                              formatter={(v: number) => [`$${v.toLocaleString(undefined, { maximumFractionDigits: 0 })}`, 'Spend']}
-                              labelFormatter={(l: string) => l.slice(5)}
-                            />
+                            <Line type="monotone" dataKey="spend" stroke="hsl(var(--primary))" strokeWidth={1.5} dot={false} isAnimationActive={false} />
                           </LineChart>
                         </ResponsiveContainer>
                       </div>
