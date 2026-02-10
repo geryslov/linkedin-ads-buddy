@@ -1,111 +1,82 @@
 
-# Speed Up Company Demographic Report
+# Add Company Logos to Company Demographic Report
 
-## Problem
+## Overview
 
-The report is slow because it queries **every campaign individually** with the MEMBER_COMPANY pivot (batches of 5). If an account has 50 campaigns, that's 10 sequential batch rounds of LinkedIn API calls -- all before the report can load.
+Display company logos next to company names in the Company Demographic table. Logos are fetched from the LinkedIn API during the existing organization lookup step and cached in the database for future use.
 
-## Solution: Two-Phase Architecture
+## How It Works
 
-Split the work into a fast initial load and lazy on-demand loading:
+The LinkedIn `organizationsLookup` API already returns a `logoV2` field (no admin access required). The flow to get a usable image URL is:
 
-**Phase 1 (initial load -- fast):** Fetch company data + objective-level breakdown only. Instead of querying each campaign individually, query once per **objective group** (all campaigns sharing the same objective in a single query). Accounts typically have 2-4 unique objectives, so this means 2-4 API calls instead of 50+.
-
-**Phase 2 (on-demand -- lazy):** When a user clicks to expand an objective row, fetch the campaign-level breakdown for just that objective's campaigns at that point. This defers the expensive per-campaign work until it's actually needed.
-
-Additionally, run name resolution (Step 2/3) in parallel with the objective breakdown queries (Step 4), since they are independent.
+1. Add `logoV2` to the existing projection in `organizationsLookup`
+2. Extract the `logoV2.original` URN (e.g., `urn:li:digitalmediaAsset:C560BAQGBzZXn5Schaw`)
+3. Convert `digitalmediaAsset` to `image` in the URN
+4. Call LinkedIn's Images API (`/rest/images/{imageURN}?fields=downloadUrl`) to get the actual CDN URL
+5. Return the `downloadUrl` alongside company data
+6. Cache it in `linkedin_company_cache` so we don't re-fetch on every load
 
 ## Changes
 
-### 1. Edge Function: Optimize `get_company_demographic`
+### 1. Database: Add `logo_url` column to `linkedin_company_cache`
+
+Add a nullable `logo_url TEXT` column to cache resolved logo URLs.
+
+### 2. Edge Function: Fetch logos during org lookup
 
 **File:** `supabase/functions/linkedin-api/index.ts`
 
-Current Step 4 (the bottleneck):
-- Fetches campaign metadata
-- Queries EACH campaign individually with MEMBER_COMPANY pivot, batches of 5
-- Builds both objective AND campaign breakdown
+In the `get_company_demographic` action's Step 2 (organization name resolution):
 
-New Step 4:
-- Fetches campaign metadata (same)
-- Queries per-OBJECTIVE GROUP (not per-campaign): one API call per unique objective, with all campaigns of that objective as filters
-- Builds objective-level breakdown only (no campaign breakdown)
-- Remove the `campaignBreakdownMap` entirely from this action
+- Update the projection to include `logoV2`: `projection=(results*(id,localizedName,localizedWebsite,vanityName,logoV2))`
+- After getting results, collect all `logoV2.original` URNs
+- Convert each URN from `digitalmediaAsset` to `image`
+- Batch-call the LinkedIn Images API (`/rest/images/{imageURN}?fields=downloadUrl`) to resolve download URLs
+- Store the logo URL in a `companyLogos` map alongside the existing `companyNames` and `companyWebsites` maps
+- Include `logoUrl` in the response for each company element
+- Also cache the `logo_url` when upserting to `linkedin_company_cache`
 
-Also parallelize: Run Steps 2+3 (name resolution) and Step 4 (objective breakdown) concurrently using `Promise.all`, since they don't depend on each other.
-
-### 2. Edge Function: New `get_company_campaign_breakdown` action
-
-**File:** `supabase/functions/linkedin-api/index.ts`
-
-Add a new lightweight action that accepts:
-- `accountId`, `dateRange`, `campaignIds` (for that objective), `campaignNames` (map)
-
-It queries each campaign individually (batches of 5, same as today) but only for the specific objective being expanded -- typically 5-15 campaigns, not 50+. Returns an array of `{ campaignId, campaignName, impressions, clicks, spent, leads, ctr, cpc, cpm }` per company URN.
-
-### 3. Hook: Add lazy loading function
+### 3. Hook: Add `logoUrl` to data model
 
 **File:** `src/hooks/useCompanyDemographic.ts`
 
-- Remove `campaignBreakdown` from the initial data mapping (it won't be in the response anymore)
-- Add a new `fetchCampaignBreakdown` function that calls the new edge function action
-- Add state to store lazily-loaded campaign breakdowns per company+objective key
-- Add a `loadingObjectives` state (Set of keys) so the UI can show a spinner
+- Add `logoUrl: string | null` to `CompanyDemographicItem` interface
+- Map it from the API response
 
-### 4. Frontend: Trigger lazy load on objective expand
+### 4. Frontend: Display logos in table
 
 **File:** `src/components/dashboard/CompanyDemographicTable.tsx`
 
-- When expanding an objective row, call `fetchCampaignBreakdown` if data isn't already loaded
-- Show a small loading spinner in the campaign area while fetching
-- Once loaded, display campaign rows as before
-- Cache the loaded data so re-expanding doesn't re-fetch
-
-## Performance Impact
-
-| Scenario | Before | After |
-|---|---|---|
-| 50 campaigns, 3 objectives | ~10 sequential batch rounds | 3 parallel API calls |
-| Initial load API calls | N campaigns / 5 per batch | N objectives (2-4) |
-| Name resolution | Sequential after analytics | Parallel with objective queries |
-| Campaign drill-down | Pre-loaded (slow) | On-demand (instant feel) |
-
-Expected improvement: initial load time reduced by roughly 80-90% for typical accounts.
+- Import the `Avatar`, `AvatarImage`, `AvatarFallback` components
+- In the Company column cell, add a small avatar (24x24) before the company name
+- Use `AvatarFallback` with `Building2` icon when no logo is available
+- This replaces the current `Building2` icon that shows when there's no breakdown
 
 ## Technical Details
 
-### Per-objective query (replacing per-campaign)
+### Images API Call
 
-Instead of:
-```
-// OLD: One query per campaign
-campaigns[0]=urn:li:sponsoredCampaign:123  (query 1)
-campaigns[0]=urn:li:sponsoredCampaign:456  (query 2)
-...50 more queries
-```
+The Images API is a simple GET per image URN. To avoid rate limits, logos will be resolved in parallel batches of 20. Each call is lightweight and fast.
 
-Now:
 ```
-// NEW: One query per objective group
-campaigns[0]=urn:li:sponsoredCampaign:123&campaigns[1]=urn:li:sponsoredCampaign:456&...  (all Lead Gen campaigns in 1 query)
-campaigns[0]=urn:li:sponsoredCampaign:789&campaigns[1]=...  (all Engagement campaigns in 1 query)
+GET https://api.linkedin.com/rest/images/urn:li:image:C560BAQGBzZXn5Schaw?fields=downloadUrl
+Headers: Authorization: Bearer {token}, LinkedIn-Version: 202511
 ```
 
-This gives us per-company metrics broken down by objective without needing individual campaign queries.
+### Caching Strategy
 
-### Lazy load contract
+- First check `linkedin_company_cache.logo_url` for cached logos
+- Only call the Images API for orgs without a cached logo
+- Upsert `logo_url` back to cache after resolution
+- This means logos are fetched once and reused across all subsequent loads
 
-The `fetchCampaignBreakdown` function will accept:
-- `accountId`, `dateRange`, `objectiveCampaignIds` (campaign IDs for one objective)
+### Performance Impact
 
-It returns a map of `companyUrn -> campaignMetrics[]`, which gets merged into the existing data.
-
-### Query tunneling safety
-
-Since per-objective queries may include many campaign URNs, the existing query tunneling fallback (POST with `X-HTTP-Method-Override: GET`) will be used if the URL exceeds length limits.
+Minimal -- the logo resolution runs in parallel with the existing org lookup. The Images API calls are fast (no analytics data). Cached logos skip the API entirely on subsequent loads.
 
 ## Files to Modify
 
-1. `supabase/functions/linkedin-api/index.ts` -- Restructure Step 4 to per-objective queries, add `get_company_campaign_breakdown` action
-2. `src/hooks/useCompanyDemographic.ts` -- Add lazy loading function and state
-3. `src/components/dashboard/CompanyDemographicTable.tsx` -- Trigger lazy load on objective expand, show loading indicator
+1. **Database migration** -- Add `logo_url` column to `linkedin_company_cache`
+2. `supabase/functions/linkedin-api/index.ts` -- Add `logoV2` to projection, resolve via Images API, cache results
+3. `src/hooks/useCompanyDemographic.ts` -- Add `logoUrl` field to interface and mapping
+4. `src/components/dashboard/CompanyDemographicTable.tsx` -- Display logo avatars in company column
