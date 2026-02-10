@@ -8332,6 +8332,107 @@ serve(async (req) => {
         }
       }
 
+      case 'get_budget_pacing_summary': {
+        // Lightweight multi-account budget pacing summary
+        const { accountIds } = params || {};
+        if (!accountIds || !Array.isArray(accountIds) || accountIds.length === 0) {
+          return new Response(JSON.stringify({ error: 'accountIds array required' }), {
+            status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = now.getMonth() + 1;
+        const daysInMonth = new Date(year, month, 0).getDate();
+        const currentDay = now.getDate();
+        const daysRemaining = daysInMonth - currentDay;
+        const monthStr = `${year}-${String(month).padStart(2, '0')}-01`;
+
+        console.log(`[get_budget_pacing_summary] Fetching ${accountIds.length} accounts, month ${monthStr}`);
+
+        const results = await Promise.allSettled(accountIds.map(async (acctId: string) => {
+          // Parallel: fetch spend + budget
+          const spendParams = new URLSearchParams();
+          spendParams.set('q', 'analytics');
+          spendParams.set('dateRange.start.day', '1');
+          spendParams.set('dateRange.start.month', String(month));
+          spendParams.set('dateRange.start.year', String(year));
+          spendParams.set('dateRange.end.day', String(currentDay));
+          spendParams.set('dateRange.end.month', String(month));
+          spendParams.set('dateRange.end.year', String(year));
+          spendParams.set('timeGranularity', 'MONTHLY');
+          spendParams.set('pivot', 'ACCOUNT');
+          spendParams.set('accounts[0]', `urn:li:sponsoredAccount:${acctId}`);
+          spendParams.set('fields', 'costInLocalCurrency');
+
+          const [spendRes, budgetRes] = await Promise.all([
+            fetch(`https://api.linkedin.com/v2/adAnalyticsV2?${spendParams.toString()}`, {
+              headers: { 'Authorization': `Bearer ${accessToken}` }
+            }),
+            supabaseClient
+              .from('account_budgets')
+              .select('budget_amount, currency')
+              .eq('account_id', acctId)
+              .eq('month', monthStr)
+              .maybeSingle()
+          ]);
+
+          let spent = 0;
+          if (spendRes.ok) {
+            const spendData = await spendRes.json();
+            const el = spendData?.elements?.[0];
+            if (el) spent = parseFloat(el.costInLocalCurrency || '0');
+          }
+
+          const budgetAmount = budgetRes.data?.budget_amount || 0;
+          const currency = budgetRes.data?.currency || 'USD';
+
+          const avgDaily = currentDay > 0 ? spent / currentDay : 0;
+          const projected = avgDaily * daysInMonth;
+
+          let pacingPercent = 0;
+          let pacingStatus: 'on_track' | 'underspend' | 'overspend' = 'on_track';
+          if (budgetAmount > 0) {
+            const idealSpent = (budgetAmount / daysInMonth) * currentDay;
+            pacingPercent = idealSpent > 0 ? (spent / idealSpent) * 100 : 0;
+            if (pacingPercent < 85) pacingStatus = 'underspend';
+            else if (pacingPercent > 115) pacingStatus = 'overspend';
+          }
+
+          return {
+            accountId: acctId,
+            budget: budgetAmount,
+            spent,
+            currency,
+            pacingPercent: Math.round(pacingPercent * 10) / 10,
+            pacingStatus,
+            daysRemaining,
+            daysInMonth,
+            projected: Math.round(projected * 100) / 100,
+            avgDaily: Math.round(avgDaily * 100) / 100,
+          };
+        }));
+
+        const summaries = results
+          .filter((r): r is PromiseFulfilledResult<any> => r.status === 'fulfilled')
+          .map(r => r.value);
+
+        const errors = results
+          .filter((r): r is PromiseRejectedResult => r.status === 'rejected')
+          .map((r, i) => ({ accountId: accountIds[i], error: r.reason?.message || 'Unknown error' }));
+
+        if (errors.length > 0) {
+          console.warn(`[get_budget_pacing_summary] ${errors.length} accounts failed:`, errors);
+        }
+
+        console.log(`[get_budget_pacing_summary] Done. ${summaries.length} succeeded, ${errors.length} failed`);
+
+        return new Response(JSON.stringify(summaries), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
       default:
         return new Response(JSON.stringify({ error: 'Unknown action' }), {
           status: 400,
