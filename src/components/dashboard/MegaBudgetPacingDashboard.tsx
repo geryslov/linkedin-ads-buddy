@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useMegaBudgetPacing, AccountPacingSummary } from "@/hooks/useMegaBudgetPacing";
 import { MetricCard } from "./MetricCard";
 import { Badge } from "@/components/ui/badge";
@@ -30,11 +30,14 @@ export function MegaBudgetPacingDashboard({ accessToken, adAccounts }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
 
+  const accountIds = useMemo(() => adAccounts.map(a => a.id), [adAccounts]);
+  const accountIdsKey = accountIds.join(",");
+
   useEffect(() => {
-    if (accessToken && adAccounts.length > 0) {
-      fetchAll(adAccounts.map(a => a.id));
+    if (accessToken && accountIds.length > 0) {
+      fetchAll(accountIds);
     }
-  }, [accessToken, adAccounts, fetchAll]);
+  }, [accessToken, accountIdsKey, fetchAll]);
 
   const nameMap = new Map(adAccounts.map(a => [a.id, a.name || a.id]));
 
