@@ -2167,6 +2167,7 @@ serve(async (req) => {
         const companyUrns = Array.from(companyMap.keys());
         const companyNames = new Map<string, string>();
         const companyWebsites = new Map<string, { website: string | null; linkedInUrl: string | null; status: string }>();
+        const companyLogos = new Map<string, string>();
 
         // Name resolution task (Steps 2+3)
         const nameResolutionTask = async () => {
@@ -2187,13 +2188,16 @@ serve(async (req) => {
               
               try {
                 const orgResponse = await fetch(
-                  `https://api.linkedin.com/v2/organizationsLookup?${idsParam}&projection=(results*(id,localizedName,localizedWebsite,vanityName))`,
+                  `https://api.linkedin.com/v2/organizationsLookup?${idsParam}&projection=(results*(id,localizedName,localizedWebsite,vanityName,logoV2))`,
                   { headers: { 'Authorization': `Bearer ${accessToken}` } }
                 );
                 
                 if (orgResponse.ok) {
                   const orgData = await orgResponse.json();
                   const results = orgData.results || {};
+                  
+                  // Collect logo URNs that need resolution
+                  const logoUrnToOrgUrn = new Map<string, string>();
                   
                   Object.entries(results).forEach(([id, org]: [string, any]) => {
                     const urn = orgIdToUrn.get(id);
@@ -2206,7 +2210,42 @@ serve(async (req) => {
                       website, linkedInUrl,
                       status: website ? 'resolved' : (vanityName ? 'fallback' : 'unresolved'),
                     });
+                    
+                    // Extract logoV2 URN
+                    const logoUrn = org?.logoV2?.original;
+                    if (logoUrn && typeof logoUrn === 'string') {
+                      // Convert digitalmediaAsset to image in the URN
+                      const imageUrn = logoUrn.replace('urn:li:digitalmediaAsset:', 'urn:li:image:');
+                      logoUrnToOrgUrn.set(imageUrn, urn);
+                    }
                   });
+                  
+                  // Resolve logo download URLs via Images API in parallel batches of 20
+                  if (logoUrnToOrgUrn.size > 0) {
+                    const logoEntries = Array.from(logoUrnToOrgUrn.entries());
+                    const logoBatchSize = 20;
+                    for (let j = 0; j < logoEntries.length; j += logoBatchSize) {
+                      const logoBatch = logoEntries.slice(j, j + logoBatchSize);
+                      const logoPromises = logoBatch.map(async ([imageUrn, orgUrn]) => {
+                        try {
+                          const imgResponse = await fetch(
+                            `https://api.linkedin.com/rest/images/${encodeURIComponent(imageUrn)}?fields=downloadUrl`,
+                            { headers: { 'Authorization': `Bearer ${accessToken}`, 'LinkedIn-Version': '202511' } }
+                          );
+                          if (imgResponse.ok) {
+                            const imgData = await imgResponse.json();
+                            if (imgData.downloadUrl) {
+                              companyLogos.set(orgUrn, imgData.downloadUrl);
+                            }
+                          }
+                        } catch (e) {
+                          // Non-fatal: logo resolution failure
+                        }
+                      });
+                      await Promise.all(logoPromises);
+                    }
+                    console.log(`[get_company_demographic] Resolved ${companyLogos.size} company logos`);
+                  }
                 }
               } catch (e) {
                 console.log('[Warning] Organization lookup failed:', e);
@@ -2442,6 +2481,7 @@ serve(async (req) => {
             website: websiteInfo.website,
             linkedInUrl: websiteInfo.linkedInUrl,
             enrichmentStatus: websiteInfo.status,
+            logoUrl: companyLogos.get(entityUrn) || null,
             impressions: metrics.impressions,
             clicks: metrics.clicks,
             costInLocalCurrency: metrics.spent.toFixed(2),

@@ -35,6 +35,7 @@ export interface CompanyDemographicItem {
   entityName: string;
   website: string | null;
   linkedInUrl: string | null;
+  logoUrl: string | null;
   enrichmentStatus: 'resolved' | 'fallback' | 'unresolved';
   impressions: number;
   clicks: number;
@@ -124,6 +125,7 @@ export function useCompanyDemographic(accessToken: string | null) {
         entityName: el.entityName || 'Unknown',
         website: el.website || null,
         linkedInUrl: el.linkedInUrl || null,
+        logoUrl: el.logoUrl || null,
         enrichmentStatus: el.enrichmentStatus || 'unresolved',
         impressions: el.impressions || 0,
         clicks: el.clicks || 0,
