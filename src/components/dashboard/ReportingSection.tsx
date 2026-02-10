@@ -10,10 +10,12 @@ import { useCreativeNamesReport, TimeFrameOption as CreativeNamesTimeFrameOption
 import { useCampaignReporting, TimeFrameOption as CampaignTimeFrameOption } from '@/hooks/useCampaignReporting';
 import { useJobSeniorityMatrix, TimeFrameOption as MatrixTimeFrameOption } from '@/hooks/useJobSeniorityMatrix';
 import { useLeadGenFormsReport, TimeFrameOption as LeadGenTimeFrameOption } from '@/hooks/useLeadGenFormsReport';
+import { useCampaignGroupPerformance, TimeFrameOption as CampaignGroupTimeFrameOption } from '@/hooks/useCampaignGroupPerformance';
 import { DemographicTable } from './DemographicTable';
 import { CompanyDemographicTable } from './CompanyDemographicTable';
 import { CreativeNamesReportTable } from './CreativeNamesReportTable';
 import { CampaignReportingTable } from './CampaignReportingTable';
+import { CampaignGroupPerformanceTable } from './CampaignGroupPerformanceTable';
 import { JobSeniorityMatrix } from './JobSeniorityMatrix';
 import { JobFunctionTitlesDrawer } from './JobFunctionTitlesDrawer';
 import { LeadGenFormsTable } from './LeadGenFormsTable';
@@ -51,6 +53,7 @@ export function ReportingSection({ accessToken, selectedAccount, canWrite = fals
   const campaignReporting = useCampaignReporting(accessToken);
   const jobSeniorityMatrix = useJobSeniorityMatrix(accessToken);
   const leadGenForms = useLeadGenFormsReport(accessToken);
+  const campaignGroupPerformance = useCampaignGroupPerformance(accessToken);
   const { toast } = useToast();
 
   const [selectedTimeFrame, setSelectedTimeFrame] = useState('last_7_days');
@@ -147,6 +150,8 @@ export function ReportingSection({ accessToken, selectedAccount, canWrite = fals
         if (campaignReporting.campaignData.length === 0) {
           campaignReporting.fetchCampaignReport(selectedAccount);
         }
+      } else if (reportType === 'campaign_performance') {
+        campaignGroupPerformance.fetchCampaignGroupPerformance(selectedAccount);
       }
     }
   }, [selectedAccount, reportType]);
@@ -192,6 +197,13 @@ export function ReportingSection({ accessToken, selectedAccount, canWrite = fals
       leadGenForms.fetchLeadGenForms(selectedAccount);
     }
   }, [leadGenForms.dateRange, leadGenForms.selectedCampaignIds]);
+
+  // Re-fetch when time changes for campaign group performance
+  useEffect(() => {
+    if (selectedAccount && reportType === 'campaign_performance') {
+      campaignGroupPerformance.fetchCampaignGroupPerformance(selectedAccount);
+    }
+  }, [campaignGroupPerformance.dateRange]);
 
   const handleDemoTimeFrameChange = (option: DemoTimeFrameOption) => {
     setSelectedTimeFrame(option.value);
@@ -272,8 +284,23 @@ export function ReportingSection({ accessToken, selectedAccount, canWrite = fals
         jobSeniorityMatrix.fetchMatrix(selectedAccount);
       } else if (reportType === 'lead_gen_forms') {
         leadGenForms.fetchLeadGenForms(selectedAccount);
+      } else if (reportType === 'campaign_performance') {
+        campaignGroupPerformance.fetchCampaignGroupPerformance(selectedAccount);
       }
     }
+  };
+
+  const handleCampaignGroupTimeFrameChange = (option: CampaignGroupTimeFrameOption) => {
+    setSelectedTimeFrame(option.value);
+    campaignGroupPerformance.setTimeFrame(option);
+  };
+
+  const handleCampaignGroupCustomDate = (start: Date, end: Date) => {
+    setSelectedTimeFrame('custom');
+    campaignGroupPerformance.setDateRange({
+      start: start.toISOString().split('T')[0],
+      end: end.toISOString().split('T')[0],
+    });
   };
 
   const handleTestTitlesApi = async () => {
@@ -308,13 +335,14 @@ export function ReportingSection({ accessToken, selectedAccount, canWrite = fals
     }
   };
 
-  const isLoading = 
+  const isLoading =
     reportType === 'creative_names' ? creativeNamesReport.isLoading :
     reportType === 'campaigns' ? campaignReporting.isLoading :
-    reportType === 'demographics' ? demographicReporting.isLoading : 
+    reportType === 'demographics' ? demographicReporting.isLoading :
     reportType === 'company_demo' ? companyDemographic.isLoading :
     reportType === 'job_seniority' ? jobSeniorityMatrix.isLoading :
-    reportType === 'lead_gen_forms' ? leadGenForms.isLoading : false;
+    reportType === 'lead_gen_forms' ? leadGenForms.isLoading :
+    reportType === 'campaign_performance' ? campaignGroupPerformance.isLoading : false;
 
   const handleLeadGenTimeFrameChange = (option: LeadGenTimeFrameOption) => {
     setSelectedTimeFrame(option.value);
@@ -364,6 +392,10 @@ export function ReportingSection({ accessToken, selectedAccount, canWrite = fals
       {/* Report Type Tabs */}
       <Tabs value={reportType} onValueChange={setReportType}>
         <TabsList className="bg-muted/50">
+          <TabsTrigger value="campaign_performance" className="gap-2">
+            <FileBarChart className="h-4 w-4" />
+            Campaign Performance
+          </TabsTrigger>
           <TabsTrigger value="campaigns" className="gap-2">
             <Target className="h-4 w-4" />
             Campaigns
@@ -426,6 +458,60 @@ export function ReportingSection({ accessToken, selectedAccount, canWrite = fals
             Settings
           </TabsTrigger>
         </TabsList>
+
+        {/* Campaign Performance Tab */}
+        <TabsContent value="campaign_performance" className="space-y-6 mt-6">
+          <Card className="bg-card/50 backdrop-blur-sm border-border/50">
+            <CardContent className="pt-4">
+              <TimeFrameSelector
+                timeFrameOptions={campaignGroupPerformance.timeFrameOptions}
+                selectedTimeFrame={selectedTimeFrame}
+                onTimeFrameChange={handleCampaignGroupTimeFrameChange}
+                timeGranularity="ALL"
+                onGranularityChange={() => {}}
+                dateRange={campaignGroupPerformance.dateRange}
+                onCustomDateChange={handleCampaignGroupCustomDate}
+              />
+            </CardContent>
+          </Card>
+
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4">
+            <MetricCard title="Impressions" value={campaignGroupPerformance.totals.impressions.toLocaleString()} icon={FileBarChart} />
+            <MetricCard title="Clicks" value={campaignGroupPerformance.totals.clicks.toLocaleString()} icon={FileBarChart} />
+            <MetricCard title="Total Spent" value={`$${campaignGroupPerformance.totals.spent.toFixed(2)}`} icon={FileBarChart} />
+            <MetricCard title="Leads" value={campaignGroupPerformance.totals.leads.toLocaleString()} icon={FileBarChart} />
+            <MetricCard title="CTR" value={`${campaignGroupPerformance.totals.impressions > 0 ? ((campaignGroupPerformance.totals.clicks / campaignGroupPerformance.totals.impressions) * 100).toFixed(2) : '0.00'}%`} icon={FileBarChart} />
+            <MetricCard title="Avg. CPC" value={`$${campaignGroupPerformance.totals.clicks > 0 ? (campaignGroupPerformance.totals.spent / campaignGroupPerformance.totals.clicks).toFixed(2) : '0.00'}`} icon={FileBarChart} />
+            <MetricCard title="CPL" value={`$${campaignGroupPerformance.totals.leads > 0 ? (campaignGroupPerformance.totals.spent / campaignGroupPerformance.totals.leads).toFixed(2) : '0.00'}`} icon={FileBarChart} />
+            <MetricCard title="Groups" value={campaignGroupPerformance.campaignGroups.length.toString()} icon={FileBarChart} />
+          </div>
+
+          {campaignGroupPerformance.error && (
+            <Card className="bg-destructive/10 border-destructive/30">
+              <CardContent className="pt-4">
+                <p className="text-sm text-destructive"><strong>Note:</strong> {campaignGroupPerformance.error}</p>
+              </CardContent>
+            </Card>
+          )}
+
+          <Card className="bg-card/50 backdrop-blur-sm border-border/50">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <FileBarChart className="h-5 w-5 text-primary" />
+                Campaign Group Performance
+              </CardTitle>
+              <CardDescription>
+                Performance metrics aggregated by campaign group
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <CampaignGroupPerformanceTable
+                data={campaignGroupPerformance.campaignGroups}
+                isLoading={campaignGroupPerformance.isLoading}
+              />
+            </CardContent>
+          </Card>
+        </TabsContent>
 
         {/* Campaigns Tab */}
         <TabsContent value="campaigns" className="space-y-6 mt-6">

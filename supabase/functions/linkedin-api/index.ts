@@ -6858,6 +6858,131 @@ serve(async (req) => {
         });
       }
 
+      case 'get_campaign_group_performance': {
+        // Campaign Group Performance Report - aggregates metrics by campaign group
+        const { accountId, dateRange } = params || {};
+        const now = new Date();
+        const startDate = dateRange?.start || new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        const endDate = dateRange?.end || now.toISOString().split('T')[0];
+
+        const [startYear, startMonth, startDay] = startDate.split('-').map(Number);
+        const [endYear, endMonth, endDay] = endDate.split('-').map(Number);
+
+        console.log(`[get_campaign_group_performance] Account ${accountId}, period: ${startDate} to ${endDate}`);
+
+        // Step 1: Fetch all campaign groups for this account
+        const campaignGroupMap = new Map<string, { id: string; name: string; status: string }>();
+
+        try {
+          const groupsUrl = `https://api.linkedin.com/v2/adCampaignGroupsV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=500`;
+          const groupsResp = await fetch(groupsUrl, {
+            headers: { 'Authorization': `Bearer ${accessToken}` }
+          });
+
+          if (groupsResp.ok) {
+            const groupsData = await groupsResp.json();
+            for (const group of (groupsData.elements || [])) {
+              const groupId = group.id?.toString() || '';
+              const groupName = group.name || `Campaign Group ${groupId}`;
+              const groupStatus = group.status || 'UNKNOWN';
+              if (groupId) {
+                campaignGroupMap.set(`urn:li:sponsoredCampaignGroup:${groupId}`, {
+                  id: groupId,
+                  name: groupName,
+                  status: groupStatus
+                });
+              }
+            }
+            console.log(`[get_campaign_group_performance] Found ${campaignGroupMap.size} campaign groups`);
+          }
+        } catch (err) {
+          console.error('[get_campaign_group_performance] Campaign groups fetch error:', err);
+        }
+
+        // Step 2: Fetch analytics by CAMPAIGN_GROUP pivot
+        const analyticsUrl = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
+          `dateRange.start.day=${startDay}&dateRange.start.month=${startMonth}&dateRange.start.year=${startYear}&` +
+          `dateRange.end.day=${endDay}&dateRange.end.month=${endMonth}&dateRange.end.year=${endYear}&` +
+          `timeGranularity=ALL&pivot=CAMPAIGN_GROUP&accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
+          `fields=pivotValue,impressions,clicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions&count=500`;
+
+        const groupPerformance: Array<{
+          campaignGroupId: string;
+          campaignGroupName: string;
+          status: string;
+          impressions: number;
+          clicks: number;
+          spent: number;
+          leads: number;
+          ctr: number;
+          avgCpc: number;
+          cpl: number;
+        }> = [];
+
+        try {
+          const analyticsResp = await fetch(analyticsUrl, {
+            headers: { 'Authorization': `Bearer ${accessToken}` }
+          });
+
+          if (analyticsResp.ok) {
+            const analyticsData = await analyticsResp.json();
+
+            for (const el of (analyticsData.elements || [])) {
+              const groupUrn = el.pivotValue || '';
+              if (!groupUrn) continue;
+
+              const impressions = el.impressions || 0;
+              const clicks = el.clicks || 0;
+              const spent = parseFloat(el.costInLocalCurrency || '0');
+              const leads = (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
+
+              const ctr = impressions > 0 ? (clicks / impressions) * 100 : 0;
+              const avgCpc = clicks > 0 ? spent / clicks : 0;
+              const cpl = leads > 0 ? spent / leads : 0;
+
+              const groupInfo = campaignGroupMap.get(groupUrn);
+              const groupId = groupUrn.split(':').pop() || '';
+
+              groupPerformance.push({
+                campaignGroupId: groupId,
+                campaignGroupName: groupInfo?.name || `Campaign Group ${groupId}`,
+                status: groupInfo?.status || 'UNKNOWN',
+                impressions,
+                clicks,
+                spent,
+                leads,
+                ctr,
+                avgCpc,
+                cpl,
+              });
+            }
+
+            console.log(`[get_campaign_group_performance] Got performance for ${groupPerformance.length} campaign groups`);
+          }
+        } catch (err) {
+          console.error('[get_campaign_group_performance] Analytics fetch error:', err);
+        }
+
+        // Sort by spent descending
+        groupPerformance.sort((a, b) => b.spent - a.spent);
+
+        // Calculate totals
+        const totals = {
+          impressions: groupPerformance.reduce((sum, g) => sum + g.impressions, 0),
+          clicks: groupPerformance.reduce((sum, g) => sum + g.clicks, 0),
+          spent: groupPerformance.reduce((sum, g) => sum + g.spent, 0),
+          leads: groupPerformance.reduce((sum, g) => sum + g.leads, 0),
+        };
+
+        return new Response(JSON.stringify({
+          period: { start: startDate, end: endDate },
+          totals,
+          campaignGroups: groupPerformance,
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
       case 'get_audience_expansion': {
         // Smart Audience Expander - suggests similar titles/skills based on top performers
         const { accountId, dateRange, topN } = params || {};
