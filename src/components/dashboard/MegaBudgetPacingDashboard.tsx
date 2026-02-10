@@ -13,6 +13,7 @@ import {
   DollarSign, Wallet, TrendingUp, AlertTriangle, CheckCircle2, ArrowUpDown, Save, X, Pencil
 } from "lucide-react";
 import { toast } from "sonner";
+import { LineChart, Line, ResponsiveContainer, Tooltip } from "recharts";
 
 interface Props {
   accessToken: string | null;
@@ -149,6 +150,9 @@ export function MegaBudgetPacingDashboard({ accessToken, adAccounts }: Props) {
                 <TableHead className="cursor-pointer" onClick={() => handleSort("pacingPercent")}>
                   <span className="flex items-center gap-1">Pacing <ArrowUpDown className="h-3 w-3" /></span>
                 </TableHead>
+                <TableHead>Avg Daily (3d)</TableHead>
+                <TableHead>Projected (3d)</TableHead>
+                <TableHead>3-Day Trend</TableHead>
                 <TableHead>Projected</TableHead>
                 <TableHead>Days Left</TableHead>
               </TableRow>
@@ -156,7 +160,7 @@ export function MegaBudgetPacingDashboard({ accessToken, adAccounts }: Props) {
             <TableBody>
               {sorted.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center text-muted-foreground py-12">
+                  <TableCell colSpan={10} className="text-center text-muted-foreground py-12">
                     No accounts found
                   </TableCell>
                 </TableRow>
@@ -200,6 +204,30 @@ export function MegaBudgetPacingDashboard({ accessToken, adAccounts }: Props) {
                         {s.budget > 0 ? `${s.pacingPercent}%` : "—"}
                       </span>
                     </div>
+                  </TableCell>
+                  <TableCell>
+                    <span className="text-sm font-medium">${s.avgDaily3d.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                  </TableCell>
+                  <TableCell>
+                    <span className={`text-sm font-medium ${s.budget > 0 && s.projected3d > s.budget ? 'text-destructive' : ''}`}>
+                      ${s.projected3d.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                    </span>
+                  </TableCell>
+                  <TableCell>
+                    {s.last3Days.length > 0 ? (
+                      <div className="w-20 h-8">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <LineChart data={s.last3Days}>
+                            <Line type="monotone" dataKey="spend" stroke="hsl(var(--primary))" strokeWidth={1.5} dot={false} />
+                            <Tooltip
+                              contentStyle={{ fontSize: '11px', padding: '4px 8px', backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))' }}
+                              formatter={(v: number) => [`$${v.toLocaleString(undefined, { maximumFractionDigits: 0 })}`, 'Spend']}
+                              labelFormatter={(l: string) => l.slice(5)}
+                            />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                    ) : <span className="text-muted-foreground text-xs">—</span>}
                   </TableCell>
                   <TableCell>${s.projected.toLocaleString(undefined, { maximumFractionDigits: 0 })}</TableCell>
                   <TableCell>{s.daysRemaining}d</TableCell>
