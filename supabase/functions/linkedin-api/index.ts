@@ -6894,6 +6894,16 @@ serve(async (req) => {
               }
             }
             console.log(`[get_campaign_group_performance] Found ${campaignGroupMap.size} campaign groups`);
+          } else {
+            const errorText = await groupsResp.text();
+            console.error(`[get_campaign_group_performance] Campaign groups API error: ${groupsResp.status}`, errorText.slice(0, 300));
+            return new Response(JSON.stringify({
+              error: `LinkedIn API error: ${groupsResp.status}`,
+              details: errorText.slice(0, 200)
+            }), {
+              status: groupsResp.status,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+            });
           }
         } catch (err) {
           console.error('[get_campaign_group_performance] Campaign groups fetch error:', err);
@@ -6958,9 +6968,26 @@ serve(async (req) => {
             }
 
             console.log(`[get_campaign_group_performance] Got performance for ${groupPerformance.length} campaign groups`);
+          } else {
+            const errorText = await analyticsResp.text();
+            console.error(`[get_campaign_group_performance] Analytics API error: ${analyticsResp.status}`, errorText.slice(0, 300));
+            return new Response(JSON.stringify({
+              error: `LinkedIn API error: ${analyticsResp.status}`,
+              details: errorText.slice(0, 200)
+            }), {
+              status: analyticsResp.status,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+            });
           }
         } catch (err) {
           console.error('[get_campaign_group_performance] Analytics fetch error:', err);
+          return new Response(JSON.stringify({
+            error: 'Failed to fetch campaign group analytics',
+            details: err instanceof Error ? err.message : 'Unknown error'
+          }), {
+            status: 500,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
         }
 
         // Sort by spent descending
