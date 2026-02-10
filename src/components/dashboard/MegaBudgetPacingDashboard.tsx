@@ -206,15 +206,15 @@ export function MegaBudgetPacingDashboard({ accessToken, adAccounts }: Props) {
                     </div>
                   </TableCell>
                   <TableCell>
-                    <span className="text-sm font-medium">${s.avgDaily3d.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                    <span className="text-sm font-medium">${(s.avgDaily3d ?? s.avgDaily ?? 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
                   </TableCell>
                   <TableCell>
-                    <span className={`text-sm font-medium ${s.budget > 0 && s.projected3d > s.budget ? 'text-destructive' : ''}`}>
-                      ${s.projected3d.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                    <span className={`text-sm font-medium ${s.budget > 0 && (s.projected3d ?? 0) > s.budget ? 'text-destructive' : ''}`}>
+                      ${(s.projected3d ?? s.projected ?? 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
                     </span>
                   </TableCell>
                   <TableCell>
-                    {s.last3Days.length > 0 ? (
+                    {(s.last3Days?.length ?? 0) > 0 ? (
                       <div className="w-20 h-8">
                         <ResponsiveContainer width="100%" height="100%">
                           <LineChart data={s.last3Days}>
