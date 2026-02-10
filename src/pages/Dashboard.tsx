@@ -11,6 +11,7 @@ import { AudienceCard } from "@/components/dashboard/AudienceCard";
 import { ReportingSection } from "@/components/dashboard/ReportingSection";
 import { TitleCheckerPage } from "@/components/dashboard/TitleCheckerPage";
 import { CompanyEngagementTimeline } from "@/components/dashboard/CompanyEngagementTimeline";
+import { MegaBudgetPacingDashboard } from "@/components/dashboard/MegaBudgetPacingDashboard";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { 
@@ -121,6 +122,7 @@ export default function Dashboard() {
               {activeTab === "campaigns" && "Campaign Management"}
               {activeTab === "audiences" && "Audience Insights"}
               {activeTab === "analytics" && "Analytics & Reports"}
+              {activeTab === "budget_pacing" && "Budget Pacing"}
               {activeTab === "company_timeline" && "Company Engagement Timeline"}
               {activeTab === "reports" && "Reports"}
               {activeTab === "title_checker" && "Title Checker"}
@@ -305,6 +307,13 @@ export default function Dashboard() {
               </p>
             </div>
           </div>
+        )}
+
+        {activeTab === "budget_pacing" && (
+          <MegaBudgetPacingDashboard
+            accessToken={accessToken}
+            adAccounts={adAccounts}
+          />
         )}
 
         {activeTab === "company_timeline" && (
