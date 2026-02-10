@@ -1,1 +1,0 @@
-ALTER TABLE public.linkedin_company_cache ADD COLUMN logo_url TEXT;

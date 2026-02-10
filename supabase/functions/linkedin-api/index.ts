@@ -2167,7 +2167,6 @@ serve(async (req) => {
         const companyUrns = Array.from(companyMap.keys());
         const companyNames = new Map<string, string>();
         const companyWebsites = new Map<string, { website: string | null; linkedInUrl: string | null; status: string }>();
-        const companyLogos = new Map<string, string>();
 
         // Name resolution task (Steps 2+3)
         const nameResolutionTask = async () => {
@@ -2180,39 +2179,6 @@ serve(async (req) => {
           const orgIds = Array.from(orgIdToUrn.keys());
           console.log(`[get_company_demographic] Step 2: Resolving ${orgIds.length} organization IDs...`);
 
-          // Pre-load cached logos from linkedin_company_cache
-          const cachedLogos = new Map<string, string>();
-          if (orgIds.length > 0) {
-            try {
-              // Query in batches of 500 to avoid URL length limits
-              for (let ci = 0; ci < orgIds.length; ci += 500) {
-                const cacheBatch = orgIds.slice(ci, ci + 500);
-                const { data: cached } = await supabaseClient
-                  .from('linkedin_company_cache')
-                  .select('org_id, logo_url')
-                  .in('org_id', cacheBatch)
-                  .not('logo_url', 'is', null);
-                if (cached) {
-                  cached.forEach((row: any) => {
-                    if (row.logo_url) {
-                      const urn = orgIdToUrn.get(row.org_id);
-                      if (urn) {
-                        cachedLogos.set(urn, row.logo_url);
-                        companyLogos.set(urn, row.logo_url);
-                      }
-                    }
-                  });
-                }
-              }
-              console.log(`[get_company_demographic] Loaded ${cachedLogos.size} cached logos`);
-            } catch (e) {
-              console.log('[Warning] Cache logo load failed:', e);
-            }
-          }
-
-          // Collect all newly resolved logos for batch cache upsert
-          const newlyResolvedLogos = new Map<string, string>();
-
           if (orgIds.length > 0) {
             const batchSize = 50;
             for (let i = 0; i < orgIds.length; i += batchSize) {
@@ -2221,16 +2187,13 @@ serve(async (req) => {
               
               try {
                 const orgResponse = await fetch(
-                  `https://api.linkedin.com/v2/organizationsLookup?${idsParam}&projection=(results*(id,localizedName,localizedWebsite,vanityName,logoV2))`,
+                  `https://api.linkedin.com/v2/organizationsLookup?${idsParam}&projection=(results*(id,localizedName,localizedWebsite,vanityName))`,
                   { headers: { 'Authorization': `Bearer ${accessToken}` } }
                 );
                 
                 if (orgResponse.ok) {
                   const orgData = await orgResponse.json();
                   const results = orgData.results || {};
-                  
-                  // Collect logo URNs that need resolution (skip cached ones)
-                  const logoUrnToOrgUrn = new Map<string, string>();
                   
                   Object.entries(results).forEach(([id, org]: [string, any]) => {
                     const urn = orgIdToUrn.get(id);
@@ -2243,76 +2206,11 @@ serve(async (req) => {
                       website, linkedInUrl,
                       status: website ? 'resolved' : (vanityName ? 'fallback' : 'unresolved'),
                     });
-                    
-                    // Only resolve logo if not already cached
-                    if (!cachedLogos.has(urn)) {
-                      const logoUrn = org?.logoV2?.original;
-                      if (logoUrn && typeof logoUrn === 'string') {
-                        const imageUrn = logoUrn.replace('urn:li:digitalmediaAsset:', 'urn:li:image:');
-                        logoUrnToOrgUrn.set(imageUrn, urn);
-                      }
-                    }
                   });
-                  
-                  // Resolve logo download URLs via Images API in parallel batches of 50
-                  if (logoUrnToOrgUrn.size > 0) {
-                    const logoEntries = Array.from(logoUrnToOrgUrn.entries());
-                    const logoBatchSize = 50;
-                    for (let j = 0; j < logoEntries.length; j += logoBatchSize) {
-                      const logoBatch = logoEntries.slice(j, j + logoBatchSize);
-                      const logoPromises = logoBatch.map(async ([imageUrn, orgUrn]) => {
-                        try {
-                          const imgResponse = await fetch(
-                            `https://api.linkedin.com/rest/images/${encodeURIComponent(imageUrn)}?fields=downloadUrl`,
-                            { headers: { 'Authorization': `Bearer ${accessToken}`, 'LinkedIn-Version': '202511' } }
-                          );
-                          if (imgResponse.ok) {
-                            const imgData = await imgResponse.json();
-                            if (imgData.downloadUrl) {
-                              companyLogos.set(orgUrn, imgData.downloadUrl);
-                              newlyResolvedLogos.set(orgUrn, imgData.downloadUrl);
-                            }
-                          }
-                        } catch (e) {
-                          // Non-fatal: logo resolution failure
-                        }
-                      });
-                      await Promise.all(logoPromises);
-                    }
-                    console.log(`[get_company_demographic] Resolved ${companyLogos.size} company logos`);
-                  }
                 }
               } catch (e) {
                 console.log('[Warning] Organization lookup failed:', e);
               }
-            }
-          }
-
-          // Cache newly resolved logos back to linkedin_company_cache
-          if (newlyResolvedLogos.size > 0) {
-            try {
-              const upsertRows = Array.from(newlyResolvedLogos.entries()).map(([urn, logoUrl]) => {
-                const orgId = urn.match(/urn:li:organization:(\d+)/)?.[1] || '';
-                return {
-                  org_id: orgId,
-                  name: companyNames.get(urn) || 'Unknown',
-                  logo_url: logoUrl,
-                  vanity_name: null,
-                  source: 'demographic_report',
-                  last_seen_at: new Date().toISOString(),
-                };
-              }).filter(r => r.org_id);
-              
-              // Upsert in batches of 200
-              for (let ci = 0; ci < upsertRows.length; ci += 200) {
-                const batch = upsertRows.slice(ci, ci + 200);
-                await supabaseClient
-                  .from('linkedin_company_cache')
-                  .upsert(batch, { onConflict: 'org_id' });
-              }
-              console.log(`[get_company_demographic] Cached ${newlyResolvedLogos.size} new logos`);
-            } catch (e) {
-              console.log('[Warning] Logo cache upsert failed:', e);
             }
           }
           
@@ -2544,7 +2442,6 @@ serve(async (req) => {
             website: websiteInfo.website,
             linkedInUrl: websiteInfo.linkedInUrl,
             enrichmentStatus: websiteInfo.status,
-            logoUrl: companyLogos.get(entityUrn) || null,
             impressions: metrics.impressions,
             clicks: metrics.clicks,
             costInLocalCurrency: metrics.spent.toFixed(2),

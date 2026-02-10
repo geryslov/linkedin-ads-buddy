@@ -5,7 +5,6 @@ import {
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { ArrowUpDown, Search, Building2, ExternalLink, Globe, AlertCircle, CheckCircle, ChevronRight, ChevronDown, Target, Megaphone, Loader2 } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { CompanyDemographicItem, ObjectiveBreakdownItem, CampaignBreakdownItem } from '@/hooks/useCompanyDemographic';
@@ -205,15 +204,9 @@ export function CompanyDemographicTable({ data, isLoading, onExpandObjective, ca
                         <div className="flex items-center gap-2">
                           {hasBreakdown ? (
                             isCompanyExpanded ? <ChevronDown className="h-4 w-4 text-muted-foreground flex-shrink-0" /> : <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                          ) : null}
-                          <Avatar className="h-6 w-6 flex-shrink-0">
-                            {item.logoUrl ? (
-                              <AvatarImage src={item.logoUrl} alt={item.entityName} />
-                            ) : null}
-                            <AvatarFallback className="text-[10px]">
-                              <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
-                            </AvatarFallback>
-                          </Avatar>
+                          ) : (
+                            <Building2 className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                          )}
                           <span className="truncate max-w-[160px]" title={item.entityName}>{item.entityName}</span>
                           {item.linkedInUrl && (
                             <a href={item.linkedInUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:text-primary/80" onClick={(e) => e.stopPropagation()}>

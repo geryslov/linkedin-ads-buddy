@@ -97,7 +97,6 @@ export type Database = {
           created_at: string | null
           id: string
           last_seen_at: string | null
-          logo_url: string | null
           name: string
           org_id: string
           source: string
@@ -107,7 +106,6 @@ export type Database = {
           created_at?: string | null
           id?: string
           last_seen_at?: string | null
-          logo_url?: string | null
           name: string
           org_id: string
           source?: string
@@ -117,7 +115,6 @@ export type Database = {
           created_at?: string | null
           id?: string
           last_seen_at?: string | null
-          logo_url?: string | null
           name?: string
           org_id?: string
           source?: string
