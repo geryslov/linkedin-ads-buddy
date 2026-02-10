@@ -8352,7 +8352,7 @@ serve(async (req) => {
         console.log(`[get_budget_pacing_summary] Fetching ${accountIds.length} accounts, month ${monthStr}`);
 
         const results = await Promise.allSettled(accountIds.map(async (acctId: string) => {
-          // Parallel: fetch spend + budget
+          // Monthly spend params
           const spendParams = new URLSearchParams();
           spendParams.set('q', 'analytics');
           spendParams.set('dateRange.start.day', '1');
@@ -8366,8 +8366,30 @@ serve(async (req) => {
           spendParams.set('accounts[0]', `urn:li:sponsoredAccount:${acctId}`);
           spendParams.set('fields', 'costInLocalCurrency');
 
-          const [spendRes, budgetRes] = await Promise.all([
+          // Last 3 full days (excluding today) - DAILY granularity
+          const threeDaysAgo = new Date(now);
+          threeDaysAgo.setDate(now.getDate() - 3);
+          const dailyParams = new URLSearchParams();
+          dailyParams.set('q', 'analytics');
+          dailyParams.set('dateRange.start.day', String(threeDaysAgo.getDate()));
+          dailyParams.set('dateRange.start.month', String(threeDaysAgo.getMonth() + 1));
+          dailyParams.set('dateRange.start.year', String(threeDaysAgo.getFullYear()));
+          // End = yesterday
+          const yesterday = new Date(now);
+          yesterday.setDate(now.getDate() - 1);
+          dailyParams.set('dateRange.end.day', String(yesterday.getDate()));
+          dailyParams.set('dateRange.end.month', String(yesterday.getMonth() + 1));
+          dailyParams.set('dateRange.end.year', String(yesterday.getFullYear()));
+          dailyParams.set('timeGranularity', 'DAILY');
+          dailyParams.set('pivot', 'ACCOUNT');
+          dailyParams.set('accounts[0]', `urn:li:sponsoredAccount:${acctId}`);
+          dailyParams.set('fields', 'costInLocalCurrency,dateRange');
+
+          const [spendRes, dailyRes, budgetRes] = await Promise.all([
             fetch(`https://api.linkedin.com/v2/adAnalyticsV2?${spendParams.toString()}`, {
+              headers: { 'Authorization': `Bearer ${accessToken}` }
+            }),
+            fetch(`https://api.linkedin.com/v2/adAnalyticsV2?${dailyParams.toString()}`, {
               headers: { 'Authorization': `Bearer ${accessToken}` }
             }),
             supabaseClient
@@ -8385,11 +8407,31 @@ serve(async (req) => {
             if (el) spent = parseFloat(el.costInLocalCurrency || '0');
           }
 
+          // Parse last 3 days daily data
+          const last3Days: Array<{ date: string; spend: number }> = [];
+          let last3Total = 0;
+          if (dailyRes.ok) {
+            const dailyData = await dailyRes.json();
+            for (const el of (dailyData?.elements || [])) {
+              const ds = el.dateRange?.start;
+              const daySpend = parseFloat(el.costInLocalCurrency || '0');
+              const dateStr = ds ? `${ds.year}-${String(ds.month).padStart(2,'0')}-${String(ds.day).padStart(2,'0')}` : '';
+              last3Days.push({ date: dateStr, spend: daySpend });
+              last3Total += daySpend;
+            }
+          }
+          // Sort by date ascending
+          last3Days.sort((a, b) => a.date.localeCompare(b.date));
+
           const budgetAmount = budgetRes.data?.budget_amount || 0;
           const currency = budgetRes.data?.currency || 'USD';
 
           const avgDaily = currentDay > 0 ? spent / currentDay : 0;
           const projected = avgDaily * daysInMonth;
+
+          const daysWithData = last3Days.filter(d => d.spend > 0).length || last3Days.length;
+          const avgDaily3d = daysWithData > 0 ? last3Total / daysWithData : avgDaily;
+          const projected3d = avgDaily3d * daysInMonth;
 
           let pacingPercent = 0;
           let pacingStatus: 'on_track' | 'underspend' | 'overspend' = 'on_track';
@@ -8411,6 +8453,9 @@ serve(async (req) => {
             daysInMonth,
             projected: Math.round(projected * 100) / 100,
             avgDaily: Math.round(avgDaily * 100) / 100,
+            avgDaily3d: Math.round(avgDaily3d * 100) / 100,
+            projected3d: Math.round(projected3d * 100) / 100,
+            last3Days,
           };
         }));
 

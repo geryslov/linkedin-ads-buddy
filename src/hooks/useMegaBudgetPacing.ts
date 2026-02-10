@@ -12,6 +12,9 @@ export interface AccountPacingSummary {
   daysInMonth: number;
   projected: number;
   avgDaily: number;
+  avgDaily3d: number;
+  projected3d: number;
+  last3Days: Array<{ date: string; spend: number }>;
 }
 
 export function useMegaBudgetPacing(accessToken: string | null) {
