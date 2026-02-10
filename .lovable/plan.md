@@ -1,111 +1,70 @@
 
-# Speed Up Company Demographic Report
 
-## Problem
+# Mega Budget Pacing Dashboard (Lightweight)
 
-The report is slow because it queries **every campaign individually** with the MEMBER_COMPANY pivot (batches of 5). If an account has 50 campaigns, that's 10 sequential batch rounds of LinkedIn API calls -- all before the report can load.
+## Overview
 
-## Solution: Two-Phase Architecture
-
-Split the work into a fast initial load and lazy on-demand loading:
-
-**Phase 1 (initial load -- fast):** Fetch company data + objective-level breakdown only. Instead of querying each campaign individually, query once per **objective group** (all campaigns sharing the same objective in a single query). Accounts typically have 2-4 unique objectives, so this means 2-4 API calls instead of 50+.
-
-**Phase 2 (on-demand -- lazy):** When a user clicks to expand an objective row, fetch the campaign-level breakdown for just that objective's campaigns at that point. This defers the expensive per-campaign work until it's actually needed.
-
-Additionally, run name resolution (Step 2/3) in parallel with the objective breakdown queries (Step 4), since they are independent.
+A new "Budget Pacing" tab showing all ad accounts at a glance with their **account name**, monthly budget, total spend, and pacing status. Uses a lightweight edge function action that fetches only essential data -- no daily breakdowns, no trends, no recommendations.
 
 ## Changes
 
-### 1. Edge Function: Optimize `get_company_demographic`
+### 1. Edge Function: Add `get_budget_pacing_summary` action
 
 **File:** `supabase/functions/linkedin-api/index.ts`
 
-Current Step 4 (the bottleneck):
-- Fetches campaign metadata
-- Queries EACH campaign individually with MEMBER_COMPANY pivot, batches of 5
-- Builds both objective AND campaign breakdown
+Accepts an array of account IDs. For each account (in parallel via `Promise.allSettled`):
+- One `adAnalyticsV2` call with `timeGranularity=MONTHLY`, `pivot=ACCOUNT` -- single row with total spend
+- One database query to fetch budget from `account_budgets`
+- Calculate pacing status from spend + budget + current day of month
 
-New Step 4:
-- Fetches campaign metadata (same)
-- Queries per-OBJECTIVE GROUP (not per-campaign): one API call per unique objective, with all campaigns of that objective as filters
-- Builds objective-level breakdown only (no campaign breakdown)
-- Remove the `campaignBreakdownMap` entirely from this action
+Returns: `Array<{ accountId, budget, spent, currency, pacingPercent, pacingStatus, daysRemaining, daysInMonth, projected, avgDaily }>`
 
-Also parallelize: Run Steps 2+3 (name resolution) and Step 4 (objective breakdown) concurrently using `Promise.all`, since they don't depend on each other.
+Skips: daily arrays, 7-day trends, recommendations, projected breakdowns.
 
-### 2. Edge Function: New `get_company_campaign_breakdown` action
+### 2. New Hook: `src/hooks/useMegaBudgetPacing.ts`
 
-**File:** `supabase/functions/linkedin-api/index.ts`
+- Calls `get_budget_pacing_summary` with all account IDs
+- Stores results as array of per-account pacing summaries
+- Provides `saveBudget` and `refetch`
+- Computes aggregate totals (total budget, total spent, pacing distribution)
 
-Add a new lightweight action that accepts:
-- `accountId`, `dateRange`, `campaignIds` (for that objective), `campaignNames` (map)
+### 3. New Component: `src/components/dashboard/MegaBudgetPacingDashboard.tsx`
 
-It queries each campaign individually (batches of 5, same as today) but only for the specific objective being expanded -- typically 5-15 campaigns, not 50+. Returns an array of `{ campaignId, campaignName, impressions, clicks, spent, leads, ctr, cpc, cpm }` per company URN.
+Receives `accessToken` and `adAccounts` (which include `id` and `name`).
 
-### 3. Hook: Add lazy loading function
+**Summary cards:** Total budget, total spent, overall pacing %, accounts on track / over / under.
 
-**File:** `src/hooks/useCompanyDemographic.ts`
+**Account table** -- each row uses the **account name** (from the `adAccounts` array, matched by ID):
+- Account name (not ID)
+- Monthly budget (inline editable)
+- Total spent
+- Pacing status badge (green/yellow/red)
+- Pacing % with mini progress bar
+- Projected month-end spend
+- Days remaining
 
-- Remove `campaignBreakdown` from the initial data mapping (it won't be in the response anymore)
-- Add a new `fetchCampaignBreakdown` function that calls the new edge function action
-- Add state to store lazily-loaded campaign breakdowns per company+objective key
-- Add a `loadingObjectives` state (Set of keys) so the UI can show a spinner
+Sortable by pacing status so problem accounts surface first.
 
-### 4. Frontend: Trigger lazy load on objective expand
+### 4. Sidebar: Add nav item
 
-**File:** `src/components/dashboard/CompanyDemographicTable.tsx`
+**File:** `src/components/dashboard/Sidebar.tsx`
+- Add `{ id: "budget_pacing", label: "Budget Pacing", icon: Wallet }` after "Analytics"
 
-- When expanding an objective row, call `fetchCampaignBreakdown` if data isn't already loaded
-- Show a small loading spinner in the campaign area while fetching
-- Once loaded, display campaign rows as before
-- Cache the loaded data so re-expanding doesn't re-fetch
+### 5. Dashboard: Wire up tab
 
-## Performance Impact
+**File:** `src/pages/Dashboard.tsx`
+- Render `MegaBudgetPacingDashboard` for `activeTab === "budget_pacing"`
+- Pass `accessToken` and `adAccounts`
+- Add header text "Budget Pacing"
 
-| Scenario | Before | After |
-|---|---|---|
-| 50 campaigns, 3 objectives | ~10 sequential batch rounds | 3 parallel API calls |
-| Initial load API calls | N campaigns / 5 per batch | N objectives (2-4) |
-| Name resolution | Sequential after analytics | Parallel with objective queries |
-| Campaign drill-down | Pre-loaded (slow) | On-demand (instant feel) |
+## Performance
 
-Expected improvement: initial load time reduced by roughly 80-90% for typical accounts.
+All accounts fetched in parallel with MONTHLY granularity (1 row per account instead of ~30 daily rows). A 10-account dashboard loads in ~1-2 seconds.
 
-## Technical Details
+## Files
 
-### Per-objective query (replacing per-campaign)
-
-Instead of:
-```
-// OLD: One query per campaign
-campaigns[0]=urn:li:sponsoredCampaign:123  (query 1)
-campaigns[0]=urn:li:sponsoredCampaign:456  (query 2)
-...50 more queries
-```
-
-Now:
-```
-// NEW: One query per objective group
-campaigns[0]=urn:li:sponsoredCampaign:123&campaigns[1]=urn:li:sponsoredCampaign:456&...  (all Lead Gen campaigns in 1 query)
-campaigns[0]=urn:li:sponsoredCampaign:789&campaigns[1]=...  (all Engagement campaigns in 1 query)
-```
-
-This gives us per-company metrics broken down by objective without needing individual campaign queries.
-
-### Lazy load contract
-
-The `fetchCampaignBreakdown` function will accept:
-- `accountId`, `dateRange`, `objectiveCampaignIds` (campaign IDs for one objective)
-
-It returns a map of `companyUrn -> campaignMetrics[]`, which gets merged into the existing data.
-
-### Query tunneling safety
-
-Since per-objective queries may include many campaign URNs, the existing query tunneling fallback (POST with `X-HTTP-Method-Override: GET`) will be used if the URL exceeds length limits.
-
-## Files to Modify
-
-1. `supabase/functions/linkedin-api/index.ts` -- Restructure Step 4 to per-objective queries, add `get_company_campaign_breakdown` action
-2. `src/hooks/useCompanyDemographic.ts` -- Add lazy loading function and state
-3. `src/components/dashboard/CompanyDemographicTable.tsx` -- Trigger lazy load on objective expand, show loading indicator
+1. **Modify** `supabase/functions/linkedin-api/index.ts` -- Add `get_budget_pacing_summary`
+2. **Create** `src/hooks/useMegaBudgetPacing.ts`
+3. **Create** `src/components/dashboard/MegaBudgetPacingDashboard.tsx`
+4. **Modify** `src/components/dashboard/Sidebar.tsx` -- Add nav item
+5. **Modify** `src/pages/Dashboard.tsx` -- Wire up tab
