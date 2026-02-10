@@ -2090,10 +2090,20 @@ serve(async (req) => {
 
         console.log('[get_company_demographic] Step 1: Fetching company demographic analytics...');
         
-        let allElements: any[] = [];
+        // Aggregate by company URN directly during pagination to reduce peak memory
+        const companyMap = new Map<string, { 
+          entityUrn: string;
+          impressions: number; 
+          clicks: number; 
+          spent: number; 
+          spentUsd: number; 
+          leads: number;
+        }>();
+        
         let startOffset = 0;
         const pageSize = 10000;
         let hasMore = true;
+        let totalReceived = 0;
         
         while (hasMore) {
           const paginatedUrl = `${analyticsUrl}&start=${startOffset}`;
@@ -2116,7 +2126,31 @@ serve(async (req) => {
           
           const analyticsData = await analyticsResponse.json();
           const pageElements = analyticsData.elements || [];
-          allElements = allElements.concat(pageElements);
+          totalReceived += pageElements.length;
+          
+          // Aggregate immediately instead of collecting all elements
+          for (const el of pageElements) {
+            const entityUrn = el.pivotValue || '';
+            if (!entityUrn) continue;
+            
+            const existing = companyMap.get(entityUrn);
+            if (existing) {
+              existing.impressions += (el.impressions || 0);
+              existing.clicks += (el.clicks || 0);
+              existing.spent += parseFloat(el.costInLocalCurrency || '0');
+              existing.spentUsd += parseFloat(el.costInUsd || '0');
+              existing.leads += (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
+            } else {
+              companyMap.set(entityUrn, {
+                entityUrn,
+                impressions: el.impressions || 0,
+                clicks: el.clicks || 0,
+                spent: parseFloat(el.costInLocalCurrency || '0'),
+                spentUsd: parseFloat(el.costInUsd || '0'),
+                leads: (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0),
+              });
+            }
+          }
           
           const paging = analyticsData.paging;
           if (paging && paging.total && (startOffset + pageElements.length) < paging.total) {
@@ -2132,36 +2166,7 @@ serve(async (req) => {
           }
         }
         
-        console.log(`[get_company_demographic] Total received: ${allElements.length} company records`);
-
-        // Aggregate by company URN
-        const companyMap = new Map<string, { 
-          entityUrn: string;
-          impressions: number; 
-          clicks: number; 
-          spent: number; 
-          spentUsd: number; 
-          leads: number;
-        }>();
-        
-        allElements.forEach((el: any) => {
-          const entityUrn = el.pivotValue || '';
-          if (!entityUrn) return;
-          
-          const existing = companyMap.get(entityUrn) || { 
-            entityUrn, impressions: 0, clicks: 0, spent: 0, spentUsd: 0, leads: 0 
-          };
-          companyMap.set(entityUrn, {
-            entityUrn,
-            impressions: existing.impressions + (el.impressions || 0),
-            clicks: existing.clicks + (el.clicks || 0),
-            spent: existing.spent + parseFloat(el.costInLocalCurrency || '0'),
-            spentUsd: existing.spentUsd + parseFloat(el.costInUsd || '0'),
-            leads: existing.leads + (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0),
-          });
-        });
-
-        console.log(`[get_company_demographic] Aggregated data for ${companyMap.size} unique companies`);
+        console.log(`[get_company_demographic] Total received: ${totalReceived} records, aggregated to ${companyMap.size} unique companies`);
 
         // Run name resolution (Steps 2+3) and objective breakdown (Step 4) in PARALLEL
         const companyUrns = Array.from(companyMap.keys());
@@ -2309,13 +2314,12 @@ serve(async (req) => {
               objectiveCampaignMap.set(objective, { campaignIds: campIds, campaignNames: names });
             }
             
-            // Query per OBJECTIVE GROUP (not per campaign) — one API call per unique objective
-            const objectiveQueryPromises = uniqueObjectives.map(async (objective) => {
+            // Query per OBJECTIVE GROUP SEQUENTIALLY to reduce peak memory
+            for (const objective of uniqueObjectives) {
               const campIds = objectiveToCampaigns.get(objective) || [];
-              if (campIds.length === 0) return { objective, elements: [] };
+              if (campIds.length === 0) continue;
               
               try {
-                // Build URL with all campaigns for this objective
                 const params = new URLSearchParams();
                 params.set('q', 'analytics');
                 params.set('dateRange.start.day', String(startDay));
@@ -2340,7 +2344,6 @@ serve(async (req) => {
                 
                 let response: Response;
                 
-                // Use query tunneling if URL is too long
                 if (fullUrl.length > 4000) {
                   console.log(`[get_company_demographic] Objective ${objective}: URL too long (${fullUrl.length}), using query tunneling`);
                   response = await fetch(baseUrl, {
@@ -2360,48 +2363,44 @@ serve(async (req) => {
                 
                 if (!response.ok) {
                   console.log(`[get_company_demographic] Objective ${objective} analytics failed: ${response.status}`);
-                  return { objective, elements: [] };
+                  continue;
                 }
                 
                 const data = await response.json();
-                return { objective, elements: data.elements || [] };
+                const elements = data.elements || [];
+                
+                // Process elements immediately and discard
+                for (const el of elements) {
+                  const entityUrn = el.pivotValue || '';
+                  if (!entityUrn) continue;
+                  
+                  const impressions = el.impressions || 0;
+                  const clicks = el.clicks || 0;
+                  const spent = parseFloat(el.costInLocalCurrency || '0');
+                  const leads = (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
+                  
+                  if (impressions === 0 && clicks === 0 && spent === 0 && leads === 0) continue;
+                  
+                  const objEntries = objectiveBreakdownMap.get(entityUrn) || [];
+                  const existingObj = objEntries.find(e => e.objective === objective);
+                  if (existingObj) {
+                    existingObj.impressions += impressions;
+                    existingObj.clicks += clicks;
+                    existingObj.spent += spent;
+                    existingObj.leads += leads;
+                  } else {
+                    objEntries.push({ objective, impressions, clicks, spent, leads });
+                  }
+                  objectiveBreakdownMap.set(entityUrn, objEntries);
+                }
+                
+                console.log(`[get_company_demographic] Objective ${objective}: processed ${elements.length} elements`);
               } catch (e) {
                 console.log(`[get_company_demographic] Objective ${objective} query error:`, e);
-                return { objective, elements: [] };
-              }
-            });
-            
-            // Run all objective queries in parallel
-            const objectiveResults = await Promise.all(objectiveQueryPromises);
-            
-            // Process results into objective-level breakdown
-            for (const { objective, elements } of objectiveResults) {
-              for (const el of elements) {
-                const entityUrn = el.pivotValue || '';
-                if (!entityUrn) continue;
-                
-                const impressions = el.impressions || 0;
-                const clicks = el.clicks || 0;
-                const spent = parseFloat(el.costInLocalCurrency || '0');
-                const leads = (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
-                
-                if (impressions === 0 && clicks === 0 && spent === 0 && leads === 0) continue;
-                
-                const objEntries = objectiveBreakdownMap.get(entityUrn) || [];
-                const existingObj = objEntries.find(e => e.objective === objective);
-                if (existingObj) {
-                  existingObj.impressions += impressions;
-                  existingObj.clicks += clicks;
-                  existingObj.spent += spent;
-                  existingObj.leads += leads;
-                } else {
-                  objEntries.push({ objective, impressions, clicks, spent, leads });
-                }
-                objectiveBreakdownMap.set(entityUrn, objEntries);
               }
             }
             
-            console.log(`[get_company_demographic] Objective breakdown populated for ${objectiveBreakdownMap.size} companies with ${uniqueObjectives.length} objective queries (instead of ${Array.from(objectiveToCampaigns.values()).reduce((s, a) => s + a.length, 0)} individual campaign queries)`);
+            console.log(`[get_company_demographic] Objective breakdown populated for ${objectiveBreakdownMap.size} companies with ${uniqueObjectives.length} sequential objective queries`);
           } catch (e) {
             console.log(`[get_company_demographic] Objective breakdown failed (non-fatal):`, e);
           }
