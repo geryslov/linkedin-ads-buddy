@@ -3323,7 +3323,8 @@ serve(async (req) => {
             
             const info = campaignInfoMap.get(campaignId) || {};
             const spent = parseFloat(row.costInLocalCurrency || '0');
-            const leads = (row.oneClickLeads || 0) + (row.externalWebsiteConversions || 0);
+            const isLeadGen = (info.objectiveType === 'LEAD_GENERATION');
+            const leads = isLeadGen ? (row.oneClickLeads || 0) + (row.externalWebsiteConversions || 0) : 0;
             
             dailyElements.push({
               campaignId,
@@ -3368,8 +3369,10 @@ serve(async (req) => {
           existing.impressions += row.impressions || 0;
           existing.clicks += row.clicks || 0;
           existing.spent += parseFloat(row.costInLocalCurrency || '0');
-          existing.leads += (row.oneClickLeads || 0) + (row.externalWebsiteConversions || 0);
-          existing.lgfFormOpens += row.oneClickLeadFormOpens || 0;
+          const info = campaignInfoMap.get(campaignId) || {};
+          const isLeadGen = (info.objectiveType === 'LEAD_GENERATION');
+          existing.leads += isLeadGen ? (row.oneClickLeads || 0) + (row.externalWebsiteConversions || 0) : 0;
+          existing.lgfFormOpens += isLeadGen ? (row.oneClickLeadFormOpens || 0) : 0;
           campaignMetrics.set(campaignId, existing);
         }
         
