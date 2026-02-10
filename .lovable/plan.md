@@ -1,70 +1,35 @@
 
 
-# Mega Budget Pacing Dashboard (Lightweight)
+# Only Count Leads from Lead Generation Campaigns
 
-## Overview
+## Problem
+Currently, the "Leads" metric in the Campaign Report counts `oneClickLeads + externalWebsiteConversions` for **all** campaigns regardless of their objective type. This inflates the leads count with conversions from non-lead-gen campaigns (e.g., Engagement, Brand Awareness) that aren't actual lead generation leads.
 
-A new "Budget Pacing" tab showing all ad accounts at a glance with their **account name**, monthly budget, total spend, and pacing status. Uses a lightweight edge function action that fetches only essential data -- no daily breakdowns, no trends, no recommendations.
+## Solution
+Filter lead counting so that only campaigns with `objectiveType === 'LEAD_GENERATION'` contribute to the leads total. Non-lead-gen campaigns will show `0` for leads, LGF Form Opens, LGF Completion Rate, and Cost Per Lead.
 
 ## Changes
 
-### 1. Edge Function: Add `get_budget_pacing_summary` action
+### 1. Edge Function: `supabase/functions/linkedin-api/index.ts`
 
-**File:** `supabase/functions/linkedin-api/index.ts`
+In the `get_campaign_report` action, modify the leads calculation in three places:
 
-Accepts an array of account IDs. For each account (in parallel via `Promise.allSettled`):
-- One `adAnalyticsV2` call with `timeGranularity=MONTHLY`, `pivot=ACCOUNT` -- single row with total spend
-- One database query to fetch budget from `account_budgets`
-- Calculate pacing status from spend + budget + current day of month
+- **DAILY granularity path (~line 3326)**: Look up the campaign's `objectiveType` from `campaignInfoMap`. Only set `leads` if objective is `LEAD_GENERATION`, otherwise set to `0`.
 
-Returns: `Array<{ accountId, budget, spent, currency, pacingPercent, pacingStatus, daysRemaining, daysInMonth, projected, avgDaily }>`
+- **ALL granularity aggregation (~line 3371)**: Same check — only accumulate `oneClickLeads`, `externalWebsiteConversions`, and `oneClickLeadFormOpens` when the campaign's objective is `LEAD_GENERATION`.
 
-Skips: daily arrays, 7-day trends, recommendations, projected breakdowns.
+- **Final report building (~line 3388-3389)**: Cost Per Lead and LGF Completion Rate are already derived from leads, so they'll naturally become `0` for non-lead-gen campaigns.
 
-### 2. New Hook: `src/hooks/useMegaBudgetPacing.ts`
+### 2. No Frontend Changes Needed
+The frontend already displays whatever the API returns. Since non-lead-gen campaigns will now return `leads: 0`, the totals and per-campaign rows will automatically reflect accurate lead counts.
 
-- Calls `get_budget_pacing_summary` with all account IDs
-- Stores results as array of per-account pacing summaries
-- Provides `saveBudget` and `refetch`
-- Computes aggregate totals (total budget, total spent, pacing distribution)
+## Technical Details
 
-### 3. New Component: `src/components/dashboard/MegaBudgetPacingDashboard.tsx`
+The key check at each aggregation point will be:
+```text
+const isLeadGen = (info.objectiveType === 'LEAD_GENERATION');
+const leads = isLeadGen ? (row.oneClickLeads || 0) + (row.externalWebsiteConversions || 0) : 0;
+const lgfFormOpens = isLeadGen ? (row.oneClickLeadFormOpens || 0) : 0;
+```
 
-Receives `accessToken` and `adAccounts` (which include `id` and `name`).
-
-**Summary cards:** Total budget, total spent, overall pacing %, accounts on track / over / under.
-
-**Account table** -- each row uses the **account name** (from the `adAccounts` array, matched by ID):
-- Account name (not ID)
-- Monthly budget (inline editable)
-- Total spent
-- Pacing status badge (green/yellow/red)
-- Pacing % with mini progress bar
-- Projected month-end spend
-- Days remaining
-
-Sortable by pacing status so problem accounts surface first.
-
-### 4. Sidebar: Add nav item
-
-**File:** `src/components/dashboard/Sidebar.tsx`
-- Add `{ id: "budget_pacing", label: "Budget Pacing", icon: Wallet }` after "Analytics"
-
-### 5. Dashboard: Wire up tab
-
-**File:** `src/pages/Dashboard.tsx`
-- Render `MegaBudgetPacingDashboard` for `activeTab === "budget_pacing"`
-- Pass `accessToken` and `adAccounts`
-- Add header text "Budget Pacing"
-
-## Performance
-
-All accounts fetched in parallel with MONTHLY granularity (1 row per account instead of ~30 daily rows). A 10-account dashboard loads in ~1-2 seconds.
-
-## Files
-
-1. **Modify** `supabase/functions/linkedin-api/index.ts` -- Add `get_budget_pacing_summary`
-2. **Create** `src/hooks/useMegaBudgetPacing.ts`
-3. **Create** `src/components/dashboard/MegaBudgetPacingDashboard.tsx`
-4. **Modify** `src/components/dashboard/Sidebar.tsx` -- Add nav item
-5. **Modify** `src/pages/Dashboard.tsx` -- Wire up tab
+This ensures LGF metrics (Form Opens, Completion Rate, Cost Per Lead) are also zeroed out for non-lead-gen campaigns, keeping all lead-related metrics consistent.
