@@ -163,12 +163,12 @@ export function CompanyDemographicTable({ data, isLoading, onExpandObjective, ca
         <span className="text-sm text-muted-foreground">{filteredAndSortedData.length} companies</span>
       </div>
 
-      <div className="rounded-lg border border-border/50 overflow-hidden">
-        <Table>
+      <div className="rounded-lg border border-border/50 overflow-x-auto">
+        <Table className="min-w-[900px]">
           <TableHeader>
             <TableRow className="bg-muted/30 hover:bg-muted/30">
-              <TableHead className="w-[200px]"><SortButton field="entityName">Company</SortButton></TableHead>
-              <TableHead className="w-[180px]"><SortButton field="enrichmentStatus">Website</SortButton></TableHead>
+              <TableHead className="min-w-[150px]"><SortButton field="entityName">Company</SortButton></TableHead>
+              <TableHead className="min-w-[120px]"><SortButton field="enrichmentStatus">Website</SortButton></TableHead>
               <TableHead className="text-right"><SortButton field="impressions">Impressions</SortButton></TableHead>
               <TableHead className="text-right"><SortButton field="clicks">Clicks</SortButton></TableHead>
               <TableHead className="text-right"><SortButton field="spent">Spent</SortButton></TableHead>
@@ -207,7 +207,7 @@ export function CompanyDemographicTable({ data, isLoading, onExpandObjective, ca
                           ) : (
                             <Building2 className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                           )}
-                          <span className="truncate max-w-[160px]" title={item.entityName}>{item.entityName}</span>
+                          <span className="break-words">{item.entityName}</span>
                           {item.linkedInUrl && (
                             <a href={item.linkedInUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:text-primary/80" onClick={(e) => e.stopPropagation()}>
                               <ExternalLink className="h-3 w-3" />
@@ -219,7 +219,7 @@ export function CompanyDemographicTable({ data, isLoading, onExpandObjective, ca
                         {item.website ? (
                           <a href={item.website.startsWith('http') ? item.website : `https://${item.website}`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-primary hover:underline text-sm" onClick={(e) => e.stopPropagation()}>
                             <Globe className="h-3 w-3 flex-shrink-0" />
-                            <span className="truncate max-w-[120px]">{item.website.replace(/^https?:\/\//, '')}</span>
+                            <span className="break-words">{item.website.replace(/^https?:\/\//, '')}</span>
                           </a>
                         ) : (
                           getStatusBadge(item.enrichmentStatus)
@@ -301,7 +301,7 @@ export function CompanyDemographicTable({ data, isLoading, onExpandObjective, ca
                               <TableCell colSpan={2} className="pl-16">
                                 <div className="flex items-center gap-2">
                                   <Megaphone className="h-3 w-3 text-muted-foreground/60 flex-shrink-0" />
-                                  <span className="text-xs text-muted-foreground truncate max-w-[200px]" title={camp.campaignName}>{camp.campaignName}</span>
+                                  <span className="text-xs text-muted-foreground break-words">{camp.campaignName}</span>
                                 </div>
                               </TableCell>
                               <TableCell className="text-right tabular-nums text-xs text-muted-foreground">{camp.impressions.toLocaleString()}</TableCell>

@@ -157,9 +157,9 @@ export function CompanyIntelligenceTable({ data, isLoading }: CompanyIntelligenc
       </div>
 
       {/* Table */}
-      <div className="rounded-md border overflow-hidden">
+      <div className="rounded-md border overflow-x-auto">
         <div className="overflow-x-auto">
-          <Table>
+          <Table className="min-w-[900px]">
             <TableHeader>
               <TableRow className="bg-muted/30">
                 <SortableHeader label="Company Name" sortKeyName="companyName" />
@@ -185,17 +185,17 @@ export function CompanyIntelligenceTable({ data, isLoading }: CompanyIntelligenc
               ) : (
                 filteredAndSortedData.map((row, index) => (
                   <TableRow key={`${row.companyName}-${index}`} className="hover:bg-muted/30">
-                    <TableCell className="font-medium max-w-[250px]">
+                    <TableCell className="font-medium min-w-[150px]">
                       <div className="flex items-center gap-2">
-                        <span className="truncate" title={row.companyName}>
+                        <span className="break-words">
                           {row.companyName}
                         </span>
                         {row.companyPageUrl && (
-                          <a 
-                            href={row.companyPageUrl} 
-                            target="_blank" 
+                          <a
+                            href={row.companyPageUrl}
+                            target="_blank"
                             rel="noopener noreferrer"
-                            className="text-muted-foreground hover:text-primary"
+                            className="text-muted-foreground hover:text-primary shrink-0"
                           >
                             <ExternalLink className="h-3 w-3" />
                           </a>

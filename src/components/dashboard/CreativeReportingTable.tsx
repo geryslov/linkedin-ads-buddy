@@ -261,7 +261,7 @@ export function CreativeReportingTable({ data, isLoading }: CreativeReportingTab
 
       {/* Table */}
       <div className="rounded-md border border-border/50 overflow-x-auto">
-        <Table>
+        <Table className="min-w-[1000px]">
           <TableHeader>
             <TableRow className="bg-muted/30">
               <SortableHeader label="Creative Name" sortKeyName="creativeName" />
@@ -288,11 +288,11 @@ export function CreativeReportingTable({ data, isLoading }: CreativeReportingTab
               <>
                 {sortedData.map((row, index) => (
                   <TableRow key={`${row.creativeId}-${index}`} className="hover:bg-muted/20">
-                    <TableCell className="font-medium max-w-[300px] truncate" title={row.creativeName}>
-                      {row.creativeName}
+                    <TableCell className="font-medium min-w-[150px]">
+                      <span className="break-words">{row.creativeName}</span>
                     </TableCell>
-                    <TableCell className="max-w-[180px] truncate" title={row.campaignName}>
-                      {row.campaignName || '-'}
+                    <TableCell className="min-w-[120px]">
+                      <span className="break-words">{row.campaignName || '-'}</span>
                     </TableCell>
                     <TableCell>
                       <CreativeTypeBadge type={row.type} />

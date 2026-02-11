@@ -137,14 +137,14 @@ export function CampaignGroupPerformanceTable({
       </div>
 
       {/* Table */}
-      <div className="rounded-md border">
-        <Table>
+      <div className="rounded-md border overflow-x-auto">
+        <Table className="min-w-[900px]">
           <TableHeader>
             <TableRow>
-              <TableHead className="w-[300px]">
+              <TableHead className="min-w-[200px]">
                 <SortButton field="campaignGroupName">Campaign Group Name</SortButton>
               </TableHead>
-              <TableHead className="w-[100px]">Status</TableHead>
+              <TableHead className="whitespace-nowrap">Status</TableHead>
               <TableHead className="text-right">
                 <SortButton field="spent">Total Spent</SortButton>
               </TableHead>
@@ -167,7 +167,7 @@ export function CampaignGroupPerformanceTable({
                 <SortButton field="cpl">CPL</SortButton>
               </TableHead>
               {onSaveCustomField && (
-                <TableHead className="w-[120px]">Custom Fields</TableHead>
+                <TableHead className="whitespace-nowrap">Custom Fields</TableHead>
               )}
             </TableRow>
           </TableHeader>
@@ -183,7 +183,7 @@ export function CampaignGroupPerformanceTable({
                 <TableRow key={group.campaignGroupId}>
                   <TableCell className="font-medium">
                     <div className="flex flex-col">
-                      <span className="truncate max-w-[280px]" title={group.campaignGroupName}>
+                      <span className="break-words">
                         {group.campaignGroupName}
                       </span>
                       <span className="text-xs text-muted-foreground">

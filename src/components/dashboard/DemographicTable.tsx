@@ -115,11 +115,11 @@ export function DemographicTable({ data, isLoading, pivot }: DemographicTablePro
         </span>
       </div>
 
-      <div className="rounded-lg border border-border/50 overflow-hidden">
-        <Table>
+      <div className="rounded-lg border border-border/50 overflow-x-auto">
+        <Table className="min-w-[800px]">
           <TableHeader>
             <TableRow className="bg-muted/30 hover:bg-muted/30">
-              <TableHead className="w-[280px]">
+              <TableHead className="min-w-[180px]">
                 <SortButton field="entityName">{pivotInfo.singular}</SortButton>
               </TableHead>
               <TableHead className="text-right">
@@ -160,8 +160,8 @@ export function DemographicTable({ data, isLoading, pivot }: DemographicTablePro
                 <TableRow key={item.entityUrn || index} className="hover:bg-muted/20">
                   <TableCell className="font-medium">
                     <div className="flex items-center gap-2">
-                      <IconComponent className="h-4 w-4 text-muted-foreground" />
-                      <span className="truncate max-w-[240px]" title={item.entityName}>
+                      <IconComponent className="h-4 w-4 text-muted-foreground shrink-0" />
+                      <span className="break-words">
                         {item.entityName}
                       </span>
                     </div>

@@ -108,8 +108,8 @@ export function CreativeNameListTable({ data, isLoading }: CreativeNameListTable
             ) : (
               sortedData.map((row, index) => (
                 <TableRow key={`${row.creativeId}-${index}`} className="hover:bg-muted/20">
-                  <TableCell className="font-medium max-w-[800px] truncate" title={row.creativeName}>
-                    {row.creativeName}
+                  <TableCell className="font-medium">
+                    <span className="break-words">{row.creativeName}</span>
                   </TableCell>
                 </TableRow>
               ))

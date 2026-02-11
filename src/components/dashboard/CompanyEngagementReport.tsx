@@ -367,36 +367,36 @@ export function CompanyEngagementReport({ accessToken, selectedAccount }: Compan
         <CardContent>
           {filteredCompanies.length > 0 ? (
             <div className="rounded-md border overflow-x-auto">
-              <Table>
+              <Table className="min-w-[900px]">
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-12">#</TableHead>
-                    <TableHead className="min-w-[200px]">
+                    <TableHead className="min-w-[150px]">
                       <SortButton field="companyName">Company</SortButton>
                     </TableHead>
-                    <TableHead className="w-24">Tier</TableHead>
-                    <TableHead className="w-28 text-right">
+                    <TableHead className="whitespace-nowrap">Tier</TableHead>
+                    <TableHead className="text-right whitespace-nowrap">
                       <SortButton field="engagementScore">Score</SortButton>
                     </TableHead>
-                    <TableHead className="w-28 text-right">
+                    <TableHead className="text-right whitespace-nowrap">
                       <SortButton field="impressions">Impressions</SortButton>
                     </TableHead>
-                    <TableHead className="w-20 text-right">
+                    <TableHead className="text-right whitespace-nowrap">
                       <SortButton field="clicks">Clicks</SortButton>
                     </TableHead>
-                    <TableHead className="w-16 text-right">
+                    <TableHead className="text-right whitespace-nowrap">
                       <SortButton field="leads">Leads</SortButton>
                     </TableHead>
-                    <TableHead className="w-24 text-right">
+                    <TableHead className="text-right whitespace-nowrap">
                       <SortButton field="spend">Spend</SortButton>
                     </TableHead>
-                    <TableHead className="w-20 text-right">
+                    <TableHead className="text-right whitespace-nowrap">
                       <SortButton field="ctr">CTR</SortButton>
                     </TableHead>
-                    <TableHead className="w-20 text-right">
+                    <TableHead className="text-right whitespace-nowrap">
                       <SortButton field="cpc">CPC</SortButton>
                     </TableHead>
-                    <TableHead className="w-20 text-right">
+                    <TableHead className="text-right whitespace-nowrap">
                       <SortButton field="cpm">CPM</SortButton>
                     </TableHead>
                   </TableRow>
@@ -406,7 +406,7 @@ export function CompanyEngagementReport({ accessToken, selectedAccount }: Compan
                     <TableRow key={company.companyUrn} className="hover:bg-muted/50">
                       <TableCell className="font-medium text-muted-foreground">{idx + 1}</TableCell>
                       <TableCell className="font-medium">
-                        <span className="truncate block max-w-[180px]" title={company.companyName}>
+                        <span className="break-words">
                           {company.companyName}
                         </span>
                       </TableCell>

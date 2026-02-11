@@ -237,11 +237,11 @@ export function CampaignReportingTable({ data, isLoading }: CampaignReportingTab
       </div>
 
       {/* Table */}
-      <div className="rounded-lg border border-border overflow-hidden">
-        <Table>
+      <div className="rounded-lg border border-border overflow-x-auto">
+        <Table className="min-w-[1100px]">
           <TableHeader>
             <TableRow className="bg-muted/30">
-              <TableHead className="min-w-[200px]">
+              <TableHead className="min-w-[180px]">
                 <Button variant="ghost" size="sm" onClick={() => handleSort('campaignName')} className="gap-1 -ml-2">
                   Campaign Name {getSortIcon('campaignName')}
                 </Button>
@@ -313,8 +313,8 @@ export function CampaignReportingTable({ data, isLoading }: CampaignReportingTab
             ) : (
               filteredAndSortedData.map((campaign) => (
                 <TableRow key={campaign.campaignId} className="hover:bg-muted/20">
-                  <TableCell className="font-medium max-w-[300px]">
-                    <div className="truncate" title={campaign.campaignName}>
+                  <TableCell className="font-medium">
+                    <div className="break-words">
                       {campaign.campaignName}
                     </div>
                     <div className="text-xs text-muted-foreground">
