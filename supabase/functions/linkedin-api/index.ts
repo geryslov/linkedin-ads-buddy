@@ -5317,57 +5317,60 @@ serve(async (req) => {
             if (uniqueSuperTitleIds.size > 0) {
               console.log(`[search_job_titles] Fetching names for ${uniqueSuperTitleIds.size} unique super titles: ${JSON.stringify([...uniqueSuperTitleIds])}`);
 
-              const superTitleUrns = [...uniqueSuperTitleIds].map(id => `urn:li:superTitle:${id}`);
-              const urnsParam = superTitleUrns.map(u => encodeURIComponent(u)).join(',');
-              const superTitlesUrl = `https://api.linkedin.com/rest/adTargetingEntities?q=urns&urns=List(${urnsParam})`;
+              // Try to fetch super title names one by one using typeahead
+              // This is more reliable than batch URN lookup
+              for (const stId of uniqueSuperTitleIds) {
+                try {
+                  // First, try the URN lookup approach
+                  const singleUrnUrl = `https://api.linkedin.com/rest/adTargetingEntities?q=urns&urns=List(urn%3Ali%3AsuperTitle%3A${stId})`;
+                  console.log(`[search_job_titles] Fetching super title ${stId} via URN lookup`);
 
-              console.log(`[search_job_titles] Calling adTargetingEntities for super titles`);
+                  const singleResponse = await fetch(singleUrnUrl, {
+                    headers: {
+                      'Authorization': `Bearer ${accessToken}`,
+                      'X-Restli-Protocol-Version': '2.0.0',
+                      'LinkedIn-Version': '202511',
+                    },
+                  });
 
-              const superTitlesResponse = await fetch(superTitlesUrl, {
-                headers: {
-                  'Authorization': `Bearer ${accessToken}`,
-                  'X-Restli-Protocol-Version': '2.0.0',
-                  'LinkedIn-Version': '202511',
-                },
-              });
+                  if (singleResponse.ok) {
+                    const singleData = await singleResponse.json();
+                    console.log(`[search_job_titles] URN lookup response for ${stId}:`, JSON.stringify(singleData));
 
-              if (superTitlesResponse.ok) {
-                const superTitlesData = await superTitlesResponse.json();
-                const elements = superTitlesData.elements || [];
-
-                console.log(`[search_job_titles] adTargetingEntities returned ${elements.length} super title results`);
-
-                for (const el of elements) {
-                  const urn = el.urn || el.entity || '';
-                  const idMatch = urn.match(/:superTitle:(\d+)$/);
-                  if (idMatch) {
-                    const stId = idMatch[1];
-                    // Extract name from various possible formats
-                    let name = '';
-                    if (el.name) {
-                      if (typeof el.name === 'string') {
-                        name = el.name;
-                      } else if (el.name.localized) {
-                        name = el.name.localized.en_US ||
-                               el.name.localized[Object.keys(el.name.localized)[0]] || '';
+                    const elements = singleData.elements || [];
+                    for (const el of elements) {
+                      const urn = el.urn || el.entity || '';
+                      const idMatch = urn.match(/:superTitle:(\d+)$/);
+                      if (idMatch && idMatch[1] === stId) {
+                        let name = '';
+                        if (el.name) {
+                          if (typeof el.name === 'string') {
+                            name = el.name;
+                          } else if (el.name.localized) {
+                            name = el.name.localized.en_US ||
+                                   el.name.localized[Object.keys(el.name.localized)[0]] || '';
+                          }
+                        }
+                        if (!name && el.displayName) {
+                          name = typeof el.displayName === 'string' ? el.displayName : '';
+                        }
+                        if (name) {
+                          superTitleNamesCache[stId] = name;
+                          console.log(`[search_job_titles] ✓ Super title "${stId}" = "${name}" (from URN lookup)`);
+                        }
                       }
                     }
-                    if (!name && el.displayName) {
-                      name = typeof el.displayName === 'string' ? el.displayName : '';
-                    }
-
-                    if (name) {
-                      superTitleNamesCache[stId] = name;
-                      console.log(`[search_job_titles] ✓ Super title "${stId}" = "${name}"`);
-                    } else {
-                      console.log(`[search_job_titles] ✗ No name found for super title "${stId}":`, JSON.stringify(el));
-                    }
+                  } else {
+                    const errorText = await singleResponse.text();
+                    console.log(`[search_job_titles] URN lookup for ${stId} failed: ${singleResponse.status} - ${errorText.slice(0, 100)}`);
                   }
+                } catch (fetchError) {
+                  console.log(`[search_job_titles] Error fetching super title ${stId}:`, fetchError);
                 }
-              } else {
-                const errorText = await superTitlesResponse.text();
-                console.log(`[search_job_titles] adTargetingEntities for super titles failed ${superTitlesResponse.status}: ${errorText.slice(0, 200)}`);
               }
+
+              // Log final cache state
+              console.log(`[search_job_titles] Super title cache after fetching: ${JSON.stringify(superTitleNamesCache)}`);
             }
 
             // Resolve super title names using the fetched cache
