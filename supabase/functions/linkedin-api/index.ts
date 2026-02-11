@@ -8722,7 +8722,15 @@ serve(async (req) => {
         }
 
         try {
-          let query = supabaseClient
+          // Use user-scoped client for RLS
+          const authHeader = req.headers.get('Authorization');
+          const userClient = createClient(
+            Deno.env.get('SUPABASE_URL')!,
+            Deno.env.get('SUPABASE_ANON_KEY')!,
+            { global: { headers: { Authorization: authHeader || '' } } }
+          );
+
+          let query = userClient
             .from('custom_fields')
             .select('*')
             .eq('account_id', accountId);
@@ -8786,22 +8794,45 @@ serve(async (req) => {
         }
 
         try {
-          const { data, error } = await supabaseClient
+          // Get user from auth header
+          const authHeader = req.headers.get('Authorization');
+          const userClient = createClient(
+            Deno.env.get('SUPABASE_URL')!,
+            Deno.env.get('SUPABASE_ANON_KEY')!,
+            { global: { headers: { Authorization: authHeader || '' } } }
+          );
+          const { data: { user }, error: userError } = await userClient.auth.getUser();
+          if (userError || !user) {
+            console.error('[set_custom_field] Auth error:', userError);
+            return new Response(JSON.stringify({ error: 'Authentication required' }), {
+              status: 401,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+            });
+          }
+
+          console.log('[set_custom_field] User:', user.id, 'Account:', accountId, 'Entity:', entityType, entityId, 'Field:', fieldName);
+
+          const { data, error } = await userClient
             .from('custom_fields')
             .upsert({
               account_id: accountId,
               entity_type: entityType,
               entity_id: entityId,
               field_name: fieldName,
-              field_value: fieldValue || null
+              field_value: fieldValue || null,
+              user_id: user.id
             }, {
-              onConflict: 'account_id,entity_type,entity_id,field_name'
+              onConflict: 'account_id,entity_type,entity_id,field_name,user_id'
             })
             .select()
             .single();
 
-          if (error) throw error;
+          if (error) {
+            console.error('[set_custom_field] DB error:', error);
+            throw error;
+          }
 
+          console.log('[set_custom_field] Success:', data?.id);
           return new Response(JSON.stringify({ success: true, field: data }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' }
           });
@@ -8828,7 +8859,14 @@ serve(async (req) => {
         }
 
         try {
-          const { error } = await supabaseClient
+          const authHeader = req.headers.get('Authorization');
+          const userClient = createClient(
+            Deno.env.get('SUPABASE_URL')!,
+            Deno.env.get('SUPABASE_ANON_KEY')!,
+            { global: { headers: { Authorization: authHeader || '' } } }
+          );
+
+          const { error } = await userClient
             .from('custom_fields')
             .delete()
             .eq('account_id', accountId)
