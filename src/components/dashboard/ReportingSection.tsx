@@ -308,13 +308,45 @@ export function ReportingSection({ accessToken, selectedAccount, canWrite = fals
 
   // Custom fields handlers for campaign groups
   const handleSaveCampaignGroupCustomField = async (entityId: string, fieldName: string, fieldValue: string): Promise<boolean> => {
-    if (!selectedAccount) return false;
-    return customFields.setCustomField(selectedAccount, 'campaign_group', entityId, fieldName, fieldValue);
+    if (!selectedAccount) {
+      console.error('[ReportingSection] handleSaveCampaignGroupCustomField: no selectedAccount');
+      toast({
+        title: 'Cannot save custom field',
+        description: 'Please select an account first.',
+        variant: 'destructive'
+      });
+      return false;
+    }
+    const success = await customFields.setCustomField(selectedAccount, 'campaign_group', entityId, fieldName, fieldValue);
+    if (!success) {
+      toast({
+        title: 'Failed to save custom field',
+        description: 'Please make sure you are connected to LinkedIn.',
+        variant: 'destructive'
+      });
+    }
+    return success;
   };
 
   const handleDeleteCampaignGroupCustomField = async (entityId: string, fieldName: string): Promise<boolean> => {
-    if (!selectedAccount) return false;
-    return customFields.deleteCustomField(selectedAccount, 'campaign_group', entityId, fieldName);
+    if (!selectedAccount) {
+      console.error('[ReportingSection] handleDeleteCampaignGroupCustomField: no selectedAccount');
+      toast({
+        title: 'Cannot delete custom field',
+        description: 'Please select an account first.',
+        variant: 'destructive'
+      });
+      return false;
+    }
+    const success = await customFields.deleteCustomField(selectedAccount, 'campaign_group', entityId, fieldName);
+    if (!success) {
+      toast({
+        title: 'Failed to delete custom field',
+        description: 'Please make sure you are connected to LinkedIn.',
+        variant: 'destructive'
+      });
+    }
+    return success;
   };
 
   const handleTestTitlesApi = async () => {
