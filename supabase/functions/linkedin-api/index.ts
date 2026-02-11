@@ -6863,6 +6863,7 @@ serve(async (req) => {
 
       case 'get_campaign_group_performance': {
         // Campaign Group Performance Report - aggregates metrics by campaign group
+        // Only counts leads from LEAD_GENERATION objective campaigns
         const { accountId, dateRange } = params || {};
         const now = new Date();
         const startDate = dateRange?.start || new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
@@ -6912,25 +6913,56 @@ serve(async (req) => {
           console.error('[get_campaign_group_performance] Campaign groups fetch error:', err);
         }
 
-        // Step 2: Fetch analytics by CAMPAIGN_GROUP pivot
+        // Step 2: Fetch all campaigns to get objectiveType and campaignGroup mapping
+        const campaignInfoMap = new Map<string, { objectiveType: string; campaignGroupUrn: string }>();
+
+        try {
+          let campaignStart = 0;
+          let hasMoreCampaigns = true;
+          while (hasMoreCampaigns) {
+            const campaignsUrl = `https://api.linkedin.com/v2/adCampaignsV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=500&start=${campaignStart}`;
+            const campaignsResp = await fetch(campaignsUrl, {
+              headers: { 'Authorization': `Bearer ${accessToken}` }
+            });
+
+            if (campaignsResp.ok) {
+              const campaignsData = await campaignsResp.json();
+              const elements = campaignsData.elements || [];
+              for (const c of elements) {
+                const cId = c.id?.toString() || '';
+                if (cId) {
+                  campaignInfoMap.set(`urn:li:sponsoredCampaign:${cId}`, {
+                    objectiveType: c.objectiveType || '',
+                    campaignGroupUrn: c.campaignGroup || ''
+                  });
+                }
+              }
+              hasMoreCampaigns = elements.length === 500;
+              campaignStart += 500;
+            } else {
+              hasMoreCampaigns = false;
+            }
+          }
+          console.log(`[get_campaign_group_performance] Fetched ${campaignInfoMap.size} campaigns for objective filtering`);
+        } catch (err) {
+          console.error('[get_campaign_group_performance] Campaigns fetch error:', err);
+        }
+
+        // Step 3: Fetch analytics pivoted by CAMPAIGN (not CAMPAIGN_GROUP)
+        // so we can filter leads by objective type per campaign
         const analyticsUrl = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
           `dateRange.start.day=${startDay}&dateRange.start.month=${startMonth}&dateRange.start.year=${startYear}&` +
           `dateRange.end.day=${endDay}&dateRange.end.month=${endMonth}&dateRange.end.year=${endYear}&` +
-          `timeGranularity=ALL&pivot=CAMPAIGN_GROUP&accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
-          `fields=pivotValue,impressions,clicks,costInLocalCurrency,oneClickLeads,oneClickLeadFormOpens&count=500`;
+          `timeGranularity=ALL&pivot=CAMPAIGN&accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
+          `fields=pivotValue,impressions,clicks,costInLocalCurrency,oneClickLeads,oneClickLeadFormOpens&count=10000`;
 
-        const groupPerformance: Array<{
-          campaignGroupId: string;
-          campaignGroupName: string;
-          status: string;
+        // Aggregate by campaign group
+        const groupAgg = new Map<string, {
           impressions: number;
           clicks: number;
           spent: number;
           leads: number;
-          ctr: number;
-          avgCpc: number;
-          cpl: number;
-        }> = [];
+        }>();
 
         try {
           const analyticsResp = await fetch(analyticsUrl, {
@@ -6941,36 +6973,30 @@ serve(async (req) => {
             const analyticsData = await analyticsResp.json();
 
             for (const el of (analyticsData.elements || [])) {
-              const groupUrn = el.pivotValue || '';
+              const campaignUrn = el.pivotValue || '';
+              if (!campaignUrn) continue;
+
+              const cInfo = campaignInfoMap.get(campaignUrn);
+              const groupUrn = cInfo?.campaignGroupUrn || '';
               if (!groupUrn) continue;
 
               const impressions = el.impressions || 0;
               const clicks = el.clicks || 0;
               const spent = parseFloat(el.costInLocalCurrency || '0');
-              const leads = el.oneClickLeads || 0; // Only Lead Gen Form leads
 
-              const ctr = impressions > 0 ? (clicks / impressions) * 100 : 0;
-              const avgCpc = clicks > 0 ? spent / clicks : 0;
-              const cpl = leads > 0 ? spent / leads : 0;
+              // Only count leads for LEAD_GENERATION campaigns
+              const isLeadGen = cInfo?.objectiveType === 'LEAD_GENERATION';
+              const leads = isLeadGen ? (el.oneClickLeads || 0) : 0;
 
-              const groupInfo = campaignGroupMap.get(groupUrn);
-              const groupId = groupUrn.split(':').pop() || '';
-
-              groupPerformance.push({
-                campaignGroupId: groupId,
-                campaignGroupName: groupInfo?.name || `Campaign Group ${groupId}`,
-                status: groupInfo?.status || 'UNKNOWN',
-                impressions,
-                clicks,
-                spent,
-                leads,
-                ctr,
-                avgCpc,
-                cpl,
-              });
+              const existing = groupAgg.get(groupUrn) || { impressions: 0, clicks: 0, spent: 0, leads: 0 };
+              existing.impressions += impressions;
+              existing.clicks += clicks;
+              existing.spent += spent;
+              existing.leads += leads;
+              groupAgg.set(groupUrn, existing);
             }
 
-            console.log(`[get_campaign_group_performance] Got performance for ${groupPerformance.length} campaign groups`);
+            console.log(`[get_campaign_group_performance] Aggregated performance for ${groupAgg.size} campaign groups`);
           } else {
             const errorText = await analyticsResp.text();
             console.error(`[get_campaign_group_performance] Analytics API error: ${analyticsResp.status}`, errorText.slice(0, 300));
@@ -6990,6 +7016,42 @@ serve(async (req) => {
           }), {
             status: 500,
             headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+
+        // Build final performance array from aggregated data
+        const groupPerformance: Array<{
+          campaignGroupId: string;
+          campaignGroupName: string;
+          status: string;
+          impressions: number;
+          clicks: number;
+          spent: number;
+          leads: number;
+          ctr: number;
+          avgCpc: number;
+          cpl: number;
+        }> = [];
+
+        for (const [groupUrn, agg] of groupAgg.entries()) {
+          const groupInfo = campaignGroupMap.get(groupUrn);
+          const groupId = groupUrn.split(':').pop() || '';
+
+          const ctr = agg.impressions > 0 ? (agg.clicks / agg.impressions) * 100 : 0;
+          const avgCpc = agg.clicks > 0 ? agg.spent / agg.clicks : 0;
+          const cpl = agg.leads > 0 ? agg.spent / agg.leads : 0;
+
+          groupPerformance.push({
+            campaignGroupId: groupId,
+            campaignGroupName: groupInfo?.name || `Campaign Group ${groupId}`,
+            status: groupInfo?.status || 'UNKNOWN',
+            impressions: agg.impressions,
+            clicks: agg.clicks,
+            spent: agg.spent,
+            leads: agg.leads,
+            ctr,
+            avgCpc,
+            cpl,
           });
         }
 
