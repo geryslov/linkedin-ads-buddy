@@ -5402,11 +5402,18 @@ serve(async (req) => {
           superTitleNameToId[name.toLowerCase()] = id;
         }
 
+        // Log full state before building final titles
+        console.log(`[search_job_titles] FINAL STATE - superTitleNamesCache:`, JSON.stringify(superTitleNamesCache));
+        console.log(`[search_job_titles] FINAL STATE - superTitleMetadata keys:`, Object.keys(superTitleMetadata));
+
         // Enhance titles with parent super title info and determine if title IS a super title
         const titles = parsedTitles.map((title: ParsedTitle) => {
           // Get the super title metadata for this title
           const metadata = superTitleMetadata[title.id] || null;
           const superTitleId = metadata ? (metadata as any)._superTitleId : null;
+
+          // Log for each title
+          console.log(`[search_job_titles] Processing "${title.name}" (id=${title.id}): metadata=${metadata ? 'found' : 'null'}, superTitleId=${superTitleId}, cachedName=${superTitleId ? superTitleNamesCache[superTitleId] : 'N/A'}`);
 
           // Determine if this title IS a super title:
           // 1. URN contains :superTitle: (already checked in isSuperTitle)
@@ -5429,6 +5436,7 @@ serve(async (req) => {
 
           if (!isSuperTitle && metadata && superTitleId) {
             const superTitleName = superTitleNamesCache[superTitleId] || '';
+            console.log(`[search_job_titles] "${title.name}" -> superTitleId "${superTitleId}" -> resolved name: "${superTitleName}"`);
             if (superTitleName) {
               parentSuperTitle = {
                 urn: metadata.urn,
