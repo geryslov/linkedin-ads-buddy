@@ -5313,64 +5313,60 @@ serve(async (req) => {
               }
             }
 
-            // Fetch actual super title names from LinkedIn API
+            // Fetch actual super title names from LinkedIn API using adTargetingEntities
             if (uniqueSuperTitleIds.size > 0) {
               console.log(`[search_job_titles] Fetching names for ${uniqueSuperTitleIds.size} unique super titles: ${JSON.stringify([...uniqueSuperTitleIds])}`);
 
-              const superTitleIdArray = [...uniqueSuperTitleIds];
-              const superTitleBatchSize = 50;
+              const superTitleUrns = [...uniqueSuperTitleIds].map(id => `urn:li:superTitle:${id}`);
+              const urnsParam = superTitleUrns.map(u => encodeURIComponent(u)).join(',');
+              const superTitlesUrl = `https://api.linkedin.com/rest/adTargetingEntities?q=urns&urns=List(${urnsParam})`;
 
-              for (let i = 0; i < superTitleIdArray.length; i += superTitleBatchSize) {
-                const batchSuperIds = superTitleIdArray.slice(i, i + superTitleBatchSize);
-                const superTitleIdsParam = `ids=List(${batchSuperIds.join(',')})`;
-                const superTitlesUrl = `https://api.linkedin.com/v2/superTitles?${superTitleIdsParam}`;
+              console.log(`[search_job_titles] Calling adTargetingEntities for super titles`);
 
-                console.log(`[search_job_titles] Fetching super title names: ${superTitlesUrl}`);
+              const superTitlesResponse = await fetch(superTitlesUrl, {
+                headers: {
+                  'Authorization': `Bearer ${accessToken}`,
+                  'X-Restli-Protocol-Version': '2.0.0',
+                  'LinkedIn-Version': '202511',
+                },
+              });
 
-                const superTitlesResponse = await fetch(superTitlesUrl, {
-                  headers: {
-                    'Authorization': `Bearer ${accessToken}`,
-                    'X-Restli-Protocol-Version': '2.0.0',
-                  },
-                });
+              if (superTitlesResponse.ok) {
+                const superTitlesData = await superTitlesResponse.json();
+                const elements = superTitlesData.elements || [];
 
-                if (superTitlesResponse.ok) {
-                  const superTitlesData = await superTitlesResponse.json();
-                  const superResults = superTitlesData.results || {};
+                console.log(`[search_job_titles] adTargetingEntities returned ${elements.length} super title results`);
 
-                  console.log(`[search_job_titles] Super titles API returned ${Object.keys(superResults).length} results`);
-
-                  for (const [superTitleKey, superTitleValue] of Object.entries(superResults)) {
-                    const stData = superTitleValue as any;
-                    // Extract the ID from the key (might be just ID or full URN)
-                    const stId = superTitleKey.replace(/^urn:li:superTitle:/, '');
-
-                    // Get the name from the response
-                    let superTitleName = '';
-                    if (stData.name) {
-                      if (typeof stData.name === 'string') {
-                        superTitleName = stData.name;
-                      } else if (stData.name.localized) {
-                        superTitleName = stData.name.localized.en_US ||
-                                        stData.name.localized[Object.keys(stData.name.localized)[0]] || '';
+                for (const el of elements) {
+                  const urn = el.urn || el.entity || '';
+                  const idMatch = urn.match(/:superTitle:(\d+)$/);
+                  if (idMatch) {
+                    const stId = idMatch[1];
+                    // Extract name from various possible formats
+                    let name = '';
+                    if (el.name) {
+                      if (typeof el.name === 'string') {
+                        name = el.name;
+                      } else if (el.name.localized) {
+                        name = el.name.localized.en_US ||
+                               el.name.localized[Object.keys(el.name.localized)[0]] || '';
                       }
-                    } else if (stData.displayName) {
-                      superTitleName = typeof stData.displayName === 'string'
-                        ? stData.displayName
-                        : stData.displayName.localized?.en_US || '';
+                    }
+                    if (!name && el.displayName) {
+                      name = typeof el.displayName === 'string' ? el.displayName : '';
                     }
 
-                    if (superTitleName) {
-                      superTitleNamesCache[stId] = superTitleName;
-                      console.log(`[search_job_titles] ✓ Super title "${stId}" = "${superTitleName}"`);
+                    if (name) {
+                      superTitleNamesCache[stId] = name;
+                      console.log(`[search_job_titles] ✓ Super title "${stId}" = "${name}"`);
                     } else {
-                      console.log(`[search_job_titles] ✗ Could not extract name for super title "${stId}":`, JSON.stringify(stData));
+                      console.log(`[search_job_titles] ✗ No name found for super title "${stId}":`, JSON.stringify(el));
                     }
                   }
-                } else {
-                  const errorText = await superTitlesResponse.text();
-                  console.log(`[search_job_titles] Super titles API returned ${superTitlesResponse.status}: ${errorText}`);
                 }
+              } else {
+                const errorText = await superTitlesResponse.text();
+                console.log(`[search_job_titles] adTargetingEntities for super titles failed ${superTitlesResponse.status}: ${errorText.slice(0, 200)}`);
               }
             }
 
