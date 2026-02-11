@@ -6695,7 +6695,7 @@ serve(async (req) => {
           `dateRange.start.day=${startDay}&dateRange.start.month=${startMonth}&dateRange.start.year=${startYear}&` +
           `dateRange.end.day=${endDay}&dateRange.end.month=${endMonth}&dateRange.end.year=${endYear}&` +
           `timeGranularity=ALL&pivot=CAMPAIGN_GROUP&accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
-          `fields=pivotValue,impressions,clicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions&count=500`;
+          `fields=pivotValue,impressions,clicks,costInLocalCurrency,oneClickLeads,oneClickLeadFormOpens&count=500`;
 
         const groupPerformance: Array<{
           campaignGroupId: string;
@@ -6725,7 +6725,7 @@ serve(async (req) => {
               const impressions = el.impressions || 0;
               const clicks = el.clicks || 0;
               const spent = parseFloat(el.costInLocalCurrency || '0');
-              const leads = (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
+              const leads = el.oneClickLeads || 0; // Only Lead Gen Form leads
 
               const ctr = impressions > 0 ? (clicks / impressions) * 100 : 0;
               const avgCpc = clicks > 0 ? spent / clicks : 0;
