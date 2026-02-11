@@ -11,6 +11,7 @@ import { useCampaignReporting, TimeFrameOption as CampaignTimeFrameOption } from
 import { useJobSeniorityMatrix, TimeFrameOption as MatrixTimeFrameOption } from '@/hooks/useJobSeniorityMatrix';
 import { useLeadGenFormsReport, TimeFrameOption as LeadGenTimeFrameOption } from '@/hooks/useLeadGenFormsReport';
 import { useCampaignGroupPerformance, TimeFrameOption as CampaignGroupTimeFrameOption } from '@/hooks/useCampaignGroupPerformance';
+import { useCustomFields } from '@/hooks/useCustomFields';
 import { DemographicTable } from './DemographicTable';
 import { CompanyDemographicTable } from './CompanyDemographicTable';
 import { CreativeNamesReportTable } from './CreativeNamesReportTable';
@@ -54,6 +55,7 @@ export function ReportingSection({ accessToken, selectedAccount, canWrite = fals
   const jobSeniorityMatrix = useJobSeniorityMatrix(accessToken);
   const leadGenForms = useLeadGenFormsReport(accessToken);
   const campaignGroupPerformance = useCampaignGroupPerformance(accessToken);
+  const customFields = useCustomFields(accessToken);
   const { toast } = useToast();
 
   const [selectedTimeFrame, setSelectedTimeFrame] = useState('last_7_days');
@@ -152,6 +154,7 @@ export function ReportingSection({ accessToken, selectedAccount, canWrite = fals
         }
       } else if (reportType === 'campaign_performance') {
         campaignGroupPerformance.fetchCampaignGroupPerformance(selectedAccount);
+        customFields.fetchCustomFields(selectedAccount, 'campaign_group');
       }
     }
   }, [selectedAccount, reportType]);
@@ -301,6 +304,17 @@ export function ReportingSection({ accessToken, selectedAccount, canWrite = fals
       start: start.toISOString().split('T')[0],
       end: end.toISOString().split('T')[0],
     });
+  };
+
+  // Custom fields handlers for campaign groups
+  const handleSaveCampaignGroupCustomField = async (entityId: string, fieldName: string, fieldValue: string): Promise<boolean> => {
+    if (!selectedAccount) return false;
+    return customFields.setCustomField(selectedAccount, 'campaign_group', entityId, fieldName, fieldValue);
+  };
+
+  const handleDeleteCampaignGroupCustomField = async (entityId: string, fieldName: string): Promise<boolean> => {
+    if (!selectedAccount) return false;
+    return customFields.deleteCustomField(selectedAccount, 'campaign_group', entityId, fieldName);
   };
 
   const handleTestTitlesApi = async () => {
@@ -508,6 +522,10 @@ export function ReportingSection({ accessToken, selectedAccount, canWrite = fals
               <CampaignGroupPerformanceTable
                 data={campaignGroupPerformance.campaignGroups}
                 isLoading={campaignGroupPerformance.isLoading}
+                customFields={customFields.grouped}
+                uniqueFieldNames={customFields.uniqueFieldNames}
+                onSaveCustomField={handleSaveCampaignGroupCustomField}
+                onDeleteCustomField={handleDeleteCampaignGroupCustomField}
               />
             </CardContent>
           </Card>
