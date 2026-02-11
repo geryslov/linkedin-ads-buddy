@@ -5241,7 +5241,13 @@ serve(async (req) => {
                   const normalizedTitleId = titleId.replace(/^urn:li:title:/, '');
                   const wasRequested = batchIds.includes(normalizedTitleId) || batchIds.includes(titleId);
 
-                  console.log(`[search_job_titles] Result key="${titleId}", normalized="${normalizedTitleId}", wasRequested=${wasRequested}, hasSuperTitle=${!!data.superTitle}`);
+                  // Extract title name from API response for debugging
+                  const apiTitleName = data.name?.localized?.en_US ||
+                                       data.name?.localized?.[Object.keys(data.name?.localized || {})[0]] ||
+                                       data.name ||
+                                       'UNKNOWN';
+
+                  console.log(`[search_job_titles] Result key="${titleId}", normalized="${normalizedTitleId}", wasRequested=${wasRequested}, hasSuperTitle=${!!data.superTitle}, apiName="${apiTitleName}"`);
 
                   if (data.superTitle) {
                     // Debug: log the actual superTitle value to understand its format
@@ -5451,8 +5457,15 @@ serve(async (req) => {
             parentSuperTitle,
           };
         });
-        
-        return new Response(JSON.stringify({ 
+
+        // Final summary log: show all title-to-superTitle mappings for debugging
+        const mappingSummary = titles
+          .filter((t: any) => t.parentSuperTitle?.name)
+          .map((t: any) => `"${t.name}" (${t.id}) -> "${t.parentSuperTitle.name}"`)
+          .join(', ');
+        console.log(`[search_job_titles] FINAL MAPPINGS: ${mappingSummary || 'none'}`);
+
+        return new Response(JSON.stringify({
           titles,
           source: 'adTargetingEntities',
           count: titles.length
