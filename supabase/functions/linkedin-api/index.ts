@@ -7010,18 +7010,20 @@ serve(async (req) => {
 
           if (leadsResp.ok) {
             const leadsData = await leadsResp.json();
+            console.log(`[get_campaign_group_performance] Total campaign-level lead elements: ${(leadsData.elements || []).length}`);
             for (const el of (leadsData.elements || [])) {
               const campaignUrn = el.pivotValue || '';
               if (!campaignUrn) continue;
               const cInfo = campaignInfoMap.get(campaignUrn);
-              if (!cInfo || cInfo.objectiveType !== 'LEAD_GENERATION') continue;
               const leads = el.oneClickLeads || 0;
+              console.log(`[get_campaign_group_performance] Campaign ${campaignUrn}: objective=${cInfo?.objectiveType || 'NOT_FOUND'}, oneClickLeads=${leads}`);
+              if (!cInfo || cInfo.objectiveType !== 'LEAD_GENERATION') continue;
               if (leads > 0) {
                 const groupUrn = cInfo.campaignGroupUrn;
                 leadsPerGroup.set(groupUrn, (leadsPerGroup.get(groupUrn) || 0) + leads);
               }
             }
-            console.log(`[get_campaign_group_performance] Lead gen leads aggregated for ${leadsPerGroup.size} groups`);
+            console.log(`[get_campaign_group_performance] Lead gen leads aggregated for ${leadsPerGroup.size} groups, totals:`, JSON.stringify(Object.fromEntries(leadsPerGroup)));
           } else {
             const errorText = await leadsResp.text();
             console.error(`[get_campaign_group_performance] Leads analytics error: ${leadsResp.status}`, errorText.slice(0, 300));
