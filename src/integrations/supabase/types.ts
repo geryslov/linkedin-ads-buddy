@@ -47,6 +47,42 @@ export type Database = {
         }
         Relationships: []
       }
+      custom_fields: {
+        Row: {
+          account_id: string
+          created_at: string
+          entity_id: string
+          entity_type: string
+          field_name: string
+          field_value: string | null
+          id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          account_id: string
+          created_at?: string
+          entity_id: string
+          entity_type: string
+          field_name: string
+          field_value?: string | null
+          id?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          account_id?: string
+          created_at?: string
+          entity_id?: string
+          entity_type?: string
+          field_name?: string
+          field_value?: string | null
+          id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       linkedin_ad_accounts: {
         Row: {
           account_id: string
