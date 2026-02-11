@@ -22,12 +22,12 @@ interface LeadGenFormsTableProps {
 
 function CreativesSubTable({ creatives }: { creatives: LeadGenFormCreative[] }) {
   return (
-    <div className="bg-muted/30 p-4 rounded-lg ml-8 mr-4 mb-4">
+    <div className="bg-muted/30 p-4 rounded-lg ml-8 mr-4 mb-4 overflow-x-auto">
       <h4 className="text-sm font-medium mb-3 text-muted-foreground">Connected Creatives ({creatives.length})</h4>
-      <Table>
+      <Table className="min-w-[700px]">
         <TableHeader>
           <TableRow className="hover:bg-transparent">
-            <TableHead className="text-xs">Creative</TableHead>
+            <TableHead className="text-xs min-w-[150px]">Creative</TableHead>
             <TableHead className="text-xs text-right">Impressions</TableHead>
             <TableHead className="text-xs text-right">Clicks</TableHead>
             <TableHead className="text-xs text-right">Spent</TableHead>
@@ -41,8 +41,8 @@ function CreativesSubTable({ creatives }: { creatives: LeadGenFormCreative[] }) 
         <TableBody>
           {creatives.map((creative) => (
             <TableRow key={creative.creativeId} className="hover:bg-muted/50">
-              <TableCell className="text-xs font-medium max-w-[200px] truncate" title={creative.creativeName}>
-                {creative.creativeName}
+              <TableCell className="text-xs font-medium">
+                <span className="break-words">{creative.creativeName}</span>
               </TableCell>
               <TableCell className="text-xs text-right">{creative.impressions.toLocaleString()}</TableCell>
               <TableCell className="text-xs text-right">{creative.clicks.toLocaleString()}</TableCell>
@@ -96,8 +96,8 @@ function FormRow({ form }: { form: LeadGenFormData }) {
             </Button>
           </CollapsibleTrigger>
         </TableCell>
-        <TableCell className="font-medium max-w-[250px] truncate" title={form.formName}>
-          {form.formName}
+        <TableCell className="font-medium">
+          <span className="break-words">{form.formName}</span>
         </TableCell>
         <TableCell className="text-right">{form.impressions.toLocaleString()}</TableCell>
         <TableCell className="text-right">{form.clicks.toLocaleString()}</TableCell>
@@ -205,12 +205,12 @@ export function LeadGenFormsTable({ data, isLoading }: LeadGenFormsTableProps) {
           Export All Forms
         </Button>
       </div>
-      <div className="rounded-md border">
-        <Table>
+      <div className="rounded-md border overflow-x-auto">
+        <Table className="min-w-[1100px]">
           <TableHeader>
             <TableRow>
               <TableHead className="w-8"></TableHead>
-              <TableHead>Form Name</TableHead>
+              <TableHead className="min-w-[150px]">Form Name</TableHead>
               <TableHead className="text-right">Impressions</TableHead>
               <TableHead className="text-right">Clicks</TableHead>
               <TableHead className="text-right">Spent</TableHead>

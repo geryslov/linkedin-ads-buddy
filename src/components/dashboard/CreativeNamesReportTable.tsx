@@ -410,7 +410,7 @@ export function CreativeNamesReportTable({ data, isLoading }: CreativeNamesRepor
                         </td>
                         <td className="p-3">
                           <div className="flex flex-col gap-0.5">
-                            <span className="font-medium truncate max-w-[300px]" title={group.creativeName}>
+                            <span className="font-medium break-words">
                               {group.creativeName}
                             </span>
                             {hasMultipleCampaigns && (
@@ -427,7 +427,7 @@ export function CreativeNamesReportTable({ data, isLoading }: CreativeNamesRepor
                           {hasMultipleCampaigns ? (
                             <span className="text-xs italic">Multiple</span>
                           ) : (
-                            <span className="truncate block max-w-[180px]" title={group.campaigns[0]?.campaignName}>
+                            <span className="break-words">
                               {group.campaigns[0]?.campaignName}
                             </span>
                           )}
@@ -460,8 +460,8 @@ export function CreativeNamesReportTable({ data, isLoading }: CreativeNamesRepor
                           <td className="p-3"></td>
                           <td className="p-3 pl-8" colSpan={3}>
                             <div className="flex items-center gap-3">
-                              <span className="text-muted-foreground">↳</span>
-                              <span className="truncate max-w-[350px]" title={campaign.campaignName}>
+                              <span className="text-muted-foreground shrink-0">↳</span>
+                              <span className="break-words">
                                 {campaign.campaignName}
                               </span>
                               <Badge variant="outline" className={`text-xs shrink-0 ${STATUS_COLORS[campaign.status] || 'bg-muted'}`}>

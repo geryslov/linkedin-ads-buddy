@@ -111,8 +111,8 @@ function CreativeRow({ creative, objectiveFilter }: CreativeRowProps) {
         <TableCell className="w-24">
           <StatusBadge status={creative.status} />
         </TableCell>
-        <TableCell className="font-medium truncate max-w-[200px]" title={creative.creativeName}>
-          {creative.creativeName}
+        <TableCell className="font-medium min-w-[150px]">
+          <span className="break-words">{creative.creativeName}</span>
         </TableCell>
         <TableCell className="text-right">{creative.metrics.totalImpressions.toLocaleString()}</TableCell>
         <TableCell className="text-right">${creative.metrics.totalSpend.toFixed(2)}</TableCell>

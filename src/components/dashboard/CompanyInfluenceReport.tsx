@@ -116,7 +116,7 @@ function CompanyRow({ company, isExpanded, onToggle, onNameUpdate }: {
             {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
           </Button>
         </TableCell>
-        <TableCell className="w-48 font-medium" onClick={(e) => isEditing && e.stopPropagation()}>
+        <TableCell className="font-medium" onClick={(e) => isEditing && e.stopPropagation()}>
           {isEditing ? (
             <div className="flex items-center gap-1">
               <Input
@@ -153,16 +153,16 @@ function CompanyRow({ company, isExpanded, onToggle, onNameUpdate }: {
             </div>
           )}
         </TableCell>
-        <TableCell className="w-24">
+        <TableCell>
           <EngagementScoreBadge score={company.engagementScore} leads={company.totalLeads} />
         </TableCell>
-        <TableCell className="w-28 text-right">{company.totalImpressions.toLocaleString()}</TableCell>
-        <TableCell className="w-20 text-right">{company.totalClicks.toLocaleString()}</TableCell>
-        <TableCell className="w-16 text-right font-medium text-primary">{company.totalLeads}</TableCell>
-        <TableCell className="w-24 text-right">${company.totalSpend.toFixed(2)}</TableCell>
-        <TableCell className="w-20 text-right">{company.ctr.toFixed(2)}%</TableCell>
-        <TableCell className="w-16 text-center">{company.campaignDepth}</TableCell>
-        <TableCell className="w-40">
+        <TableCell className="text-right">{company.totalImpressions.toLocaleString()}</TableCell>
+        <TableCell className="text-right">{company.totalClicks.toLocaleString()}</TableCell>
+        <TableCell className="text-right font-medium text-primary">{company.totalLeads}</TableCell>
+        <TableCell className="text-right">${company.totalSpend.toFixed(2)}</TableCell>
+        <TableCell className="text-right">{company.ctr.toFixed(2)}%</TableCell>
+        <TableCell className="text-center">{company.campaignDepth}</TableCell>
+        <TableCell>
           <div className="flex flex-wrap gap-1">
             {company.objectiveTypes.slice(0, 2).map(obj => (
               <ObjectiveBadge key={obj} objective={obj} />
@@ -179,22 +179,22 @@ function CompanyRow({ company, isExpanded, onToggle, onNameUpdate }: {
             <div className="p-4 ml-8 mr-4 mb-2 rounded-lg">
               <h4 className="text-sm font-medium mb-3">Campaign Breakdown</h4>
               {company.campaignBreakdown.length > 0 ? (
-                <Table>
+                <Table className="min-w-[600px]">
                   <TableHeader>
                     <TableRow className="hover:bg-transparent">
-                      <TableHead className="text-xs w-48">Campaign</TableHead>
-                      <TableHead className="text-xs w-32">Objective</TableHead>
-                      <TableHead className="text-xs text-right w-24">Impressions</TableHead>
-                      <TableHead className="text-xs text-right w-20">Clicks</TableHead>
-                      <TableHead className="text-xs text-right w-16">Leads</TableHead>
-                      <TableHead className="text-xs text-right w-24">Spend</TableHead>
+                      <TableHead className="text-xs min-w-[150px]">Campaign</TableHead>
+                      <TableHead className="text-xs whitespace-nowrap">Objective</TableHead>
+                      <TableHead className="text-xs text-right whitespace-nowrap">Impressions</TableHead>
+                      <TableHead className="text-xs text-right whitespace-nowrap">Clicks</TableHead>
+                      <TableHead className="text-xs text-right whitespace-nowrap">Leads</TableHead>
+                      <TableHead className="text-xs text-right whitespace-nowrap">Spend</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {company.campaignBreakdown.map((campaign, idx) => (
                       <TableRow key={idx} className="hover:bg-muted/50">
-                        <TableCell className="text-xs font-medium max-w-[150px] truncate" title={campaign.campaignName}>
-                          {campaign.campaignName}
+                        <TableCell className="text-xs font-medium">
+                          <span className="break-words">{campaign.campaignName}</span>
                         </TableCell>
                         <TableCell>
                           <ObjectiveBadge objective={campaign.objective} />
@@ -512,19 +512,19 @@ export function CompanyInfluenceReport({ accessToken, selectedAccount }: Company
         <CardContent>
           {filteredCompanies.length > 0 ? (
             <div className="rounded-md border overflow-x-auto">
-              <Table className="table-fixed w-full min-w-[900px]">
+              <Table className="min-w-[900px]">
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-10"></TableHead>
-                    <TableHead className="w-48">Company</TableHead>
-                    <TableHead className="w-24">Score</TableHead>
-                    <TableHead className="w-28 text-right">Impressions</TableHead>
-                    <TableHead className="w-20 text-right">Clicks</TableHead>
-                    <TableHead className="w-16 text-right">Leads</TableHead>
-                    <TableHead className="w-24 text-right">Spend</TableHead>
-                    <TableHead className="w-20 text-right">CTR</TableHead>
-                    <TableHead className="w-16 text-center">Depth</TableHead>
-                    <TableHead className="w-40">Objectives</TableHead>
+                    <TableHead className="min-w-[150px]">Company</TableHead>
+                    <TableHead className="whitespace-nowrap">Score</TableHead>
+                    <TableHead className="text-right whitespace-nowrap">Impressions</TableHead>
+                    <TableHead className="text-right whitespace-nowrap">Clicks</TableHead>
+                    <TableHead className="text-right whitespace-nowrap">Leads</TableHead>
+                    <TableHead className="text-right whitespace-nowrap">Spend</TableHead>
+                    <TableHead className="text-right whitespace-nowrap">CTR</TableHead>
+                    <TableHead className="text-center whitespace-nowrap">Depth</TableHead>
+                    <TableHead className="min-w-[120px]">Objectives</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
