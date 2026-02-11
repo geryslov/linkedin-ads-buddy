@@ -8632,6 +8632,191 @@ serve(async (req) => {
         });
       }
 
+      // ============ CUSTOM FIELDS CRUD ============
+
+      case 'get_custom_fields': {
+        // Get all custom fields for an account, optionally filtered by entity type
+        const { accountId, entityType, entityId } = params || {};
+
+        if (!accountId) {
+          return new Response(JSON.stringify({ error: 'accountId is required' }), {
+            status: 400,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+
+        try {
+          let query = supabaseClient
+            .from('custom_fields')
+            .select('*')
+            .eq('account_id', accountId);
+
+          if (entityType) {
+            query = query.eq('entity_type', entityType);
+          }
+          if (entityId) {
+            query = query.eq('entity_id', entityId);
+          }
+
+          const { data, error } = await query.order('field_name');
+
+          if (error) throw error;
+
+          // Group by entity for easier consumption
+          const grouped: Record<string, Record<string, string>> = {};
+          for (const field of (data || [])) {
+            const key = `${field.entity_type}:${field.entity_id}`;
+            if (!grouped[key]) {
+              grouped[key] = {};
+            }
+            grouped[key][field.field_name] = field.field_value;
+          }
+
+          return new Response(JSON.stringify({
+            fields: data || [],
+            grouped
+          }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        } catch (e) {
+          console.error('[get_custom_fields] Error:', e);
+          return new Response(JSON.stringify({ error: 'Failed to fetch custom fields' }), {
+            status: 500,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+      }
+
+      case 'set_custom_field': {
+        // Create or update a custom field
+        const { accountId, entityType, entityId, fieldName, fieldValue } = params || {};
+
+        if (!accountId || !entityType || !entityId || !fieldName) {
+          return new Response(JSON.stringify({
+            error: 'accountId, entityType, entityId, and fieldName are required'
+          }), {
+            status: 400,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+
+        if (!['campaign', 'campaign_group'].includes(entityType)) {
+          return new Response(JSON.stringify({
+            error: 'entityType must be "campaign" or "campaign_group"'
+          }), {
+            status: 400,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+
+        try {
+          const { data, error } = await supabaseClient
+            .from('custom_fields')
+            .upsert({
+              account_id: accountId,
+              entity_type: entityType,
+              entity_id: entityId,
+              field_name: fieldName,
+              field_value: fieldValue || null
+            }, {
+              onConflict: 'account_id,entity_type,entity_id,field_name'
+            })
+            .select()
+            .single();
+
+          if (error) throw error;
+
+          return new Response(JSON.stringify({ success: true, field: data }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        } catch (e) {
+          console.error('[set_custom_field] Error:', e);
+          return new Response(JSON.stringify({ error: 'Failed to save custom field' }), {
+            status: 500,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+      }
+
+      case 'delete_custom_field': {
+        // Delete a custom field
+        const { accountId, entityType, entityId, fieldName } = params || {};
+
+        if (!accountId || !entityType || !entityId || !fieldName) {
+          return new Response(JSON.stringify({
+            error: 'accountId, entityType, entityId, and fieldName are required'
+          }), {
+            status: 400,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+
+        try {
+          const { error } = await supabaseClient
+            .from('custom_fields')
+            .delete()
+            .eq('account_id', accountId)
+            .eq('entity_type', entityType)
+            .eq('entity_id', entityId)
+            .eq('field_name', fieldName);
+
+          if (error) throw error;
+
+          return new Response(JSON.stringify({ success: true }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        } catch (e) {
+          console.error('[delete_custom_field] Error:', e);
+          return new Response(JSON.stringify({ error: 'Failed to delete custom field' }), {
+            status: 500,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+      }
+
+      case 'bulk_set_custom_fields': {
+        // Set multiple custom fields at once
+        const { accountId, fields } = params || {};
+
+        if (!accountId || !fields || !Array.isArray(fields)) {
+          return new Response(JSON.stringify({
+            error: 'accountId and fields array are required'
+          }), {
+            status: 400,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+
+        try {
+          const records = fields.map((f: any) => ({
+            account_id: accountId,
+            entity_type: f.entityType,
+            entity_id: f.entityId,
+            field_name: f.fieldName,
+            field_value: f.fieldValue || null
+          }));
+
+          const { data, error } = await supabaseClient
+            .from('custom_fields')
+            .upsert(records, {
+              onConflict: 'account_id,entity_type,entity_id,field_name'
+            })
+            .select();
+
+          if (error) throw error;
+
+          return new Response(JSON.stringify({ success: true, count: data?.length || 0 }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        } catch (e) {
+          console.error('[bulk_set_custom_fields] Error:', e);
+          return new Response(JSON.stringify({ error: 'Failed to save custom fields' }), {
+            status: 500,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+      }
+
       default:
         return new Response(JSON.stringify({ error: 'Unknown action' }), {
           status: 400,

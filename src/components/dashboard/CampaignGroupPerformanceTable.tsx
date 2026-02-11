@@ -13,16 +13,29 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ArrowUpDown, Search } from 'lucide-react';
 import { CampaignGroupPerformanceItem } from '@/hooks/useCampaignGroupPerformance';
+import { CustomFieldEditor } from './CustomFieldEditor';
+import { GroupedCustomFields } from '@/hooks/useCustomFields';
 
 interface CampaignGroupPerformanceTableProps {
   data: CampaignGroupPerformanceItem[];
   isLoading: boolean;
+  customFields?: GroupedCustomFields;
+  uniqueFieldNames?: string[];
+  onSaveCustomField?: (entityId: string, fieldName: string, fieldValue: string) => Promise<boolean>;
+  onDeleteCustomField?: (entityId: string, fieldName: string) => Promise<boolean>;
 }
 
 type SortField = 'campaignGroupName' | 'spent' | 'impressions' | 'clicks' | 'leads' | 'ctr' | 'avgCpc' | 'cpl';
 type SortDirection = 'asc' | 'desc';
 
-export function CampaignGroupPerformanceTable({ data, isLoading }: CampaignGroupPerformanceTableProps) {
+export function CampaignGroupPerformanceTable({
+  data,
+  isLoading,
+  customFields = {},
+  uniqueFieldNames = [],
+  onSaveCustomField,
+  onDeleteCustomField
+}: CampaignGroupPerformanceTableProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [sortField, setSortField] = useState<SortField>('spent');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
@@ -153,12 +166,15 @@ export function CampaignGroupPerformanceTable({ data, isLoading }: CampaignGroup
               <TableHead className="text-right">
                 <SortButton field="cpl">CPL</SortButton>
               </TableHead>
+              {onSaveCustomField && (
+                <TableHead className="w-[120px]">Custom Fields</TableHead>
+              )}
             </TableRow>
           </TableHeader>
           <TableBody>
             {filteredAndSortedData.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={9} className="h-24 text-center">
+                <TableCell colSpan={onSaveCustomField ? 10 : 9} className="h-24 text-center">
                   No campaign groups found.
                 </TableCell>
               </TableRow>
@@ -197,6 +213,19 @@ export function CampaignGroupPerformanceTable({ data, isLoading }: CampaignGroup
                   <TableCell className="text-right">
                     {group.leads > 0 ? `$${group.cpl.toFixed(2)}` : '-'}
                   </TableCell>
+                  {onSaveCustomField && onDeleteCustomField && (
+                    <TableCell>
+                      <CustomFieldEditor
+                        entityType="campaign_group"
+                        entityId={group.campaignGroupId}
+                        entityName={group.campaignGroupName}
+                        currentFields={customFields[`campaign_group:${group.campaignGroupId}`] || {}}
+                        onSave={(fieldName, fieldValue) => onSaveCustomField(group.campaignGroupId, fieldName, fieldValue)}
+                        onDelete={(fieldName) => onDeleteCustomField(group.campaignGroupId, fieldName)}
+                        existingFieldNames={uniqueFieldNames}
+                      />
+                    </TableCell>
+                  )}
                 </TableRow>
               ))
             )}
