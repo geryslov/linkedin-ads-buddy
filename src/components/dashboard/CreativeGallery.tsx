@@ -44,9 +44,15 @@ export function CreativeGallery({ accessToken, selectedAccount }: CreativeGaller
     }
   }, [selectedAccount, fetchCreativeAnalytics]);
 
-  // Filter to only active creatives with images
+  const [statusFilter, setStatusFilter] = useState<string>('ALL');
+
+  // Filter creatives
   const activeCreatives = useMemo(() => {
-    let result = creativeData.filter(c => c.status === 'ACTIVE');
+    let result = creativeData;
+
+    if (statusFilter !== 'ALL') {
+      result = result.filter(c => c.status === statusFilter);
+    }
 
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
@@ -57,7 +63,13 @@ export function CreativeGallery({ accessToken, selectedAccount }: CreativeGaller
     }
 
     return result;
-  }, [creativeData, searchQuery]);
+  }, [creativeData, searchQuery, statusFilter]);
+
+  // Get unique statuses for filter
+  const availableStatuses = useMemo(() => {
+    const statuses = new Set(creativeData.map(c => c.status));
+    return Array.from(statuses).sort();
+  }, [creativeData]);
 
   const creativesWithImages = activeCreatives.filter(c => c.imageUrl);
   const creativesWithoutImages = activeCreatives.filter(c => !c.imageUrl);
@@ -84,6 +96,17 @@ export function CreativeGallery({ accessToken, selectedAccount }: CreativeGaller
           />
         </div>
         <div className="flex items-center gap-3">
+          <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <SelectTrigger className="w-[140px]">
+              <SelectValue placeholder="Status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="ALL">All Statuses</SelectItem>
+              {availableStatuses.map(s => (
+                <SelectItem key={s} value={s}>{s}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <Select
             value={timeFrameOptions.find(o => 
               o.startDate.toISOString().split('T')[0] === dateRange.start
