@@ -12,6 +12,7 @@ import { ReportingSection } from "@/components/dashboard/ReportingSection";
 import { TitleCheckerPage } from "@/components/dashboard/TitleCheckerPage";
 import { CompanyEngagementTimeline } from "@/components/dashboard/CompanyEngagementTimeline";
 import { MegaBudgetPacingDashboard } from "@/components/dashboard/MegaBudgetPacingDashboard";
+import { CreativeGallery } from "@/components/dashboard/CreativeGallery";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { 
@@ -124,6 +125,7 @@ export default function Dashboard() {
               {activeTab === "analytics" && "Analytics & Reports"}
               {activeTab === "budget_pacing" && "Budget Pacing"}
               {activeTab === "company_timeline" && "Company Engagement Timeline"}
+              {activeTab === "creatives" && "Ad Creatives"}
               {activeTab === "reports" && "Reports"}
               {activeTab === "title_checker" && "Title Checker"}
             </h1>
@@ -318,6 +320,13 @@ export default function Dashboard() {
 
         {activeTab === "company_timeline" && (
           <CompanyEngagementTimeline
+            accessToken={accessToken}
+            selectedAccount={selectedAccount}
+          />
+        )}
+
+        {activeTab === "creatives" && (
+          <CreativeGallery
             accessToken={accessToken}
             selectedAccount={selectedAccount}
           />

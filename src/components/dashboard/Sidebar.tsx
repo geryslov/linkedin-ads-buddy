@@ -13,6 +13,7 @@ import {
   Crown,
   Building2,
   Wallet,
+  ImageIcon,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -30,6 +31,7 @@ const navItems = [
   { id: "analytics", label: "Analytics", icon: BarChart3 },
   { id: "budget_pacing", label: "Budget Pacing", icon: Wallet },
   { id: "company_timeline", label: "Company Timeline", icon: Building2 },
+  { id: "creatives", label: "Creatives", icon: ImageIcon },
   { id: "reports", label: "Reports", icon: FileBarChart },
   { id: "title_checker", label: "Title Checker", icon: Crown },
 ];
