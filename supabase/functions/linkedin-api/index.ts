@@ -1093,6 +1093,22 @@ serve(async (req) => {
               if (response.ok) {
                 const data: any = await response.json();
                 
+                // Debug: log first share response structure
+                if (shareData.size === 0) {
+                  console.log(`[Share API] Sample response keys for ${urn}:`, JSON.stringify(Object.keys(data)));
+                  if (isUgc) {
+                    const sc = data.specificContent?.['com.linkedin.ugc.ShareContent'];
+                    console.log(`[Share API] UGC specificContent keys:`, sc ? JSON.stringify(Object.keys(sc)) : 'null');
+                    console.log(`[Share API] UGC media:`, sc?.media ? JSON.stringify(sc.media[0]?.thumbnails?.[0] || sc.media[0]?.originalUrl || 'no-thumb-or-url') : 'no-media');
+                  } else {
+                    console.log(`[Share API] Share content keys:`, data.content ? JSON.stringify(Object.keys(data.content)) : 'null');
+                    console.log(`[Share API] Share distribution:`, data.distribution ? JSON.stringify(Object.keys(data.distribution)) : 'null');
+                    const ce = data.content?.contentEntities?.[0];
+                    console.log(`[Share API] contentEntity:`, ce ? JSON.stringify(Object.keys(ce)) : 'null');
+                    console.log(`[Share API] Full content sample:`, JSON.stringify(data.content || data).substring(0, 500));
+                  }
+                }
+                
                 // Extract text from share/ugcPost
                 let text = '';
                 let imageUrl = '';
@@ -1112,6 +1128,15 @@ serve(async (req) => {
                   const contentEntity = data.content?.contentEntities?.[0];
                   if (contentEntity) {
                     imageUrl = contentEntity.thumbnails?.[0]?.resolvedUrl || '';
+                  }
+                  // Fallback: try multiImage or other structures
+                  if (!imageUrl && data.content?.multiImage?.images?.[0]) {
+                    const img = data.content.multiImage.images[0];
+                    imageUrl = img.resolvedUrl || img.url || '';
+                  }
+                  if (!imageUrl && data.content?.media?.id) {
+                    // Sometimes media is referenced by ID
+                    console.log(`[Share API] Share has media ID but no direct URL:`, data.content.media.id);
                   }
                 }
                 
