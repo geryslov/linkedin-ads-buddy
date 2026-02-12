@@ -1,68 +1,63 @@
 
 
-# Pull Actual Creative Images from LinkedIn API
+# Fix: Creative Thumbnails Not Showing
 
-## Overview
-Add creative image thumbnails to the Creative Report tables. The LinkedIn API provides image URLs through the UGC post/share content, which we can extract alongside the text we already resolve.
+## Root Cause
 
-## How It Works (LinkedIn API Flow)
+The image extraction only happens for creatives that **failed** name resolution. Here's the problem flow:
 
-1. We already fetch UGC posts and shares to resolve creative names (text)
-2. Those same API responses contain media references with image URNs
-3. For UGC posts: `specificContent['com.linkedin.ugc.ShareContent'].media[0].thumbnails[0].url` or the media's `originalUrl`
-4. For shares: `content.contentEntities[0].thumbnails[0].resolvedUrl`
-5. As a fallback for newer image URNs (`urn:li:image:...`), we can call LinkedIn's **Images API** (`GET https://api.linkedin.com/rest/images/{imageUrn}`) which returns a `downloadUrl`
+1. Step 5 (line 1220): Only collects share URNs for creatives where `!data.name` (no name resolved)
+2. Step 6 (line 1229): Only fetches share content for those unresolved URNs
+3. Step 7 (line 1265): Tries to get `imageUrl` from `shareContentData`, but it's empty for most creatives because their share content was never fetched
 
-## Changes
+Since most creatives DO get names from the versioned API, their share references are skipped, and `imageUrl` is always empty.
 
-### 1. Edge Function: Extract image URLs during name resolution
+## Fix
+
+### 1. Edge Function: Fetch share content for ALL creatives with references (not just unresolved ones)
+
 **File**: `supabase/functions/linkedin-api/index.ts`
 
-In the existing reference resolution logic (where we fetch UGC posts/shares to get creative names), also extract the first image thumbnail URL from the response:
-- From UGC posts: look at `specificContent['com.linkedin.ugc.ShareContent'].media[0]` for thumbnail URLs or `originalUrl`
-- From shares: look at `content.contentEntities[0].thumbnails[0].resolvedUrl`
-- Store the image URL in the creative metadata alongside the name
+Change Step 5 to collect ALL share URNs (not just unresolved), and fetch share content for all of them to extract image URLs:
 
-This applies to the `get_creative_report` and `get_creative_names_report` actions. Return a new `imageUrl` field in each element.
+- Line 1218-1225: Collect share URNs from ALL creatives that have a `reference`, regardless of whether they already have a name
+- This means `fetchShareContent` will be called with all share references, giving us image URLs for every creative
 
-### 2. Frontend: Add image column to Creative Report tables
-**Files**:
-- `src/hooks/useCreativeReporting.ts` — Add `imageUrl` to `CreativeData` interface
-- `src/hooks/useCreativeNamesReport.ts` — Add `imageUrl` to `CreativeNameData` interface
-- `src/components/dashboard/CreativeReportingTable.tsx` — Add a small thumbnail column before the Creative Name column
-- `src/components/dashboard/CreativeNamesReportTable.tsx` — Add thumbnail to the grouped creative rows
-- `src/components/dashboard/CreativeFatigueDetector.tsx` — Add thumbnail next to creative name
+The same fix needs to be applied to the `get_creative_names_report` action as well, where a similar pattern exists.
 
-### 3. Image display approach
-- Show a small 40x40px thumbnail in the table
-- Click to open a larger preview (using a Dialog/popover)
-- Show a placeholder icon when no image is available (e.g., for Text Ads)
-- Use `object-cover` and rounded corners for clean display
+### 2. Redeploy the edge function
+
+After the code change, redeploy `linkedin-api` to make it live.
 
 ## Technical Details
 
-### UGC Post image extraction (already-fetched data)
+**Current code (broken)**:
 ```text
-post.specificContent['com.linkedin.ugc.ShareContent']
-  .media[0]
-    .thumbnails[0].url          -- thumbnail
-    .originalUrl                -- or full image
+// Only collects URNs for creatives WITHOUT names
+versionedCreativeData.forEach((data, creativeId) => {
+  if (!data.name && data.reference) {
+    unresolvedShareUrns.push(data.reference);
+  }
+});
 ```
 
-### Share image extraction
+**Fixed code**:
 ```text
-share.content.contentEntities[0]
-  .thumbnails[0].resolvedUrl    -- thumbnail URL
+// Collect ALL share URNs for image extraction
+const allShareUrns: string[] = [];
+versionedCreativeData.forEach((data, creativeId) => {
+  if (data.reference) {
+    allShareUrns.push(data.reference);
+  }
+  // Also track unresolved ones for name fallback
+  if (!data.name && data.reference) {
+    unresolvedShareUrns.push(data.reference);
+  }
+});
+
+// Fetch share content for ALL references (for images)
+shareContentData = await fetchShareContent(allShareUrns, accessToken);
 ```
 
-### Images API fallback (for urn:li:image URNs)
-```text
-GET https://api.linkedin.com/rest/images/{imageUrn}
-Headers: LinkedIn-Version: 202511, Authorization: Bearer ...
-Response: { downloadUrl: "https://media.licdn-ei.com/..." }
-```
+Note: The `fetchShareContent` function already has a limit of 50 share URNs (line 1081), so this won't cause excessive API calls. We may want to increase this limit slightly since we're now fetching for all creatives.
 
-### Performance considerations
-- No extra API calls needed for most creatives (images come from the same UGC/share responses we already fetch)
-- Images API fallback only used when media contains `urn:li:image:` references without embedded thumbnails
-- CDN URLs are returned directly to the browser (no proxying needed)
