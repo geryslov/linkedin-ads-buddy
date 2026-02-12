@@ -27,7 +27,13 @@ export function useCustomFields(accessToken: string | null) {
     entityType?: 'campaign' | 'campaign_group',
     entityId?: string
   ) => {
-    if (!accessToken || !accountId) return;
+    if (!accessToken || !accountId) {
+      console.error('[useCustomFields] fetchCustomFields: missing required parameters', {
+        hasAccessToken: !!accessToken,
+        hasAccountId: !!accountId
+      });
+      return;
+    }
 
     setIsLoading(true);
     setError(null);
@@ -67,7 +73,16 @@ export function useCustomFields(accessToken: string | null) {
     fieldName: string,
     fieldValue: string | null
   ): Promise<boolean> => {
-    if (!accessToken || !accountId) return false;
+    if (!accessToken || !accountId) {
+      console.error('[useCustomFields] setCustomField: missing required parameters', {
+        hasAccessToken: !!accessToken,
+        hasAccountId: !!accountId,
+        entityType,
+        entityId,
+        fieldName
+      });
+      return false;
+    }
 
     try {
       const { data: result, error: fnError } = await supabase.functions.invoke('linkedin-api', {
@@ -124,7 +139,16 @@ export function useCustomFields(accessToken: string | null) {
     entityId: string,
     fieldName: string
   ): Promise<boolean> => {
-    if (!accessToken || !accountId) return false;
+    if (!accessToken || !accountId) {
+      console.error('[useCustomFields] deleteCustomField: missing required parameters', {
+        hasAccessToken: !!accessToken,
+        hasAccountId: !!accountId,
+        entityType,
+        entityId,
+        fieldName
+      });
+      return false;
+    }
 
     try {
       const { data: result, error: fnError } = await supabase.functions.invoke('linkedin-api', {

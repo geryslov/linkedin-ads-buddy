@@ -34,6 +34,7 @@ export function CustomFieldEditor({
   const [editingField, setEditingField] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const fieldEntries = Object.entries(currentFields);
 
@@ -41,27 +42,37 @@ export function CustomFieldEditor({
     if (!newFieldName.trim()) return;
 
     setIsSaving(true);
+    setError(null);
     const success = await onSave(newFieldName.trim(), newFieldValue);
     if (success) {
       setNewFieldName('');
       setNewFieldValue('');
+    } else {
+      setError('Failed to save field. Please check your connection.');
     }
     setIsSaving(false);
   };
 
   const handleUpdateField = async (fieldName: string) => {
     setIsSaving(true);
+    setError(null);
     const success = await onSave(fieldName, editValue);
     if (success) {
       setEditingField(null);
       setEditValue('');
+    } else {
+      setError('Failed to update field. Please check your connection.');
     }
     setIsSaving(false);
   };
 
   const handleDeleteField = async (fieldName: string) => {
     setIsSaving(true);
-    await onDelete(fieldName);
+    setError(null);
+    const success = await onDelete(fieldName);
+    if (!success) {
+      setError('Failed to delete field. Please check your connection.');
+    }
     setIsSaving(false);
   };
 
@@ -90,6 +101,13 @@ export function CustomFieldEditor({
               {entityType === 'campaign_group' ? 'Campaign Group' : 'Campaign'}: {entityName}
             </p>
           </div>
+
+          {/* Error message */}
+          {error && (
+            <div className="text-xs text-destructive bg-destructive/10 px-2 py-1 rounded">
+              {error}
+            </div>
+          )}
 
           {/* Existing fields */}
           {fieldEntries.length > 0 && (
