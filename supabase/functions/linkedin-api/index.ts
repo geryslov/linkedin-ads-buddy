@@ -1078,7 +1078,7 @@ serve(async (req) => {
           
           console.log(`[Share API] Fetching content for ${shareUrns.length} shares...`);
           
-          for (const urn of shareUrns.slice(0, 50)) { // Limit to first 50
+          for (const urn of shareUrns.slice(0, 100)) { // Limit to first 100
             try {
               // Determine if it's a share or ugcPost
               const isUgc = urn.includes('ugcPost');
@@ -1215,19 +1215,23 @@ serve(async (req) => {
         });
         console.log(`[Step 4] Aggregated ${analyticsMap.size} unique creatives with analytics`);
 
-        // Step 5: Identify creatives that need share/post resolution for names
+        // Step 5: Collect ALL share URNs for image extraction + unresolved ones for name fallback
+        const allShareUrns: string[] = [];
         const unresolvedShareUrns: string[] = [];
         versionedCreativeData.forEach((data, creativeId) => {
+          if (data.reference) {
+            allShareUrns.push(data.reference);
+          }
           if (!data.name && data.reference) {
             unresolvedShareUrns.push(data.reference);
           }
         });
-        console.log(`[Step 5] ${unresolvedShareUrns.length} creatives have share references for name resolution`);
+        console.log(`[Step 5] ${allShareUrns.length} total share references, ${unresolvedShareUrns.length} need name resolution`);
 
-        // Step 6: Fetch share content for creatives without names (optional fallback)
+        // Step 6: Fetch share content for ALL references (for images + name fallback)
         let shareContentData = new Map<string, { text: string; imageUrl: string }>();
-        if (unresolvedShareUrns.length > 0) {
-          shareContentData = await fetchShareContent(unresolvedShareUrns, accessToken);
+        if (allShareUrns.length > 0) {
+          shareContentData = await fetchShareContent(allShareUrns, accessToken);
           console.log(`[Step 6] Share API resolved ${shareContentData.size} share entries`);
         }
 
@@ -2901,15 +2905,17 @@ serve(async (req) => {
         const namesResolved = [...creativeInfoMap.values()].filter(c => c.name).length;
         console.log(`[Step 4] Resolved ${namesResolved} of ${creativeInfoMap.size} creative names`);
         
-        // Step 5: Resolve post text for creatives without names
+        // Step 5: Resolve post text AND images for ALL creatives with references
         const uniqueReferences = new Set<string>();
         for (const [_, info] of creativeInfoMap) {
-          if (!info.name && info.reference) {
+          if (info.reference) {
             uniqueReferences.add(info.reference);
           }
         }
         
-        console.log(`[Step 5] Resolving ${uniqueReferences.size} unique post references...`);
+        console.log(`[Step 5] Resolving ${uniqueReferences.size} unique post references for names + images...`);
+        
+        const referenceImageCache = new Map<string, string>();
         
         for (const reference of uniqueReferences) {
           try {
@@ -2921,9 +2927,16 @@ serve(async (req) => {
               });
               if (postResp.ok) {
                 const post = await postResp.json();
-                const text = post.specificContent?.['com.linkedin.ugc.ShareContent']?.shareCommentary?.text || '';
+                const shareContent = post.specificContent?.['com.linkedin.ugc.ShareContent'];
+                const text = shareContent?.shareCommentary?.text || '';
                 if (text.trim()) {
                   referenceNameCache.set(reference, text.replace(/\s+/g, ' ').trim().slice(0, 80));
+                }
+                // Extract image
+                const media = shareContent?.media?.[0];
+                if (media) {
+                  const imgUrl = media.thumbnails?.[0]?.url || media.originalUrl || '';
+                  if (imgUrl) referenceImageCache.set(reference, imgUrl);
                 }
               }
             } else if (reference.includes('share')) {
@@ -2937,6 +2950,12 @@ serve(async (req) => {
                 const text = share.text?.text || '';
                 if (text.trim()) {
                   referenceNameCache.set(reference, text.replace(/\s+/g, ' ').trim().slice(0, 80));
+                }
+                // Extract image
+                const contentEntity = share.content?.contentEntities?.[0];
+                if (contentEntity) {
+                  const imgUrl = contentEntity.thumbnails?.[0]?.resolvedUrl || '';
+                  if (imgUrl) referenceImageCache.set(reference, imgUrl);
                 }
               }
             }
@@ -2970,12 +2989,15 @@ serve(async (req) => {
           const costPerLead = metrics.leads > 0 ? metrics.spent / metrics.leads : 0;
           const lgfCompletionRate = metrics.lgfFormOpens > 0 ? (metrics.leads / metrics.lgfFormOpens) * 100 : 0;
           
+          const imageUrl = info.reference ? (referenceImageCache.get(info.reference) || '') : '';
+          
           reportElements.push({
             creativeId,
             creativeName: info.name || 'Sponsored Image Ad',
             campaignName: info.campaignName,
             status: info.status,
             type: info.type,
+            imageUrl: imageUrl || undefined,
             impressions: metrics.impressions,
             clicks: metrics.clicks,
             spent: metrics.spent.toFixed(2),
