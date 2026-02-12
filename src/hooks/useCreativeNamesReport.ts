@@ -8,6 +8,7 @@ export interface CreativeNameData {
   campaignType: string;
   status: string;
   type: string;
+  imageUrl?: string;
   impressions: number;
   clicks: number;
   spent: number;
@@ -153,6 +154,7 @@ export function useCreativeNamesReport(accessToken: string | null) {
             campaignType: item.campaignType || item.objectiveType || 'UNKNOWN',
             status: item.status || 'UNKNOWN',
             type: item.type || '-',
+            imageUrl: item.imageUrl || undefined,
             impressions: item.impressions || 0,
             clicks: item.clicks || 0,
             spent,

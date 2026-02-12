@@ -9,6 +9,7 @@ export interface CreativeData {
   campaignType: string;
   status: string;
   type: string;
+  imageUrl?: string;
   impressions: number;
   clicks: number;
   spent: number;
@@ -146,6 +147,7 @@ export function useCreativeReporting(accessToken: string | null) {
             campaignType: el.campaignType || el.objectiveType || 'UNKNOWN',
             status: el.status || 'UNKNOWN',
             type: el.type || 'UNKNOWN',
+            imageUrl: el.imageUrl || undefined,
             impressions,
             clicks,
             spent,

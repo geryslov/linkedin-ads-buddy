@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { ArrowUp, ArrowDown, Search, X, ChevronRight, ChevronDown, Layers } from 'lucide-react';
 import { CreativeNameData } from '@/hooks/useCreativeNamesReport';
 import { CreativeTypeBadge } from './CreativeTypeBadge';
+import { CreativeThumbnail } from './CreativeThumbnail';
 import {
   PerformanceFilters,
   MetricFilter,
@@ -24,6 +25,7 @@ interface GroupedCreative {
   campaigns: CreativeNameData[];
   campaignType: string;
   type: string;
+  imageUrl?: string;
   impressions: number;
   clicks: number;
   spent: number;
@@ -144,6 +146,7 @@ export function CreativeNamesReportTable({ data, isLoading }: CreativeNamesRepor
         campaigns,
         campaignType: campaigns[0]?.campaignType || 'UNKNOWN',
         type: campaigns[0]?.type || 'UNKNOWN',
+        imageUrl: campaigns[0]?.imageUrl,
         impressions,
         clicks,
         spent,
@@ -292,6 +295,7 @@ export function CreativeNamesReportTable({ data, isLoading }: CreativeNamesRepor
             <thead className="bg-muted/40 border-b border-border">
               <tr>
                 <th className="w-10 p-3"></th>
+                <th className="w-[50px] p-3"></th>
                 <th 
                   className="text-left p-3 font-semibold cursor-pointer hover:bg-muted/60 transition-colors min-w-[250px]"
                   onClick={() => handleSort('creativeName')}
@@ -383,7 +387,7 @@ export function CreativeNamesReportTable({ data, isLoading }: CreativeNamesRepor
             <tbody className="divide-y divide-border/50">
               {sortedData.length === 0 ? (
                 <tr>
-                  <td colSpan={13} className="text-center py-12 text-muted-foreground">
+                  <td colSpan={14} className="text-center py-12 text-muted-foreground">
                     No creatives match your filters
                   </td>
                 </tr>
@@ -407,6 +411,9 @@ export function CreativeNamesReportTable({ data, isLoading }: CreativeNamesRepor
                               <ChevronRight className="h-4 w-4 text-muted-foreground mx-auto" />
                             )
                           )}
+                        </td>
+                        <td className="p-3">
+                          <CreativeThumbnail imageUrl={group.imageUrl} creativeName={group.creativeName} />
                         </td>
                         <td className="p-3">
                           <div className="flex flex-col gap-0.5">
@@ -491,6 +498,7 @@ export function CreativeNamesReportTable({ data, isLoading }: CreativeNamesRepor
             {/* Footer Totals */}
             <tfoot className="bg-muted/50 border-t-2 border-border font-semibold">
               <tr>
+                <td className="p-3"></td>
                 <td className="p-3"></td>
                 <td className="p-3">Totals</td>
                 <td className="p-3"></td>

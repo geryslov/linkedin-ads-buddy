@@ -1071,10 +1071,10 @@ serve(async (req) => {
           return creativeData;
         }
         
-        // Helper: Fetch post/share content to extract readable text for creatives without names
-        async function fetchShareContent(shareUrns: string[], token: string): Promise<Map<string, string>> {
-          const shareTexts = new Map<string, string>();
-          if (shareUrns.length === 0) return shareTexts;
+        // Helper: Fetch post/share content to extract readable text and image URLs for creatives
+        async function fetchShareContent(shareUrns: string[], token: string): Promise<Map<string, { text: string; imageUrl: string }>> {
+          const shareData = new Map<string, { text: string; imageUrl: string }>();
+          if (shareUrns.length === 0) return shareData;
           
           console.log(`[Share API] Fetching content for ${shareUrns.length} shares...`);
           
@@ -1095,18 +1095,30 @@ serve(async (req) => {
                 
                 // Extract text from share/ugcPost
                 let text = '';
+                let imageUrl = '';
                 if (isUgc) {
                   // UGC Post structure
-                  text = data.specificContent?.['com.linkedin.ugc.ShareContent']?.shareCommentary?.text || '';
+                  const shareContent = data.specificContent?.['com.linkedin.ugc.ShareContent'];
+                  text = shareContent?.shareCommentary?.text || '';
+                  // Extract image from UGC post media
+                  const media = shareContent?.media?.[0];
+                  if (media) {
+                    imageUrl = media.thumbnails?.[0]?.url || media.originalUrl || '';
+                  }
                 } else {
                   // Share structure
                   text = data.text?.text || data.commentary || '';
+                  // Extract image from share content
+                  const contentEntity = data.content?.contentEntities?.[0];
+                  if (contentEntity) {
+                    imageUrl = contentEntity.thumbnails?.[0]?.resolvedUrl || '';
+                  }
                 }
                 
-                if (text) {
+                if (text || imageUrl) {
                   // Truncate long text
                   const truncated = text.length > 80 ? text.substring(0, 77) + '...' : text;
-                  shareTexts.set(urn, truncated);
+                  shareData.set(urn, { text: truncated, imageUrl });
                 }
               }
             } catch (err) {
@@ -1114,8 +1126,8 @@ serve(async (req) => {
             }
           }
           
-          console.log(`[Share API] Resolved ${shareTexts.size} share texts`);
-          return shareTexts;
+          console.log(`[Share API] Resolved ${shareData.size} share entries`);
+          return shareData;
         }
 
         // Step 1: Fetch campaigns for campaign name resolution
@@ -1213,10 +1225,10 @@ serve(async (req) => {
         console.log(`[Step 5] ${unresolvedShareUrns.length} creatives have share references for name resolution`);
 
         // Step 6: Fetch share content for creatives without names (optional fallback)
-        let shareTexts = new Map<string, string>();
+        let shareContentData = new Map<string, { text: string; imageUrl: string }>();
         if (unresolvedShareUrns.length > 0) {
-          shareTexts = await fetchShareContent(unresolvedShareUrns, accessToken);
-          console.log(`[Step 6] Share API resolved ${shareTexts.size} share texts`);
+          shareContentData = await fetchShareContent(unresolvedShareUrns, accessToken);
+          console.log(`[Step 6] Share API resolved ${shareContentData.size} share entries`);
         }
 
         // Step 7: Build final report with resolution tracking
@@ -1236,8 +1248,8 @@ serve(async (req) => {
             resolutionStats.legacyApi++; // Reusing counter for versioned_api
           }
           // Priority 2: Share/Post text fallback
-          else if (meta.reference && shareTexts.has(meta.reference)) {
-            creativeName = shareTexts.get(meta.reference)!;
+          else if (meta.reference && shareContentData.has(meta.reference)) {
+            creativeName = shareContentData.get(meta.reference)!.text;
             resolutionSource = 'share_api';
             resolutionStats.versionedApiFallback++; // Reusing counter for share_api
           }
@@ -1248,6 +1260,11 @@ serve(async (req) => {
             resolutionSource = 'placeholder';
             resolutionStats.placeholder++;
           }
+          
+          // Extract imageUrl from share content if available
+          const imageUrl = meta.reference && shareContentData.has(meta.reference) 
+            ? shareContentData.get(meta.reference)!.imageUrl 
+            : '';
           
           const campaignName = campaignMap.get(meta.campaignId) || 'Unknown Campaign';
           const metrics = analyticsMap.get(creativeId) || { impressions: 0, clicks: 0, spent: 0, spentUsd: 0, leads: 0 };
@@ -1262,6 +1279,7 @@ serve(async (req) => {
             campaignName,
             status: meta.status || 'UNKNOWN',
             type: meta.type || 'UNKNOWN',
+            imageUrl: imageUrl || undefined,
             impressions: metrics.impressions,
             clicks: metrics.clicks,
             costInLocalCurrency: metrics.spent.toFixed(2),
@@ -1425,8 +1443,8 @@ serve(async (req) => {
         
         console.log(`[Step 2b] Found ${shareUrnsToResolve.length} shares to resolve for post content`);
         
-        // Batch fetch share/post content to get human-readable titles
-        const shareContentMap = new Map<string, string>(); // shareUrn -> post text/title
+        // Batch fetch share/post content to get human-readable titles and image URLs
+        const shareContentMap = new Map<string, { text: string; imageUrl: string }>(); // shareUrn -> { text, imageUrl }
         
         if (shareUrnsToResolve.length > 0) {
           const uniqueShareUrns = [...new Set(shareUrnsToResolve)];
@@ -1438,7 +1456,6 @@ serve(async (req) => {
             const sharePromises = batch.map(async (shareUrn) => {
               try {
                 // Try shares endpoint first
-                const shareId = shareUrn.split(':').pop();
                 const shareResponse = await fetch(
                   `https://api.linkedin.com/v2/shares/${shareUrn}`,
                   { headers: { 'Authorization': `Bearer ${accessToken}` } }
@@ -1446,7 +1463,6 @@ serve(async (req) => {
                 
                 if (shareResponse.ok) {
                   const shareData = await shareResponse.json();
-                  // Extract text from share content
                   let text = shareData.text?.text || '';
                   if (!text && shareData.content?.title) {
                     text = shareData.content.title;
@@ -1454,11 +1470,13 @@ serve(async (req) => {
                   if (!text && shareData.content?.description) {
                     text = shareData.content.description;
                   }
-                  // Truncate to reasonable length for display
                   if (text && text.length > 60) {
                     text = text.substring(0, 57) + '...';
                   }
-                  return { urn: shareUrn, text: text || null };
+                  // Extract image from share content
+                  const contentEntity = shareData.content?.contentEntities?.[0];
+                  const imageUrl = contentEntity?.thumbnails?.[0]?.resolvedUrl || '';
+                  return { urn: shareUrn, text: text || null, imageUrl };
                 }
                 
                 // Try ugcPosts endpoint as fallback (for ugcPost URNs)
@@ -1470,37 +1488,41 @@ serve(async (req) => {
                   
                   if (ugcResponse.ok) {
                     const ugcData = await ugcResponse.json();
-                    let text = ugcData.specificContent?.['com.linkedin.ugc.ShareContent']?.shareCommentary?.text || '';
+                    const shareContent = ugcData.specificContent?.['com.linkedin.ugc.ShareContent'];
+                    let text = shareContent?.shareCommentary?.text || '';
                     if (!text) {
-                      const media = ugcData.specificContent?.['com.linkedin.ugc.ShareContent']?.media?.[0];
+                      const media = shareContent?.media?.[0];
                       text = media?.title?.text || media?.description?.text || '';
                     }
                     if (text && text.length > 60) {
                       text = text.substring(0, 57) + '...';
                     }
-                    return { urn: shareUrn, text: text || null };
+                    // Extract image from UGC post media
+                    const media = shareContent?.media?.[0];
+                    const imageUrl = media?.thumbnails?.[0]?.url || media?.originalUrl || '';
+                    return { urn: shareUrn, text: text || null, imageUrl };
                   }
                 }
                 
-                return { urn: shareUrn, text: null };
+                return { urn: shareUrn, text: null, imageUrl: '' };
               } catch (e) {
                 console.log(`[Warning] Share lookup error for ${shareUrn}:`, e);
-                return { urn: shareUrn, text: null };
+                return { urn: shareUrn, text: null, imageUrl: '' };
               }
             });
             
             const results = await Promise.all(sharePromises);
             results.forEach(result => {
-              if (result.text) {
-                shareContentMap.set(result.urn, result.text);
+              if (result.text || result.imageUrl) {
+                shareContentMap.set(result.urn, { text: result.text || '', imageUrl: result.imageUrl });
               }
             });
           }
-          console.log(`[Step 2b] Resolved ${shareContentMap.size} share texts`);
+          console.log(`[Step 2b] Resolved ${shareContentMap.size} share entries`);
         }
 
         // Build creative metadata map with resolved names
-        const creativeMetadataMap = new Map<string, { name: string; campaignId: string; campaignName: string; status: string; type: string }>();
+        const creativeMetadataMap = new Map<string, { name: string; campaignId: string; campaignName: string; status: string; type: string; imageUrl: string }>();
         (creativesData.elements || []).forEach((c: any) => {
           const creativeId = c.id?.toString() || '';
           const campaignUrn = c.campaign || '';
@@ -1526,18 +1548,18 @@ serve(async (req) => {
               creativeType = 'SPONSORED_CONTENT';
             } else if (dsContent?.share) {
               // Try to get share content text
-              const shareText = shareContentMap.get(dsContent.share);
-              if (shareText) {
-                creativeName = shareText;
+              const shareEntry = shareContentMap.get(dsContent.share);
+              if (shareEntry?.text) {
+                creativeName = shareEntry.text;
               } else {
                 creativeName = `Sponsored Content #${dsContent.share.split(':').pop() || creativeId}`;
               }
               creativeType = 'SPONSORED_CONTENT';
             } else if (sponsoredUpdate?.activity) {
               // Try to get activity content text  
-              const activityText = shareContentMap.get(sponsoredUpdate.activity);
-              if (activityText) {
-                creativeName = activityText;
+              const activityEntry = shareContentMap.get(sponsoredUpdate.activity);
+              if (activityEntry?.text) {
+                creativeName = activityEntry.text;
               } else {
                 creativeName = `Sponsored Update #${sponsoredUpdate.activity.split(':').pop() || creativeId}`;
               }
@@ -1582,6 +1604,11 @@ serve(async (req) => {
             }
           }
           
+          // Resolve imageUrl from share content
+          const shareUrn = creativeToShareMap.get(creativeId);
+          const shareEntry = shareUrn ? shareContentMap.get(shareUrn) : undefined;
+          const imageUrl = shareEntry?.imageUrl || '';
+          
           const resolvedCampaignName = campaignMap.get(campaignId);
           creativeMetadataMap.set(creativeId, {
             name: creativeName,
@@ -1589,6 +1616,7 @@ serve(async (req) => {
             campaignName: typeof resolvedCampaignName === 'string' ? resolvedCampaignName : `Campaign ${campaignId}`,
             status: c.status || 'UNKNOWN',
             type: creativeType !== 'UNKNOWN' ? creativeType : (c.type || 'UNKNOWN'),
+            imageUrl,
           });
         });
         console.log(`[Step 2] Built metadata map for ${creativeMetadataMap.size} creatives`);
@@ -1604,6 +1632,7 @@ serve(async (req) => {
             campaignName: 'Unknown Campaign',
             status: 'UNKNOWN',
             type: 'UNKNOWN',
+            imageUrl: '',
           };
           
           // Calculate derived metrics
@@ -1617,6 +1646,7 @@ serve(async (req) => {
             campaignName: metadata.campaignName,
             status: metadata.status,
             type: metadata.type,
+            imageUrl: metadata.imageUrl || undefined,
             impressions: metrics.impressions,
             clicks: metrics.clicks,
             costInLocalCurrency: metrics.spent.toFixed(2),
@@ -1637,6 +1667,7 @@ serve(async (req) => {
               campaignName: metadata.campaignName,
               status: metadata.status,
               type: metadata.type,
+              imageUrl: metadata.imageUrl || undefined,
               impressions: 0,
               clicks: 0,
               costInLocalCurrency: '0.00',

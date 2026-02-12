@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button';
 import { ArrowUpDown, ArrowUp, ArrowDown, Search, Filter, X, Layers } from 'lucide-react';
 import { CreativeData } from '@/hooks/useCreativeReporting';
 import { CreativeTypeBadge } from './CreativeTypeBadge';
+import { CreativeThumbnail } from './CreativeThumbnail';
 import {
   Select,
   SelectContent,
@@ -264,6 +265,7 @@ export function CreativeReportingTable({ data, isLoading }: CreativeReportingTab
         <Table className="min-w-[1000px]">
           <TableHeader>
             <TableRow className="bg-muted/30">
+              <TableHead className="w-[50px]"></TableHead>
               <SortableHeader label="Creative Name" sortKeyName="creativeName" />
               <SortableHeader label="Campaign" sortKeyName="campaignName" />
               <SortableHeader label="Type" sortKeyName="type" />
@@ -280,7 +282,7 @@ export function CreativeReportingTable({ data, isLoading }: CreativeReportingTab
           <TableBody>
             {sortedData.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={11} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={12} className="text-center py-8 text-muted-foreground">
                   No creatives match your filters
                 </TableCell>
               </TableRow>
@@ -288,6 +290,9 @@ export function CreativeReportingTable({ data, isLoading }: CreativeReportingTab
               <>
                 {sortedData.map((row, index) => (
                   <TableRow key={`${row.creativeId}-${index}`} className="hover:bg-muted/20">
+                    <TableCell>
+                      <CreativeThumbnail imageUrl={row.imageUrl} creativeName={row.creativeName} />
+                    </TableCell>
                     <TableCell className="font-medium min-w-[150px]">
                       <span className="break-words">{row.creativeName}</span>
                     </TableCell>
@@ -309,6 +314,7 @@ export function CreativeReportingTable({ data, isLoading }: CreativeReportingTab
                 ))}
                 {/* Totals Row */}
                 <TableRow className="bg-muted/50 font-semibold border-t-2">
+                  <TableCell></TableCell>
                   <TableCell>Total ({filteredData.length} creatives)</TableCell>
                   <TableCell></TableCell>
                   <TableCell></TableCell>
