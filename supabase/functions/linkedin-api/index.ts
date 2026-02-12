@@ -5372,175 +5372,64 @@ serve(async (req) => {
               }
             }
 
-            // Pre-fetch common super titles using typeahead to ensure we have options for semantic matching
-            // This addresses issues where LinkedIn's standardizedTitles API returns wrong associations
-            const commonCategories = ['marketing', 'engineering', 'sales', 'finance', 'operations', 'human resources', 'legal', 'product', 'design', 'data', 'research', 'consulting', 'healthcare', 'education', 'media', 'support', 'administrative'];
-
-            console.log(`[search_job_titles] Pre-fetching common super titles for semantic matching`);
-            for (const category of commonCategories) {
-              try {
-                const superTitleSearchUrl = `https://api.linkedin.com/rest/adTargetingEntities?q=typeahead&facet=urn:li:adTargetingFacet:titles&query=${encodeURIComponent(category)}&count=5`;
-                const stResponse = await fetch(superTitleSearchUrl, {
-                  headers: {
-                    'Authorization': `Bearer ${accessToken}`,
-                    'X-Restli-Protocol-Version': '2.0.0',
-                    'LinkedIn-Version': '202511',
-                  },
-                });
-
-                if (stResponse.ok) {
-                  const stData = await stResponse.json();
-                  for (const el of stData.elements || []) {
-                    const urn = el.urn || '';
-                    if (urn.includes(':superTitle:')) {
-                      const idMatch = urn.match(/:superTitle:(\d+)$/);
-                      if (idMatch) {
-                        const stId = idMatch[1];
-                        const name = el.name?.localized?.en_US ||
-                                     el.name?.localized?.[Object.keys(el.name?.localized || {})[0]] ||
-                                     el.displayName ||
-                                     el.name || '';
-                        if (name && !superTitleNamesCache[stId]) {
-                          superTitleNamesCache[stId] = typeof name === 'string' ? name : String(name);
-                          console.log(`[search_job_titles] Pre-cached super title: "${stId}" = "${superTitleNamesCache[stId]}"`);
-                        }
-                      }
-                    }
-                  }
-                }
-              } catch (e) {
-                // Ignore errors in pre-fetching
-              }
-            }
-            console.log(`[search_job_titles] Pre-fetched ${Object.keys(superTitleNamesCache).length} super titles`);
-
-            // Fetch actual super title names from LinkedIn API using adTargetingEntities
+            // Fetch super title names from dedicated LinkedIn API endpoint
             if (uniqueSuperTitleIds.size > 0) {
               console.log(`[search_job_titles] Fetching names for ${uniqueSuperTitleIds.size} unique super titles: ${JSON.stringify([...uniqueSuperTitleIds])}`);
 
-              // Try to fetch super title names one by one using typeahead
-              // This is more reliable than batch URN lookup
-              for (const stId of uniqueSuperTitleIds) {
-                try {
-                  // First, try the URN lookup approach
-                  const singleUrnUrl = `https://api.linkedin.com/rest/adTargetingEntities?q=urns&urns=List(urn%3Ali%3AsuperTitle%3A${stId})`;
-                  console.log(`[search_job_titles] Fetching super title ${stId} via URN lookup`);
+              const superTitleIdsParam = `ids=List(${[...uniqueSuperTitleIds].join(',')})`;
+              const superTitlesUrl = `https://api.linkedin.com/v2/superTitles?${superTitleIdsParam}`;
 
-                  const singleResponse = await fetch(singleUrnUrl, {
-                    headers: {
-                      'Authorization': `Bearer ${accessToken}`,
-                      'X-Restli-Protocol-Version': '2.0.0',
-                      'LinkedIn-Version': '202511',
-                    },
-                  });
+              console.log(`[search_job_titles] Calling /v2/superTitles: ${superTitlesUrl}`);
 
-                  if (singleResponse.ok) {
-                    const singleData = await singleResponse.json();
-                    console.log(`[search_job_titles] URN lookup response for ${stId}:`, JSON.stringify(singleData));
+              const superTitlesResponse = await fetch(superTitlesUrl, {
+                headers: {
+                  'Authorization': `Bearer ${accessToken}`,
+                  'X-Restli-Protocol-Version': '2.0.0',
+                },
+              });
 
-                    const elements = singleData.elements || [];
-                    for (const el of elements) {
-                      const urn = el.urn || el.entity || '';
-                      const idMatch = urn.match(/:superTitle:(\d+)$/);
-                      if (idMatch && idMatch[1] === stId) {
-                        let name = '';
-                        if (el.name) {
-                          if (typeof el.name === 'string') {
-                            name = el.name;
-                          } else if (el.name.localized) {
-                            name = el.name.localized.en_US ||
-                                   el.name.localized[Object.keys(el.name.localized)[0]] || '';
-                          }
-                        }
-                        if (!name && el.displayName) {
-                          name = typeof el.displayName === 'string' ? el.displayName : '';
-                        }
-                        if (name) {
-                          superTitleNamesCache[stId] = name;
-                          console.log(`[search_job_titles] ✓ Super title "${stId}" = "${name}" (from URN lookup)`);
-                        }
-                      }
+              if (superTitlesResponse.ok) {
+                const superTitlesData = await superTitlesResponse.json();
+                const results = superTitlesData.results || {};
+
+                console.log(`[search_job_titles] /v2/superTitles returned ${Object.keys(results).length} results`);
+
+                for (const [key, value] of Object.entries(results)) {
+                  const stData = value as any;
+                  // Key could be "407" or "urn:li:superTitle:407"
+                  const stId = key.replace(/^urn:li:superTitle:/, '');
+
+                  let name = '';
+                  if (stData.name) {
+                    if (typeof stData.name === 'string') {
+                      name = stData.name;
+                    } else if (stData.name.localized) {
+                      name = stData.name.localized.en_US ||
+                             stData.name.localized[Object.keys(stData.name.localized)[0]] || '';
                     }
-                  } else {
-                    const errorText = await singleResponse.text();
-                    console.log(`[search_job_titles] URN lookup for ${stId} failed: ${singleResponse.status} - ${errorText.slice(0, 100)}`);
                   }
-                } catch (fetchError) {
-                  console.log(`[search_job_titles] Error fetching super title ${stId}:`, fetchError);
+
+                  if (name) {
+                    superTitleNamesCache[stId] = name;
+                    console.log(`[search_job_titles] ✓ Super title "${stId}" = "${name}"`);
+                  }
                 }
+              } else {
+                const errorText = await superTitlesResponse.text();
+                console.log(`[search_job_titles] /v2/superTitles failed ${superTitlesResponse.status}: ${errorText.slice(0, 200)}`);
               }
 
               // Log final cache state
               console.log(`[search_job_titles] Super title cache after fetching: ${JSON.stringify(superTitleNamesCache)}`);
             }
 
-            // SEMANTIC VALIDATION: Create a function to find best matching super title
-            // This fixes issues where LinkedIn's API returns wrong associations
-            const findBestSuperTitleMatch = (titleName: string, currentSuperTitleName: string, allSuperTitles: Record<string, string>): { id: string; name: string } | null => {
-              const titleLower = titleName.toLowerCase();
-              const currentLower = currentSuperTitleName.toLowerCase();
-
-              // Extract meaningful keywords from title (ignore common words)
-              const stopWords = ['of', 'the', 'a', 'an', 'and', 'or', 'in', 'at', 'to', 'for', 'on', 'with', 'by', 'head', 'chief', 'senior', 'junior', 'lead', 'associate', 'assistant', 'manager', 'director', 'officer', 'specialist', 'analyst', 'coordinator', 'executive', 'vp', 'vice', 'president'];
-              const titleWords = titleLower.split(/\s+/).filter(w => w.length > 2 && !stopWords.includes(w));
-
-              // Check if current super title contains any of the title keywords
-              const currentMatches = titleWords.some(word => currentLower.includes(word) || word.includes(currentLower.replace(/s$/, '')));
-
-              if (currentMatches) {
-                // Current mapping seems correct
-                return null;
-              }
-
-              // Current mapping seems wrong - find a better match
-              console.log(`[search_job_titles] Semantic mismatch: "${titleName}" mapped to "${currentSuperTitleName}" - searching for better match`);
-
-              for (const [id, name] of Object.entries(allSuperTitles)) {
-                const nameLower = name.toLowerCase();
-                const nameMatches = titleWords.some(word => nameLower.includes(word) || word.includes(nameLower.replace(/s$/, '')));
-
-                if (nameMatches) {
-                  console.log(`[search_job_titles] Found better match: "${titleName}" -> "${name}" (id=${id})`);
-                  return { id, name };
-                }
-              }
-
-              // No better match found, keep original
-              return null;
-            };
-
-            // Resolve super title names using the fetched cache WITH semantic validation
+            // Resolve super title names from cache
             const entriesWithSuperTitle = Object.entries(superTitleMetadata).filter(([_, v]) => (v as any)._superTitleId);
-            if (entriesWithSuperTitle.length > 0) {
-              console.log(`[search_job_titles] Resolving names for ${entriesWithSuperTitle.length} super titles using cache`);
-
-              // First pass: resolve all names from cache
-              for (const [titleId, metadata] of entriesWithSuperTitle) {
-                const superTitleId = (metadata as any)._superTitleId;
-                if (superTitleId && superTitleNamesCache[superTitleId]) {
-                  superTitleMetadata[titleId].name = superTitleNamesCache[superTitleId];
-                  console.log(`[search_job_titles] ✓ Resolved: title "${titleId}" -> superTitleId "${superTitleId}" = "${superTitleNamesCache[superTitleId]}"`);
-                } else {
-                  // For unknown super titles, leave empty - UI will not display
-                  superTitleMetadata[titleId].name = '';
-                  console.log(`[search_job_titles] ✗ No cached name for super title ID: "${superTitleId}" for title "${titleId}"`);
-                }
-              }
-
-              // Second pass: validate semantic matches and fix if needed
-              for (const title of parsedTitles as ParsedTitle[]) {
-                const metadata = superTitleMetadata[title.id];
-                if (metadata && metadata.name) {
-                  const betterMatch = findBestSuperTitleMatch(title.name, metadata.name, superTitleNamesCache);
-                  if (betterMatch) {
-                    superTitleMetadata[title.id] = {
-                      urn: `urn:li:superTitle:${betterMatch.id}`,
-                      name: betterMatch.name,
-                      _superTitleId: betterMatch.id,
-                    };
-                    console.log(`[search_job_titles] ✓ FIXED: "${title.name}" -> "${betterMatch.name}" (was "${metadata.name}")`);
-                  }
-                }
+            for (const [titleId, metadata] of entriesWithSuperTitle) {
+              const superTitleId = (metadata as any)._superTitleId;
+              if (superTitleId && superTitleNamesCache[superTitleId]) {
+                superTitleMetadata[titleId].name = superTitleNamesCache[superTitleId];
+                console.log(`[search_job_titles] ✓ Resolved: title "${titleId}" -> "${superTitleNamesCache[superTitleId]}"`);
               }
             }
           } catch (metadataError) {
