@@ -2784,10 +2784,12 @@ serve(async (req) => {
           status: string;
           type: string;
           reference?: string;
+          imageUrl?: string;
         }
-        
+
         const creativeInfoMap = new Map<string, CreativeInfo>();
         const referenceNameCache = new Map<string, string>();
+        const referenceImageCache = new Map<string, string>();
         
         // Fetch creatives by ID in batches (more reliable than search for specific creatives)
         const creativeIdsArray = [...creativeIdsWithData];
@@ -2937,9 +2939,9 @@ serve(async (req) => {
             uniqueReferences.add(info.reference);
           }
         }
-        
+
         console.log(`[Step 5] Resolving ${uniqueReferences.size} unique post references for names + images...`);
-        
+
         const referenceImageCache = new Map<string, string>();
         
         for (const reference of uniqueReferences) {
@@ -2957,10 +2959,10 @@ serve(async (req) => {
                 if (text.trim()) {
                   referenceNameCache.set(reference, text.replace(/\s+/g, ' ').trim().slice(0, 80));
                 }
-                // Extract image
+                // Extract image from media array
                 const media = shareContent?.media?.[0];
                 if (media) {
-                  const imgUrl = media.thumbnails?.[0]?.url || media.originalUrl || '';
+                  const imgUrl = media.thumbnails?.[0]?.url || media.thumbnails?.[0]?.resolvedUrl || media.originalUrl || '';
                   if (imgUrl) referenceImageCache.set(reference, imgUrl);
                 }
               }
@@ -2976,11 +2978,10 @@ serve(async (req) => {
                 if (text.trim()) {
                   referenceNameCache.set(reference, text.replace(/\s+/g, ' ').trim().slice(0, 80));
                 }
-                // Extract image
+                // Extract image from content entities
                 const contentEntity = share.content?.contentEntities?.[0];
-                if (contentEntity) {
-                  const imgUrl = contentEntity.thumbnails?.[0]?.resolvedUrl || '';
-                  if (imgUrl) referenceImageCache.set(reference, imgUrl);
+                const imgUrl = contentEntity?.thumbnails?.[0]?.resolvedUrl || contentEntity?.thumbnails?.[0]?.url || '';
+                if (imgUrl) referenceImageCache.set(reference, imgUrl);
                 }
               }
             }
@@ -2988,15 +2989,21 @@ serve(async (req) => {
             // Silently ignore reference fetch errors
           }
         }
-        
-        // Apply cached names
+
+        // Apply cached names and images
         for (const [creativeId, info] of creativeInfoMap) {
-          if (!info.name && info.reference) {
-            const cachedName = referenceNameCache.get(info.reference);
-            if (cachedName) {
-              info.name = cachedName;
-              creativeInfoMap.set(creativeId, info);
+          if (info.reference) {
+            if (!info.name) {
+              const cachedName = referenceNameCache.get(info.reference);
+              if (cachedName) {
+                info.name = cachedName;
+              }
             }
+            const cachedImage = referenceImageCache.get(info.reference);
+            if (cachedImage) {
+              info.imageUrl = cachedImage;
+            }
+            creativeInfoMap.set(creativeId, info);
           }
         }
         

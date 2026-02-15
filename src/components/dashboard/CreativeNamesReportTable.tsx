@@ -295,8 +295,8 @@ export function CreativeNamesReportTable({ data, isLoading }: CreativeNamesRepor
             <thead className="bg-muted/40 border-b border-border">
               <tr>
                 <th className="w-10 p-3"></th>
-                <th className="w-[50px] p-3"></th>
-                <th 
+                <th className="text-center p-3 font-semibold w-[70px]">Preview</th>
+                <th
                   className="text-left p-3 font-semibold cursor-pointer hover:bg-muted/60 transition-colors min-w-[250px]"
                   onClick={() => handleSort('creativeName')}
                 >
@@ -460,10 +460,11 @@ export function CreativeNamesReportTable({ data, isLoading }: CreativeNamesRepor
 
                       {/* Expanded Campaign Rows */}
                       {isExpanded && group.campaigns.map((campaign, idx) => (
-                        <tr 
+                        <tr
                           key={`${group.creativeName}-campaign-${idx}`}
                           className="bg-primary/[0.02] border-l-2 border-l-primary/40"
                         >
+                          <td className="p-3"></td>
                           <td className="p-3"></td>
                           <td className="p-3 pl-8" colSpan={3}>
                             <div className="flex items-center gap-3">
