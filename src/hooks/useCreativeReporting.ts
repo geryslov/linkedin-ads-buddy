@@ -127,13 +127,7 @@ export function useCreativeReporting(accessToken: string | null) {
       }
       
       // Map API response to CreativeData interface
-      // Filter out creatives with no performance data (0 impressions AND 0 spend)
       const analyticsData: CreativeData[] = (data.elements || [])
-        .filter((el: any) => {
-          const impressions = el.impressions || 0;
-          const spent = parseFloat(el.costInLocalCurrency || el.spent || '0');
-          return impressions > 0 || spent > 0;
-        })
         .map((el: any) => {
           const impressions = el.impressions || 0;
           const clicks = el.clicks || 0;
