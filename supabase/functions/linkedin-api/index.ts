@@ -955,8 +955,8 @@ serve(async (req) => {
 
         // Helper: Fetch ALL creatives via V2 adCreativesV2 API (this works reliably)
         // Then fetch names from individual creative lookup if needed
-        async function fetchCreativesVersioned(accountId: string, token: string): Promise<Map<string, { name: string; campaignId: string; status: string; type: string; reference: string }>> {
-          const creativeData = new Map<string, { name: string; campaignId: string; status: string; type: string; reference: string }>();
+        async function fetchCreativesVersioned(accountId: string, token: string): Promise<Map<string, { name: string; campaignId: string; status: string; type: string; reference: string; imageUrl: string }>> {
+          const creativeData = new Map<string, { name: string; campaignId: string; status: string; type: string; reference: string; imageUrl: string }>();
           
           console.log('[Creative Metadata] Fetching creatives from V2 adCreativesV2 API...');
           
@@ -1015,6 +1015,7 @@ serve(async (req) => {
                 status: creative.status || 'UNKNOWN',
                 type: creativeType,
                 reference: creative.reference || '',
+                imageUrl: '', // Will be resolved below
               });
             }
             
@@ -1043,13 +1044,39 @@ serve(async (req) => {
                   
                   if (creativeResp.ok) {
                     const creativeDetail = await creativeResp.json();
-                    if (creativeDetail.name) {
-                      const existing = creativeData.get(creativeId);
-                      if (existing) {
+                    const existing = creativeData.get(creativeId);
+                    if (existing) {
+                      if (creativeDetail.name) {
                         existing.name = creativeDetail.name;
-                        creativeData.set(creativeId, existing);
                         namesResolved++;
                       }
+                      // Extract image URL from creative content
+                      // Try multiple paths where LinkedIn stores image data
+                      let imageUrl = '';
+                      const content = creativeDetail.content;
+                      if (content) {
+                        // Standard single image
+                        imageUrl = content.media?.downloadUrl || '';
+                        // Try landingPage thumbnail
+                        if (!imageUrl && content.landingPage?.landingPageMedia?.thumbnail) {
+                          imageUrl = content.landingPage.landingPageMedia.thumbnail;
+                        }
+                        // Try spotlight format
+                        if (!imageUrl && content.spotlight?.logo?.downloadUrl) {
+                          imageUrl = content.spotlight.logo.downloadUrl;
+                        }
+                        // Try follow company format
+                        if (!imageUrl && content.followCompany?.logo?.downloadUrl) {
+                          imageUrl = content.followCompany.logo.downloadUrl;
+                        }
+                      }
+                      // Log first creative's structure for debugging
+                      if (namesResolved === 0) {
+                        console.log(`[Creative Detail] Sample content keys: ${content ? JSON.stringify(Object.keys(content)) : 'null'}`);
+                        console.log(`[Creative Detail] Extracted imageUrl: ${imageUrl || 'none'}`);
+                      }
+                      existing.imageUrl = imageUrl;
+                      creativeData.set(creativeId, existing);
                     }
                   } else {
                     console.log(`[Creative Metadata] Failed to fetch creative ${creativeId}: ${creativeResp.status}`);
@@ -1290,10 +1317,11 @@ serve(async (req) => {
             resolutionStats.placeholder++;
           }
           
-          // Extract imageUrl from share content if available
-          const imageUrl = meta.reference && shareContentData.has(meta.reference) 
-            ? shareContentData.get(meta.reference)!.imageUrl 
-            : '';
+          // Extract imageUrl - prefer versioned API, fallback to share content
+          let imageUrl = meta.imageUrl || '';
+          if (!imageUrl && meta.reference && shareContentData.has(meta.reference)) {
+            imageUrl = shareContentData.get(meta.reference)!.imageUrl;
+          }
           
           const campaignName = campaignMap.get(meta.campaignId) || 'Unknown Campaign';
           const metrics = analyticsMap.get(creativeId) || { impressions: 0, clicks: 0, spent: 0, spentUsd: 0, leads: 0 };
