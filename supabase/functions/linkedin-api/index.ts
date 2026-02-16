@@ -1050,6 +1050,9 @@ serve(async (req) => {
                         existing.name = creativeDetail.name;
                         namesResolved++;
                       }
+                      // Extract reference URN for image resolution via share/UGC content
+                      const ref = creativeDetail.content?.reference;
+                      if (ref) existing.reference = ref;
                       // Extract image URL from creative content
                       // Try multiple paths where LinkedIn stores image data
                       let imageUrl = '';
