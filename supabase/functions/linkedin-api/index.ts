@@ -3039,9 +3039,10 @@ serve(async (req) => {
 
         console.log(`[get_creative_performance_report] Starting for account ${accountId}, ${dateRanges.length} periods`);
 
-        // Step 1: Fetch ALL campaigns (paginated) - store name + status
+        // Step 1: Fetch ALL campaigns (paginated) - store name + status + type
         const cpCampaignNames = new Map<string, string>();
         const cpCampaignStatuses = new Map<string, string>();
+        const cpCampaignTypes = new Map<string, string>();
         try {
           let cpCampStart = 0;
           let cpCampTotal = 0;
@@ -3061,13 +3062,15 @@ serve(async (req) => {
                   // Normalize status to uppercase
                   const rawStatus = c.status || c.runSchedule?.status || 'UNKNOWN';
                   cpCampaignStatuses.set(cid, String(rawStatus).toUpperCase());
+                  // Capture campaign type for creative type detection
+                  if (c.type) cpCampaignTypes.set(cid, String(c.type).toUpperCase());
                 }
               }
               cpCampStart += elements.length;
               if (elements.length === 0) break;
             } else { break; }
           } while (cpCampStart < cpCampTotal);
-          console.log(`[Step 1] Fetched ${cpCampaignNames.size} campaigns`);
+          console.log(`[Step 1] Fetched ${cpCampaignNames.size} campaigns, campaign types:`, Object.fromEntries([...cpCampaignTypes.entries()].slice(0, 10)));
         } catch (e) { console.error('[Step 1] campaign fetch error', e); }
 
         // Step 2: Run analytics for ALL periods in parallel
@@ -3131,34 +3134,37 @@ serve(async (req) => {
                 const campId = (d.campaign || '').split(':').pop() || '';
                 const creativeStatus = String(d.status || d.servingStatus || 'UNKNOWN').toUpperCase();
                 
-                // Detect creative type from content structure
-                let creativeType = 'SPONSORED_CONTENT';
+                // Detect creative type from campaign type (reliable) + content hints
+                const campaignType = cpCampaignTypes.get(campId) || '';
                 const content = d.content || {};
-                if (content.textAd) {
+                const ref = (typeof content === 'string' ? content : content.reference) || '';
+                let creativeType = 'SPONSORED_CONTENT';
+
+                if (campaignType === 'TEXT_AD') {
                   creativeType = 'TEXT_AD';
-                } else if (content.spotlightAd) {
-                  creativeType = 'SPOTLIGHT_AD';
-                } else if (content.followerAd) {
-                  creativeType = 'FOLLOWER_AD';
-                } else if (content.jobsAd) {
-                  creativeType = 'JOBS_AD';
-                } else if (content.reference) {
-                  const ref = content.reference || '';
-                  if (ref.includes('video')) {
+                } else if (campaignType === 'SPONSORED_INMAILS' || campaignType === 'SPONSORED_MESSAGING') {
+                  creativeType = 'MESSAGE_AD';
+                } else if (campaignType === 'DYNAMIC') {
+                  // Dynamic ads do have content sub-fields
+                  if (content.followerAd) creativeType = 'FOLLOWER_AD';
+                  else if (content.jobsAd) creativeType = 'JOBS_AD';
+                  else creativeType = 'SPOTLIGHT_AD';
+                } else if (campaignType === 'SPONSORED_UPDATES' || campaignType === 'SPONSORED_STATUS_UPDATE' || !campaignType) {
+                  // Use content reference to distinguish sub-types
+                  if (ref.includes('video') || ref.includes('ugcVideo')) {
                     creativeType = 'VIDEO';
-                  } else if (content.carouselCards || (Array.isArray(content.mediaContent) && content.mediaContent.length > 1)) {
+                  } else if (content.carouselCards || content.carouselAd || (Array.isArray(content.mediaContent) && content.mediaContent.length > 1)) {
                     creativeType = 'CAROUSEL';
+                  } else if (ref.includes('document')) {
+                    creativeType = 'DOCUMENT_AD';
+                  } else {
+                    creativeType = 'SPONSORED_CONTENT';
                   }
-                } else if (content.carouselAd || content.carouselCards) {
-                  creativeType = 'CAROUSEL';
-                } else if (content.videoAd) {
-                  creativeType = 'VIDEO_AD';
-                }
-                // Also check the top-level 'type' field if LinkedIn provides it
-                if (d.type && d.type !== 'UNKNOWN') {
-                  const apiType = String(d.type).toUpperCase();
-                  if (['TEXT_AD', 'SPOTLIGHT_AD', 'FOLLOWER_AD', 'JOBS_AD', 'VIDEO_AD', 'CAROUSEL_AD'].includes(apiType)) {
-                    creativeType = apiType;
+                } else {
+                  // Fallback: map any other campaign type directly if recognized
+                  const directTypes = ['VIDEO_AD', 'CAROUSEL_AD', 'SPOTLIGHT_AD', 'FOLLOWER_AD', 'JOBS_AD'];
+                  if (directTypes.includes(campaignType)) {
+                    creativeType = campaignType;
                   }
                 }
 
@@ -3175,6 +3181,13 @@ serve(async (req) => {
             } catch (e) { /* ignore */ }
           }));
         }
+
+        // Log type distribution for debugging
+        const typeDistribution: Record<string, number> = {};
+        for (const [, info] of cpCreativeInfo) {
+          typeDistribution[info.type] = (typeDistribution[info.type] || 0) + 1;
+        }
+        console.log(`[Step 3] Creative type distribution:`, JSON.stringify(typeDistribution));
 
         // Step 4: Resolve references for images/names in parallel
         const cpUniqueRefs = new Set<string>();
