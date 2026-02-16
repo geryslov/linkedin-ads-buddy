@@ -339,7 +339,10 @@ export function CreativePerformanceReport({ accessToken, selectedAccount }: Prop
                         {PERIODS.map((p, i) => renderMetricCells(row[p.field], p.key, i))}
                         <td className="p-2 text-center"><FatigueIndicator row={row} /></td>
                       </tr>
-                      {isExpanded && row.campaigns.map(camp => (
+                      {isExpanded && (activeOnly
+                        ? row.campaigns.filter(c => c.campaignStatus === 'ACTIVE')
+                        : row.campaigns
+                      ).map(camp => (
                         <tr key={`${row.creativeName}-${camp.campaignName}`} className="bg-muted/10 border-t border-border/30">
                           <td className="p-2 pl-8">
                             <div className="flex items-center gap-2">
