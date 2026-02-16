@@ -3039,24 +3039,35 @@ serve(async (req) => {
 
         console.log(`[get_creative_performance_report] Starting for account ${accountId}, ${dateRanges.length} periods`);
 
-        // Step 1: Fetch campaigns (once) - store name + status
+        // Step 1: Fetch ALL campaigns (paginated) - store name + status
         const cpCampaignNames = new Map<string, string>();
         const cpCampaignStatuses = new Map<string, string>();
         try {
-          const cpCampaignsUrl = `https://api.linkedin.com/rest/adAccounts/${accountId}/adCampaigns?q=search&sortOrder=DESCENDING&count=100`;
-          const cpCampaignsResp = await fetch(cpCampaignsUrl, {
-            headers: { 'Authorization': `Bearer ${accessToken}`, 'LinkedIn-Version': '202511', 'X-Restli-Protocol-Version': '2.0.0' },
-          });
-          if (cpCampaignsResp.ok) {
-            const cpCampaignsData = await cpCampaignsResp.json();
-            for (const c of (cpCampaignsData.elements || [])) {
-              const cid = c.id?.toString() || c.$URN?.split(':').pop();
-              if (cid) {
-                cpCampaignNames.set(cid, c.name || `Campaign ${cid}`);
-                cpCampaignStatuses.set(cid, c.status || c.runSchedule?.status || 'UNKNOWN');
+          let cpCampStart = 0;
+          let cpCampTotal = 0;
+          do {
+            const cpCampaignsUrl = `https://api.linkedin.com/rest/adAccounts/${accountId}/adCampaigns?q=search&sortOrder=DESCENDING&count=100&start=${cpCampStart}`;
+            const cpCampaignsResp = await fetch(cpCampaignsUrl, {
+              headers: { 'Authorization': `Bearer ${accessToken}`, 'LinkedIn-Version': '202511', 'X-Restli-Protocol-Version': '2.0.0' },
+            });
+            if (cpCampaignsResp.ok) {
+              const cpCampaignsData = await cpCampaignsResp.json();
+              const elements = cpCampaignsData.elements || [];
+              cpCampTotal = cpCampaignsData.paging?.total || elements.length;
+              for (const c of elements) {
+                const cid = c.id?.toString() || c.$URN?.split(':').pop();
+                if (cid) {
+                  cpCampaignNames.set(cid, c.name || `Campaign ${cid}`);
+                  // Normalize status to uppercase
+                  const rawStatus = c.status || c.runSchedule?.status || 'UNKNOWN';
+                  cpCampaignStatuses.set(cid, String(rawStatus).toUpperCase());
+                }
               }
-            }
-          }
+              cpCampStart += elements.length;
+              if (elements.length === 0) break;
+            } else { break; }
+          } while (cpCampStart < cpCampTotal);
+          console.log(`[Step 1] Fetched ${cpCampaignNames.size} campaigns`);
         } catch (e) { console.error('[Step 1] campaign fetch error', e); }
 
         // Step 2: Run analytics for ALL periods in parallel
