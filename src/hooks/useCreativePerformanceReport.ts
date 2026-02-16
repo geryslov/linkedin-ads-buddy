@@ -13,6 +13,7 @@ export interface PeriodMetrics {
 export interface CampaignBreakdown {
   campaignName: string;
   campaignStatus: string;
+  creativeStatus: string;
   last7d: PeriodMetrics;
   last14d: PeriodMetrics;
   last30d: PeriodMetrics;
@@ -23,6 +24,7 @@ export interface CreativePerformanceRow {
   creativeName: string;
   imageUrl?: string;
   type: string;
+  creativeStatus: string;
   campaignCount: number;
   campaigns: CampaignBreakdown[];
   last7d: PeriodMetrics;
@@ -91,7 +93,8 @@ export function useCreativePerformanceReport(accessToken: string | null) {
       const byName = new Map<string, {
         imageUrl?: string;
         type: string;
-        campaigns: Map<string, { campaignName: string; campaignStatus: string; periods: Record<string, { impressions: number; clicks: number; spent: number; leads: number }> }>;
+        creativeStatus: string;
+        campaigns: Map<string, { campaignName: string; campaignStatus: string; creativeStatus: string; periods: Record<string, { impressions: number; clicks: number; spent: number; leads: number }> }>;
         totals: Record<string, { impressions: number; clicks: number; spent: number; leads: number }>;
       }>();
 
@@ -100,13 +103,13 @@ export function useCreativePerformanceReport(accessToken: string | null) {
         const campKey = el.campaignName || 'Unknown';
 
         if (!byName.has(name)) {
-          byName.set(name, { imageUrl: el.imageUrl, type: el.type || 'UNKNOWN', campaigns: new Map(), totals: {} });
+          byName.set(name, { imageUrl: el.imageUrl, type: el.type || 'UNKNOWN', creativeStatus: el.creativeStatus || 'UNKNOWN', campaigns: new Map(), totals: {} });
         }
         const entry = byName.get(name)!;
 
         // Ensure campaign entry
         if (!entry.campaigns.has(campKey)) {
-          entry.campaigns.set(campKey, { campaignName: campKey, campaignStatus: el.campaignStatus || 'UNKNOWN', periods: {} });
+          entry.campaigns.set(campKey, { campaignName: campKey, campaignStatus: el.campaignStatus || 'UNKNOWN', creativeStatus: el.creativeStatus || 'UNKNOWN', periods: {} });
         }
         const camp = entry.campaigns.get(campKey)!;
 
@@ -138,6 +141,7 @@ export function useCreativePerformanceReport(accessToken: string | null) {
           campaigns.push({
             campaignName: c.campaignName,
             campaignStatus: c.campaignStatus,
+            creativeStatus: c.creativeStatus,
             last7d: toMetrics(c.periods['last7d']),
             last14d: toMetrics(c.periods['last14d']),
             last30d: toMetrics(c.periods['last30d']),
@@ -148,6 +152,7 @@ export function useCreativePerformanceReport(accessToken: string | null) {
           creativeName: name,
           imageUrl: v.imageUrl,
           type: v.type,
+          creativeStatus: v.creativeStatus,
           campaignCount: campaigns.length,
           campaigns,
           last7d: toMetrics(v.totals['last7d']),

@@ -55,20 +55,38 @@ function FatigueIndicator({ row }: { row: { last7d: PeriodMetrics; last30d: Peri
   const ctrDecline = ctr7 > 0 && ctr30 > 0 && ctr7 < ctr30 * 0.85;
   const cplChange = cpl30 > 0 ? ((cpl7 - cpl30) / cpl30 * 100).toFixed(0) : '—';
   const ctrChange = ctr30 > 0 ? ((ctr7 - ctr30) / ctr30 * 100).toFixed(0) : '—';
-  if (!cplRising && !ctrDecline) return null;
+  if (!cplRising && !ctrDecline) return <span className="text-xs text-green-600">✓ OK</span>;
   return (
-    <div className="flex flex-col gap-0.5 items-center">
-      {cplRising && (
-        <Badge variant="destructive" className="text-[10px] px-1.5 py-0" title={`CPL 7d: ${formatCurrency(cpl7)} vs 30d: ${formatCurrency(cpl30)} (+${cplChange}%). Fatigue threshold: >15% increase.`}>
-          <TrendingUp className="h-3 w-3 mr-0.5" />CPL +{cplChange}%
-        </Badge>
-      )}
-      {ctrDecline && (
-        <Badge variant="destructive" className="text-[10px] px-1.5 py-0" title={`CTR 7d: ${ctr7.toFixed(2)}% vs 30d: ${ctr30.toFixed(2)}% (${ctrChange}%). Fatigue threshold: >15% decline.`}>
-          <TrendingDown className="h-3 w-3 mr-0.5" />CTR {ctrChange}%
-        </Badge>
-      )}
-    </div>
+    <TooltipProvider>
+      <div className="flex flex-col gap-0.5 items-center">
+        {cplRising && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Badge variant="destructive" className="text-[10px] px-1.5 py-0 cursor-help">
+                <TrendingUp className="h-3 w-3 mr-0.5" />CPL +{cplChange}%
+              </Badge>
+            </TooltipTrigger>
+            <TooltipContent side="left" className="text-xs max-w-[220px]">
+              <p>CPL 7d: {formatCurrency(cpl7)} vs 30d: {formatCurrency(cpl30)}</p>
+              <p className="text-muted-foreground mt-0.5">Threshold: &gt;15% increase</p>
+            </TooltipContent>
+          </Tooltip>
+        )}
+        {ctrDecline && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Badge variant="destructive" className="text-[10px] px-1.5 py-0 cursor-help">
+                <TrendingDown className="h-3 w-3 mr-0.5" />CTR {ctrChange}%
+              </Badge>
+            </TooltipTrigger>
+            <TooltipContent side="left" className="text-xs max-w-[220px]">
+              <p>CTR 7d: {ctr7.toFixed(2)}% vs 30d: {ctr30.toFixed(2)}%</p>
+              <p className="text-muted-foreground mt-0.5">Threshold: &gt;15% decline</p>
+            </TooltipContent>
+          </Tooltip>
+        )}
+      </div>
+    </TooltipProvider>
   );
 }
 
@@ -130,7 +148,7 @@ export function CreativePerformanceReport({ accessToken, selectedAccount }: Prop
       result = result.filter(r => r.creativeName.toLowerCase().includes(q));
     }
     if (activeOnly) {
-      result = result.filter(r => r.campaigns.some(c => c.campaignStatus === 'ACTIVE'));
+      result = result.filter(r => r.creativeStatus === 'ACTIVE');
     }
     return result;
   }, [data, search, activeOnly]);
@@ -210,7 +228,7 @@ export function CreativePerformanceReport({ accessToken, selectedAccount }: Prop
         </div>
         <div className="flex items-center gap-2">
           <Switch id="active-filter" checked={activeOnly} onCheckedChange={setActiveOnly} />
-          <Label htmlFor="active-filter" className="text-sm cursor-pointer">Active campaigns only</Label>
+          <Label htmlFor="active-filter" className="text-sm cursor-pointer">Active ads only</Label>
         </div>
         <span className="text-sm text-muted-foreground">{sorted.length} creatives</span>
         <TooltipProvider>
@@ -218,11 +236,11 @@ export function CreativePerformanceReport({ accessToken, selectedAccount }: Prop
             <TooltipTrigger asChild>
               <button className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors ml-auto">
                 <Info className="h-3.5 w-3.5" />
-                Fatigue Logic
+                Trend Logic
               </button>
             </TooltipTrigger>
             <TooltipContent side="bottom" className="max-w-xs text-xs">
-              <p className="font-semibold mb-1">Fatigue Detection</p>
+              <p className="font-semibold mb-1">Performance Trend Detection</p>
               <p>Compares 7-day vs 30-day metrics:</p>
               <ul className="list-disc pl-4 mt-1 space-y-0.5">
                 <li><span className="font-medium">CPL ↑</span>: 7d CPL is &gt;15% higher than 30d CPL</li>
@@ -261,7 +279,7 @@ export function CreativePerformanceReport({ accessToken, selectedAccount }: Prop
                     {subHeader(p.key, 'CTR', 'ctr', i)}
                   </Fragment>
                 ))}
-                <th className="text-center p-2 font-semibold w-[80px] text-xs">Fatigue</th>
+                <th className="text-center p-2 font-semibold w-[80px] text-xs">Trend</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border/50">

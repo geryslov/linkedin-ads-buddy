@@ -3112,7 +3112,7 @@ serve(async (req) => {
         }
 
         // Step 3: Fetch creative metadata ONCE for all creatives (large parallel batches)
-        interface CPCreativeInfo { name: string; campaignId: string; campaignName: string; campaignStatus: string; type: string; reference?: string; imageUrl?: string; }
+        interface CPCreativeInfo { name: string; campaignId: string; campaignName: string; campaignStatus: string; creativeStatus: string; type: string; reference?: string; imageUrl?: string; }
         const cpCreativeInfo = new Map<string, CPCreativeInfo>();
         const cpRefImageCache = new Map<string, string>();
 
@@ -3129,11 +3129,13 @@ serve(async (req) => {
               if (resp.ok) {
                 const d = await resp.json();
                 const campId = (d.campaign || '').split(':').pop() || '';
+                const creativeStatus = String(d.status || d.servingStatus || 'UNKNOWN').toUpperCase();
                 cpCreativeInfo.set(creativeId, {
                   name: d.name || '',
                   campaignId: campId,
                   campaignName: cpCampaignNames.get(campId) || `Campaign ${campId}`,
                   campaignStatus: cpCampaignStatuses.get(campId) || 'UNKNOWN',
+                  creativeStatus,
                   type: 'SPONSORED_CONTENT',
                   reference: d.content?.reference || undefined,
                 });
@@ -3220,6 +3222,7 @@ serve(async (req) => {
             campaignId: info?.campaignId || '',
             campaignName: info?.campaignName || 'Unknown',
             campaignStatus: info?.campaignStatus || 'UNKNOWN',
+            creativeStatus: info?.creativeStatus || 'UNKNOWN',
             type: info?.type || 'UNKNOWN',
             imageUrl: info?.imageUrl || undefined,
             periods: periodData,
