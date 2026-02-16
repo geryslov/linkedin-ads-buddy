@@ -3030,6 +3030,185 @@ serve(async (req) => {
         });
       }
 
+      case 'get_creative_performance_report': {
+        // Batched multi-period creative report: fetches metadata ONCE, analytics for multiple date ranges in parallel
+        const { accountId, dateRanges } = params || {};
+        if (!accountId || !dateRanges || !Array.isArray(dateRanges)) {
+          return new Response(JSON.stringify({ error: 'accountId and dateRanges[] required' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        console.log(`[get_creative_performance_report] Starting for account ${accountId}, ${dateRanges.length} periods`);
+
+        // Step 1: Fetch campaigns (once)
+        const cpCampaignNames = new Map<string, string>();
+        try {
+          const cpCampaignsUrl = `https://api.linkedin.com/rest/adAccounts/${accountId}/adCampaigns?q=search&sortOrder=DESCENDING&count=100`;
+          const cpCampaignsResp = await fetch(cpCampaignsUrl, {
+            headers: { 'Authorization': `Bearer ${accessToken}`, 'LinkedIn-Version': '202511', 'X-Restli-Protocol-Version': '2.0.0' },
+          });
+          if (cpCampaignsResp.ok) {
+            const cpCampaignsData = await cpCampaignsResp.json();
+            for (const c of (cpCampaignsData.elements || [])) {
+              const cid = c.id?.toString() || c.$URN?.split(':').pop();
+              if (cid) cpCampaignNames.set(cid, c.name || `Campaign ${cid}`);
+            }
+          }
+        } catch (e) { console.error('[Step 1] campaign fetch error', e); }
+
+        // Step 2: Run analytics for ALL periods in parallel
+        const periodResults = await Promise.all(dateRanges.map(async (range: { start: string; end: string; key: string }) => {
+          const [sY, sM, sD] = range.start.split('-').map(Number);
+          const [eY, eM, eD] = range.end.split('-').map(Number);
+          const url = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&dateRange.start.day=${sD}&dateRange.start.month=${sM}&dateRange.start.year=${sY}&dateRange.end.day=${eD}&dateRange.end.month=${eM}&dateRange.end.year=${eY}&timeGranularity=ALL&pivot=CREATIVE&accounts[0]=urn:li:sponsoredAccount:${accountId}&fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,pivotValue&count=10000`;
+          try {
+            const resp = await fetch(url, { headers: { 'Authorization': `Bearer ${accessToken}` } });
+            if (resp.ok) {
+              const data = await resp.json();
+              return { key: range.key, elements: data.elements || [] };
+            }
+          } catch (e) { /* ignore */ }
+          return { key: range.key, elements: [] };
+        }));
+
+        // Collect ALL unique creative IDs across all periods
+        const allCreativeIds = new Set<string>();
+        const periodMetrics = new Map<string, Map<string, { impressions: number; clicks: number; spent: number; leads: number }>>();
+
+        for (const pr of periodResults) {
+          const metricsMap = new Map<string, { impressions: number; clicks: number; spent: number; leads: number }>();
+          for (const el of pr.elements) {
+            const cid = el.pivotValue?.split(':').pop() || '';
+            if (!cid) continue;
+            allCreativeIds.add(cid);
+            const ex = metricsMap.get(cid) || { impressions: 0, clicks: 0, spent: 0, leads: 0 };
+            ex.impressions += el.impressions || 0;
+            ex.clicks += el.clicks || 0;
+            ex.spent += parseFloat(el.costInLocalCurrency || '0');
+            ex.leads += (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
+            metricsMap.set(cid, ex);
+          }
+          periodMetrics.set(pr.key, metricsMap);
+        }
+
+        console.log(`[Step 2] Found ${allCreativeIds.size} unique creatives across all periods`);
+
+        if (allCreativeIds.size === 0) {
+          return new Response(JSON.stringify({ periods: dateRanges.map((r: any) => r.key), elements: [] }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        // Step 3: Fetch creative metadata ONCE for all creatives
+        interface CPCreativeInfo { name: string; campaignName: string; type: string; reference?: string; imageUrl?: string; }
+        const cpCreativeInfo = new Map<string, CPCreativeInfo>();
+        const cpRefImageCache = new Map<string, string>();
+
+        const cpBatchSize = 10;
+        const cpIds = [...allCreativeIds];
+        for (let i = 0; i < cpIds.length; i += cpBatchSize) {
+          const batch = cpIds.slice(i, i + cpBatchSize);
+          await Promise.all(batch.map(async (creativeId) => {
+            try {
+              const urn = encodeURIComponent(`urn:li:sponsoredCreative:${creativeId}`);
+              const url = `https://api.linkedin.com/rest/adAccounts/${accountId}/creatives/${urn}`;
+              const resp = await fetch(url, { headers: { 'Authorization': `Bearer ${accessToken}`, 'LinkedIn-Version': '202511', 'X-Restli-Protocol-Version': '2.0.0' } });
+              if (resp.ok) {
+                const d = await resp.json();
+                const campId = (d.campaign || '').split(':').pop() || '';
+                const info: CPCreativeInfo = {
+                  name: d.name || '',
+                  campaignName: cpCampaignNames.get(campId) || `Campaign ${campId}`,
+                  type: 'SPONSORED_CONTENT',
+                  reference: d.content?.reference || undefined,
+                };
+                cpCreativeInfo.set(creativeId, info);
+              }
+            } catch (e) { /* ignore */ }
+          }));
+        }
+
+        // Step 4: Resolve references for images/names ONCE
+        const cpUniqueRefs = new Set<string>();
+        for (const [, info] of cpCreativeInfo) {
+          if (info.reference) cpUniqueRefs.add(info.reference);
+        }
+
+        const cpRefNameCache = new Map<string, string>();
+        for (const reference of cpUniqueRefs) {
+          try {
+            if (reference.includes('ugcPost')) {
+              const pid = reference.split(':').pop();
+              const resp = await fetch(`https://api.linkedin.com/v2/ugcPosts/${pid}`, { headers: { 'Authorization': `Bearer ${accessToken}` } });
+              if (resp.ok) {
+                const post = await resp.json();
+                const sc = post.specificContent?.['com.linkedin.ugc.ShareContent'];
+                const txt = sc?.shareCommentary?.text || '';
+                if (txt.trim()) cpRefNameCache.set(reference, txt.replace(/\s+/g, ' ').trim().slice(0, 80));
+                const media = sc?.media?.[0];
+                if (media) {
+                  const img = media.thumbnails?.[0]?.url || media.thumbnails?.[0]?.resolvedUrl || media.originalUrl || '';
+                  if (img) cpRefImageCache.set(reference, img);
+                }
+              }
+            } else if (reference.includes('share')) {
+              const sid = reference.split(':').pop();
+              const resp = await fetch(`https://api.linkedin.com/v2/shares/${sid}`, { headers: { 'Authorization': `Bearer ${accessToken}` } });
+              if (resp.ok) {
+                const share = await resp.json();
+                const txt = share.text?.text || '';
+                if (txt.trim()) cpRefNameCache.set(reference, txt.replace(/\s+/g, ' ').trim().slice(0, 80));
+                const ce = share.content?.contentEntities?.[0];
+                const img = ce?.thumbnails?.[0]?.resolvedUrl || ce?.thumbnails?.[0]?.url || '';
+                if (img) cpRefImageCache.set(reference, img);
+              }
+            }
+          } catch (e) { /* ignore */ }
+        }
+
+        // Apply cached names/images
+        for (const [, info] of cpCreativeInfo) {
+          if (info.reference) {
+            if (!info.name) info.name = cpRefNameCache.get(info.reference) || '';
+            info.imageUrl = cpRefImageCache.get(info.reference) || undefined;
+          }
+        }
+
+        // Step 5: Build merged elements - one per creative with all period metrics
+        const cpElements: any[] = [];
+        for (const creativeId of allCreativeIds) {
+          const info = cpCreativeInfo.get(creativeId);
+          const campaignNames2 = new Set<string>();
+          const periodData: Record<string, any> = {};
+
+          for (const pr of periodResults) {
+            const m = periodMetrics.get(pr.key)?.get(creativeId);
+            if (m) {
+              campaignNames2.add(info?.campaignName || '');
+              periodData[pr.key] = {
+                impressions: m.impressions,
+                clicks: m.clicks,
+                spent: m.spent,
+                leads: m.leads,
+                costInLocalCurrency: m.spent.toFixed(2),
+              };
+            }
+          }
+
+          cpElements.push({
+            creativeId,
+            creativeName: info?.name || `Creative ${creativeId}`,
+            campaignName: info?.campaignName || 'Unknown',
+            type: info?.type || 'UNKNOWN',
+            imageUrl: info?.imageUrl || undefined,
+            periods: periodData,
+          });
+        }
+
+        console.log(`[get_creative_performance_report] Complete. ${cpElements.length} creatives, ${dateRanges.length} periods`);
+
+        return new Response(JSON.stringify({ periods: dateRanges.map((r: any) => r.key), elements: cpElements }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
       case 'get_account_structure': {
         // Fetches the complete account hierarchy: Campaign Groups -> Campaigns -> Creatives
         const { accountId } = params || {};
