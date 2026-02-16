@@ -56,10 +56,10 @@ function FatigueIndicator({ row }: { row: { last7d: PeriodMetrics; last30d: Peri
   const ctrDecline = ctr7 > 0 && ctr30 > 0 && ctr7 < ctr30 * 0.85;
   const cplChange = cpl30 > 0 ? ((cpl7 - cpl30) / cpl30 * 100).toFixed(0) : '—';
   const ctrChange = ctr30 > 0 ? ((ctr7 - ctr30) / ctr30 * 100).toFixed(0) : '—';
-  if (!cplRising && !ctrDecline) return <span className="text-xs text-green-600">✓ OK</span>;
+  if (!cplRising && !ctrDecline) return <span className="text-xs text-green-600 whitespace-nowrap">✓ OK</span>;
   return (
     <TooltipProvider>
-      <div className="flex flex-col gap-0.5 items-center">
+      <div className="flex flex-row gap-1 items-center justify-center whitespace-nowrap">
         {cplRising && (
           <Tooltip>
             <TooltipTrigger asChild>
