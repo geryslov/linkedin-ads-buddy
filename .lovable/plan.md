@@ -1,63 +1,57 @@
 
 
-# Fix: Creative Gallery Images Not Showing (get_creative_report)
+# New "Creative Reports" Sidebar Section with Multi-Timeframe View
 
-## Problem
-The Creative Gallery shows "212 active creatives, 0 with images" because the `get_creative_report` action has the same root cause we previously fixed in `get_creative_names_report`: the `content.reference` URN is never extracted from the versioned REST API response.
+## Overview
 
-## Root Cause
-In `fetchCreativesVersioned` (lines 1045-1079 of `supabase/functions/linkedin-api/index.ts`), the individual versioned API lookup extracts `name` and attempts to find images via `content.media.downloadUrl` -- but for Sponsored Content ads, the image lives in a referenced UGC post/share, accessible only through `content.reference`. This field is never read, so the `reference` property stays empty, and Steps 5-6 (which resolve images from UGC posts/shares) have nothing to work with.
+Add a new top-level sidebar tab called "Creative Reports" that displays a single table where each creative (aggregated by name across all campaigns, same as Creative Names Report) shows its CPL, CTR, and Spend for 4 timeframes side-by-side: Last 7 Days, Last 14 Days, Last 30 Days, and Last Month. This lets you spot fatigue at a glance.
 
-## Solution
-Add `content.reference` extraction to the versioned API lookup inside `fetchCreativesVersioned`, matching what we already did for `get_creative_names_report`.
+## New Files
 
-## Changes
+### 1. `src/hooks/useCreativePerformanceReport.ts`
+- New hook that fires 4 parallel calls to the existing `get_creative_names_report` edge function action, one for each timeframe (7d, 14d, 30d, last month).
+- Each call uses the same `accessToken` and `accountId`, just different `dateRange` params.
+- Groups the 4 result sets by `creativeName` (same aggregation logic as Creative Names Report -- summing impressions, clicks, spent, leads across campaigns for the same creative name).
+- Returns a merged array where each entry has metrics for all 4 periods.
 
-### File: `supabase/functions/linkedin-api/index.ts`
+### 2. `src/components/dashboard/CreativePerformanceReport.tsx`
+- Main component rendered when the "Creative Reports" tab is active.
+- Calls the hook on mount / account change.
+- Renders a table with columns:
+  - **Creative Name** (with thumbnail + expand for campaign breakdown)
+  - For each of the 4 timeframes: **CPL**, **CTR**, **Spend**
+- Includes search filter and sortable columns.
+- Color-coded trend indicators: if CPL is rising or CTR is declining across periods, highlight in red/amber.
+- Totals row at the bottom.
 
-In the `fetchCreativesVersioned` function, after the existing image extraction logic (around line 1072), add extraction of `content.reference`:
+## Modified Files
 
+### 3. `src/components/dashboard/Sidebar.tsx`
+- Add a new nav item: `{ id: "creative_reports", label: "Creative Reports", icon: TrendingUp }` (or `BarChart3`), placed after "Creatives" in the list.
+
+### 4. `src/pages/Dashboard.tsx`
+- Add header title for `creative_reports` tab.
+- Render `<CreativePerformanceReport>` when `activeTab === "creative_reports"`.
+- Pass `accessToken` and `selectedAccount` as props.
+
+## No Backend Changes Required
+The existing `get_creative_names_report` edge function action already supports arbitrary date ranges. We simply call it 4 times in parallel with different date ranges.
+
+## Technical Details
+
+### Data Flow
+1. User selects "Creative Reports" tab.
+2. Hook fires 4 parallel `supabase.functions.invoke('linkedin-api', { body: { action: 'get_creative_names_report', ... } })` calls.
+3. Each returns creative-level data for its timeframe.
+4. Client-side: group by `creativeName`, aggregate metrics, merge into a single row per creative with `{ last7d: {cpl, ctr, spend}, last14d: {...}, last30d: {...}, lastMonth: {...} }`.
+
+### Table Layout
 ```text
-// Current code (lines 1047-1079):
-if (existing) {
-  if (creativeDetail.name) {
-    existing.name = creativeDetail.name;
-    namesResolved++;
-  }
-  // Extract image URL from creative content
-  let imageUrl = '';
-  const content = creativeDetail.content;
-  if (content) {
-    imageUrl = content.media?.downloadUrl || '';
-    // ... other paths ...
-  }
-  existing.imageUrl = imageUrl;
-  creativeData.set(creativeId, existing);
-}
-
-// Fixed code - add reference extraction:
-if (existing) {
-  if (creativeDetail.name) {
-    existing.name = creativeDetail.name;
-    namesResolved++;
-  }
-  // Extract reference URN for image resolution via share/UGC content
-  const ref = creativeDetail.content?.reference;
-  if (ref) existing.reference = ref;
-
-  // Extract image URL from creative content (direct paths)
-  let imageUrl = '';
-  const content = creativeDetail.content;
-  if (content) {
-    imageUrl = content.media?.downloadUrl || '';
-    // ... other paths unchanged ...
-  }
-  existing.imageUrl = imageUrl;
-  creativeData.set(creativeId, existing);
-}
+Creative Name | 7d CPL | 7d CTR | 7d Spend | 14d CPL | 14d CTR | 14d Spend | 30d CPL | 30d CTR | 30d Spend | LM CPL | LM CTR | LM Spend
 ```
 
-This ensures the `reference` field is populated before Steps 5-6, which already correctly fetch UGC posts/shares and extract image URLs from them.
+### Fatigue Indicators
+- CPL rising from 7d to 30d: amber/red badge
+- CTR declining from 7d to 30d: amber/red badge
+- These are calculated client-side by comparing the metric values across timeframes.
 
-### Deployment
-Redeploy the `linkedin-api` backend function.
