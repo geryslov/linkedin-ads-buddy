@@ -3130,14 +3130,46 @@ serve(async (req) => {
                 const d = await resp.json();
                 const campId = (d.campaign || '').split(':').pop() || '';
                 const creativeStatus = String(d.status || d.servingStatus || 'UNKNOWN').toUpperCase();
+                
+                // Detect creative type from content structure
+                let creativeType = 'SPONSORED_CONTENT';
+                const content = d.content || {};
+                if (content.textAd) {
+                  creativeType = 'TEXT_AD';
+                } else if (content.spotlightAd) {
+                  creativeType = 'SPOTLIGHT_AD';
+                } else if (content.followerAd) {
+                  creativeType = 'FOLLOWER_AD';
+                } else if (content.jobsAd) {
+                  creativeType = 'JOBS_AD';
+                } else if (content.reference) {
+                  const ref = content.reference || '';
+                  if (ref.includes('video')) {
+                    creativeType = 'VIDEO';
+                  } else if (content.carouselCards || (Array.isArray(content.mediaContent) && content.mediaContent.length > 1)) {
+                    creativeType = 'CAROUSEL';
+                  }
+                } else if (content.carouselAd || content.carouselCards) {
+                  creativeType = 'CAROUSEL';
+                } else if (content.videoAd) {
+                  creativeType = 'VIDEO_AD';
+                }
+                // Also check the top-level 'type' field if LinkedIn provides it
+                if (d.type && d.type !== 'UNKNOWN') {
+                  const apiType = String(d.type).toUpperCase();
+                  if (['TEXT_AD', 'SPOTLIGHT_AD', 'FOLLOWER_AD', 'JOBS_AD', 'VIDEO_AD', 'CAROUSEL_AD'].includes(apiType)) {
+                    creativeType = apiType;
+                  }
+                }
+
                 cpCreativeInfo.set(creativeId, {
                   name: d.name || '',
                   campaignId: campId,
                   campaignName: cpCampaignNames.get(campId) || `Campaign ${campId}`,
                   campaignStatus: cpCampaignStatuses.get(campId) || 'UNKNOWN',
                   creativeStatus,
-                  type: 'SPONSORED_CONTENT',
-                  reference: d.content?.reference || undefined,
+                  type: creativeType,
+                  reference: content.reference || undefined,
                 });
               } else { await resp.text(); }
             } catch (e) { /* ignore */ }
