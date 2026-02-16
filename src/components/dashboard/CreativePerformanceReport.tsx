@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo, Fragment } from 'react';
 import { useCreativePerformanceReport, CreativePerformanceRow, PeriodMetrics, CampaignBreakdown } from '@/hooks/useCreativePerformanceReport';
 import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
@@ -123,6 +124,7 @@ export function CreativePerformanceReport({ accessToken, selectedAccount }: Prop
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [activeOnly, setActiveOnly] = useState(false);
+  const [typeFilter, setTypeFilter] = useState<string>('all');
 
   useEffect(() => {
     if (selectedAccount) fetchReport(selectedAccount);
@@ -141,6 +143,11 @@ export function CreativePerformanceReport({ accessToken, selectedAccount }: Prop
     });
   };
 
+  const adTypes = useMemo(() => {
+    const types = new Set(data.map(r => r.type));
+    return [...types].sort();
+  }, [data]);
+
   const filtered = useMemo(() => {
     let result = data;
     if (search.trim()) {
@@ -150,8 +157,11 @@ export function CreativePerformanceReport({ accessToken, selectedAccount }: Prop
     if (activeOnly) {
       result = result.filter(r => r.creativeStatus === 'ACTIVE');
     }
+    if (typeFilter !== 'all') {
+      result = result.filter(r => r.type === typeFilter);
+    }
     return result;
-  }, [data, search, activeOnly]);
+  }, [data, search, activeOnly, typeFilter]);
 
   const sorted = useMemo(() => {
     return [...filtered].sort((a, b) => {
@@ -230,6 +240,19 @@ export function CreativePerformanceReport({ accessToken, selectedAccount }: Prop
           <Switch id="active-filter" checked={activeOnly} onCheckedChange={setActiveOnly} />
           <Label htmlFor="active-filter" className="text-sm cursor-pointer">Active ads only</Label>
         </div>
+        <Select value={typeFilter} onValueChange={setTypeFilter}>
+          <SelectTrigger className="w-[180px] h-9 text-sm">
+            <SelectValue placeholder="All ad types" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All ad types</SelectItem>
+            {adTypes.map(t => (
+              <SelectItem key={t} value={t}>
+                {t.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()).replace(/\bAd\b/i, 'Ad')}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <span className="text-sm text-muted-foreground">{sorted.length} creatives</span>
         <TooltipProvider>
           <Tooltip>
