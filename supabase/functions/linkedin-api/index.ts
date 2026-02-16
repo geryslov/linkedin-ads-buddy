@@ -2970,8 +2970,6 @@ serve(async (req) => {
 
         console.log(`[Step 5] Resolving ${uniqueReferences.size} unique post references for names + images...`);
 
-        const referenceImageCache = new Map<string, string>();
-        
         for (const reference of uniqueReferences) {
           try {
             if (reference.includes('ugcPost')) {
