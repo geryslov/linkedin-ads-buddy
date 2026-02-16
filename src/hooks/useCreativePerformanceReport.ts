@@ -30,53 +30,23 @@ function getDateRanges() {
   const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
   const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
 
-  return {
-    last7d: { start: formatDate(new Date(now.getTime() - 7 * 86400000)), end: formatDate(now) },
-    last14d: { start: formatDate(new Date(now.getTime() - 14 * 86400000)), end: formatDate(now) },
-    last30d: { start: formatDate(new Date(now.getTime() - 30 * 86400000)), end: formatDate(now) },
-    lastMonth: { start: formatDate(lastMonthStart), end: formatDate(lastMonthEnd) },
-  };
+  return [
+    { key: 'last7d', start: formatDate(new Date(now.getTime() - 7 * 86400000)), end: formatDate(now) },
+    { key: 'last14d', start: formatDate(new Date(now.getTime() - 14 * 86400000)), end: formatDate(now) },
+    { key: 'last30d', start: formatDate(new Date(now.getTime() - 30 * 86400000)), end: formatDate(now) },
+    { key: 'lastMonth', start: formatDate(lastMonthStart), end: formatDate(lastMonthEnd) },
+  ];
 }
 
-function aggregateByName(elements: any[]): Map<string, { impressions: number; clicks: number; spent: number; leads: number; imageUrl?: string; type: string; campaignNames: Set<string> }> {
-  const map = new Map<string, any>();
-  for (const item of elements) {
-    const name = item.creativeName || `Creative ${item.creativeId}`;
-    const impressions = item.impressions || 0;
-    const spent = parseFloat(item.costInLocalCurrency || item.spent || '0');
-    if (impressions === 0 && spent === 0) continue;
-
-    const existing = map.get(name);
-    if (existing) {
-      existing.impressions += impressions;
-      existing.clicks += (item.clicks || 0);
-      existing.spent += spent;
-      existing.leads += (item.leads || 0);
-      existing.campaignNames.add(item.campaignName || '');
-    } else {
-      map.set(name, {
-        impressions,
-        clicks: item.clicks || 0,
-        spent,
-        leads: item.leads || 0,
-        imageUrl: item.imageUrl || undefined,
-        type: item.type || 'UNKNOWN',
-        campaignNames: new Set([item.campaignName || '']),
-      });
-    }
-  }
-  return map;
-}
-
-function toMetrics(agg: { impressions: number; clicks: number; spent: number; leads: number } | undefined): PeriodMetrics {
-  if (!agg) return { impressions: 0, clicks: 0, spent: 0, leads: 0, ctr: 0, cpl: 0 };
+function toMetrics(p: { impressions: number; clicks: number; spent: number; leads: number } | undefined): PeriodMetrics {
+  if (!p) return { impressions: 0, clicks: 0, spent: 0, leads: 0, ctr: 0, cpl: 0 };
   return {
-    impressions: agg.impressions,
-    clicks: agg.clicks,
-    spent: agg.spent,
-    leads: agg.leads,
-    ctr: agg.impressions > 0 ? (agg.clicks / agg.impressions) * 100 : 0,
-    cpl: agg.leads > 0 ? agg.spent / agg.leads : 0,
+    impressions: p.impressions,
+    clicks: p.clicks,
+    spent: p.spent,
+    leads: p.leads,
+    ctr: p.impressions > 0 ? (p.clicks / p.impressions) * 100 : 0,
+    cpl: p.leads > 0 ? p.spent / p.leads : 0,
   };
 }
 
@@ -91,57 +61,59 @@ export function useCreativePerformanceReport(accessToken: string | null) {
     setError(null);
 
     try {
-      const ranges = getDateRanges();
-      const keys = ['last7d', 'last14d', 'last30d', 'lastMonth'] as const;
-
-      const results = await Promise.all(
-        keys.map(key =>
-          supabase.functions.invoke('linkedin-api', {
-            body: {
-              action: 'get_creative_names_report',
-              accessToken,
-              params: {
-                accountId,
-                dateRange: ranges[key],
-                timeGranularity: 'ALL',
-              },
-            },
-          })
-        )
-      );
-
-      // Aggregate each period
-      const aggregated = keys.map((_, i) => {
-        const res = results[i];
-        if (res.error || res.data?.error) return new Map();
-        return aggregateByName(res.data?.elements || []);
+      const res = await supabase.functions.invoke('linkedin-api', {
+        body: {
+          action: 'get_creative_performance_report',
+          accessToken,
+          params: { accountId, dateRanges: getDateRanges() },
+        },
       });
 
-      // Merge into unified rows
-      const allNames = new Set<string>();
-      aggregated.forEach(m => m.forEach((_, k) => allNames.add(k)));
+      if (res.error || res.data?.error) {
+        setError(res.data?.error || 'Failed to fetch report');
+        return;
+      }
+
+      const elements = res.data?.elements || [];
+
+      // Aggregate by creativeName across campaigns
+      const byName = new Map<string, { imageUrl?: string; type: string; campaignNames: Set<string>; periods: Record<string, { impressions: number; clicks: number; spent: number; leads: number }> }>();
+
+      for (const el of elements) {
+        const name = el.creativeName || `Creative ${el.creativeId}`;
+        const existing = byName.get(name);
+        if (existing) {
+          existing.campaignNames.add(el.campaignName || '');
+          for (const [key, pd] of Object.entries(el.periods || {})) {
+            const p = pd as any;
+            const ex = existing.periods[key] || { impressions: 0, clicks: 0, spent: 0, leads: 0 };
+            ex.impressions += p.impressions || 0;
+            ex.clicks += p.clicks || 0;
+            ex.spent += parseFloat(p.costInLocalCurrency || p.spent || '0');
+            ex.leads += p.leads || 0;
+            existing.periods[key] = ex;
+          }
+        } else {
+          const periods: Record<string, any> = {};
+          for (const [key, pd] of Object.entries(el.periods || {})) {
+            const p = pd as any;
+            periods[key] = { impressions: p.impressions || 0, clicks: p.clicks || 0, spent: parseFloat(p.costInLocalCurrency || p.spent || '0'), leads: p.leads || 0 };
+          }
+          byName.set(name, { imageUrl: el.imageUrl, type: el.type || 'UNKNOWN', campaignNames: new Set([el.campaignName || '']), periods });
+        }
+      }
 
       const rows: CreativePerformanceRow[] = [];
-      allNames.forEach(name => {
-        const d7 = aggregated[0].get(name);
-        const d14 = aggregated[1].get(name);
-        const d30 = aggregated[2].get(name);
-        const lm = aggregated[3].get(name);
-
-        // Find best image/type from any period
-        const ref = d30 || d14 || d7 || lm;
-        const allCampaigns = new Set<string>();
-        [d7, d14, d30, lm].forEach(a => a?.campaignNames?.forEach((c: string) => allCampaigns.add(c)));
-
+      byName.forEach((v, name) => {
         rows.push({
           creativeName: name,
-          imageUrl: ref?.imageUrl,
-          type: ref?.type || 'UNKNOWN',
-          campaignCount: allCampaigns.size,
-          last7d: toMetrics(d7),
-          last14d: toMetrics(d14),
-          last30d: toMetrics(d30),
-          lastMonth: toMetrics(lm),
+          imageUrl: v.imageUrl,
+          type: v.type,
+          campaignCount: v.campaignNames.size,
+          last7d: toMetrics(v.periods['last7d']),
+          last14d: toMetrics(v.periods['last14d']),
+          last30d: toMetrics(v.periods['last30d']),
+          lastMonth: toMetrics(v.periods['lastMonth']),
         });
       });
 
