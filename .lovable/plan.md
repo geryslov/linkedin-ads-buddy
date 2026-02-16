@@ -1,63 +1,47 @@
 
 
-# Fix: Creative Thumbnails Not Showing
+# Fix: Build Error and Creative Images Not Showing
 
-## Root Cause
+## Two Issues Found
 
-The image extraction only happens for creatives that **failed** name resolution. Here's the problem flow:
+### Issue 1: Build Error (Blocking Deployment)
+There is an extra closing brace `}` on line 3015 of `supabase/functions/linkedin-api/index.ts`. This was introduced during a previous edit that added image extraction to the `get_creative_names_report` action. The extra brace prematurely closes the `for` loop, causing all subsequent `case` statements (starting with `get_account_structure` at line 3100) to fall outside the `switch` block, breaking the entire file.
 
-1. Step 5 (line 1220): Only collects share URNs for creatives where `!data.name` (no name resolved)
-2. Step 6 (line 1229): Only fetches share content for those unresolved URNs
-3. Step 7 (line 1265): Tries to get `imageUrl` from `shareContentData`, but it's empty for most creatives because their share content was never fetched
+**Fix**: Remove the extra `}` on line 3015.
 
-Since most creatives DO get names from the versioned API, their share references are skipped, and `imageUrl` is always empty.
+### Issue 2: Image Extraction Enhancement
+The versioned Creatives API (`/rest/adAccounts/{id}/creatives/{urn}`) returns a `content` object, but for most Sponsored Content ads this object only contains a `reference` URN pointing to a UGC post or share -- it does NOT contain direct image URLs in the `content.media.downloadUrl` path the code currently checks (lines 1055-1072).
 
-## Fix
+The `fetchShareContent` helper function (called in Step 6) correctly resolves images from UGC posts and shares. However, the versioned API individual lookup (Step 2) also tries to extract `content.media.downloadUrl` which almost never has the actual ad image for sponsored content.
 
-### 1. Edge Function: Fetch share content for ALL creatives with references (not just unresolved ones)
+The current logic at line 1321-1324 already falls back to share content images when the versioned API yields no `imageUrl`. So once the build error is fixed and the edge function deploys successfully, images should start appearing.
 
-**File**: `supabase/functions/linkedin-api/index.ts`
+**Fix**: Remove the extra brace, redeploy, and add a debug log to confirm image resolution counts.
 
-Change Step 5 to collect ALL share URNs (not just unresolved), and fetch share content for all of them to extract image URLs:
+## Changes
 
-- Line 1218-1225: Collect share URNs from ALL creatives that have a `reference`, regardless of whether they already have a name
-- This means `fetchShareContent` will be called with all share references, giving us image URLs for every creative
+### File: `supabase/functions/linkedin-api/index.ts`
+- Remove the extra `}` on line 3015 that breaks the switch statement
+- Add a log line after Step 6 in `get_creative_report` to count how many images were resolved
 
-The same fix needs to be applied to the `get_creative_names_report` action as well, where a similar pattern exists.
-
-### 2. Redeploy the edge function
-
-After the code change, redeploy `linkedin-api` to make it live.
+### Deployment
+- Redeploy the `linkedin-api` edge function
 
 ## Technical Details
 
-**Current code (broken)**:
+The problematic code structure (lines 3012-3019):
 ```text
-// Only collects URNs for creatives WITHOUT names
-versionedCreativeData.forEach((data, creativeId) => {
-  if (!data.name && data.reference) {
-    unresolvedShareUrns.push(data.reference);
-  }
-});
+// Current (broken):
+                if (imgUrl) referenceImageCache.set(reference, imgUrl);
+                }       // closes if (shareResp.ok)
+              }         // closes else if (share)
+            }           // <-- EXTRA BRACE - closes for loop early
+          } catch (err) {
+
+// Fixed:
+                if (imgUrl) referenceImageCache.set(reference, imgUrl);
+                }       // closes if (shareResp.ok)
+              }         // closes else if (share)
+          } catch (err) {
 ```
-
-**Fixed code**:
-```text
-// Collect ALL share URNs for image extraction
-const allShareUrns: string[] = [];
-versionedCreativeData.forEach((data, creativeId) => {
-  if (data.reference) {
-    allShareUrns.push(data.reference);
-  }
-  // Also track unresolved ones for name fallback
-  if (!data.name && data.reference) {
-    unresolvedShareUrns.push(data.reference);
-  }
-});
-
-// Fetch share content for ALL references (for images)
-shareContentData = await fetchShareContent(allShareUrns, accessToken);
-```
-
-Note: The `fetchShareContent` function already has a limit of 50 share URNs (line 1081), so this won't cause excessive API calls. We may want to increase this limit slightly since we're now fetching for all creatives.
 
