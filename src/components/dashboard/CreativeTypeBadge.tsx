@@ -8,7 +8,9 @@ import {
   Users, 
   Briefcase,
   FileText,
-  HelpCircle
+  HelpCircle,
+  Mail,
+  FileSpreadsheet
 } from 'lucide-react';
 
 interface CreativeTypeBadgeProps {
@@ -70,6 +72,16 @@ const TYPE_CONFIG: Record<string, {
     icon: Briefcase,
     label: 'Jobs Ad',
     colors: 'bg-cyan-500/10 text-cyan-600 border-cyan-500/20 dark:bg-cyan-500/20 dark:text-cyan-400',
+  },
+  MESSAGE_AD: {
+    icon: Mail,
+    label: 'Message Ad',
+    colors: 'bg-violet-500/10 text-violet-600 border-violet-500/20 dark:bg-violet-500/20 dark:text-violet-400',
+  },
+  DOCUMENT_AD: {
+    icon: FileSpreadsheet,
+    label: 'Document Ad',
+    colors: 'bg-teal-500/10 text-teal-600 border-teal-500/20 dark:bg-teal-500/20 dark:text-teal-400',
   },
 };
 
