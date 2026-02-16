@@ -3100,13 +3100,14 @@ serve(async (req) => {
           return new Response(JSON.stringify({ periods: dateRanges.map((r: any) => r.key), elements: [] }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         }
 
-        // Step 3: Fetch creative metadata ONCE for all creatives
+        // Step 3: Fetch creative metadata ONCE for all creatives (large parallel batches)
         interface CPCreativeInfo { name: string; campaignId: string; campaignName: string; campaignStatus: string; type: string; reference?: string; imageUrl?: string; }
         const cpCreativeInfo = new Map<string, CPCreativeInfo>();
         const cpRefImageCache = new Map<string, string>();
 
-        const cpBatchSize = 10;
         const cpIds = [...allCreativeIds];
+        // Fire ALL creative metadata fetches in parallel (max 50 concurrent)
+        const cpBatchSize = 50;
         for (let i = 0; i < cpIds.length; i += cpBatchSize) {
           const batch = cpIds.slice(i, i + cpBatchSize);
           await Promise.all(batch.map(async (creativeId) => {
@@ -3117,56 +3118,60 @@ serve(async (req) => {
               if (resp.ok) {
                 const d = await resp.json();
                 const campId = (d.campaign || '').split(':').pop() || '';
-                const info: CPCreativeInfo = {
+                cpCreativeInfo.set(creativeId, {
                   name: d.name || '',
                   campaignId: campId,
                   campaignName: cpCampaignNames.get(campId) || `Campaign ${campId}`,
                   campaignStatus: cpCampaignStatuses.get(campId) || 'UNKNOWN',
                   type: 'SPONSORED_CONTENT',
                   reference: d.content?.reference || undefined,
-                };
-                cpCreativeInfo.set(creativeId, info);
-              }
+                });
+              } else { await resp.text(); }
             } catch (e) { /* ignore */ }
           }));
         }
 
-        // Step 4: Resolve references for images/names ONCE
+        // Step 4: Resolve references for images/names in parallel
         const cpUniqueRefs = new Set<string>();
         for (const [, info] of cpCreativeInfo) {
           if (info.reference) cpUniqueRefs.add(info.reference);
         }
 
         const cpRefNameCache = new Map<string, string>();
-        for (const reference of cpUniqueRefs) {
-          try {
-            if (reference.includes('ugcPost')) {
-              const pid = reference.split(':').pop();
-              const resp = await fetch(`https://api.linkedin.com/v2/ugcPosts/${pid}`, { headers: { 'Authorization': `Bearer ${accessToken}` } });
-              if (resp.ok) {
-                const post = await resp.json();
-                const sc = post.specificContent?.['com.linkedin.ugc.ShareContent'];
-                const txt = sc?.shareCommentary?.text || '';
-                if (txt.trim()) cpRefNameCache.set(reference, txt.replace(/\s+/g, ' ').trim().slice(0, 80));
-                const media = sc?.media?.[0];
-                if (media) {
-                  const img = media.thumbnails?.[0]?.url || media.thumbnails?.[0]?.resolvedUrl || media.originalUrl || '';
+        const refArray = [...cpUniqueRefs];
+        const refBatchSize = 30;
+        for (let i = 0; i < refArray.length; i += refBatchSize) {
+          const batch = refArray.slice(i, i + refBatchSize);
+          await Promise.all(batch.map(async (reference) => {
+            try {
+              if (reference.includes('ugcPost')) {
+                const pid = reference.split(':').pop();
+                const resp = await fetch(`https://api.linkedin.com/v2/ugcPosts/${pid}`, { headers: { 'Authorization': `Bearer ${accessToken}` } });
+                if (resp.ok) {
+                  const post = await resp.json();
+                  const sc = post.specificContent?.['com.linkedin.ugc.ShareContent'];
+                  const txt = sc?.shareCommentary?.text || '';
+                  if (txt.trim()) cpRefNameCache.set(reference, txt.replace(/\s+/g, ' ').trim().slice(0, 80));
+                  const media = sc?.media?.[0];
+                  if (media) {
+                    const img = media.thumbnails?.[0]?.url || media.thumbnails?.[0]?.resolvedUrl || media.originalUrl || '';
+                    if (img) cpRefImageCache.set(reference, img);
+                  }
+                } else { await resp.text(); }
+              } else if (reference.includes('share')) {
+                const sid = reference.split(':').pop();
+                const resp = await fetch(`https://api.linkedin.com/v2/shares/${sid}`, { headers: { 'Authorization': `Bearer ${accessToken}` } });
+                if (resp.ok) {
+                  const share = await resp.json();
+                  const txt = share.text?.text || '';
+                  if (txt.trim()) cpRefNameCache.set(reference, txt.replace(/\s+/g, ' ').trim().slice(0, 80));
+                  const ce = share.content?.contentEntities?.[0];
+                  const img = ce?.thumbnails?.[0]?.resolvedUrl || ce?.thumbnails?.[0]?.url || '';
                   if (img) cpRefImageCache.set(reference, img);
-                }
+                } else { await resp.text(); }
               }
-            } else if (reference.includes('share')) {
-              const sid = reference.split(':').pop();
-              const resp = await fetch(`https://api.linkedin.com/v2/shares/${sid}`, { headers: { 'Authorization': `Bearer ${accessToken}` } });
-              if (resp.ok) {
-                const share = await resp.json();
-                const txt = share.text?.text || '';
-                if (txt.trim()) cpRefNameCache.set(reference, txt.replace(/\s+/g, ' ').trim().slice(0, 80));
-                const ce = share.content?.contentEntities?.[0];
-                const img = ce?.thumbnails?.[0]?.resolvedUrl || ce?.thumbnails?.[0]?.url || '';
-                if (img) cpRefImageCache.set(reference, img);
-              }
-            }
-          } catch (e) { /* ignore */ }
+            } catch (e) { /* ignore */ }
+          }));
         }
 
         // Apply cached names/images
