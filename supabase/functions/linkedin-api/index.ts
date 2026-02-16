@@ -3039,8 +3039,9 @@ serve(async (req) => {
 
         console.log(`[get_creative_performance_report] Starting for account ${accountId}, ${dateRanges.length} periods`);
 
-        // Step 1: Fetch campaigns (once)
+        // Step 1: Fetch campaigns (once) - store name + status
         const cpCampaignNames = new Map<string, string>();
+        const cpCampaignStatuses = new Map<string, string>();
         try {
           const cpCampaignsUrl = `https://api.linkedin.com/rest/adAccounts/${accountId}/adCampaigns?q=search&sortOrder=DESCENDING&count=100`;
           const cpCampaignsResp = await fetch(cpCampaignsUrl, {
@@ -3050,7 +3051,10 @@ serve(async (req) => {
             const cpCampaignsData = await cpCampaignsResp.json();
             for (const c of (cpCampaignsData.elements || [])) {
               const cid = c.id?.toString() || c.$URN?.split(':').pop();
-              if (cid) cpCampaignNames.set(cid, c.name || `Campaign ${cid}`);
+              if (cid) {
+                cpCampaignNames.set(cid, c.name || `Campaign ${cid}`);
+                cpCampaignStatuses.set(cid, c.status || c.runSchedule?.status || 'UNKNOWN');
+              }
             }
           }
         } catch (e) { console.error('[Step 1] campaign fetch error', e); }
@@ -3097,7 +3101,7 @@ serve(async (req) => {
         }
 
         // Step 3: Fetch creative metadata ONCE for all creatives
-        interface CPCreativeInfo { name: string; campaignName: string; type: string; reference?: string; imageUrl?: string; }
+        interface CPCreativeInfo { name: string; campaignId: string; campaignName: string; campaignStatus: string; type: string; reference?: string; imageUrl?: string; }
         const cpCreativeInfo = new Map<string, CPCreativeInfo>();
         const cpRefImageCache = new Map<string, string>();
 
@@ -3115,7 +3119,9 @@ serve(async (req) => {
                 const campId = (d.campaign || '').split(':').pop() || '';
                 const info: CPCreativeInfo = {
                   name: d.name || '',
+                  campaignId: campId,
                   campaignName: cpCampaignNames.get(campId) || `Campaign ${campId}`,
+                  campaignStatus: cpCampaignStatuses.get(campId) || 'UNKNOWN',
                   type: 'SPONSORED_CONTENT',
                   reference: d.content?.reference || undefined,
                 };
@@ -3195,7 +3201,9 @@ serve(async (req) => {
           cpElements.push({
             creativeId,
             creativeName: info?.name || `Creative ${creativeId}`,
+            campaignId: info?.campaignId || '',
             campaignName: info?.campaignName || 'Unknown',
+            campaignStatus: info?.campaignStatus || 'UNKNOWN',
             type: info?.type || 'UNKNOWN',
             imageUrl: info?.imageUrl || undefined,
             periods: periodData,
