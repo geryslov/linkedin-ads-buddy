@@ -6,7 +6,8 @@ import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
-import { Search, ArrowUp, ArrowDown, TrendingUp, TrendingDown, ChevronRight, ChevronDown, Copy } from 'lucide-react';
+import { Search, ArrowUp, ArrowDown, TrendingUp, TrendingDown, ChevronRight, ChevronDown, Copy, Info } from 'lucide-react';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
 interface Props {
   accessToken: string | null;
@@ -52,11 +53,21 @@ function FatigueIndicator({ row }: { row: { last7d: PeriodMetrics; last30d: Peri
   const ctr7 = row.last7d.ctr, ctr30 = row.last30d.ctr;
   const cplRising = cpl7 > 0 && cpl30 > 0 && cpl7 > cpl30 * 1.15;
   const ctrDecline = ctr7 > 0 && ctr30 > 0 && ctr7 < ctr30 * 0.85;
+  const cplChange = cpl30 > 0 ? ((cpl7 - cpl30) / cpl30 * 100).toFixed(0) : '—';
+  const ctrChange = ctr30 > 0 ? ((ctr7 - ctr30) / ctr30 * 100).toFixed(0) : '—';
   if (!cplRising && !ctrDecline) return null;
   return (
-    <div className="flex gap-1 justify-center">
-      {cplRising && <Badge variant="destructive" className="text-[10px] px-1.5 py-0"><TrendingUp className="h-3 w-3 mr-0.5" />CPL↑</Badge>}
-      {ctrDecline && <Badge variant="destructive" className="text-[10px] px-1.5 py-0"><TrendingDown className="h-3 w-3 mr-0.5" />CTR↓</Badge>}
+    <div className="flex flex-col gap-0.5 items-center">
+      {cplRising && (
+        <Badge variant="destructive" className="text-[10px] px-1.5 py-0" title={`CPL 7d: ${formatCurrency(cpl7)} vs 30d: ${formatCurrency(cpl30)} (+${cplChange}%). Fatigue threshold: >15% increase.`}>
+          <TrendingUp className="h-3 w-3 mr-0.5" />CPL +{cplChange}%
+        </Badge>
+      )}
+      {ctrDecline && (
+        <Badge variant="destructive" className="text-[10px] px-1.5 py-0" title={`CTR 7d: ${ctr7.toFixed(2)}% vs 30d: ${ctr30.toFixed(2)}% (${ctrChange}%). Fatigue threshold: >15% decline.`}>
+          <TrendingDown className="h-3 w-3 mr-0.5" />CTR {ctrChange}%
+        </Badge>
+      )}
     </div>
   );
 }
@@ -201,7 +212,25 @@ export function CreativePerformanceReport({ accessToken, selectedAccount }: Prop
           <Switch id="active-filter" checked={activeOnly} onCheckedChange={setActiveOnly} />
           <Label htmlFor="active-filter" className="text-sm cursor-pointer">Active campaigns only</Label>
         </div>
-        <span className="text-sm text-muted-foreground ml-auto">{sorted.length} creatives</span>
+        <span className="text-sm text-muted-foreground">{sorted.length} creatives</span>
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors ml-auto">
+                <Info className="h-3.5 w-3.5" />
+                Fatigue Logic
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="max-w-xs text-xs">
+              <p className="font-semibold mb-1">Fatigue Detection</p>
+              <p>Compares 7-day vs 30-day metrics:</p>
+              <ul className="list-disc pl-4 mt-1 space-y-0.5">
+                <li><span className="font-medium">CPL ↑</span>: 7d CPL is &gt;15% higher than 30d CPL</li>
+                <li><span className="font-medium">CTR ↓</span>: 7d CTR is &gt;15% lower than 30d CTR</li>
+              </ul>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
       </div>
 
       <div className="border border-border rounded-lg overflow-hidden">
