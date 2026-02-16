@@ -2825,106 +2825,20 @@ serve(async (req) => {
         const referenceNameCache = new Map<string, string>();
         const referenceImageCache = new Map<string, string>();
         
-        // Fetch creatives by ID in batches (more reliable than search for specific creatives)
-        const creativeIdsArray = [...creativeIdsWithData];
-        console.log(`[Step 3] Fetching ${creativeIdsArray.length} creatives by ID...`);
+        // Step 3: Create placeholder entries for all creatives with analytics data
+        // (Step 4 will fetch names + references via versioned REST API)
+        console.log(`[Step 3] Creating placeholders for ${creativeIdsWithData.size} creatives with data...`);
         
-        const batchSize = 50;
-        for (let i = 0; i < creativeIdsArray.length; i += batchSize) {
-          const batchIds = creativeIdsArray.slice(i, i + batchSize);
-          
-          // Build the ids parameter for batch GET: ids=List(urn:li:sponsoredCreative:123,urn:li:sponsoredCreative:456)
-          const idsParam = batchIds.map(id => `urn:li:sponsoredCreative:${id}`).join(',');
-          
-          // Try V2 batch GET first (more reliable for specific IDs)
-          const batchUrl = `https://api.linkedin.com/v2/adCreativesV2?ids=List(${idsParam})`;
-          
-          try {
-            const batchResponse = await fetch(batchUrl, {
-              headers: { 'Authorization': `Bearer ${accessToken}` }
-            });
-            
-            if (batchResponse.ok) {
-              const batchData = await batchResponse.json();
-              // V2 batch returns { results: { "urn:li:sponsoredCreative:123": {...}, ... } }
-              const results = batchData.results || {};
-              
-              for (const [urn, creative] of Object.entries(results)) {
-                const creativeObj = creative as any;
-                const creativeId = urn.split(':').pop() || '';
-                
-                const campaignUrn = creativeObj.campaign || '';
-                const campaignId = campaignUrn.split(':').pop() || '';
-                
-                let creativeType = 'SPONSORED_CONTENT';
-                if (creativeObj.type) creativeType = creativeObj.type;
-                else if (creativeObj.variables?.type) creativeType = creativeObj.variables.type;
-                
-                creativeInfoMap.set(creativeId, {
-                  id: creativeId,
-                  name: '',
-                  campaignId,
-                  campaignName: campaignNames.get(campaignId) || `Campaign ${campaignId}`,
-                  status: creativeObj.status || 'UNKNOWN',
-                  type: creativeType,
-                  reference: creativeObj.reference || '',
-                });
-              }
-              
-              if (i === 0) {
-                console.log(`[Step 3] First batch: fetched ${Object.keys(results).length} creatives`);
-              }
-            } else {
-              console.log(`[Step 3] Batch GET failed: ${batchResponse.status}`);
-              
-              // Try individual fetches as fallback
-              for (const creativeId of batchIds) {
-                try {
-                  const singleUrl = `https://api.linkedin.com/v2/adCreativesV2/${creativeId}`;
-                  const singleResponse = await fetch(singleUrl, {
-                    headers: { 'Authorization': `Bearer ${accessToken}` }
-                  });
-                  
-                  if (singleResponse.ok) {
-                    const creativeObj = await singleResponse.json();
-                    const campaignUrn = creativeObj.campaign || '';
-                    const campaignId = campaignUrn.split(':').pop() || '';
-                    
-                    creativeInfoMap.set(creativeId, {
-                      id: creativeId,
-                      name: '',
-                      campaignId,
-                      campaignName: campaignNames.get(campaignId) || `Campaign ${campaignId}`,
-                      status: creativeObj.status || 'UNKNOWN',
-                      type: creativeObj.type || 'SPONSORED_CONTENT',
-                      reference: creativeObj.reference || '',
-                    });
-                  }
-                } catch (err) {
-                  // Skip this creative
-                }
-              }
-            }
-          } catch (err) {
-            console.error(`[Step 3] Batch fetch error:`, err);
-          }
-        }
-        
-        console.log(`[Step 3] Fetched metadata for ${creativeInfoMap.size} of ${creativeIdsArray.length} creatives`);
-        
-        // Create placeholders for any creatives we couldn't fetch
         for (const creativeId of creativeIdsWithData) {
-          if (!creativeInfoMap.has(String(creativeId))) {
-            creativeInfoMap.set(String(creativeId), {
-              id: String(creativeId),
-              name: '',
-              campaignId: '',
-              campaignName: 'Unknown Campaign',
-              status: 'UNKNOWN',
-              type: 'SPONSORED_CONTENT',
-              reference: '',
-            });
-          }
+          creativeInfoMap.set(String(creativeId), {
+            id: String(creativeId),
+            name: '',
+            campaignId: '',
+            campaignName: 'Unknown Campaign',
+            status: 'UNKNOWN',
+            type: 'SPONSORED_CONTENT',
+            reference: '',
+          });
         }
         
         console.log(`[Step 3] Mapped ${creativeInfoMap.size} creatives with analytics`);
@@ -2952,8 +2866,19 @@ serve(async (req) => {
               if (creativeResp.ok) {
                 const creativeDetail = await creativeResp.json();
                 const existing = creativeInfoMap.get(creativeId);
-                if (existing && creativeDetail.name) {
-                  existing.name = creativeDetail.name;
+                if (existing) {
+                  if (creativeDetail.name) existing.name = creativeDetail.name;
+                  // Extract campaign info
+                  const campaignUrn = creativeDetail.campaign || '';
+                  const campaignId = campaignUrn.split(':').pop() || '';
+                  if (campaignId) {
+                    existing.campaignId = campaignId;
+                    existing.campaignName = campaignNames.get(campaignId) || `Campaign ${campaignId}`;
+                  }
+                  if (creativeDetail.status) existing.status = creativeDetail.status;
+                  // Extract reference URN for image resolution
+                  const ref = creativeDetail.content?.reference;
+                  if (ref) existing.reference = ref;
                   creativeInfoMap.set(creativeId, existing);
                 }
               }
