@@ -59,12 +59,12 @@ function FatigueIndicator({ row }: { row: { last7d: PeriodMetrics; last30d: Peri
   if (!cplRising && !ctrDecline) return <span className="text-xs text-green-600 whitespace-nowrap">✓ OK</span>;
   return (
     <TooltipProvider>
-      <div className="flex flex-row gap-1 items-center justify-center whitespace-nowrap">
+      <div className="flex flex-row gap-1 items-center justify-center flex-nowrap">
         {cplRising && (
           <Tooltip>
             <TooltipTrigger asChild>
-              <Badge variant="destructive" className="text-[10px] px-1.5 py-0 cursor-help">
-                <TrendingUp className="h-3 w-3 mr-0.5" />CPL +{cplChange}%
+              <Badge variant="destructive" className="text-[10px] px-1.5 py-0 cursor-help whitespace-nowrap inline-flex">
+                <TrendingUp className="h-3 w-3 mr-0.5 shrink-0" />CPL +{cplChange}%
               </Badge>
             </TooltipTrigger>
             <TooltipContent side="left" className="text-xs max-w-[220px]">
@@ -76,8 +76,8 @@ function FatigueIndicator({ row }: { row: { last7d: PeriodMetrics; last30d: Peri
         {ctrDecline && (
           <Tooltip>
             <TooltipTrigger asChild>
-              <Badge variant="destructive" className="text-[10px] px-1.5 py-0 cursor-help">
-                <TrendingDown className="h-3 w-3 mr-0.5" />CTR {ctrChange}%
+              <Badge variant="destructive" className="text-[10px] px-1.5 py-0 cursor-help whitespace-nowrap inline-flex">
+                <TrendingDown className="h-3 w-3 mr-0.5 shrink-0" />CTR {ctrChange}%
               </Badge>
             </TooltipTrigger>
             <TooltipContent side="left" className="text-xs max-w-[220px]">
@@ -302,7 +302,7 @@ export function CreativePerformanceReport({ accessToken, selectedAccount }: Prop
                     {subHeader(p.key, 'CTR', 'ctr', i)}
                   </Fragment>
                 ))}
-                <th className="text-center p-2 font-semibold w-[80px] text-xs">Trend</th>
+                <th className="text-center p-2 font-semibold min-w-[120px] text-xs">Trend</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border/50">
