@@ -1190,7 +1190,11 @@ serve(async (req) => {
         );
         
         if (!campaignsResponse.ok) {
-          throw new Error(`Failed to fetch campaigns: ${campaignsResponse.status}`);
+          const errorText = await campaignsResponse.text();
+          console.error('[get_creative_report] Failed to fetch campaigns:', campaignsResponse.status, errorText);
+          return new Response(JSON.stringify({ error: `Failed to fetch campaigns: ${campaignsResponse.status}`, elements: [] }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
         }
         
         const campaignsData = await campaignsResponse.json();
@@ -1397,8 +1401,10 @@ serve(async (req) => {
         
         if (!campaignsResponse.ok) {
           const errorText = await campaignsResponse.text();
-          console.error('[Error] Failed to fetch campaigns:', campaignsResponse.status, errorText);
-          throw new Error(`Failed to fetch campaigns: ${campaignsResponse.status}`);
+          console.error('[get_ad_analytics] Failed to fetch campaigns:', campaignsResponse.status, errorText);
+          return new Response(JSON.stringify({ error: `Failed to fetch campaigns: ${campaignsResponse.status}`, elements: [] }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
         }
         
         const campaignsData = await campaignsResponse.json();
