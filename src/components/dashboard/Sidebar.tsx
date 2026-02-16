@@ -14,6 +14,7 @@ import {
   Building2,
   Wallet,
   ImageIcon,
+  TrendingUp,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -32,6 +33,7 @@ const navItems = [
   { id: "budget_pacing", label: "Budget Pacing", icon: Wallet },
   { id: "company_timeline", label: "Company Timeline", icon: Building2 },
   { id: "creatives", label: "Creatives", icon: ImageIcon },
+  { id: "creative_reports", label: "Creative Reports", icon: TrendingUp },
   { id: "reports", label: "Reports", icon: FileBarChart },
   { id: "title_checker", label: "Title Checker", icon: Crown },
 ];
