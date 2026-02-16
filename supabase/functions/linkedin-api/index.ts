@@ -3012,7 +3012,6 @@ serve(async (req) => {
                 if (imgUrl) referenceImageCache.set(reference, imgUrl);
                 }
               }
-            }
           } catch (err) {
             // Silently ignore reference fetch errors
           }
@@ -3034,6 +3033,8 @@ serve(async (req) => {
             creativeInfoMap.set(creativeId, info);
           }
         }
+        const imagesResolved = Array.from(referenceImageCache.values()).filter(v => v).length;
+        console.log(`[Image Debug] referenceImageCache size: ${referenceImageCache.size}, images resolved: ${imagesResolved}, creativeInfoMap size: ${creativeInfoMap.size}`);
         
         // Step 5: Build final report
         console.log('[Step 5] Building final report...');
