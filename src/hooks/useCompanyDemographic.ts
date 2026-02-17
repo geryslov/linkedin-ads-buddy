@@ -10,6 +10,10 @@ export interface CampaignBreakdownItem {
   spent: number;
   leads: number;
   engagements: number;
+  likes: number;
+  comments: number;
+  reactions: number;
+  shares: number;
   ctr: number;
   cpc: number;
   cpm: number;
@@ -22,6 +26,10 @@ export interface ObjectiveBreakdownItem {
   spent: number;
   leads: number;
   engagements: number;
+  likes: number;
+  comments: number;
+  reactions: number;
+  shares: number;
   ctr: number;
   cpc: number;
   cpm: number;
@@ -41,6 +49,10 @@ export interface CompanyDemographicItem {
   spent: number;
   leads: number;
   engagements: number;
+  likes: number;
+  comments: number;
+  reactions: number;
+  shares: number;
   ctr: number;
   cpc: number;
   cpm: number;
@@ -131,6 +143,10 @@ export function useCompanyDemographic(accessToken: string | null) {
         spent: parseFloat(el.costInLocalCurrency || '0'),
         leads: el.leads || 0,
         engagements: el.engagements || 0,
+        likes: el.likes || 0,
+        comments: el.comments || 0,
+        reactions: el.reactions || 0,
+        shares: el.shares || 0,
         ctr: parseFloat(el.ctr || '0'),
         cpc: parseFloat(el.cpc || '0'),
         cpm: parseFloat(el.cpm || '0'),
@@ -141,6 +157,10 @@ export function useCompanyDemographic(accessToken: string | null) {
           spent: b.spent || 0,
           leads: b.leads || 0,
           engagements: b.engagements || 0,
+          likes: b.likes || 0,
+          comments: b.comments || 0,
+          reactions: b.reactions || 0,
+          shares: b.shares || 0,
           ctr: b.ctr || 0,
           cpc: b.cpc || 0,
           cpm: b.cpm || 0,

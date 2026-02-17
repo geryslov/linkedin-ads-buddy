@@ -5,8 +5,9 @@ import {
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { ArrowUpDown, Search, Building2, ExternalLink, Globe, AlertCircle, CheckCircle, ChevronRight, ChevronDown, Target, Megaphone, Loader2 } from 'lucide-react';
+import { ArrowUpDown, Search, Building2, ExternalLink, Globe, AlertCircle, CheckCircle, ChevronRight, ChevronDown, Target, Megaphone, Loader2, Heart, MessageCircle, Sparkles, Share2 } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { CompanyDemographicItem, ObjectiveBreakdownItem, CampaignBreakdownItem } from '@/hooks/useCompanyDemographic';
 
 interface CompanyDemographicTableProps {
@@ -32,6 +33,51 @@ const OBJECTIVE_LABELS: Record<string, string> = {
 
 function formatObjective(objective: string): string {
   return OBJECTIVE_LABELS[objective] || objective.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+interface EngagementBreakdownProps {
+  engagements: number;
+  likes: number;
+  comments: number;
+  reactions: number;
+  shares: number;
+  className?: string;
+}
+
+function EngagementBreakdownPopover({ engagements, likes, comments, reactions, shares, className = '' }: EngagementBreakdownProps) {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button 
+          className={`tabular-nums hover:underline hover:text-primary cursor-pointer transition-colors ${className}`}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {engagements.toLocaleString()}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-48 p-3" align="end" side="bottom">
+        <div className="space-y-1.5">
+          <p className="text-xs font-semibold text-muted-foreground mb-2">Engagement Breakdown</p>
+          <div className="flex items-center justify-between text-sm">
+            <span className="flex items-center gap-1.5 text-muted-foreground"><Heart className="h-3 w-3" />Likes</span>
+            <span className="tabular-nums font-medium">{likes.toLocaleString()}</span>
+          </div>
+          <div className="flex items-center justify-between text-sm">
+            <span className="flex items-center gap-1.5 text-muted-foreground"><MessageCircle className="h-3 w-3" />Comments</span>
+            <span className="tabular-nums font-medium">{comments.toLocaleString()}</span>
+          </div>
+          <div className="flex items-center justify-between text-sm">
+            <span className="flex items-center gap-1.5 text-muted-foreground"><Sparkles className="h-3 w-3" />Reactions</span>
+            <span className="tabular-nums font-medium">{reactions.toLocaleString()}</span>
+          </div>
+          <div className="flex items-center justify-between text-sm">
+            <span className="flex items-center gap-1.5 text-muted-foreground"><Share2 className="h-3 w-3" />Shares</span>
+            <span className="tabular-nums font-medium">{shares.toLocaleString()}</span>
+          </div>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
 }
 
 export function CompanyDemographicTable({ data, isLoading, onExpandObjective, campaignBreakdownCache, loadingObjectives }: CompanyDemographicTableProps) {
@@ -77,7 +123,6 @@ export function CompanyDemographicTable({ data, isLoading, onExpandObjective, ca
         next.delete(key);
       } else {
         next.add(key);
-        // Trigger lazy load if we have campaign IDs and no cached data
         if (breakdown?.campaignIds && breakdown.campaignIds.length > 0 && !campaignBreakdownCache?.has(key)) {
           onExpandObjective?.(companyUrn, objective, breakdown.campaignIds, breakdown.campaignNames || {});
         }
@@ -115,8 +160,12 @@ export function CompanyDemographicTable({ data, isLoading, onExpandObjective, ca
         spent: acc.spent + item.spent,
         leads: acc.leads + item.leads,
         engagements: acc.engagements + item.engagements,
+        likes: acc.likes + item.likes,
+        comments: acc.comments + item.comments,
+        reactions: acc.reactions + item.reactions,
+        shares: acc.shares + item.shares,
       }),
-      { impressions: 0, clicks: 0, spent: 0, leads: 0, engagements: 0 }
+      { impressions: 0, clicks: 0, spent: 0, leads: 0, engagements: 0, likes: 0, comments: 0, reactions: 0, shares: 0 }
     );
   }, [filteredAndSortedData]);
 
@@ -231,7 +280,15 @@ export function CompanyDemographicTable({ data, isLoading, onExpandObjective, ca
                       <TableCell className="text-right tabular-nums">{item.clicks.toLocaleString()}</TableCell>
                       <TableCell className="text-right tabular-nums">${item.spent.toFixed(2)}</TableCell>
                       <TableCell className="text-right tabular-nums">{item.leads.toLocaleString()}</TableCell>
-                      <TableCell className="text-right tabular-nums">{item.engagements.toLocaleString()}</TableCell>
+                      <TableCell className="text-right">
+                        <EngagementBreakdownPopover
+                          engagements={item.engagements}
+                          likes={item.likes}
+                          comments={item.comments}
+                          reactions={item.reactions}
+                          shares={item.shares}
+                        />
+                      </TableCell>
                       <TableCell className="text-right tabular-nums">{item.ctr.toFixed(2)}%</TableCell>
                       <TableCell className="text-right tabular-nums">${item.cpc.toFixed(2)}</TableCell>
                       <TableCell className="text-right tabular-nums">${item.cpm.toFixed(2)}</TableCell>
@@ -278,7 +335,16 @@ export function CompanyDemographicTable({ data, isLoading, onExpandObjective, ca
                             <TableCell className="text-right tabular-nums text-sm text-muted-foreground">{breakdown.clicks.toLocaleString()}</TableCell>
                             <TableCell className="text-right tabular-nums text-sm text-muted-foreground">${breakdown.spent.toFixed(2)}</TableCell>
                             <TableCell className="text-right tabular-nums text-sm text-muted-foreground">{breakdown.leads.toLocaleString()}</TableCell>
-                            <TableCell className="text-right tabular-nums text-sm text-muted-foreground">{breakdown.engagements.toLocaleString()}</TableCell>
+                            <TableCell className="text-right text-sm text-muted-foreground">
+                              <EngagementBreakdownPopover
+                                engagements={breakdown.engagements}
+                                likes={breakdown.likes}
+                                comments={breakdown.comments}
+                                reactions={breakdown.reactions}
+                                shares={breakdown.shares}
+                                className="text-sm text-muted-foreground"
+                              />
+                            </TableCell>
                             <TableCell className="text-right tabular-nums text-sm text-muted-foreground">{breakdown.ctr.toFixed(2)}%</TableCell>
                             <TableCell className="text-right tabular-nums text-sm text-muted-foreground">${breakdown.cpc.toFixed(2)}</TableCell>
                             <TableCell className="text-right tabular-nums text-sm text-muted-foreground">${breakdown.cpm.toFixed(2)}</TableCell>
@@ -312,7 +378,16 @@ export function CompanyDemographicTable({ data, isLoading, onExpandObjective, ca
                               <TableCell className="text-right tabular-nums text-xs text-muted-foreground">{camp.clicks.toLocaleString()}</TableCell>
                               <TableCell className="text-right tabular-nums text-xs text-muted-foreground">${camp.spent.toFixed(2)}</TableCell>
                               <TableCell className="text-right tabular-nums text-xs text-muted-foreground">{camp.leads.toLocaleString()}</TableCell>
-                              <TableCell className="text-right tabular-nums text-xs text-muted-foreground">{camp.engagements.toLocaleString()}</TableCell>
+                              <TableCell className="text-right text-xs text-muted-foreground">
+                                <EngagementBreakdownPopover
+                                  engagements={camp.engagements}
+                                  likes={camp.likes}
+                                  comments={camp.comments}
+                                  reactions={camp.reactions}
+                                  shares={camp.shares}
+                                  className="text-xs text-muted-foreground"
+                                />
+                              </TableCell>
                               <TableCell className="text-right tabular-nums text-xs text-muted-foreground">{camp.ctr.toFixed(2)}%</TableCell>
                               <TableCell className="text-right tabular-nums text-xs text-muted-foreground">${camp.cpc.toFixed(2)}</TableCell>
                               <TableCell className="text-right tabular-nums text-xs text-muted-foreground">${camp.cpm.toFixed(2)}</TableCell>
@@ -343,7 +418,16 @@ export function CompanyDemographicTable({ data, isLoading, onExpandObjective, ca
                 <TableCell className="text-right tabular-nums">{totals.clicks.toLocaleString()}</TableCell>
                 <TableCell className="text-right tabular-nums">${totals.spent.toFixed(2)}</TableCell>
                 <TableCell className="text-right tabular-nums">{totals.leads.toLocaleString()}</TableCell>
-                <TableCell className="text-right tabular-nums">{totals.engagements.toLocaleString()}</TableCell>
+                <TableCell className="text-right">
+                  <EngagementBreakdownPopover
+                    engagements={totals.engagements}
+                    likes={totals.likes}
+                    comments={totals.comments}
+                    reactions={totals.reactions}
+                    shares={totals.shares}
+                    className="font-semibold"
+                  />
+                </TableCell>
                 <TableCell className="text-right tabular-nums">{totalCtr.toFixed(2)}%</TableCell>
                 <TableCell className="text-right tabular-nums">${totalCpc.toFixed(2)}</TableCell>
                 <TableCell className="text-right tabular-nums">${totalCpm.toFixed(2)}</TableCell>
