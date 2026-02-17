@@ -1,54 +1,34 @@
 
 
-# Switch to Anthropic Claude API
+# Add Landing Page Clicks to Company Demographic Report
 
 ## Overview
-Store the provided Anthropic API key as a secure backend secret and update the `analyze-data` edge function to call Claude instead of the Lovable AI gateway. No frontend changes needed.
+Add a "LP Clicks" (Landing Page Clicks) column to the Company Demographic with Website Enrichment report. This metric from LinkedIn's `adAnalyticsV2` API counts clicks that navigate users to the advertiser's landing page, as opposed to social engagement clicks.
 
-## Steps
+## Changes (3 files + 1 edge function)
 
-### 1. Store `ANTHROPIC_API_KEY` as a backend secret
-- Securely save the provided API key so the edge function can access it
+### 1. Edge Function: `supabase/functions/linkedin-api/index.ts`
+- **`get_company_demographic` action (line ~2179):** Add `landingPageClicks` to the `fields` parameter in the API request
+- **Aggregation map (line ~2191):** Add `landingPageClicks: number` to the company map type and aggregate it during pagination
+- **Output mapping (line ~2535+):** Include `landingPageClicks` in the final response elements
 
-### 2. Update `supabase/functions/analyze-data/index.ts`
-- Read `ANTHROPIC_API_KEY` instead of `LOVABLE_API_KEY`
-- Call `https://api.anthropic.com/v1/messages` with model `claude-sonnet-4-20250514`
-- Enable Anthropic streaming (`stream: true`)
-- Parse Anthropic's SSE format (`content_block_delta` events with `text_delta`) and re-emit as OpenAI-compatible SSE format (`data: {"choices":[{"delta":{"content":"..."}}]}`) so the existing frontend works unchanged
-- Keep the same system prompt and CORS handling
-- Handle Anthropic-specific errors (401 invalid key, 429 rate limit, etc.)
+### 2. Hook: `src/hooks/useCompanyDemographic.ts`
+- Add `landingPageClicks: number` to:
+  - `CompanyDemographicItem` interface (line 41)
+  - `ObjectiveBreakdownItem` interface (line 22)
+  - `CampaignBreakdownItem` interface (line 5)
+- Map the field from API response in `fetchCompanyDemographic` (line 135)
+- Add to `totals` computation (line 252)
 
-### No other files change
-The existing `useAIAnalysis.ts` hook and `AIAnalysisPanel.tsx` component already parse OpenAI-compatible SSE, so they work as-is with the translated stream.
+### 3. Table UI: `src/components/dashboard/CompanyDemographicTable.tsx`
+- Add `landingPageClicks` as a sortable column header between "Clicks" and "Spent"
+- Display value in each company row, objective breakdown row, and campaign breakdown row
+- Include in footer totals row
 
-## Technical Details
+### 4. Export: `src/lib/exportUtils.ts`
+- Add `{ key: 'landingPageClicks', label: 'LP Clicks' }` to `companyDemographicColumns`
 
-### Anthropic API call structure
-```text
-POST https://api.anthropic.com/v1/messages
-Headers:
-  x-api-key: ANTHROPIC_API_KEY
-  anthropic-version: 2023-06-01
-  content-type: application/json
-Body:
-  model: claude-sonnet-4-20250514
-  system: (LinkedIn Ads analyst prompt)
-  messages: [{ role: "user", content: question + data }]
-  max_tokens: 4096
-  stream: true
-```
-
-### SSE translation (server-side)
-Anthropic sends events like:
-```text
-event: content_block_delta
-data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"Hello"}}
-```
-
-The edge function reads these and re-emits:
-```text
-data: {"choices":[{"delta":{"content":"Hello"}}]}
-```
-
-This keeps the frontend completely unchanged.
-
+## Technical Notes
+- `landingPageClicks` is a standard LinkedIn adAnalyticsV2 field -- no special API provisioning required
+- The field will be aggregated the same way as `clicks` (summed across time periods per company)
+- The objective and campaign breakdown sub-rows will also show LP clicks when available
