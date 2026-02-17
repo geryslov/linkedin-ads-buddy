@@ -1,65 +1,70 @@
 
 
-# Add Engagement Breakdown (Likes, Comments, Reactions) to Company Demographic Report
+# AI-Powered Q&A for Creative Reports
 
 ## Overview
-Replace the single "Engagements" number with a breakdown showing Likes, Comments, Reactions, and Shares. The total Engagements column stays, but clicking/hovering reveals the granular breakdown via a popover.
+Add an "Ask AI" button to the Creative Reports (Trend) tab that opens a dialog where you can type any question about your creative performance data. The AI analyzes your currently loaded data and streams back an answer in real-time.
+
+No API key needed -- this uses the built-in Lovable AI, which is already configured.
+
+## What You'll Get
+- A floating "Ask AI" button in the Creative Reports toolbar
+- A dialog with a text input where you type any question (e.g., "Which creative has the worst CPL trend?", "What should I pause?", "Summarize top performers")
+- The AI sees all your loaded creative data (spend, CPL, CTR across all time periods, campaign breakdowns, trend flags)
+- Streamed markdown response rendered in real-time
+- Conversation history within the session so you can ask follow-up questions
 
 ## Changes
 
-### 1. Backend: `supabase/functions/linkedin-api/index.ts`
+### 1. New Backend Function: `supabase/functions/analyze-data/index.ts`
+- Receives the user's question + serialized creative report data
+- Calls the Lovable AI gateway with a LinkedIn Ads analyst system prompt
+- Streams the response back via SSE for real-time rendering
+- Handles rate limit (429) and payment (402) errors gracefully
 
-**`get_company_demographic` action (Step 1 analytics fetch):**
-- Add `likes`, `comments`, `reactions`, `shares` to the `fields` parameter alongside `totalEngagements`
-- Update the `companyMap` type to track these four fields
-- Aggregate them during pagination just like the other metrics
+### 2. Update `supabase/config.toml`
+- Add `[functions.analyze-data]` with `verify_jwt = false`
 
-**`get_company_demographic` objective breakdown (Step 4):**
-- Add the same four fields to objective-level analytics queries
-- Aggregate per-objective breakdown
+### 3. New React Hook: `src/hooks/useAIAnalysis.ts`
+- Manages streaming state (loading, partial response, error, conversation history)
+- Sends question + data to the `analyze-data` edge function
+- Parses SSE stream token-by-token and builds the response progressively
 
-**`get_company_campaign_breakdown` action:**
-- Add the four fields to campaign-level queries
-- Include in the response
+### 4. New UI Component: `src/components/dashboard/AIAnalysisPanel.tsx`
+- A Dialog triggered by the "Ask AI" button
+- Text input for free-form questions
+- Streaming markdown response area (using basic markdown rendering)
+- Session-based conversation history (Q&A pairs)
+- Loading indicator while streaming
 
-### 2. Data Hook: `src/hooks/useCompanyDemographic.ts`
-
-- Add `likes`, `comments`, `reactions`, `shares` to `CompanyDemographicItem`, `ObjectiveBreakdownItem`, and `CampaignBreakdownItem` interfaces
-- Map the new fields in the fetch response handler
-
-### 3. UI: `src/components/dashboard/CompanyDemographicTable.tsx`
-
-- Replace the plain Engagements number with a clickable Popover
-- Popover shows a small 4-row breakdown: Likes, Comments, Reactions, Shares
-- The column header remains "Engagements" (total)
-- Apply the same popover pattern at the objective and campaign breakdown levels
-- Footer totals include aggregated likes/comments/reactions/shares in a popover too
+### 5. Integration: `src/components/dashboard/CreativePerformanceReport.tsx`
+- Add an "Ask AI" button next to the existing filters
+- Pass the currently filtered/sorted creative data to the AI panel
+- The AI receives all visible rows with their multi-period metrics
 
 ## Technical Details
 
-### LinkedIn API Fields
-The `adAnalyticsV2` endpoint supports these granular engagement fields at the `MEMBER_COMPANY` pivot:
-- `likes` -- total likes on the ad
-- `comments` -- total comments
-- `reactions` -- total reactions (superset of likes on newer content)
-- `shares` -- total shares/reposts
+### Data Passed to AI
+The creative report data is serialized as JSON context. For each creative, the AI sees:
+- Creative name, type, status, campaign count
+- Spend, CPL, CTR for all 4 periods (7d, 14d, 30d, Last Month)
+- Per-campaign breakdowns
+- Trend flags (CPL rising, CTR declining)
 
-These are added to the existing `fields` query parameter, comma-separated.
+### System Prompt
+The backend instructs the AI to act as a LinkedIn Ads performance analyst, focusing on:
+- Creative performance trends and anomalies
+- Cost efficiency analysis (CPL, CPC, CTR)
+- Fatigue/trend detection insights
+- Actionable optimization recommendations
+- Budget reallocation suggestions
 
-### Popover UI Pattern
+### Streaming Flow
 ```text
-+--------------------+
-| Engagements: 1,234 |  <-- clickable
-+--------------------+
-     |
-     v
-+--------------------+
-| Likes:      450    |
-| Comments:   120    |
-| Reactions:  580    |
-| Shares:      84    |
-+--------------------+
+User types question in dialog
+  --> useAIAnalysis sends { question, data, reportType } to edge function
+  --> Edge function calls Lovable AI gateway (streaming)
+  --> SSE tokens streamed back to browser
+  --> Rendered as markdown in real-time in the dialog
 ```
-
-Each level (company, objective, campaign) gets this popover on the Engagements cell.
 
