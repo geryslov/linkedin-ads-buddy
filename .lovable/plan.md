@@ -1,70 +1,54 @@
 
 
-# AI-Powered Q&A for Creative Reports
+# Switch to Anthropic Claude API
 
 ## Overview
-Add an "Ask AI" button to the Creative Reports (Trend) tab that opens a dialog where you can type any question about your creative performance data. The AI analyzes your currently loaded data and streams back an answer in real-time.
+Store the provided Anthropic API key as a secure backend secret and update the `analyze-data` edge function to call Claude instead of the Lovable AI gateway. No frontend changes needed.
 
-No API key needed -- this uses the built-in Lovable AI, which is already configured.
+## Steps
 
-## What You'll Get
-- A floating "Ask AI" button in the Creative Reports toolbar
-- A dialog with a text input where you type any question (e.g., "Which creative has the worst CPL trend?", "What should I pause?", "Summarize top performers")
-- The AI sees all your loaded creative data (spend, CPL, CTR across all time periods, campaign breakdowns, trend flags)
-- Streamed markdown response rendered in real-time
-- Conversation history within the session so you can ask follow-up questions
+### 1. Store `ANTHROPIC_API_KEY` as a backend secret
+- Securely save the provided API key so the edge function can access it
 
-## Changes
+### 2. Update `supabase/functions/analyze-data/index.ts`
+- Read `ANTHROPIC_API_KEY` instead of `LOVABLE_API_KEY`
+- Call `https://api.anthropic.com/v1/messages` with model `claude-sonnet-4-20250514`
+- Enable Anthropic streaming (`stream: true`)
+- Parse Anthropic's SSE format (`content_block_delta` events with `text_delta`) and re-emit as OpenAI-compatible SSE format (`data: {"choices":[{"delta":{"content":"..."}}]}`) so the existing frontend works unchanged
+- Keep the same system prompt and CORS handling
+- Handle Anthropic-specific errors (401 invalid key, 429 rate limit, etc.)
 
-### 1. New Backend Function: `supabase/functions/analyze-data/index.ts`
-- Receives the user's question + serialized creative report data
-- Calls the Lovable AI gateway with a LinkedIn Ads analyst system prompt
-- Streams the response back via SSE for real-time rendering
-- Handles rate limit (429) and payment (402) errors gracefully
-
-### 2. Update `supabase/config.toml`
-- Add `[functions.analyze-data]` with `verify_jwt = false`
-
-### 3. New React Hook: `src/hooks/useAIAnalysis.ts`
-- Manages streaming state (loading, partial response, error, conversation history)
-- Sends question + data to the `analyze-data` edge function
-- Parses SSE stream token-by-token and builds the response progressively
-
-### 4. New UI Component: `src/components/dashboard/AIAnalysisPanel.tsx`
-- A Dialog triggered by the "Ask AI" button
-- Text input for free-form questions
-- Streaming markdown response area (using basic markdown rendering)
-- Session-based conversation history (Q&A pairs)
-- Loading indicator while streaming
-
-### 5. Integration: `src/components/dashboard/CreativePerformanceReport.tsx`
-- Add an "Ask AI" button next to the existing filters
-- Pass the currently filtered/sorted creative data to the AI panel
-- The AI receives all visible rows with their multi-period metrics
+### No other files change
+The existing `useAIAnalysis.ts` hook and `AIAnalysisPanel.tsx` component already parse OpenAI-compatible SSE, so they work as-is with the translated stream.
 
 ## Technical Details
 
-### Data Passed to AI
-The creative report data is serialized as JSON context. For each creative, the AI sees:
-- Creative name, type, status, campaign count
-- Spend, CPL, CTR for all 4 periods (7d, 14d, 30d, Last Month)
-- Per-campaign breakdowns
-- Trend flags (CPL rising, CTR declining)
-
-### System Prompt
-The backend instructs the AI to act as a LinkedIn Ads performance analyst, focusing on:
-- Creative performance trends and anomalies
-- Cost efficiency analysis (CPL, CPC, CTR)
-- Fatigue/trend detection insights
-- Actionable optimization recommendations
-- Budget reallocation suggestions
-
-### Streaming Flow
+### Anthropic API call structure
 ```text
-User types question in dialog
-  --> useAIAnalysis sends { question, data, reportType } to edge function
-  --> Edge function calls Lovable AI gateway (streaming)
-  --> SSE tokens streamed back to browser
-  --> Rendered as markdown in real-time in the dialog
+POST https://api.anthropic.com/v1/messages
+Headers:
+  x-api-key: ANTHROPIC_API_KEY
+  anthropic-version: 2023-06-01
+  content-type: application/json
+Body:
+  model: claude-sonnet-4-20250514
+  system: (LinkedIn Ads analyst prompt)
+  messages: [{ role: "user", content: question + data }]
+  max_tokens: 4096
+  stream: true
 ```
+
+### SSE translation (server-side)
+Anthropic sends events like:
+```text
+event: content_block_delta
+data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"Hello"}}
+```
+
+The edge function reads these and re-emits:
+```text
+data: {"choices":[{"delta":{"content":"Hello"}}]}
+```
+
+This keeps the frontend completely unchanged.
 
