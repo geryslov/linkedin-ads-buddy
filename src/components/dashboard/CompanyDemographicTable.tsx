@@ -45,35 +45,45 @@ interface EngagementBreakdownProps {
 }
 
 function EngagementBreakdownPopover({ engagements, likes, comments, reactions, shares, className = '' }: EngagementBreakdownProps) {
+  const maxVal = Math.max(likes, comments, reactions, shares, 1);
+  const items = [
+    { label: 'Likes', value: likes, icon: Heart, color: 'bg-rose-500' },
+    { label: 'Comments', value: comments, icon: MessageCircle, color: 'bg-sky-500' },
+    { label: 'Reactions', value: reactions, icon: Sparkles, color: 'bg-amber-500' },
+    { label: 'Shares', value: shares, icon: Share2, color: 'bg-emerald-500' },
+  ];
+
   return (
     <Popover>
       <PopoverTrigger asChild>
         <button 
-          className={`tabular-nums hover:underline hover:text-primary cursor-pointer transition-colors ${className}`}
+          className={`tabular-nums hover:text-primary cursor-pointer transition-colors inline-flex items-center gap-1.5 ${className}`}
           onClick={(e) => e.stopPropagation()}
         >
           {engagements.toLocaleString()}
+          <ChevronDown className="h-3 w-3 opacity-40" />
         </button>
       </PopoverTrigger>
-      <PopoverContent className="w-48 p-3" align="end" side="bottom">
-        <div className="space-y-1.5">
-          <p className="text-xs font-semibold text-muted-foreground mb-2">Engagement Breakdown</p>
-          <div className="flex items-center justify-between text-sm">
-            <span className="flex items-center gap-1.5 text-muted-foreground"><Heart className="h-3 w-3" />Likes</span>
-            <span className="tabular-nums font-medium">{likes.toLocaleString()}</span>
-          </div>
-          <div className="flex items-center justify-between text-sm">
-            <span className="flex items-center gap-1.5 text-muted-foreground"><MessageCircle className="h-3 w-3" />Comments</span>
-            <span className="tabular-nums font-medium">{comments.toLocaleString()}</span>
-          </div>
-          <div className="flex items-center justify-between text-sm">
-            <span className="flex items-center gap-1.5 text-muted-foreground"><Sparkles className="h-3 w-3" />Reactions</span>
-            <span className="tabular-nums font-medium">{reactions.toLocaleString()}</span>
-          </div>
-          <div className="flex items-center justify-between text-sm">
-            <span className="flex items-center gap-1.5 text-muted-foreground"><Share2 className="h-3 w-3" />Shares</span>
-            <span className="tabular-nums font-medium">{shares.toLocaleString()}</span>
-          </div>
+      <PopoverContent className="w-56 p-3" align="end" side="bottom">
+        <p className="text-xs font-semibold text-muted-foreground mb-3">Engagement Breakdown</p>
+        <div className="space-y-2.5">
+          {items.map(({ label, value, icon: Icon, color }) => (
+            <div key={label} className="space-y-1">
+              <div className="flex items-center justify-between text-sm">
+                <span className="flex items-center gap-1.5 text-muted-foreground">
+                  <Icon className="h-3 w-3" />
+                  {label}
+                </span>
+                <span className="tabular-nums font-medium">{value.toLocaleString()}</span>
+              </div>
+              <div className="h-1.5 w-full rounded-full bg-muted/50 overflow-hidden">
+                <div
+                  className={`h-full rounded-full ${color} transition-all`}
+                  style={{ width: `${(value / maxVal) * 100}%` }}
+                />
+              </div>
+            </div>
+          ))}
         </div>
       </PopoverContent>
     </Popover>
@@ -218,7 +228,7 @@ export function CompanyDemographicTable({ data, isLoading, onExpandObjective, ca
           <TableHeader>
             <TableRow className="bg-muted/30 hover:bg-muted/30">
               <TableHead className="min-w-[150px]"><SortButton field="entityName">Company</SortButton></TableHead>
-              <TableHead className="min-w-[120px]"><SortButton field="enrichmentStatus">Website</SortButton></TableHead>
+              <TableHead className="max-w-[200px]"><SortButton field="enrichmentStatus">Website</SortButton></TableHead>
               <TableHead className="text-right"><SortButton field="impressions">Impressions</SortButton></TableHead>
               <TableHead className="text-right"><SortButton field="clicks">Clicks</SortButton></TableHead>
               <TableHead className="text-right"><SortButton field="spent">Spent</SortButton></TableHead>
@@ -266,11 +276,11 @@ export function CompanyDemographicTable({ data, isLoading, onExpandObjective, ca
                           )}
                         </div>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="max-w-[200px]">
                         {item.website ? (
                           <a href={item.website.startsWith('http') ? item.website : `https://${item.website}`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-primary hover:underline text-sm" onClick={(e) => e.stopPropagation()}>
                             <Globe className="h-3 w-3 flex-shrink-0" />
-                            <span className="break-words">{item.website.replace(/^https?:\/\//, '')}</span>
+                            <span className="truncate">{item.website.replace(/^https?:\/\//, '')}</span>
                           </a>
                         ) : (
                           getStatusBadge(item.enrichmentStatus)
