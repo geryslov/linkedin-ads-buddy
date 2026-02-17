@@ -155,7 +155,10 @@ export function CreativePerformanceReport({ accessToken, selectedAccount }: Prop
       result = result.filter(r => r.creativeName.toLowerCase().includes(q));
     }
     if (activeOnly) {
-      result = result.filter(r => r.creativeStatus === 'ACTIVE');
+      result = result.filter(r => 
+        r.creativeStatus === 'ACTIVE' || 
+        r.campaigns.some(c => c.campaignStatus === 'ACTIVE' || c.creativeStatus === 'ACTIVE')
+      );
     }
     if (typeFilter !== 'all') {
       result = result.filter(r => r.type === typeFilter);
@@ -254,24 +257,10 @@ export function CreativePerformanceReport({ accessToken, selectedAccount }: Prop
           </SelectContent>
         </Select>
         <span className="text-sm text-muted-foreground">{sorted.length} creatives</span>
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors ml-auto">
-                <Info className="h-3.5 w-3.5" />
-                Trend Logic
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" className="max-w-xs text-xs">
-              <p className="font-semibold mb-1">Performance Trend Detection</p>
-              <p>Compares 7-day vs 30-day metrics:</p>
-              <ul className="list-disc pl-4 mt-1 space-y-0.5">
-                <li><span className="font-medium">CPL ↑</span>: 7d CPL is &gt;15% higher than 30d CPL</li>
-                <li><span className="font-medium">CTR ↓</span>: 7d CTR is &gt;15% lower than 30d CTR</li>
-              </ul>
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
+      </div>
+      <div className="flex items-center gap-3 px-3 py-2 rounded-md bg-muted/40 border border-border/50 text-xs text-muted-foreground">
+        <Info className="h-3.5 w-3.5 shrink-0 text-primary" />
+        <span><span className="font-medium text-foreground">Trend Logic</span> — Compares 7d vs 30d: <span className="font-medium">CPL ↑</span> flagged if 7d CPL &gt;15% above 30d &nbsp;|&nbsp; <span className="font-medium">CTR ↓</span> flagged if 7d CTR &gt;15% below 30d</span>
       </div>
 
       <div className="border border-border rounded-lg overflow-hidden">
