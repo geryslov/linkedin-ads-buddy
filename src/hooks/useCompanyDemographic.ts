@@ -9,6 +9,7 @@ export interface CampaignBreakdownItem {
   clicks: number;
   spent: number;
   leads: number;
+  engagements: number;
   ctr: number;
   cpc: number;
   cpm: number;
@@ -20,13 +21,12 @@ export interface ObjectiveBreakdownItem {
   clicks: number;
   spent: number;
   leads: number;
+  engagements: number;
   ctr: number;
   cpc: number;
   cpm: number;
-  // Campaign IDs and names for lazy loading
   campaignIds?: string[];
   campaignNames?: Record<string, string>;
-  // Campaign breakdown is lazily loaded
   campaignBreakdown?: CampaignBreakdownItem[];
 }
 
@@ -40,6 +40,7 @@ export interface CompanyDemographicItem {
   clicks: number;
   spent: number;
   leads: number;
+  engagements: number;
   ctr: number;
   cpc: number;
   cpm: number;
@@ -129,6 +130,7 @@ export function useCompanyDemographic(accessToken: string | null) {
         clicks: el.clicks || 0,
         spent: parseFloat(el.costInLocalCurrency || '0'),
         leads: el.leads || 0,
+        engagements: el.engagements || 0,
         ctr: parseFloat(el.ctr || '0'),
         cpc: parseFloat(el.cpc || '0'),
         cpm: parseFloat(el.cpm || '0'),
@@ -138,12 +140,12 @@ export function useCompanyDemographic(accessToken: string | null) {
           clicks: b.clicks || 0,
           spent: b.spent || 0,
           leads: b.leads || 0,
+          engagements: b.engagements || 0,
           ctr: b.ctr || 0,
           cpc: b.cpc || 0,
           cpm: b.cpm || 0,
           campaignIds: b.campaignIds || [],
           campaignNames: b.campaignNames || {},
-          // No campaignBreakdown in initial load — it's lazy loaded
         })) || undefined,
       }));
       
