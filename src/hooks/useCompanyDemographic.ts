@@ -7,6 +7,7 @@ export interface CampaignBreakdownItem {
   campaignName: string;
   impressions: number;
   clicks: number;
+  landingPageClicks: number;
   spent: number;
   leads: number;
   engagements: number;
@@ -23,6 +24,7 @@ export interface ObjectiveBreakdownItem {
   objective: string;
   impressions: number;
   clicks: number;
+  landingPageClicks: number;
   spent: number;
   leads: number;
   engagements: number;
@@ -46,6 +48,7 @@ export interface CompanyDemographicItem {
   enrichmentStatus: 'resolved' | 'fallback' | 'unresolved';
   impressions: number;
   clicks: number;
+  landingPageClicks: number;
   spent: number;
   leads: number;
   engagements: number;
@@ -140,6 +143,7 @@ export function useCompanyDemographic(accessToken: string | null) {
         enrichmentStatus: el.enrichmentStatus || 'unresolved',
         impressions: el.impressions || 0,
         clicks: el.clicks || 0,
+        landingPageClicks: el.landingPageClicks || 0,
         spent: parseFloat(el.costInLocalCurrency || '0'),
         leads: el.leads || 0,
         engagements: el.engagements || 0,
@@ -154,6 +158,7 @@ export function useCompanyDemographic(accessToken: string | null) {
           objective: b.objective || 'UNKNOWN',
           impressions: b.impressions || 0,
           clicks: b.clicks || 0,
+          landingPageClicks: b.landingPageClicks || 0,
           spent: b.spent || 0,
           leads: b.leads || 0,
           engagements: b.engagements || 0,
@@ -254,12 +259,13 @@ export function useCompanyDemographic(accessToken: string | null) {
       (acc, item) => ({
         impressions: acc.impressions + item.impressions,
         clicks: acc.clicks + item.clicks,
+        landingPageClicks: acc.landingPageClicks + item.landingPageClicks,
         spent: acc.spent + item.spent,
         leads: acc.leads + item.leads,
         resolved: acc.resolved + (item.enrichmentStatus === 'resolved' ? 1 : 0),
         unresolved: acc.unresolved + (item.enrichmentStatus === 'unresolved' ? 1 : 0),
       }),
-      { impressions: 0, clicks: 0, spent: 0, leads: 0, resolved: 0, unresolved: 0 }
+      { impressions: 0, clicks: 0, landingPageClicks: 0, spent: 0, leads: 0, resolved: 0, unresolved: 0 }
     );
   }, [companyData]);
 

@@ -95,6 +95,7 @@ export const companyDemographicColumns = [
   { key: 'linkedInUrl', label: 'LinkedIn URL' },
   { key: 'impressions', label: 'Impressions' },
   { key: 'clicks', label: 'Clicks' },
+  { key: 'landingPageClicks', label: 'LP Clicks' },
   { key: 'spent', label: 'Spent' },
   { key: 'leads', label: 'Leads' },
   { key: 'ctr', label: 'CTR %' },

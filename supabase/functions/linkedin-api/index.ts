@@ -2176,7 +2176,7 @@ serve(async (req) => {
           `timeGranularity=${granularity === 'ALL' ? 'ALL' : granularity}&` +
           `pivot=MEMBER_COMPANY&` +
           `accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
-          `fields=impressions,clicks,costInLocalCurrency,costInUsd,externalWebsiteConversions,oneClickLeads,totalEngagements,likes,comments,reactions,shares,pivotValue&` +
+          `fields=impressions,clicks,landingPageClicks,costInLocalCurrency,costInUsd,externalWebsiteConversions,oneClickLeads,totalEngagements,likes,comments,reactions,shares,pivotValue&` +
           `count=10000`;
         
         if (campaignIds && campaignIds.length > 0) {
@@ -2196,6 +2196,7 @@ serve(async (req) => {
           spentUsd: number; 
           leads: number;
           engagements: number;
+          landingPageClicks: number;
           likes: number;
           comments: number;
           reactions: number;
@@ -2242,6 +2243,7 @@ serve(async (req) => {
               existing.spent += parseFloat(el.costInLocalCurrency || '0');
               existing.spentUsd += parseFloat(el.costInUsd || '0');
               existing.leads += (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
+              existing.landingPageClicks += (el.landingPageClicks || 0);
               existing.engagements += (el.totalEngagements || 0);
               existing.likes += (el.likes || 0);
               existing.comments += (el.comments || 0);
@@ -2255,6 +2257,7 @@ serve(async (req) => {
                 spent: parseFloat(el.costInLocalCurrency || '0'),
                 spentUsd: parseFloat(el.costInUsd || '0'),
                 leads: (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0),
+                landingPageClicks: el.landingPageClicks || 0,
                 engagements: el.totalEngagements || 0,
                 likes: el.likes || 0,
                 comments: el.comments || 0,
@@ -2443,7 +2446,7 @@ serve(async (req) => {
                 params.set('timeGranularity', granularity === 'ALL' ? 'ALL' : granularity);
                 params.set('pivot', 'MEMBER_COMPANY');
                 params.set('accounts[0]', `urn:li:sponsoredAccount:${accountId}`);
-                params.set('fields', 'impressions,clicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions,totalEngagements,likes,comments,reactions,shares,pivotValue');
+                params.set('fields', 'impressions,clicks,landingPageClicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions,totalEngagements,likes,comments,reactions,shares,pivotValue');
                 params.set('count', '10000');
                 
                 campIds.forEach((id, idx) => {
@@ -2490,13 +2493,14 @@ serve(async (req) => {
                   const clicks = el.clicks || 0;
                   const spent = parseFloat(el.costInLocalCurrency || '0');
                   const leads = (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
+                  const landingPageClicks = el.landingPageClicks || 0;
                   const engagements = el.totalEngagements || 0;
                   const likes = el.likes || 0;
                   const comments = el.comments || 0;
                   const reactions = el.reactions || 0;
                   const shares = el.shares || 0;
                   
-                  if (impressions === 0 && clicks === 0 && spent === 0 && leads === 0 && engagements === 0) continue;
+                  if (impressions === 0 && clicks === 0 && spent === 0 && leads === 0 && engagements === 0 && landingPageClicks === 0) continue;
                   
                   const objEntries = objectiveBreakdownMap.get(entityUrn) || [];
                   const existingObj = objEntries.find(e => e.objective === objective);
@@ -2505,13 +2509,14 @@ serve(async (req) => {
                     existingObj.clicks += clicks;
                     existingObj.spent += spent;
                     existingObj.leads += leads;
+                    existingObj.landingPageClicks += landingPageClicks;
                     existingObj.engagements += engagements;
                     existingObj.likes += likes;
                     existingObj.comments += comments;
                     existingObj.reactions += reactions;
                     existingObj.shares += shares;
                   } else {
-                    objEntries.push({ objective, impressions, clicks, spent, leads, engagements, likes, comments, reactions, shares });
+                    objEntries.push({ objective, impressions, clicks, spent, leads, landingPageClicks, engagements, likes, comments, reactions, shares });
                   }
                   objectiveBreakdownMap.set(entityUrn, objEntries);
                 }
@@ -2550,6 +2555,7 @@ serve(async (req) => {
             clicks: b.clicks,
             spent: parseFloat(b.spent.toFixed(2)),
             leads: b.leads,
+            landingPageClicks: b.landingPageClicks || 0,
             engagements: b.engagements || 0,
             likes: b.likes || 0,
             comments: b.comments || 0,
@@ -2569,6 +2575,7 @@ serve(async (req) => {
             enrichmentStatus: websiteInfo.status,
             impressions: metrics.impressions,
             clicks: metrics.clicks,
+            landingPageClicks: metrics.landingPageClicks,
             costInLocalCurrency: metrics.spent.toFixed(2),
             costInUsd: metrics.spentUsd.toFixed(2),
             leads: metrics.leads,
@@ -2642,7 +2649,7 @@ serve(async (req) => {
                 `pivot=MEMBER_COMPANY&` +
                 `accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
                 `campaigns[0]=urn:li:sponsoredCampaign:${campaignId}&` +
-                `fields=impressions,clicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions,totalEngagements,likes,comments,reactions,shares,pivotValue&` +
+                `fields=impressions,clicks,landingPageClicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions,totalEngagements,likes,comments,reactions,shares,pivotValue&` +
                 `count=10000`;
               
               const response = await fetch(url, {
@@ -2664,7 +2671,7 @@ serve(async (req) => {
         console.log(`[get_company_campaign_breakdown] Completed ${allResults.length} campaign queries`);
         
         // Build breakdowns: companyUrn -> [{ campaignId, campaignName, metrics }]
-        const breakdowns: Record<string, Array<{ campaignId: string; campaignName: string; impressions: number; clicks: number; spent: number; leads: number; engagements: number; likes: number; comments: number; reactions: number; shares: number; ctr: number; cpc: number; cpm: number }>> = {};
+        const breakdowns: Record<string, Array<{ campaignId: string; campaignName: string; impressions: number; clicks: number; landingPageClicks: number; spent: number; leads: number; engagements: number; likes: number; comments: number; reactions: number; shares: number; ctr: number; cpc: number; cpm: number }>> = {};
         const nameMap = objCampaignNames || {};
         
         for (const { campaignId, elements } of allResults) {
@@ -2678,13 +2685,14 @@ serve(async (req) => {
             const clicks = el.clicks || 0;
             const spent = parseFloat(el.costInLocalCurrency || '0');
             const leads = (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
+            const landingPageClicks = el.landingPageClicks || 0;
             const engagements = el.totalEngagements || 0;
             const likes = el.likes || 0;
             const comments = el.comments || 0;
             const reactions = el.reactions || 0;
             const shares = el.shares || 0;
             
-            if (impressions === 0 && clicks === 0 && spent === 0 && leads === 0 && engagements === 0) continue;
+            if (impressions === 0 && clicks === 0 && spent === 0 && leads === 0 && engagements === 0 && landingPageClicks === 0) continue;
             
             if (!breakdowns[entityUrn]) breakdowns[entityUrn] = [];
             
@@ -2694,6 +2702,7 @@ serve(async (req) => {
               existing.clicks += clicks;
               existing.spent += spent;
               existing.leads += leads;
+              existing.landingPageClicks += landingPageClicks;
               existing.engagements += engagements;
               existing.likes += likes;
               existing.comments += comments;
@@ -2708,6 +2717,7 @@ serve(async (req) => {
                 campaignName: campName,
                 impressions,
                 clicks,
+                landingPageClicks,
                 spent: parseFloat(spent.toFixed(2)),
                 leads,
                 engagements,

@@ -18,7 +18,7 @@ interface CompanyDemographicTableProps {
   loadingObjectives?: Set<string>;
 }
 
-type SortField = 'entityName' | 'impressions' | 'clicks' | 'spent' | 'leads' | 'engagements' | 'ctr' | 'cpc' | 'cpm' | 'enrichmentStatus';
+type SortField = 'entityName' | 'impressions' | 'clicks' | 'landingPageClicks' | 'spent' | 'leads' | 'engagements' | 'ctr' | 'cpc' | 'cpm' | 'enrichmentStatus';
 type SortDirection = 'asc' | 'desc';
 
 const OBJECTIVE_LABELS: Record<string, string> = {
@@ -167,6 +167,7 @@ export function CompanyDemographicTable({ data, isLoading, onExpandObjective, ca
       (acc, item) => ({
         impressions: acc.impressions + item.impressions,
         clicks: acc.clicks + item.clicks,
+        landingPageClicks: acc.landingPageClicks + item.landingPageClicks,
         spent: acc.spent + item.spent,
         leads: acc.leads + item.leads,
         engagements: acc.engagements + item.engagements,
@@ -175,7 +176,7 @@ export function CompanyDemographicTable({ data, isLoading, onExpandObjective, ca
         reactions: acc.reactions + item.reactions,
         shares: acc.shares + item.shares,
       }),
-      { impressions: 0, clicks: 0, spent: 0, leads: 0, engagements: 0, likes: 0, comments: 0, reactions: 0, shares: 0 }
+      { impressions: 0, clicks: 0, landingPageClicks: 0, spent: 0, leads: 0, engagements: 0, likes: 0, comments: 0, reactions: 0, shares: 0 }
     );
   }, [filteredAndSortedData]);
 
@@ -231,6 +232,7 @@ export function CompanyDemographicTable({ data, isLoading, onExpandObjective, ca
               <TableHead className="max-w-[200px]"><SortButton field="enrichmentStatus">Website</SortButton></TableHead>
               <TableHead className="text-right"><SortButton field="impressions">Impressions</SortButton></TableHead>
               <TableHead className="text-right"><SortButton field="clicks">Clicks</SortButton></TableHead>
+              <TableHead className="text-right"><SortButton field="landingPageClicks">LP Clicks</SortButton></TableHead>
               <TableHead className="text-right"><SortButton field="spent">Spent</SortButton></TableHead>
               <TableHead className="text-right"><SortButton field="leads">Leads</SortButton></TableHead>
               <TableHead className="text-right"><SortButton field="engagements">Engagements</SortButton></TableHead>
@@ -242,7 +244,7 @@ export function CompanyDemographicTable({ data, isLoading, onExpandObjective, ca
           <TableBody>
             {filteredAndSortedData.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={10} className="h-24 text-center text-muted-foreground">
+                <TableCell colSpan={11} className="h-24 text-center text-muted-foreground">
                   <div className="flex flex-col items-center gap-2">
                     <Building2 className="h-8 w-8 opacity-50" />
                     <span>No company demographic data available</span>
@@ -288,6 +290,7 @@ export function CompanyDemographicTable({ data, isLoading, onExpandObjective, ca
                       </TableCell>
                       <TableCell className="text-right tabular-nums">{item.impressions.toLocaleString()}</TableCell>
                       <TableCell className="text-right tabular-nums">{item.clicks.toLocaleString()}</TableCell>
+                      <TableCell className="text-right tabular-nums">{item.landingPageClicks.toLocaleString()}</TableCell>
                       <TableCell className="text-right tabular-nums">${item.spent.toFixed(2)}</TableCell>
                       <TableCell className="text-right tabular-nums">{item.leads.toLocaleString()}</TableCell>
                       <TableCell className="text-right">
@@ -343,6 +346,7 @@ export function CompanyDemographicTable({ data, isLoading, onExpandObjective, ca
                             </TableCell>
                             <TableCell className="text-right tabular-nums text-sm text-muted-foreground">{breakdown.impressions.toLocaleString()}</TableCell>
                             <TableCell className="text-right tabular-nums text-sm text-muted-foreground">{breakdown.clicks.toLocaleString()}</TableCell>
+                            <TableCell className="text-right tabular-nums text-sm text-muted-foreground">{breakdown.landingPageClicks.toLocaleString()}</TableCell>
                             <TableCell className="text-right tabular-nums text-sm text-muted-foreground">${breakdown.spent.toFixed(2)}</TableCell>
                             <TableCell className="text-right tabular-nums text-sm text-muted-foreground">{breakdown.leads.toLocaleString()}</TableCell>
                             <TableCell className="text-right text-sm text-muted-foreground">
@@ -363,7 +367,7 @@ export function CompanyDemographicTable({ data, isLoading, onExpandObjective, ca
                           {/* Campaign breakdown rows - lazy loaded */}
                           {isObjExpanded && isLoadingCampaigns && (
                             <TableRow key={`${objKey}-loading`} className="bg-muted/[0.02] border-l-4 border-l-primary/10">
-                              <TableCell colSpan={10} className="pl-16">
+                               <TableCell colSpan={11} className="pl-16">
                                 <div className="flex items-center gap-2 py-2">
                                   <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
                                   <span className="text-xs text-muted-foreground">Loading campaign breakdown...</span>
@@ -386,6 +390,7 @@ export function CompanyDemographicTable({ data, isLoading, onExpandObjective, ca
                               </TableCell>
                               <TableCell className="text-right tabular-nums text-xs text-muted-foreground">{camp.impressions.toLocaleString()}</TableCell>
                               <TableCell className="text-right tabular-nums text-xs text-muted-foreground">{camp.clicks.toLocaleString()}</TableCell>
+                              <TableCell className="text-right tabular-nums text-xs text-muted-foreground">{camp.landingPageClicks.toLocaleString()}</TableCell>
                               <TableCell className="text-right tabular-nums text-xs text-muted-foreground">${camp.spent.toFixed(2)}</TableCell>
                               <TableCell className="text-right tabular-nums text-xs text-muted-foreground">{camp.leads.toLocaleString()}</TableCell>
                               <TableCell className="text-right text-xs text-muted-foreground">
@@ -406,7 +411,7 @@ export function CompanyDemographicTable({ data, isLoading, onExpandObjective, ca
 
                           {isObjExpanded && !isLoadingCampaigns && cachedCampaigns && cachedCampaigns.length === 0 && (
                             <TableRow key={`${objKey}-empty`} className="bg-muted/[0.02] border-l-4 border-l-primary/10">
-                              <TableCell colSpan={10} className="pl-16">
+                              <TableCell colSpan={11} className="pl-16">
                                 <span className="text-xs text-muted-foreground/60">No campaign-level data for this company</span>
                               </TableCell>
                             </TableRow>
@@ -426,6 +431,7 @@ export function CompanyDemographicTable({ data, isLoading, onExpandObjective, ca
                 <TableCell></TableCell>
                 <TableCell className="text-right tabular-nums">{totals.impressions.toLocaleString()}</TableCell>
                 <TableCell className="text-right tabular-nums">{totals.clicks.toLocaleString()}</TableCell>
+                <TableCell className="text-right tabular-nums">{totals.landingPageClicks.toLocaleString()}</TableCell>
                 <TableCell className="text-right tabular-nums">${totals.spent.toFixed(2)}</TableCell>
                 <TableCell className="text-right tabular-nums">{totals.leads.toLocaleString()}</TableCell>
                 <TableCell className="text-right">
