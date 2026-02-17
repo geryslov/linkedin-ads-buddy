@@ -1,44 +1,65 @@
 
 
-# Fix: Ad Type Filter Shows Only "Sponsored Content"
+# Add Engagement Breakdown (Likes, Comments, Reactions) to Company Demographic Report
 
-## Problem
-The creative type detection in the backend function defaults everything to `SPONSORED_CONTENT` because it checks for content sub-fields (`content.textAd`, `content.spotlightAd`, etc.) that don't exist in the REST API v202511 response. The REST API returns `content` as a simple URN reference string, not a nested object with type-specific keys.
-
-## Solution
-Use the campaign's `type` field (which LinkedIn always returns on campaign objects as e.g. `TEXT_AD`, `VIDEO_AD`, `SPONSORED_UPDATES`) to determine the ad format. This is reliable because LinkedIn enforces that all creatives in a campaign must match the campaign's ad format.
+## Overview
+Replace the single "Engagements" number with a breakdown showing Likes, Comments, Reactions, and Shares. The total Engagements column stays, but clicking/hovering reveals the granular breakdown via a popover.
 
 ## Changes
 
-### 1. `supabase/functions/linkedin-api/index.ts` -- Step 1 (Campaign Fetch)
-- Capture the campaign `type` field alongside `name` and `status` in a new map: `cpCampaignTypes`.
-- The campaign `type` field returns values like: `TEXT_AD`, `SPONSORED_UPDATES`, `SPONSORED_INMAILS`, `DYNAMIC`, etc.
+### 1. Backend: `supabase/functions/linkedin-api/index.ts`
 
-### 2. `supabase/functions/linkedin-api/index.ts` -- Step 3 (Creative Metadata)
-- Replace the unreliable content-structure detection with campaign-type-based detection.
-- Map campaign types to creative display types:
-  - `TEXT_AD` -> `TEXT_AD`
-  - `SPONSORED_UPDATES` -> check the `content` reference for video/carousel hints, otherwise `SPONSORED_CONTENT`
-  - `SPONSORED_INMAILS` / `SPONSORED_MESSAGING` -> `MESSAGE_AD`
-  - `DYNAMIC` -> inspect the creative's `content` for `spotlightAd`, `followerAd`, `jobsAd` (dynamic ads do have these subfields), or default to `SPOTLIGHT_AD`
-- Add a `console.log` to output the detected type distribution for debugging.
-- Also add logging of a sample creative's raw response structure so we can verify what fields are actually returned.
+**`get_company_demographic` action (Step 1 analytics fetch):**
+- Add `likes`, `comments`, `reactions`, `shares` to the `fields` parameter alongside `totalEngagements`
+- Update the `companyMap` type to track these four fields
+- Aggregate them during pagination just like the other metrics
 
-### 3. `src/components/dashboard/CreativeTypeBadge.tsx`
-- Add `MESSAGE_AD` and `DOCUMENT_AD` entries to the type config for complete coverage.
+**`get_company_demographic` objective breakdown (Step 4):**
+- Add the same four fields to objective-level analytics queries
+- Aggregate per-objective breakdown
+
+**`get_company_campaign_breakdown` action:**
+- Add the four fields to campaign-level queries
+- Include in the response
+
+### 2. Data Hook: `src/hooks/useCompanyDemographic.ts`
+
+- Add `likes`, `comments`, `reactions`, `shares` to `CompanyDemographicItem`, `ObjectiveBreakdownItem`, and `CampaignBreakdownItem` interfaces
+- Map the new fields in the fetch response handler
+
+### 3. UI: `src/components/dashboard/CompanyDemographicTable.tsx`
+
+- Replace the plain Engagements number with a clickable Popover
+- Popover shows a small 4-row breakdown: Likes, Comments, Reactions, Shares
+- The column header remains "Engagements" (total)
+- Apply the same popover pattern at the objective and campaign breakdown levels
+- Footer totals include aggregated likes/comments/reactions/shares in a popover too
 
 ## Technical Details
 
-The campaign `type` field is fetched from the same `/rest/adAccounts/{id}/adCampaigns` endpoint already called in Step 1. We just need to read `c.type` from each campaign element and store it. Then in Step 3, instead of inspecting `content` sub-objects (which are empty in the REST API), we look up the campaign type via `cpCampaignTypes.get(campId)`.
+### LinkedIn API Fields
+The `adAnalyticsV2` endpoint supports these granular engagement fields at the `MEMBER_COMPANY` pivot:
+- `likes` -- total likes on the ad
+- `comments` -- total comments
+- `reactions` -- total reactions (superset of likes on newer content)
+- `shares` -- total shares/reposts
 
-### Type Mapping Logic
+These are added to the existing `fields` query parameter, comma-separated.
+
+### Popover UI Pattern
 ```text
-Campaign type          -> Display type
-TEXT_AD                -> TEXT_AD
-SPONSORED_UPDATES      -> SPONSORED_CONTENT (default), VIDEO (if reference contains video), CAROUSEL (if multiple media)
-SPONSORED_INMAILS      -> MESSAGE_AD
-DYNAMIC                -> SPOTLIGHT_AD / FOLLOWER_AD / JOBS_AD (from content sub-fields)
++--------------------+
+| Engagements: 1,234 |  <-- clickable
++--------------------+
+     |
+     v
++--------------------+
+| Likes:      450    |
+| Comments:   120    |
+| Reactions:  580    |
+| Shares:      84    |
++--------------------+
 ```
 
-For `SPONSORED_UPDATES` campaigns, we still inspect the `content.reference` URN to distinguish video vs single image vs carousel, but only as a secondary signal -- the primary type comes from the campaign.
+Each level (company, objective, campaign) gets this popover on the Engagements cell.
 
