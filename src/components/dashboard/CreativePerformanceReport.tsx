@@ -7,8 +7,10 @@ import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
-import { Search, ArrowUp, ArrowDown, TrendingUp, TrendingDown, ChevronRight, ChevronDown, Copy, Info } from 'lucide-react';
+import { Search, ArrowUp, ArrowDown, TrendingUp, TrendingDown, ChevronRight, ChevronDown, Copy, Info, Sparkles } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Button } from '@/components/ui/button';
+import { AIAnalysisPanel } from './AIAnalysisPanel';
 
 interface Props {
   accessToken: string | null;
@@ -125,6 +127,7 @@ export function CreativePerformanceReport({ accessToken, selectedAccount }: Prop
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [activeOnly, setActiveOnly] = useState(false);
   const [typeFilter, setTypeFilter] = useState<string>('all');
+  const [aiPanelOpen, setAiPanelOpen] = useState(false);
 
   useEffect(() => {
     if (selectedAccount) fetchReport(selectedAccount);
@@ -257,6 +260,12 @@ export function CreativePerformanceReport({ accessToken, selectedAccount }: Prop
           </SelectContent>
         </Select>
         <span className="text-sm text-muted-foreground">{sorted.length} creatives</span>
+        {sorted.length > 0 && (
+          <Button variant="outline" size="sm" onClick={() => setAiPanelOpen(true)} className="gap-1.5">
+            <Sparkles className="h-4 w-4" />
+            Ask AI
+          </Button>
+        )}
       </div>
       <div className="flex items-center gap-3 px-3 py-2 rounded-md bg-muted/40 border border-border/50 text-xs text-muted-foreground">
         <Info className="h-3.5 w-3.5 shrink-0 text-primary" />
@@ -369,6 +378,13 @@ export function CreativePerformanceReport({ accessToken, selectedAccount }: Prop
           </table>
         </div>
       </div>
+
+      <AIAnalysisPanel
+        open={aiPanelOpen}
+        onOpenChange={setAiPanelOpen}
+        data={sorted}
+        reportType="creative_performance"
+      />
     </div>
   );
 }
