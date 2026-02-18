@@ -5002,7 +5002,7 @@ serve(async (req) => {
           }
         }
 
-        // Step 3c: Hardcoded fallback names for known form IDs (used when API cannot resolve names)
+        // Step 3c: Hardcoded canonical names for known form IDs — always override API-resolved names
         const knownFormNames: Record<string, string> = {
           '12758933': 'privacy-demo-banner',
           '12759063': 'privacy-demo-message',
@@ -5019,11 +5019,9 @@ serve(async (req) => {
           '13512463': 'outbound_email_privacy',
           '13104613': 'AI governance-demo-banner_NA',
         };
-        // Apply hardcoded names only where API didn't already resolve them
+        // Always apply known names — overrides whatever the API returned
         for (const [formId, formName] of Object.entries(knownFormNames)) {
-          if (!lgfFormNames.has(formId)) {
-            lgfFormNames.set(formId, formName);
-          }
+          lgfFormNames.set(formId, formName);
         }
 
         console.log(`[Step 3] Resolved ${lgfFormNames.size} form names:`,
