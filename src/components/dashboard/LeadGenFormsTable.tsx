@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { ChevronDown, ChevronRight, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -19,63 +19,110 @@ interface LeadGenFormsTableProps {
   isLoading: boolean;
 }
 
-/** Single creative row with a click-to-reveal ID sub-row */
-function CreativeRow({ creative }: { creative: LeadGenFormCreative }) {
-  const [showId, setShowId] = useState(false);
+interface AggregatedCreative {
+  creativeName: string;
+  impressions: number;
+  clicks: number;
+  spent: number;
+  leads: number;
+  formOpens: number;
+  ctr: number;
+  cpc: number;
+  cpl: number;
+  lgfRate: number;
+  instances: LeadGenFormCreative[]; // individual creatives with same name
+}
+
+/** Row for an aggregated creative name, drills down to IDs + campaigns */
+function AggregatedCreativeRow({ agg }: { agg: AggregatedCreative }) {
+  const [isOpen, setIsOpen] = useState(false);
 
   return (
     <>
       <tr
         className="hover:bg-muted/40 border-b border-border/40 cursor-pointer"
-        onClick={() => setShowId((v) => !v)}
+        onClick={() => setIsOpen((v) => !v)}
       >
-        {/* Expand icon */}
         <td className="p-2 w-6">
-          {showId
+          {isOpen
             ? <ChevronDown className="h-3 w-3 text-muted-foreground" />
             : <ChevronRight className="h-3 w-3 text-muted-foreground" />}
         </td>
-        <td className="p-2 font-medium text-xs">{creative.creativeName}</td>
-        <td className="p-2 text-xs text-muted-foreground">{creative.campaignName || creative.campaignId || '—'}</td>
-        <td className="p-2 text-right tabular-nums text-xs">{creative.impressions.toLocaleString()}</td>
-        <td className="p-2 text-right tabular-nums text-xs">{creative.clicks.toLocaleString()}</td>
-        <td className="p-2 text-right tabular-nums text-xs">${creative.spent.toFixed(2)}</td>
-        <td className="p-2 text-right tabular-nums text-xs font-medium">{creative.leads}</td>
-        <td className="p-2 text-right tabular-nums text-xs">{creative.ctr.toFixed(2)}%</td>
-        <td className="p-2 text-right tabular-nums text-xs">${creative.cpc.toFixed(2)}</td>
-        <td className="p-2 text-right tabular-nums text-xs">${creative.cpl.toFixed(2)}</td>
+        <td className="p-2 font-medium text-xs">{agg.creativeName}</td>
+        <td className="p-2 text-right tabular-nums text-xs">{agg.impressions.toLocaleString()}</td>
+        <td className="p-2 text-right tabular-nums text-xs">{agg.clicks.toLocaleString()}</td>
+        <td className="p-2 text-right tabular-nums text-xs">${agg.spent.toFixed(2)}</td>
+        <td className="p-2 text-right tabular-nums text-xs font-medium">{agg.leads}</td>
+        <td className="p-2 text-right tabular-nums text-xs">{agg.ctr.toFixed(2)}%</td>
+        <td className="p-2 text-right tabular-nums text-xs">${agg.cpc.toFixed(2)}</td>
+        <td className="p-2 text-right tabular-nums text-xs">${agg.cpl.toFixed(2)}</td>
         <td className="p-2 text-right tabular-nums text-xs">
-          {creative.formOpens > 0 ? `${creative.lgfRate.toFixed(1)}%` : '—'}
+          {agg.formOpens > 0 ? `${agg.lgfRate.toFixed(1)}%` : '—'}
         </td>
       </tr>
-      {showId && (
-        <tr className="bg-muted/50 border-b border-border/40">
+      {isOpen && agg.instances.map((c) => (
+        <tr key={c.creativeId} className="bg-muted/50 border-b border-border/40">
           <td />
-          <td colSpan={10} className="px-4 py-2">
-            <span className="text-xs text-muted-foreground font-mono">
-              Creative ID: <span className="text-foreground select-all">{creative.creativeId}</span>
-            </span>
+          <td colSpan={9} className="px-4 py-2">
+            <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs">
+              <span className="text-muted-foreground font-mono">
+                ID: <span className="text-foreground select-all">{c.creativeId}</span>
+              </span>
+              <span className="text-muted-foreground">
+                Campaign: <span className="text-foreground">{c.campaignName || c.campaignId || '—'}</span>
+              </span>
+            </div>
           </td>
         </tr>
-      )}
+      ))}
     </>
   );
 }
 
-/** Creatives sub-table shown when a form row is expanded */
+/** Creatives sub-table shown when a form row is expanded — aggregated by creative name */
 function CreativesSubTable({ creatives }: { creatives: LeadGenFormCreative[] }) {
+  // Aggregate by creative name
+  const aggregated = useMemo<AggregatedCreative[]>(() => {
+    const map = new Map<string, AggregatedCreative>();
+    for (const c of creatives) {
+      const key = c.creativeName || c.creativeId;
+      if (!map.has(key)) {
+        map.set(key, {
+          creativeName: c.creativeName || c.creativeId,
+          impressions: 0, clicks: 0, spent: 0, leads: 0, formOpens: 0,
+          ctr: 0, cpc: 0, cpl: 0, lgfRate: 0,
+          instances: [],
+        });
+      }
+      const agg = map.get(key)!;
+      agg.impressions += c.impressions;
+      agg.clicks += c.clicks;
+      agg.spent += c.spent;
+      agg.leads += c.leads;
+      agg.formOpens += c.formOpens;
+      agg.instances.push(c);
+    }
+    // Compute derived metrics
+    for (const agg of map.values()) {
+      agg.ctr = agg.impressions > 0 ? (agg.clicks / agg.impressions) * 100 : 0;
+      agg.cpc = agg.clicks > 0 ? agg.spent / agg.clicks : 0;
+      agg.cpl = agg.leads > 0 ? agg.spent / agg.leads : 0;
+      agg.lgfRate = agg.formOpens > 0 ? (agg.leads / agg.formOpens) * 100 : 0;
+    }
+    return Array.from(map.values()).sort((a, b) => b.leads - a.leads || b.impressions - a.impressions);
+  }, [creatives]);
+
   return (
     <div className="bg-muted/30 py-3 px-6 mb-1">
       <p className="text-xs font-medium text-muted-foreground mb-2">
-        Connected Creatives ({creatives.length}) — click a row to reveal its ID
+        {aggregated.length} creative{aggregated.length !== 1 ? 's' : ''} — click a row to reveal ID &amp; campaign
       </p>
       <div className="overflow-x-auto">
-        <table className="w-full text-xs border-separate border-spacing-0 min-w-[900px]">
+        <table className="w-full text-xs border-separate border-spacing-0 min-w-[860px]">
           <thead>
             <tr className="bg-muted/50">
               <th className="w-6 border-b border-border" />
-              <th className="text-left p-2 font-semibold border-b border-border min-w-[200px]">Creative</th>
-              <th className="text-left p-2 font-semibold border-b border-border min-w-[160px]">Campaign</th>
+              <th className="text-left p-2 font-semibold border-b border-border min-w-[220px]">Creative Name</th>
               <th className="text-right p-2 font-semibold border-b border-border">Impressions</th>
               <th className="text-right p-2 font-semibold border-b border-border">Clicks</th>
               <th className="text-right p-2 font-semibold border-b border-border">Spent</th>
@@ -87,8 +134,8 @@ function CreativesSubTable({ creatives }: { creatives: LeadGenFormCreative[] }) 
             </tr>
           </thead>
           <tbody>
-            {creatives.map((creative) => (
-              <CreativeRow key={creative.creativeId} creative={creative} />
+            {aggregated.map((agg) => (
+              <AggregatedCreativeRow key={agg.creativeName} agg={agg} />
             ))}
           </tbody>
         </table>
