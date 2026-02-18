@@ -3444,7 +3444,7 @@ serve(async (req) => {
         console.log(`[get_campaign_performance_report Step 3] ${allCreativeIdsForCamp.size} unique creatives`);
 
         // Fetch creative metadata (name + campaign association) in parallel batches
-        const campPerfCreativeInfo = new Map<string, { name: string; campaignId: string; status: string }>();
+        const campPerfCreativeInfo = new Map<string, { name: string; campaignId: string; status: string; reference: string }>();
         const cpCreativeIds = [...allCreativeIdsForCamp];
         for (let i = 0; i < cpCreativeIds.length; i += 50) {
           const batch = cpCreativeIds.slice(i, i + 50);
@@ -3457,20 +3457,55 @@ serve(async (req) => {
               if (r.ok) {
                 const d = await r.json();
                 const campaignId = (d.campaign || '').split(':').pop() || '';
-                // Try to get a name from the creative's content reference
                 let name = d.name || '';
+                // Extract reference URN for UGC/share name resolution
                 const content = d.content || {};
-                const reference = typeof content === 'string' ? content : (content.reference || '');
-                campPerfCreativeInfo.set(creativeId, { name: name || `Ad ${creativeId}`, campaignId, status: String(d.status || 'UNKNOWN').toUpperCase() });
+                const reference = typeof content === 'string' ? content : (content.reference || d.reference || '');
+                campPerfCreativeInfo.set(creativeId, { name, campaignId, status: String(d.status || 'UNKNOWN').toUpperCase(), reference: String(reference) });
               }
             } catch (e) { /* ignore */ }
           }));
         }
 
-        // Try to resolve creative names from UGC posts/shares (batch, best-effort)
-        const campPerfRefCache = new Map<string, string>();
-        const cpRefSet = new Set<string>();
-        // We don't have references here easily, so skip reference resolution for speed
+        // Resolve creative names from UGC posts / shares for any without a direct name
+        const campPerfRefNameCache = new Map<string, string>();
+        const refsToResolve = new Set<string>();
+        for (const [, info] of campPerfCreativeInfo) {
+          if (!info.name && info.reference && (info.reference.includes('ugcPost') || info.reference.includes('share'))) {
+            refsToResolve.add(info.reference);
+          }
+        }
+        if (refsToResolve.size > 0) {
+          await Promise.all([...refsToResolve].slice(0, 80).map(async (ref) => {
+            try {
+              const isUgc = ref.includes('ugcPost');
+              const endpoint = isUgc
+                ? `https://api.linkedin.com/v2/ugcPosts/${encodeURIComponent(ref)}`
+                : `https://api.linkedin.com/v2/shares/${encodeURIComponent(ref)}`;
+              const resp = await fetch(endpoint, { headers: { 'Authorization': `Bearer ${accessToken}` } });
+              if (resp.ok) {
+                const data = await resp.json();
+                let text = '';
+                if (isUgc) {
+                  text = data.specificContent?.['com.linkedin.ugc.ShareContent']?.shareCommentary?.text || '';
+                } else {
+                  text = data.text?.text || '';
+                }
+                if (text.trim()) {
+                  campPerfRefNameCache.set(ref, text.replace(/\s+/g, ' ').trim().slice(0, 80));
+                }
+              }
+            } catch (e) { /* ignore */ }
+          }));
+        }
+        // Apply resolved names
+        for (const [creativeId, info] of campPerfCreativeInfo) {
+          if (!info.name && info.reference) {
+            const resolved = campPerfRefNameCache.get(info.reference);
+            if (resolved) info.name = resolved;
+          }
+          if (!info.name) info.name = `Ad ${creativeId}`;
+        }
 
         // Build per-campaign ad breakdown
         const campPerfAdsByCampaign = new Map<string, Array<{ creativeId: string; name: string; status: string; periods: Record<string, any> }>>();

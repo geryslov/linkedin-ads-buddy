@@ -201,10 +201,14 @@ export function CampaignPerformanceReport({ accessToken, selectedAccount }: Prop
       : <ArrowUp className="h-3 w-3 text-primary shrink-0" />;
   };
 
+  // Border-left on first metric cell of each period to visually separate groups
+  const PERIOD_BORDER = ['border-l-2 border-primary/30', 'border-l-2 border-blue-500/30', 'border-l-2 border-purple-500/30', 'border-l-2 border-orange-500/30'];
+
   const subHeader = (prefix: string, label: string, metric: 'spend' | 'cpl' | 'ctr', periodIdx: number) => {
     const key = `${prefix}_${metric}` as SortKey;
+    const isFirst = metric === 'spend';
     return (
-      <th key={key} className={`text-right p-2 font-medium text-xs cursor-pointer hover:bg-muted/60 transition-colors whitespace-nowrap ${PERIOD_BG[periodIdx]}`} onClick={() => handleSort(key)}>
+      <th key={key} className={`text-right p-2 font-medium text-xs cursor-pointer hover:bg-muted/60 transition-colors whitespace-nowrap ${PERIOD_BG[periodIdx]} ${isFirst ? PERIOD_BORDER[periodIdx] : ''}`} onClick={() => handleSort(key)}>
         <div className="flex items-center justify-end gap-1">{label}<SortIcon col={key} /></div>
       </th>
     );
@@ -212,7 +216,7 @@ export function CampaignPerformanceReport({ accessToken, selectedAccount }: Prop
 
   const renderMetricCells = (m: PeriodMetrics, prefix: string, periodIdx: number) => (
     <Fragment key={prefix}>
-      <td className={`p-2 text-right text-xs font-mono ${PERIOD_BG[periodIdx]}`}><MetricCell value={m.spent} format="currency" /></td>
+      <td className={`p-2 text-right text-xs font-mono ${PERIOD_BG[periodIdx]} ${PERIOD_BORDER[periodIdx]}`}><MetricCell value={m.spent} format="currency" /></td>
       <td className={`p-2 text-right text-xs font-mono ${PERIOD_BG[periodIdx]}`}><MetricCell value={m.cpl} format="currency" /></td>
       <td className={`p-2 text-right text-xs font-mono ${PERIOD_BG[periodIdx]}`}><MetricCell value={m.ctr} format="percent" /></td>
     </Fragment>
@@ -252,7 +256,7 @@ export function CampaignPerformanceReport({ accessToken, selectedAccount }: Prop
               <tr className="border-b border-border">
                 <th colSpan={3} className="bg-muted/30" />
                 {PERIODS.map((p, i) => (
-                  <th key={p.key} colSpan={3} className={`text-center p-2 font-semibold border-b border-border text-xs uppercase tracking-wider ${PERIOD_HEADER_BG[i]}`}>
+                  <th key={p.key} colSpan={3} className={`text-center p-2 font-semibold border-b border-border text-xs uppercase tracking-wider ${PERIOD_HEADER_BG[i]} ${PERIOD_BORDER[i]}`}>
                     <div className="flex items-center justify-center gap-1.5">
                       <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: p.color }} />
                       {p.label}
@@ -342,7 +346,7 @@ export function CampaignPerformanceReport({ accessToken, selectedAccount }: Prop
                     const t = totals[p.field];
                     return (
                       <Fragment key={`t-${p.key}`}>
-                        <td className={`p-2 text-right text-xs font-mono ${PERIOD_BG[i]}`}><MetricCell value={t.spend} format="currency" /></td>
+                        <td className={`p-2 text-right text-xs font-mono ${PERIOD_BG[i]} ${PERIOD_BORDER[i]}`}><MetricCell value={t.spend} format="currency" /></td>
                         <td className={`p-2 text-right text-xs font-mono ${PERIOD_BG[i]}`}><MetricCell value={t.cpl} format="currency" /></td>
                         <td className={`p-2 text-right text-xs font-mono ${PERIOD_BG[i]}`}><MetricCell value={t.ctr} format="percent" /></td>
                       </Fragment>
