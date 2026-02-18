@@ -2373,7 +2373,7 @@ serve(async (req) => {
         };
 
         // Objective breakdown task (Step 4) - queries per OBJECTIVE GROUP, not per campaign
-        let objectiveBreakdownMap = new Map<string, Array<{ objective: string; impressions: number; clicks: number; spent: number; leads: number; engagements: number; likes: number; comments: number; reactions: number; shares: number }>>();
+        let objectiveBreakdownMap = new Map<string, Array<{ objective: string; impressions: number; clicks: number; spent: number; leads: number; landingPageClicks: number; engagements: number; likes: number; comments: number; reactions: number; shares: number }>>();
         // Also store which campaigns belong to each objective so the frontend can request campaign breakdown lazily
         let objectiveCampaignMap = new Map<string, { campaignIds: string[]; campaignNames: Record<string, string> }>();
 
