@@ -151,7 +151,7 @@ export function CampaignPerformanceReport({ accessToken, selectedAccount }: Prop
       result = result.filter(r => r.campaignName.toLowerCase().includes(q));
     }
     if (activeOnly) {
-      result = result.filter(r => r.campaignStatus === 'ACTIVE');
+      result = result.filter(r => r.ads.some(ad => ad.adStatus === 'ACTIVE'));
     }
     return result;
   }, [data, search, activeOnly]);
@@ -233,7 +233,7 @@ export function CampaignPerformanceReport({ accessToken, selectedAccount }: Prop
         </div>
         <div className="flex items-center gap-2">
           <Switch id="active-filter-camp" checked={activeOnly} onCheckedChange={setActiveOnly} />
-          <Label htmlFor="active-filter-camp" className="text-sm cursor-pointer">Active campaigns only</Label>
+          <Label htmlFor="active-filter-camp" className="text-sm cursor-pointer">Active ads only</Label>
         </div>
         <span className="text-sm text-muted-foreground">{sorted.length} campaigns</span>
         {sorted.length > 0 && (
