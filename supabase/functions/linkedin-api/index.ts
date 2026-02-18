@@ -4864,11 +4864,37 @@ serve(async (req) => {
         } catch (err) {
           console.log(`[Step 2] V2 Creatives API error:`, err);
         }
-        
+
         console.log(`[Step 2] Mapped ${creativeMetadata.size} creatives, discovered ${discoveredFormUrns.size} form URNs from metadata`);
-        
+
+        // Step 2b: Resolve proper creative names via versioned REST API for all LGF creatives.
+        // adCreativesV2 batch endpoint rarely includes a meaningful name; the versioned endpoint always does.
+        console.log('[Step 2b] Fetching creative names via versioned REST API...');
+        const lgfCreativeUrns = Array.from(lgfCreativeAnalytics.keys());
+        const BATCH_SIZE = 10;
+        for (let bi = 0; bi < lgfCreativeUrns.length; bi += BATCH_SIZE) {
+          await Promise.all(lgfCreativeUrns.slice(bi, bi + BATCH_SIZE).map(async (creativeUrn) => {
+            try {
+              const resp = await fetch(
+                `https://api.linkedin.com/rest/adAccounts/${accountId}/creatives/${encodeURIComponent(creativeUrn)}`,
+                { headers: { 'Authorization': `Bearer ${accessToken}`, 'X-Restli-Protocol-Version': '2.0.0', 'LinkedIn-Version': '202511' } }
+              );
+              if (resp.ok) {
+                const cd = await resp.json();
+                const resolvedName = cd.name || cd.creativeDscName;
+                if (resolvedName) {
+                  const existing = creativeMetadata.get(creativeUrn) || { name: '', campaignId: '' };
+                  creativeMetadata.set(creativeUrn, { ...existing, name: resolvedName });
+                }
+              }
+            } catch (_) { /* non-fatal */ }
+          }));
+        }
+        console.log(`[Step 2b] Versioned name resolution done for ${lgfCreativeUrns.length} creatives`);
+
         // Step 3: Resolve form names from Lead Sync API (leadGenForms)
         console.log('[Step 3] Resolving lead form names via Lead Sync API...');
+
         // Store by form ID only (not full URN) to avoid format mismatches
         const lgfFormNames = new Map<string, string>();
 
