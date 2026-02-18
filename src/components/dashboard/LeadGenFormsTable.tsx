@@ -19,18 +19,61 @@ interface LeadGenFormsTableProps {
   isLoading: boolean;
 }
 
-const COLS = 12; // total columns: expand + name + impressions + clicks + spent + leads + form-opens + ctr + cpc + cpl + lgf-rate + creatives + export = 13
+/** Single creative row with a click-to-reveal ID sub-row */
+function CreativeRow({ creative }: { creative: LeadGenFormCreative }) {
+  const [showId, setShowId] = useState(false);
 
+  return (
+    <>
+      <tr
+        className="hover:bg-muted/40 border-b border-border/40 cursor-pointer"
+        onClick={() => setShowId((v) => !v)}
+      >
+        {/* Expand icon */}
+        <td className="p-2 w-6">
+          {showId
+            ? <ChevronDown className="h-3 w-3 text-muted-foreground" />
+            : <ChevronRight className="h-3 w-3 text-muted-foreground" />}
+        </td>
+        <td className="p-2 font-medium text-xs">{creative.creativeName}</td>
+        <td className="p-2 text-xs text-muted-foreground">{creative.campaignName || creative.campaignId || '—'}</td>
+        <td className="p-2 text-right tabular-nums text-xs">{creative.impressions.toLocaleString()}</td>
+        <td className="p-2 text-right tabular-nums text-xs">{creative.clicks.toLocaleString()}</td>
+        <td className="p-2 text-right tabular-nums text-xs">${creative.spent.toFixed(2)}</td>
+        <td className="p-2 text-right tabular-nums text-xs font-medium">{creative.leads}</td>
+        <td className="p-2 text-right tabular-nums text-xs">{creative.ctr.toFixed(2)}%</td>
+        <td className="p-2 text-right tabular-nums text-xs">${creative.cpc.toFixed(2)}</td>
+        <td className="p-2 text-right tabular-nums text-xs">${creative.cpl.toFixed(2)}</td>
+        <td className="p-2 text-right tabular-nums text-xs">
+          {creative.formOpens > 0 ? `${creative.lgfRate.toFixed(1)}%` : '—'}
+        </td>
+      </tr>
+      {showId && (
+        <tr className="bg-muted/50 border-b border-border/40">
+          <td />
+          <td colSpan={10} className="px-4 py-2">
+            <span className="text-xs text-muted-foreground font-mono">
+              Creative ID: <span className="text-foreground select-all">{creative.creativeId}</span>
+            </span>
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
+/** Creatives sub-table shown when a form row is expanded */
 function CreativesSubTable({ creatives }: { creatives: LeadGenFormCreative[] }) {
   return (
     <div className="bg-muted/30 py-3 px-6 mb-1">
       <p className="text-xs font-medium text-muted-foreground mb-2">
-        Connected Creatives ({creatives.length})
+        Connected Creatives ({creatives.length}) — click a row to reveal its ID
       </p>
       <div className="overflow-x-auto">
         <table className="w-full text-xs border-separate border-spacing-0 min-w-[900px]">
           <thead>
             <tr className="bg-muted/50">
+              <th className="w-6 border-b border-border" />
               <th className="text-left p-2 font-semibold border-b border-border min-w-[200px]">Creative</th>
               <th className="text-left p-2 font-semibold border-b border-border min-w-[160px]">Campaign</th>
               <th className="text-right p-2 font-semibold border-b border-border">Impressions</th>
@@ -45,20 +88,7 @@ function CreativesSubTable({ creatives }: { creatives: LeadGenFormCreative[] }) 
           </thead>
           <tbody>
             {creatives.map((creative) => (
-              <tr key={creative.creativeId} className="hover:bg-muted/40 border-b border-border/40">
-                <td className="p-2 font-medium">{creative.creativeName}</td>
-                <td className="p-2 text-muted-foreground">{creative.campaignName || creative.campaignId || '—'}</td>
-                <td className="p-2 text-right tabular-nums">{creative.impressions.toLocaleString()}</td>
-                <td className="p-2 text-right tabular-nums">{creative.clicks.toLocaleString()}</td>
-                <td className="p-2 text-right tabular-nums">${creative.spent.toFixed(2)}</td>
-                <td className="p-2 text-right tabular-nums font-medium">{creative.leads}</td>
-                <td className="p-2 text-right tabular-nums">{creative.ctr.toFixed(2)}%</td>
-                <td className="p-2 text-right tabular-nums">${creative.cpc.toFixed(2)}</td>
-                <td className="p-2 text-right tabular-nums">${creative.cpl.toFixed(2)}</td>
-                <td className="p-2 text-right tabular-nums">
-                  {creative.formOpens > 0 ? `${creative.lgfRate.toFixed(1)}%` : '—'}
-                </td>
-              </tr>
+              <CreativeRow key={creative.creativeId} creative={creative} />
             ))}
           </tbody>
         </table>
@@ -76,6 +106,7 @@ function FormRow({ form, colCount }: { form: LeadGenFormData; colCount: number }
     const columns = [
       { key: 'creativeName', label: 'Creative Name' },
       { key: 'creativeId', label: 'Creative ID' },
+      { key: 'campaignName', label: 'Campaign Name' },
       { key: 'impressions', label: 'Impressions' },
       { key: 'clicks', label: 'Clicks' },
       { key: 'spent', label: 'Spent' },
@@ -133,7 +164,7 @@ function FormRow({ form, colCount }: { form: LeadGenFormData; colCount: number }
           </Button>
         </TableCell>
       </TableRow>
-      {/* Sub-table row — plain <tr> with a single <td> spanning all columns */}
+      {/* Sub-table row */}
       {isOpen && (
         <tr>
           <td colSpan={colCount} className="p-0 border-b border-border/40">
