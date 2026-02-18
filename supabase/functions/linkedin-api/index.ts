@@ -3339,6 +3339,186 @@ serve(async (req) => {
         });
       }
 
+      case 'get_campaign_performance_report': {
+        // Multi-period campaign trend report: fetches campaign metadata ONCE, analytics for multiple date ranges in parallel
+        // Each campaign row expands to show its individual ad (creative) breakdown
+        const { accountId: campPerfAccountId, dateRanges: campPerfDateRanges } = params || {};
+        if (!campPerfAccountId || !campPerfDateRanges || !Array.isArray(campPerfDateRanges)) {
+          return new Response(JSON.stringify({ error: 'accountId and dateRanges[] required' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        console.log(`[get_campaign_performance_report] Starting for account ${campPerfAccountId}, ${campPerfDateRanges.length} periods`);
+
+        // Step 1: Fetch ALL campaigns (paginated) - name, status, objective
+        const campPerfCampaigns = new Map<string, { name: string; status: string; objectiveType: string; groupId: string }>();
+        try {
+          let cpStart = 0; let cpTotal = 0;
+          do {
+            const url = `https://api.linkedin.com/rest/adAccounts/${campPerfAccountId}/adCampaigns?q=search&sortOrder=DESCENDING&count=100&start=${cpStart}`;
+            const r = await fetch(url, { headers: { 'Authorization': `Bearer ${accessToken}`, 'LinkedIn-Version': '202511', 'X-Restli-Protocol-Version': '2.0.0' } });
+            if (r.ok) {
+              const d = await r.json();
+              const els = d.elements || [];
+              cpTotal = d.paging?.total || els.length;
+              for (const c of els) {
+                const cid = c.id?.toString() || c.$URN?.split(':').pop();
+                if (cid) {
+                  const groupId = (c.campaignGroup || '').split(':').pop() || '';
+                  campPerfCampaigns.set(cid, {
+                    name: c.name || `Campaign ${cid}`,
+                    status: String(c.status || 'UNKNOWN').toUpperCase(),
+                    objectiveType: String(c.objectiveType || 'UNKNOWN').toUpperCase(),
+                    groupId,
+                  });
+                }
+              }
+              cpStart += els.length;
+              if (els.length === 0) break;
+            } else { break; }
+          } while (cpStart < cpTotal);
+          console.log(`[get_campaign_performance_report Step 1] Fetched ${campPerfCampaigns.size} campaigns`);
+        } catch (e) { console.error('[get_campaign_performance_report Step 1] error', e); }
+
+        // Step 2: Fetch campaign-pivot analytics for all periods in parallel
+        const campPerfPeriodResults = await Promise.all(campPerfDateRanges.map(async (range: { start: string; end: string; key: string }) => {
+          const [sY, sM, sD] = range.start.split('-').map(Number);
+          const [eY, eM, eD] = range.end.split('-').map(Number);
+          const url = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&dateRange.start.day=${sD}&dateRange.start.month=${sM}&dateRange.start.year=${sY}&dateRange.end.day=${eD}&dateRange.end.month=${eM}&dateRange.end.year=${eY}&timeGranularity=ALL&pivot=CAMPAIGN&accounts[0]=urn:li:sponsoredAccount:${campPerfAccountId}&fields=impressions,clicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions,pivotValue&count=10000`;
+          try {
+            const resp = await fetch(url, { headers: { 'Authorization': `Bearer ${accessToken}` } });
+            if (resp.ok) { const d = await resp.json(); return { key: range.key, elements: d.elements || [] }; }
+          } catch (e) { /* ignore */ }
+          return { key: range.key, elements: [] };
+        }));
+
+        // Step 3: Fetch creative-pivot analytics for all periods (for ad breakdown)
+        const campPerfCreativePeriodResults = await Promise.all(campPerfDateRanges.map(async (range: { start: string; end: string; key: string }) => {
+          const [sY, sM, sD] = range.start.split('-').map(Number);
+          const [eY, eM, eD] = range.end.split('-').map(Number);
+          const url = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&dateRange.start.day=${sD}&dateRange.start.month=${sM}&dateRange.start.year=${sY}&dateRange.end.day=${eD}&dateRange.end.month=${eM}&dateRange.end.year=${eY}&timeGranularity=ALL&pivot=CREATIVE&accounts[0]=urn:li:sponsoredAccount:${campPerfAccountId}&fields=impressions,clicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions,pivotValue&count=10000`;
+          try {
+            const resp = await fetch(url, { headers: { 'Authorization': `Bearer ${accessToken}` } });
+            if (resp.ok) { const d = await resp.json(); return { key: range.key, elements: d.elements || [] }; }
+          } catch (e) { /* ignore */ }
+          return { key: range.key, elements: [] };
+        }));
+
+        // Build campaign-level metrics map
+        const campPerfMetrics = new Map<string, Map<string, { impressions: number; clicks: number; spent: number; leads: number }>>();
+        const allCampIds = new Set<string>();
+        for (const pr of campPerfPeriodResults) {
+          const m = new Map<string, { impressions: number; clicks: number; spent: number; leads: number }>();
+          for (const el of pr.elements) {
+            const cid = el.pivotValue?.split(':').pop() || '';
+            if (!cid) continue;
+            allCampIds.add(cid);
+            const ex = m.get(cid) || { impressions: 0, clicks: 0, spent: 0, leads: 0 };
+            ex.impressions += el.impressions || 0;
+            ex.clicks += el.clicks || 0;
+            ex.spent += parseFloat(el.costInLocalCurrency || '0');
+            ex.leads += (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
+            m.set(cid, ex);
+          }
+          campPerfMetrics.set(pr.key, m);
+        }
+
+        // Step 4: Fetch creative metadata for all creatives seen in analytics
+        const campCreativeMetrics = new Map<string, Map<string, { impressions: number; clicks: number; spent: number; leads: number }>>();
+        const allCreativeIdsForCamp = new Set<string>();
+        for (const pr of campPerfCreativePeriodResults) {
+          const m = new Map<string, { impressions: number; clicks: number; spent: number; leads: number }>();
+          for (const el of pr.elements) {
+            const cid = el.pivotValue?.split(':').pop() || '';
+            if (!cid) continue;
+            allCreativeIdsForCamp.add(cid);
+            const ex = m.get(cid) || { impressions: 0, clicks: 0, spent: 0, leads: 0 };
+            ex.impressions += el.impressions || 0;
+            ex.clicks += el.clicks || 0;
+            ex.spent += parseFloat(el.costInLocalCurrency || '0');
+            ex.leads += (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
+            m.set(cid, ex);
+          }
+          campCreativeMetrics.set(pr.key, m);
+        }
+
+        console.log(`[get_campaign_performance_report Step 3] ${allCreativeIdsForCamp.size} unique creatives`);
+
+        // Fetch creative metadata (name + campaign association) in parallel batches
+        const campPerfCreativeInfo = new Map<string, { name: string; campaignId: string; status: string }>();
+        const cpCreativeIds = [...allCreativeIdsForCamp];
+        for (let i = 0; i < cpCreativeIds.length; i += 50) {
+          const batch = cpCreativeIds.slice(i, i + 50);
+          await Promise.all(batch.map(async (creativeId) => {
+            try {
+              const urn = encodeURIComponent(`urn:li:sponsoredCreative:${creativeId}`);
+              const r = await fetch(`https://api.linkedin.com/rest/adAccounts/${campPerfAccountId}/creatives/${urn}`, {
+                headers: { 'Authorization': `Bearer ${accessToken}`, 'LinkedIn-Version': '202511', 'X-Restli-Protocol-Version': '2.0.0' },
+              });
+              if (r.ok) {
+                const d = await r.json();
+                const campaignId = (d.campaign || '').split(':').pop() || '';
+                // Try to get a name from the creative's content reference
+                let name = d.name || '';
+                const content = d.content || {};
+                const reference = typeof content === 'string' ? content : (content.reference || '');
+                campPerfCreativeInfo.set(creativeId, { name: name || `Ad ${creativeId}`, campaignId, status: String(d.status || 'UNKNOWN').toUpperCase() });
+              }
+            } catch (e) { /* ignore */ }
+          }));
+        }
+
+        // Try to resolve creative names from UGC posts/shares (batch, best-effort)
+        const campPerfRefCache = new Map<string, string>();
+        const cpRefSet = new Set<string>();
+        // We don't have references here easily, so skip reference resolution for speed
+
+        // Build per-campaign ad breakdown
+        const campPerfAdsByCampaign = new Map<string, Array<{ creativeId: string; name: string; status: string; periods: Record<string, any> }>>();
+        for (const creativeId of allCreativeIdsForCamp) {
+          const info = campPerfCreativeInfo.get(creativeId);
+          const campaignId = info?.campaignId || '';
+          if (!campaignId) continue;
+          if (!campPerfAdsByCampaign.has(campaignId)) campPerfAdsByCampaign.set(campaignId, []);
+          const adPeriods: Record<string, any> = {};
+          for (const pr of campPerfCreativePeriodResults) {
+            const m = campCreativeMetrics.get(pr.key)?.get(creativeId);
+            if (m) adPeriods[pr.key] = m;
+          }
+          campPerfAdsByCampaign.get(campaignId)!.push({
+            creativeId,
+            name: info?.name || `Ad ${creativeId}`,
+            status: info?.status || 'UNKNOWN',
+            periods: adPeriods,
+          });
+        }
+
+        // Step 5: Build final campaign elements
+        const campPerfElements: any[] = [];
+        for (const campId of allCampIds) {
+          const meta = campPerfCampaigns.get(campId);
+          const periodData: Record<string, any> = {};
+          for (const pr of campPerfPeriodResults) {
+            const m = campPerfMetrics.get(pr.key)?.get(campId);
+            if (m) periodData[pr.key] = m;
+          }
+          const ads = campPerfAdsByCampaign.get(campId) || [];
+          campPerfElements.push({
+            campaignId: campId,
+            campaignName: meta?.name || `Campaign ${campId}`,
+            campaignStatus: meta?.status || 'UNKNOWN',
+            objectiveType: meta?.objectiveType || 'UNKNOWN',
+            adCount: ads.length,
+            ads,
+            periods: periodData,
+          });
+        }
+
+        console.log(`[get_campaign_performance_report] Complete. ${campPerfElements.length} campaigns`);
+        return new Response(JSON.stringify({ periods: campPerfDateRanges.map((r: any) => r.key), elements: campPerfElements }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
       case 'get_account_structure': {
         // Fetches the complete account hierarchy: Campaign Groups -> Campaigns -> Creatives
         const { accountId } = params || {};
