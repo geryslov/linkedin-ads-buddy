@@ -5,6 +5,7 @@ export interface LeadGenFormCreative {
   creativeId: string;
   creativeName: string;
   campaignId: string;
+  campaignName: string;
   impressions: number;
   clicks: number;
   spent: number;

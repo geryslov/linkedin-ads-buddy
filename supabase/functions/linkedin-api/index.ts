@@ -5027,6 +5027,34 @@ serve(async (req) => {
         console.log(`[Step 3] Resolved ${lgfFormNames.size} form names:`,
           Array.from(lgfFormNames.entries()).slice(0, 5).map(([id, name]) => `${id}=${name}`).join(', '));
         
+        // Step 3d: Fetch campaign names for all campaigns referenced by creatives
+        const lgfCampaignNames = new Map<string, string>();
+        const allCampaignIds = new Set<string>();
+        for (const meta of creativeMetadata.values()) {
+          if (meta.campaignId) allCampaignIds.add(meta.campaignId);
+        }
+        if (allCampaignIds.size > 0) {
+          try {
+            const campParams = new URLSearchParams();
+            campParams.set('q', 'search');
+            campParams.set('search.account.values[0]', `urn:li:sponsoredAccount:${accountId}`);
+            campParams.set('count', '500');
+            const campResponse = await fetch(`https://api.linkedin.com/v2/adCampaignsV2?${campParams.toString()}`, {
+              headers: { 'Authorization': `Bearer ${accessToken}` }
+            });
+            if (campResponse.ok) {
+              const campData = await campResponse.json();
+              for (const c of campData.elements || []) {
+                const id = c.id?.toString() || '';
+                if (id) lgfCampaignNames.set(id, c.name || `Campaign ${id}`);
+              }
+              console.log(`[Step 3d] Resolved ${lgfCampaignNames.size} campaign names`);
+            }
+          } catch (err) {
+            console.log(`[Step 3d] Campaign name fetch error:`, err);
+          }
+        }
+
         // Step 4: Join + Aggregate - group creatives by form URN
         console.log('[Step 4] Building form aggregates from creatives...');
         
@@ -5042,6 +5070,7 @@ serve(async (req) => {
             creativeId: string;
             creativeName: string;
             campaignId: string;
+            campaignName: string;
             impressions: number;
             clicks: number;
             spent: number;
@@ -5070,6 +5099,7 @@ serve(async (req) => {
             creativeId,
             creativeName: meta.name,
             campaignId: meta.campaignId,
+            campaignName: lgfCampaignNames.get(meta.campaignId) || `Campaign ${meta.campaignId}`,
             impressions: metrics.impressions,
             clicks: metrics.clicks,
             spent: metrics.spent,

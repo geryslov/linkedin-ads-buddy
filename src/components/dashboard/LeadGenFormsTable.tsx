@@ -28,10 +28,11 @@ function CreativesSubTable({ creatives }: { creatives: LeadGenFormCreative[] }) 
         Connected Creatives ({creatives.length})
       </p>
       <div className="overflow-x-auto">
-        <table className="w-full text-xs border-separate border-spacing-0 min-w-[800px]">
+        <table className="w-full text-xs border-separate border-spacing-0 min-w-[900px]">
           <thead>
             <tr className="bg-muted/50">
-              <th className="text-left p-2 font-semibold border-b border-border min-w-[180px]">Creative</th>
+              <th className="text-left p-2 font-semibold border-b border-border min-w-[200px]">Creative</th>
+              <th className="text-left p-2 font-semibold border-b border-border min-w-[160px]">Campaign</th>
               <th className="text-right p-2 font-semibold border-b border-border">Impressions</th>
               <th className="text-right p-2 font-semibold border-b border-border">Clicks</th>
               <th className="text-right p-2 font-semibold border-b border-border">Spent</th>
@@ -46,6 +47,7 @@ function CreativesSubTable({ creatives }: { creatives: LeadGenFormCreative[] }) 
             {creatives.map((creative) => (
               <tr key={creative.creativeId} className="hover:bg-muted/40 border-b border-border/40">
                 <td className="p-2 font-medium">{creative.creativeName}</td>
+                <td className="p-2 text-muted-foreground">{creative.campaignName || creative.campaignId || '—'}</td>
                 <td className="p-2 text-right tabular-nums">{creative.impressions.toLocaleString()}</td>
                 <td className="p-2 text-right tabular-nums">{creative.clicks.toLocaleString()}</td>
                 <td className="p-2 text-right tabular-nums">${creative.spent.toFixed(2)}</td>
