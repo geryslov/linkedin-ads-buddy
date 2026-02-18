@@ -11,7 +11,6 @@ import {
 } from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
 import { LeadGenFormData, LeadGenFormCreative } from '@/hooks/useLeadGenFormsReport';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { exportToCSV } from '@/lib/exportUtils';
 import { useToast } from '@/hooks/use-toast';
 
@@ -20,53 +19,58 @@ interface LeadGenFormsTableProps {
   isLoading: boolean;
 }
 
+const COLS = 12; // total columns: expand + name + impressions + clicks + spent + leads + form-opens + ctr + cpc + cpl + lgf-rate + creatives + export = 13
+
 function CreativesSubTable({ creatives }: { creatives: LeadGenFormCreative[] }) {
   return (
-    <div className="bg-muted/30 p-4 rounded-lg ml-8 mr-4 mb-4 overflow-x-auto">
-      <h4 className="text-sm font-medium mb-3 text-muted-foreground">Connected Creatives ({creatives.length})</h4>
-      <Table className="min-w-[700px]">
-        <TableHeader>
-          <TableRow className="hover:bg-transparent">
-            <TableHead className="text-xs min-w-[150px]">Creative</TableHead>
-            <TableHead className="text-xs text-right">Impressions</TableHead>
-            <TableHead className="text-xs text-right">Clicks</TableHead>
-            <TableHead className="text-xs text-right">Spent</TableHead>
-            <TableHead className="text-xs text-right">Leads</TableHead>
-            <TableHead className="text-xs text-right">CTR</TableHead>
-            <TableHead className="text-xs text-right">CPC</TableHead>
-            <TableHead className="text-xs text-right">CPL</TableHead>
-            <TableHead className="text-xs text-right">LGF Rate</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {creatives.map((creative) => (
-            <TableRow key={creative.creativeId} className="hover:bg-muted/50">
-              <TableCell className="text-xs font-medium">
-                <span className="break-words">{creative.creativeName}</span>
-              </TableCell>
-              <TableCell className="text-xs text-right">{creative.impressions.toLocaleString()}</TableCell>
-              <TableCell className="text-xs text-right">{creative.clicks.toLocaleString()}</TableCell>
-              <TableCell className="text-xs text-right">${creative.spent.toFixed(2)}</TableCell>
-              <TableCell className="text-xs text-right font-medium">{creative.leads}</TableCell>
-              <TableCell className="text-xs text-right">{creative.ctr.toFixed(2)}%</TableCell>
-              <TableCell className="text-xs text-right">${creative.cpc.toFixed(2)}</TableCell>
-              <TableCell className="text-xs text-right">${creative.cpl.toFixed(2)}</TableCell>
-              <TableCell className="text-xs text-right">
-                {creative.formOpens > 0 ? `${creative.lgfRate.toFixed(1)}%` : '-'}
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+    <div className="bg-muted/30 py-3 px-6 mb-1">
+      <p className="text-xs font-medium text-muted-foreground mb-2">
+        Connected Creatives ({creatives.length})
+      </p>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs border-separate border-spacing-0 min-w-[800px]">
+          <thead>
+            <tr className="bg-muted/50">
+              <th className="text-left p-2 font-semibold border-b border-border min-w-[180px]">Creative</th>
+              <th className="text-right p-2 font-semibold border-b border-border">Impressions</th>
+              <th className="text-right p-2 font-semibold border-b border-border">Clicks</th>
+              <th className="text-right p-2 font-semibold border-b border-border">Spent</th>
+              <th className="text-right p-2 font-semibold border-b border-border">Leads</th>
+              <th className="text-right p-2 font-semibold border-b border-border">CTR</th>
+              <th className="text-right p-2 font-semibold border-b border-border">CPC</th>
+              <th className="text-right p-2 font-semibold border-b border-border">CPL</th>
+              <th className="text-right p-2 font-semibold border-b border-border">LGF Rate</th>
+            </tr>
+          </thead>
+          <tbody>
+            {creatives.map((creative) => (
+              <tr key={creative.creativeId} className="hover:bg-muted/40 border-b border-border/40">
+                <td className="p-2 font-medium">{creative.creativeName}</td>
+                <td className="p-2 text-right tabular-nums">{creative.impressions.toLocaleString()}</td>
+                <td className="p-2 text-right tabular-nums">{creative.clicks.toLocaleString()}</td>
+                <td className="p-2 text-right tabular-nums">${creative.spent.toFixed(2)}</td>
+                <td className="p-2 text-right tabular-nums font-medium">{creative.leads}</td>
+                <td className="p-2 text-right tabular-nums">{creative.ctr.toFixed(2)}%</td>
+                <td className="p-2 text-right tabular-nums">${creative.cpc.toFixed(2)}</td>
+                <td className="p-2 text-right tabular-nums">${creative.cpl.toFixed(2)}</td>
+                <td className="p-2 text-right tabular-nums">
+                  {creative.formOpens > 0 ? `${creative.lgfRate.toFixed(1)}%` : '—'}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
 
-function FormRow({ form }: { form: LeadGenFormData }) {
+function FormRow({ form, colCount }: { form: LeadGenFormData; colCount: number }) {
   const [isOpen, setIsOpen] = useState(false);
   const { toast } = useToast();
 
-  const handleExportCreatives = () => {
+  const handleExportCreatives = (e: React.MouseEvent) => {
+    e.stopPropagation();
     const columns = [
       { key: 'creativeName', label: 'Creative Name' },
       { key: 'creativeId', label: 'Creative ID' },
@@ -80,38 +84,42 @@ function FormRow({ form }: { form: LeadGenFormData }) {
       { key: 'lgfRate', label: 'LGF Rate (%)' },
     ];
     exportToCSV(form.creatives, `lead_form_${form.formUrn.split(':').pop()}_creatives`, columns);
-    toast({
-      title: 'Export successful',
-      description: `${form.creatives.length} creatives exported`,
-    });
+    toast({ title: 'Export successful', description: `${form.creatives.length} creatives exported` });
   };
 
+  const hasCreatives = form.creatives.length > 0;
+
   return (
-    <Collapsible open={isOpen} onOpenChange={setIsOpen}>
-      <TableRow className="hover:bg-muted/50 cursor-pointer" onClick={() => setIsOpen(!isOpen)}>
-        <TableCell className="w-8">
-          <CollapsibleTrigger asChild>
-            <Button variant="ghost" size="sm" className="h-6 w-6 p-0">
-              {isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-            </Button>
-          </CollapsibleTrigger>
+    <>
+      <TableRow
+        className={`hover:bg-muted/40 transition-colors ${hasCreatives ? 'cursor-pointer' : ''} ${isOpen ? 'bg-muted/20' : ''}`}
+        onClick={hasCreatives ? () => setIsOpen(!isOpen) : undefined}
+      >
+        {/* Expand */}
+        <TableCell className="w-8 p-2">
+          {hasCreatives && (
+            isOpen
+              ? <ChevronDown className="h-4 w-4 text-muted-foreground" />
+              : <ChevronRight className="h-4 w-4 text-muted-foreground" />
+          )}
         </TableCell>
-        <TableCell className="font-medium">
-          <span className="break-words">{form.formName}</span>
+        {/* Form Name */}
+        <TableCell className="font-medium text-sm min-w-[160px]">{form.formName}</TableCell>
+        {/* Metrics */}
+        <TableCell className="text-right tabular-nums">{form.impressions.toLocaleString()}</TableCell>
+        <TableCell className="text-right tabular-nums">{form.clicks.toLocaleString()}</TableCell>
+        <TableCell className="text-right tabular-nums">${form.spent.toFixed(2)}</TableCell>
+        <TableCell className="text-right tabular-nums font-semibold text-primary">{form.leads}</TableCell>
+        <TableCell className="text-right tabular-nums">{form.formOpens}</TableCell>
+        <TableCell className="text-right tabular-nums">{form.ctr.toFixed(2)}%</TableCell>
+        <TableCell className="text-right tabular-nums">${form.cpc.toFixed(2)}</TableCell>
+        <TableCell className="text-right tabular-nums">${form.cpl.toFixed(2)}</TableCell>
+        <TableCell className="text-right tabular-nums">
+          {form.formOpens > 0 ? `${form.lgfRate.toFixed(1)}%` : '—'}
         </TableCell>
-        <TableCell className="text-right">{form.impressions.toLocaleString()}</TableCell>
-        <TableCell className="text-right">{form.clicks.toLocaleString()}</TableCell>
-        <TableCell className="text-right">${form.spent.toFixed(2)}</TableCell>
-        <TableCell className="text-right font-semibold text-primary">{form.leads}</TableCell>
-        <TableCell className="text-right">{form.formOpens}</TableCell>
-        <TableCell className="text-right">{form.ctr.toFixed(2)}%</TableCell>
-        <TableCell className="text-right">${form.cpc.toFixed(2)}</TableCell>
-        <TableCell className="text-right">${form.cpl.toFixed(2)}</TableCell>
-        <TableCell className="text-right">
-          {form.formOpens > 0 ? `${form.lgfRate.toFixed(1)}%` : '-'}
-        </TableCell>
-        <TableCell className="text-right text-muted-foreground">{form.creatives.length}</TableCell>
-        <TableCell className="w-10" onClick={(e) => e.stopPropagation()}>
+        <TableCell className="text-right tabular-nums text-muted-foreground">{form.creatives.length}</TableCell>
+        {/* Export */}
+        <TableCell className="w-10 p-2" onClick={(e) => e.stopPropagation()}>
           <Button
             variant="ghost"
             size="sm"
@@ -123,19 +131,22 @@ function FormRow({ form }: { form: LeadGenFormData }) {
           </Button>
         </TableCell>
       </TableRow>
-      <CollapsibleContent asChild>
+      {/* Sub-table row — plain <tr> with a single <td> spanning all columns */}
+      {isOpen && (
         <tr>
-          <td colSpan={13} className="p-0">
+          <td colSpan={colCount} className="p-0 border-b border-border/40">
             <CreativesSubTable creatives={form.creatives} />
           </td>
         </tr>
-      </CollapsibleContent>
-    </Collapsible>
+      )}
+    </>
   );
 }
 
 export function LeadGenFormsTable({ data, isLoading }: LeadGenFormsTableProps) {
   const { toast } = useToast();
+  // 1 expand + 1 name + 9 metrics + 1 creatives count + 1 export = 13
+  const COL_COUNT = 13;
 
   const handleExportAll = () => {
     const columns = [
@@ -152,23 +163,15 @@ export function LeadGenFormsTable({ data, isLoading }: LeadGenFormsTableProps) {
       { key: 'lgfRate', label: 'LGF Rate (%)' },
       { key: 'creativesCount', label: 'Connected Creatives' },
     ];
-    const exportData = data.map(form => ({
-      ...form,
-      creativesCount: form.creatives.length,
-    }));
+    const exportData = data.map(form => ({ ...form, creativesCount: form.creatives.length }));
     exportToCSV(exportData, 'lead_gen_forms_report', columns);
-    toast({
-      title: 'Export successful',
-      description: `${data.length} forms exported`,
-    });
+    toast({ title: 'Export successful', description: `${data.length} forms exported` });
   };
 
   if (isLoading) {
     return (
       <div className="space-y-2">
-        {[...Array(5)].map((_, i) => (
-          <Skeleton key={i} className="h-12 w-full" />
-        ))}
+        {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}
       </div>
     );
   }
@@ -182,7 +185,7 @@ export function LeadGenFormsTable({ data, isLoading }: LeadGenFormsTableProps) {
     );
   }
 
-  // Calculate summary totals
+  // Summary totals
   const summary = data.reduce((acc, form) => ({
     impressions: acc.impressions + form.impressions,
     clicks: acc.clicks + form.clicks,
@@ -205,12 +208,13 @@ export function LeadGenFormsTable({ data, isLoading }: LeadGenFormsTableProps) {
           Export All Forms
         </Button>
       </div>
+
       <div className="rounded-md border overflow-x-auto">
         <Table className="min-w-[1100px]">
           <TableHeader>
-            <TableRow>
-              <TableHead className="w-8"></TableHead>
-              <TableHead className="min-w-[150px]">Form Name</TableHead>
+            <TableRow className="bg-muted/40">
+              <TableHead className="w-8" />
+              <TableHead className="min-w-[160px]">Form Name</TableHead>
               <TableHead className="text-right">Impressions</TableHead>
               <TableHead className="text-right">Clicks</TableHead>
               <TableHead className="text-right">Spent</TableHead>
@@ -221,30 +225,30 @@ export function LeadGenFormsTable({ data, isLoading }: LeadGenFormsTableProps) {
               <TableHead className="text-right">CPL</TableHead>
               <TableHead className="text-right">LGF Rate</TableHead>
               <TableHead className="text-right">Creatives</TableHead>
-              <TableHead className="w-10"></TableHead>
+              <TableHead className="w-10" />
             </TableRow>
           </TableHeader>
           <TableBody>
             {data.map((form) => (
-              <FormRow key={form.formUrn} form={form} />
+              <FormRow key={form.formUrn} form={form} colCount={COL_COUNT} />
             ))}
-            {/* Summary Row */}
-            <TableRow className="bg-muted/50 font-semibold border-t-2">
-              <TableCell></TableCell>
+            {/* Summary row */}
+            <TableRow className="bg-muted/50 font-semibold border-t-2 border-border">
+              <TableCell />
               <TableCell>Summary ({data.length} forms)</TableCell>
-              <TableCell className="text-right">{summary.impressions.toLocaleString()}</TableCell>
-              <TableCell className="text-right">{summary.clicks.toLocaleString()}</TableCell>
-              <TableCell className="text-right">${summary.spent.toFixed(2)}</TableCell>
-              <TableCell className="text-right text-primary">{summary.leads}</TableCell>
-              <TableCell className="text-right">{summary.formOpens}</TableCell>
-              <TableCell className="text-right">{summaryCtr.toFixed(2)}%</TableCell>
-              <TableCell className="text-right">${summaryCpc.toFixed(2)}</TableCell>
-              <TableCell className="text-right">${summaryCpl.toFixed(2)}</TableCell>
-              <TableCell className="text-right">
-                {summary.formOpens > 0 ? `${summaryLgfRate.toFixed(1)}%` : '-'}
+              <TableCell className="text-right tabular-nums">{summary.impressions.toLocaleString()}</TableCell>
+              <TableCell className="text-right tabular-nums">{summary.clicks.toLocaleString()}</TableCell>
+              <TableCell className="text-right tabular-nums">${summary.spent.toFixed(2)}</TableCell>
+              <TableCell className="text-right tabular-nums text-primary">{summary.leads}</TableCell>
+              <TableCell className="text-right tabular-nums">{summary.formOpens}</TableCell>
+              <TableCell className="text-right tabular-nums">{summaryCtr.toFixed(2)}%</TableCell>
+              <TableCell className="text-right tabular-nums">${summaryCpc.toFixed(2)}</TableCell>
+              <TableCell className="text-right tabular-nums">${summaryCpl.toFixed(2)}</TableCell>
+              <TableCell className="text-right tabular-nums">
+                {summary.formOpens > 0 ? `${summaryLgfRate.toFixed(1)}%` : '—'}
               </TableCell>
-              <TableCell className="text-right">{summary.creatives}</TableCell>
-              <TableCell></TableCell>
+              <TableCell className="text-right tabular-nums">{summary.creatives}</TableCell>
+              <TableCell />
             </TableRow>
           </TableBody>
         </Table>
