@@ -4967,6 +4967,30 @@ serve(async (req) => {
           }
         }
 
+        // Step 3c: Hardcoded fallback names for known form IDs (used when API cannot resolve names)
+        const knownFormNames: Record<string, string> = {
+          '12758933': 'privacy-demo-banner',
+          '12759063': 'privacy-demo-message',
+          '12401253': '5_actionable_lessions_top_dpos',
+          '12401203': 'creating_managing_ropa',
+          '1003452086': 'easy-compliance-demo-banner',
+          '12743913': 'AI governance-demo-message',
+          '1002616045': 'ROPA 2026',
+          '13339823': 'security-demo-banner-calendly',
+          '1003553081': '2026 checklist doc',
+          '1002614051': 'DPAs 2026 2.0',
+          '1002617057': 'AI governance-demo-banner_EMEA2',
+          '1002615056': 'DSAR 2026',
+          '13512463': 'outbound_email_privacy',
+          '13104613': 'AI governance-demo-banner_NA',
+        };
+        // Apply hardcoded names only where API didn't already resolve them
+        for (const [formId, formName] of Object.entries(knownFormNames)) {
+          if (!lgfFormNames.has(formId)) {
+            lgfFormNames.set(formId, formName);
+          }
+        }
+
         console.log(`[Step 3] Resolved ${lgfFormNames.size} form names:`,
           Array.from(lgfFormNames.entries()).slice(0, 5).map(([id, name]) => `${id}=${name}`).join(', '));
         
