@@ -14,6 +14,7 @@ import { CompanyEngagementTimeline } from "@/components/dashboard/CompanyEngagem
 import { MegaBudgetPacingDashboard } from "@/components/dashboard/MegaBudgetPacingDashboard";
 import { CreativeGallery } from "@/components/dashboard/CreativeGallery";
 import { CreativePerformanceReport } from "@/components/dashboard/CreativePerformanceReport";
+import { CampaignPerformanceReport } from "@/components/dashboard/CampaignPerformanceReport";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { 
@@ -128,6 +129,7 @@ export default function Dashboard() {
               {activeTab === "company_timeline" && "Company Engagement Timeline"}
               {activeTab === "creatives" && "Ad Creatives"}
               {activeTab === "creative_reports" && "Creative Reports"}
+              {activeTab === "campaign_reports" && "Campaign Reports"}
               {activeTab === "reports" && "Reports"}
               {activeTab === "title_checker" && "Title Checker"}
             </h1>
@@ -344,6 +346,13 @@ export default function Dashboard() {
 
         {activeTab === "creative_reports" && (
           <CreativePerformanceReport
+            accessToken={accessToken}
+            selectedAccount={selectedAccount}
+          />
+        )}
+
+        {activeTab === "campaign_reports" && (
+          <CampaignPerformanceReport
             accessToken={accessToken}
             selectedAccount={selectedAccount}
           />

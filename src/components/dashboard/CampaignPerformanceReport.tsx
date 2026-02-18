@@ -1,7 +1,6 @@
 import { useEffect, useState, useMemo, Fragment } from 'react';
-import { useCreativePerformanceReport, CreativePerformanceRow, PeriodMetrics, CampaignBreakdown } from '@/hooks/useCreativePerformanceReport';
+import { useCampaignPerformanceReport, CampaignPerformanceRow, PeriodMetrics } from '@/hooks/useCampaignPerformanceReport';
 import { Input } from '@/components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
@@ -17,7 +16,7 @@ interface Props {
   selectedAccount: string | null;
 }
 
-type SortKey = 'creativeName' | '7d_spend' | '7d_cpl' | '7d_ctr' | '14d_spend' | '14d_cpl' | '14d_ctr' | '30d_spend' | '30d_cpl' | '30d_ctr' | 'lm_spend' | 'lm_cpl' | 'lm_ctr';
+type SortKey = 'campaignName' | '7d_spend' | '7d_cpl' | '7d_ctr' | '14d_spend' | '14d_cpl' | '14d_ctr' | '30d_spend' | '30d_cpl' | '30d_ctr' | 'lm_spend' | 'lm_cpl' | 'lm_ctr';
 
 const PERIODS = [
   { key: '7d', label: 'Last 7 Days', field: 'last7d' as const, color: 'hsl(var(--primary))' },
@@ -40,10 +39,10 @@ const PERIOD_HEADER_BG = [
   'bg-orange-500/15',
 ];
 
-function getMetricValue(row: CreativePerformanceRow, key: SortKey): number | string {
-  if (key === 'creativeName') return row.creativeName;
+function getMetricValue(row: CampaignPerformanceRow, key: SortKey): number | string {
+  if (key === 'campaignName') return row.campaignName;
   const [period, metric] = key.split('_') as [string, string];
-  const periodMap: Record<string, keyof CreativePerformanceRow> = { '7d': 'last7d', '14d': 'last14d', '30d': 'last30d', 'lm': 'lastMonth' };
+  const periodMap: Record<string, keyof CampaignPerformanceRow> = { '7d': 'last7d', '14d': 'last14d', '30d': 'last30d', 'lm': 'lastMonth' };
   const p = row[periodMap[period]] as PeriodMetrics;
   if (metric === 'cpl') return p.cpl;
   if (metric === 'ctr') return p.ctr;
@@ -119,14 +118,13 @@ function copyToClipboard(text: string) {
   });
 }
 
-export function CreativePerformanceReport({ accessToken, selectedAccount }: Props) {
-  const { data, isLoading, error, fetchReport } = useCreativePerformanceReport(accessToken);
+export function CampaignPerformanceReport({ accessToken, selectedAccount }: Props) {
+  const { data, isLoading, error, fetchReport } = useCampaignPerformanceReport(accessToken);
   const [search, setSearch] = useState('');
   const [sortKey, setSortKey] = useState<SortKey>('7d_spend');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [activeOnly, setActiveOnly] = useState(false);
-  const [typeFilter, setTypeFilter] = useState<string>('all');
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
 
   useEffect(() => {
@@ -138,36 +136,25 @@ export function CreativePerformanceReport({ accessToken, selectedAccount }: Prop
     else { setSortKey(key); setSortOrder('desc'); }
   };
 
-  const toggleExpand = (name: string) => {
+  const toggleExpand = (id: string) => {
     setExpandedRows(prev => {
       const next = new Set(prev);
-      next.has(name) ? next.delete(name) : next.add(name);
+      next.has(id) ? next.delete(id) : next.add(id);
       return next;
     });
   };
-
-  const adTypes = useMemo(() => {
-    const types = new Set(data.map(r => r.type));
-    return [...types].sort();
-  }, [data]);
 
   const filtered = useMemo(() => {
     let result = data;
     if (search.trim()) {
       const q = search.toLowerCase();
-      result = result.filter(r => r.creativeName.toLowerCase().includes(q));
+      result = result.filter(r => r.campaignName.toLowerCase().includes(q));
     }
     if (activeOnly) {
-      result = result.filter(r => 
-        r.creativeStatus === 'ACTIVE' || 
-        r.campaigns.some(c => c.campaignStatus === 'ACTIVE' || c.creativeStatus === 'ACTIVE')
-      );
-    }
-    if (typeFilter !== 'all') {
-      result = result.filter(r => r.type === typeFilter);
+      result = result.filter(r => r.ads.some(ad => ad.adStatus === 'ACTIVE'));
     }
     return result;
-  }, [data, search, activeOnly, typeFilter]);
+  }, [data, search, activeOnly]);
 
   const sorted = useMemo(() => {
     return [...filtered].sort((a, b) => {
@@ -214,52 +201,41 @@ export function CreativePerformanceReport({ accessToken, selectedAccount }: Prop
       : <ArrowUp className="h-3 w-3 text-primary shrink-0" />;
   };
 
-  // Order: Spend, CPL, CTR
+  // Border-left on first metric cell of each period to visually separate groups
+  const PERIOD_BORDER = ['border-l-2 border-primary/30', 'border-l-2 border-blue-500/30', 'border-l-2 border-purple-500/30', 'border-l-2 border-orange-500/30'];
+
   const subHeader = (prefix: string, label: string, metric: 'spend' | 'cpl' | 'ctr', periodIdx: number) => {
     const key = `${prefix}_${metric}` as SortKey;
+    const isFirst = metric === 'spend';
     return (
-      <th key={key} className={`text-right p-2 font-medium text-xs cursor-pointer hover:bg-muted/60 transition-colors whitespace-nowrap ${PERIOD_BG[periodIdx]}`} onClick={() => handleSort(key)}>
+      <th key={key} className={`text-right p-2 font-medium text-xs cursor-pointer hover:bg-muted/60 transition-colors whitespace-nowrap ${PERIOD_BG[periodIdx]} ${isFirst ? PERIOD_BORDER[periodIdx] : ''}`} onClick={() => handleSort(key)}>
         <div className="flex items-center justify-end gap-1">{label}<SortIcon col={key} /></div>
       </th>
     );
   };
 
-  // Render in order: Spend, CPL, CTR
   const renderMetricCells = (m: PeriodMetrics, prefix: string, periodIdx: number) => (
     <Fragment key={prefix}>
-      <td className={`p-2 text-right text-xs font-mono ${PERIOD_BG[periodIdx]}`}><MetricCell value={m.spent} format="currency" /></td>
+      <td className={`p-2 text-right text-xs font-mono ${PERIOD_BG[periodIdx]} ${PERIOD_BORDER[periodIdx]}`}><MetricCell value={m.spent} format="currency" /></td>
       <td className={`p-2 text-right text-xs font-mono ${PERIOD_BG[periodIdx]}`}><MetricCell value={m.cpl} format="currency" /></td>
       <td className={`p-2 text-right text-xs font-mono ${PERIOD_BG[periodIdx]}`}><MetricCell value={m.ctr} format="percent" /></td>
     </Fragment>
   );
 
-  const COL_COUNT = 2 + PERIODS.length * 3 + 1; // name + #camp + periods*3 + fatigue
+  const COL_COUNT = 3 + PERIODS.length * 3 + 1; // name + status + #ads + periods*3 + trend
 
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-4 flex-wrap">
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input placeholder="Search creatives..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
+          <Input placeholder="Search campaigns..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
         </div>
         <div className="flex items-center gap-2">
-          <Switch id="active-filter" checked={activeOnly} onCheckedChange={setActiveOnly} />
-          <Label htmlFor="active-filter" className="text-sm cursor-pointer">Active ads only</Label>
+          <Switch id="active-filter-camp" checked={activeOnly} onCheckedChange={setActiveOnly} />
+          <Label htmlFor="active-filter-camp" className="text-sm cursor-pointer">Active ads only</Label>
         </div>
-        <Select value={typeFilter} onValueChange={setTypeFilter}>
-          <SelectTrigger className="w-[180px] h-9 text-sm">
-            <SelectValue placeholder="All ad types" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All ad types</SelectItem>
-            {adTypes.map(t => (
-              <SelectItem key={t} value={t}>
-                {t.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()).replace(/\bAd\b/i, 'Ad')}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <span className="text-sm text-muted-foreground">{sorted.length} creatives</span>
+        <span className="text-sm text-muted-foreground">{sorted.length} campaigns</span>
         {sorted.length > 0 && (
           <Button variant="outline" size="sm" onClick={() => setAiPanelOpen(true)} className="gap-1.5">
             <Sparkles className="h-4 w-4" />
@@ -267,9 +243,10 @@ export function CreativePerformanceReport({ accessToken, selectedAccount }: Prop
           </Button>
         )}
       </div>
+
       <div className="flex items-center gap-3 px-3 py-2 rounded-md bg-muted/40 border border-border/50 text-xs text-muted-foreground">
         <Info className="h-3.5 w-3.5 shrink-0 text-primary" />
-        <span><span className="font-medium text-foreground">Trend Logic</span> — Compares 7d vs 30d: <span className="font-medium">CPL ↑</span> flagged if 7d CPL &gt;15% above 30d &nbsp;|&nbsp; <span className="font-medium">CTR ↓</span> flagged if 7d CTR &gt;15% below 30d</span>
+        <span><span className="font-medium text-foreground">Trend Logic</span> — Compares 7d vs 30d: <span className="font-medium">CPL ↑</span> flagged if 7d CPL &gt;15% above 30d &nbsp;|&nbsp; <span className="font-medium">CTR ↓</span> flagged if 7d CTR &gt;15% below 30d. Expand a campaign row to see ad-level breakdowns.</span>
       </div>
 
       <div className="border border-border rounded-lg overflow-hidden">
@@ -277,9 +254,9 @@ export function CreativePerformanceReport({ accessToken, selectedAccount }: Prop
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border">
-                <th colSpan={2} className="bg-muted/30" />
+                <th colSpan={3} className="bg-muted/30" />
                 {PERIODS.map((p, i) => (
-                  <th key={p.key} colSpan={3} className={`text-center p-2 font-semibold border-b border-border text-xs uppercase tracking-wider ${PERIOD_HEADER_BG[i]}`}>
+                  <th key={p.key} colSpan={3} className={`text-center p-2 font-semibold border-b border-border text-xs uppercase tracking-wider ${PERIOD_HEADER_BG[i]} ${PERIOD_BORDER[i]}`}>
                     <div className="flex items-center justify-center gap-1.5">
                       <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: p.color }} />
                       {p.label}
@@ -289,10 +266,11 @@ export function CreativePerformanceReport({ accessToken, selectedAccount }: Prop
                 <th className="bg-muted/30" />
               </tr>
               <tr className="border-b border-border bg-muted/40">
-                <th className="text-left p-2 font-semibold min-w-[200px] cursor-pointer hover:bg-muted/60" onClick={() => handleSort('creativeName')}>
-                  <div className="flex items-center gap-1">Creative Name <SortIcon col="creativeName" /></div>
+                <th className="text-left p-2 font-semibold min-w-[220px] cursor-pointer hover:bg-muted/60" onClick={() => handleSort('campaignName')}>
+                  <div className="flex items-center gap-1">Campaign Name <SortIcon col="campaignName" /></div>
                 </th>
-                <th className="text-center p-2 font-semibold w-[50px] text-xs">#Camp</th>
+                <th className="text-center p-2 font-semibold w-[70px] text-xs">Status</th>
+                <th className="text-center p-2 font-semibold w-[50px] text-xs">#Ads</th>
                 {PERIODS.map((p, i) => (
                   <Fragment key={p.key}>
                     {subHeader(p.key, 'Spend', 'spend', i)}
@@ -305,52 +283,54 @@ export function CreativePerformanceReport({ accessToken, selectedAccount }: Prop
             </thead>
             <tbody className="divide-y divide-border/50">
               {sorted.length === 0 ? (
-                <tr><td colSpan={COL_COUNT} className="text-center py-12 text-muted-foreground">No creative data available</td></tr>
+                <tr><td colSpan={COL_COUNT} className="text-center py-12 text-muted-foreground">No campaign data available</td></tr>
               ) : (
                 sorted.map(row => {
-                  const isExpanded = expandedRows.has(row.creativeName);
-                  const hasMultipleCampaigns = row.campaigns.length > 1;
+                  const isExpanded = expandedRows.has(row.campaignId);
+                  const hasAds = row.ads.length > 0;
                   return (
-                    <Fragment key={row.creativeName}>
+                    <Fragment key={row.campaignId}>
                       <tr
-                        className={`hover:bg-muted/30 transition-colors ${hasMultipleCampaigns ? 'cursor-pointer' : ''} ${isExpanded ? 'bg-muted/20' : ''}`}
-                        onClick={hasMultipleCampaigns ? () => toggleExpand(row.creativeName) : undefined}
+                        className={`hover:bg-muted/30 transition-colors ${hasAds ? 'cursor-pointer' : ''} ${isExpanded ? 'bg-muted/20' : ''}`}
+                        onClick={hasAds ? () => toggleExpand(row.campaignId) : undefined}
                       >
                         <td className="p-2">
                           <div className="flex items-center gap-1.5 group">
-                            {hasMultipleCampaigns && (
+                            {hasAds && (
                               isExpanded
                                 ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                                 : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                             )}
-                            <span className="font-medium text-xs break-words line-clamp-2">{row.creativeName}</span>
+                            <div>
+                              <span className="font-medium text-xs break-words line-clamp-2">{row.campaignName}</span>
+                              <div className="text-[10px] text-muted-foreground mt-0.5">{row.objectiveType.replace(/_/g, ' ')}</div>
+                            </div>
                             <button
-                              onClick={(e) => { e.stopPropagation(); copyToClipboard(row.creativeName); }}
-                              className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded hover:bg-muted"
-                              title="Copy creative name"
+                              onClick={(e) => { e.stopPropagation(); copyToClipboard(row.campaignName); }}
+                              className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded hover:bg-muted ml-auto shrink-0"
+                              title="Copy campaign name"
                             >
                               <Copy className="h-3 w-3 text-muted-foreground" />
                             </button>
                           </div>
                         </td>
-                        <td className="p-2 text-center text-xs text-muted-foreground">{row.campaignCount}</td>
+                        <td className="p-2 text-center"><StatusBadge status={row.campaignStatus} /></td>
+                        <td className="p-2 text-center text-xs text-muted-foreground">{row.adCount}</td>
                         {PERIODS.map((p, i) => renderMetricCells(row[p.field], p.key, i))}
                         <td className="p-2 text-center"><FatigueIndicator row={row} /></td>
                       </tr>
-                      {isExpanded && (activeOnly
-                        ? row.campaigns.filter(c => c.campaignStatus === 'ACTIVE')
-                        : row.campaigns
-                      ).map(camp => (
-                        <tr key={`${row.creativeName}-${camp.campaignName}`} className="bg-muted/10 border-t border-border/30">
+                      {isExpanded && row.ads.map(ad => (
+                        <tr key={`${row.campaignId}-${ad.creativeId}`} className="bg-muted/10 border-t border-border/30">
                           <td className="p-2 pl-8">
                             <div className="flex items-center gap-2">
-                              <span className="text-xs text-muted-foreground truncate max-w-[180px]">{camp.campaignName}</span>
-                              <StatusBadge status={camp.campaignStatus} />
+                              <span className="text-xs text-muted-foreground truncate max-w-[200px]">{ad.adName}</span>
+                              <StatusBadge status={ad.adStatus} />
                             </div>
                           </td>
                           <td className="p-2" />
-                          {PERIODS.map((p, i) => renderMetricCells(camp[p.field], `${p.key}-${camp.campaignName}`, i))}
-                          <td className="p-2 text-center"><FatigueIndicator row={camp} /></td>
+                          <td className="p-2" />
+                          {PERIODS.map((p, i) => renderMetricCells(ad[p.field], `${p.key}-${ad.creativeId}`, i))}
+                          <td className="p-2 text-center"><FatigueIndicator row={ad} /></td>
                         </tr>
                       ))}
                     </Fragment>
@@ -361,11 +341,12 @@ export function CreativePerformanceReport({ accessToken, selectedAccount }: Prop
                 <tr className="bg-muted/50 font-semibold border-t-2 border-border">
                   <td className="p-2 text-xs">Totals</td>
                   <td className="p-2" />
+                  <td className="p-2" />
                   {PERIODS.map((p, i) => {
                     const t = totals[p.field];
                     return (
                       <Fragment key={`t-${p.key}`}>
-                        <td className={`p-2 text-right text-xs font-mono ${PERIOD_BG[i]}`}><MetricCell value={t.spend} format="currency" /></td>
+                        <td className={`p-2 text-right text-xs font-mono ${PERIOD_BG[i]} ${PERIOD_BORDER[i]}`}><MetricCell value={t.spend} format="currency" /></td>
                         <td className={`p-2 text-right text-xs font-mono ${PERIOD_BG[i]}`}><MetricCell value={t.cpl} format="currency" /></td>
                         <td className={`p-2 text-right text-xs font-mono ${PERIOD_BG[i]}`}><MetricCell value={t.ctr} format="percent" /></td>
                       </Fragment>
@@ -383,7 +364,7 @@ export function CreativePerformanceReport({ accessToken, selectedAccount }: Prop
         open={aiPanelOpen}
         onOpenChange={setAiPanelOpen}
         data={sorted}
-        reportType="creative_performance"
+        reportType="campaign_performance"
       />
     </div>
   );

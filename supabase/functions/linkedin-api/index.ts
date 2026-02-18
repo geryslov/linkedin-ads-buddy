@@ -2176,7 +2176,7 @@ serve(async (req) => {
           `timeGranularity=${granularity === 'ALL' ? 'ALL' : granularity}&` +
           `pivot=MEMBER_COMPANY&` +
           `accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
-          `fields=impressions,clicks,costInLocalCurrency,costInUsd,externalWebsiteConversions,oneClickLeads,totalEngagements,likes,comments,reactions,shares,pivotValue&` +
+          `fields=impressions,clicks,landingPageClicks,costInLocalCurrency,costInUsd,externalWebsiteConversions,oneClickLeads,totalEngagements,likes,comments,reactions,shares,pivotValue&` +
           `count=10000`;
         
         if (campaignIds && campaignIds.length > 0) {
@@ -2196,6 +2196,7 @@ serve(async (req) => {
           spentUsd: number; 
           leads: number;
           engagements: number;
+          landingPageClicks: number;
           likes: number;
           comments: number;
           reactions: number;
@@ -2242,6 +2243,7 @@ serve(async (req) => {
               existing.spent += parseFloat(el.costInLocalCurrency || '0');
               existing.spentUsd += parseFloat(el.costInUsd || '0');
               existing.leads += (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
+              existing.landingPageClicks += (el.landingPageClicks || 0);
               existing.engagements += (el.totalEngagements || 0);
               existing.likes += (el.likes || 0);
               existing.comments += (el.comments || 0);
@@ -2255,6 +2257,7 @@ serve(async (req) => {
                 spent: parseFloat(el.costInLocalCurrency || '0'),
                 spentUsd: parseFloat(el.costInUsd || '0'),
                 leads: (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0),
+                landingPageClicks: el.landingPageClicks || 0,
                 engagements: el.totalEngagements || 0,
                 likes: el.likes || 0,
                 comments: el.comments || 0,
@@ -2443,7 +2446,7 @@ serve(async (req) => {
                 params.set('timeGranularity', granularity === 'ALL' ? 'ALL' : granularity);
                 params.set('pivot', 'MEMBER_COMPANY');
                 params.set('accounts[0]', `urn:li:sponsoredAccount:${accountId}`);
-                params.set('fields', 'impressions,clicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions,totalEngagements,likes,comments,reactions,shares,pivotValue');
+                params.set('fields', 'impressions,clicks,landingPageClicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions,totalEngagements,likes,comments,reactions,shares,pivotValue');
                 params.set('count', '10000');
                 
                 campIds.forEach((id, idx) => {
@@ -2490,13 +2493,14 @@ serve(async (req) => {
                   const clicks = el.clicks || 0;
                   const spent = parseFloat(el.costInLocalCurrency || '0');
                   const leads = (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
+                  const landingPageClicks = el.landingPageClicks || 0;
                   const engagements = el.totalEngagements || 0;
                   const likes = el.likes || 0;
                   const comments = el.comments || 0;
                   const reactions = el.reactions || 0;
                   const shares = el.shares || 0;
                   
-                  if (impressions === 0 && clicks === 0 && spent === 0 && leads === 0 && engagements === 0) continue;
+                  if (impressions === 0 && clicks === 0 && spent === 0 && leads === 0 && engagements === 0 && landingPageClicks === 0) continue;
                   
                   const objEntries = objectiveBreakdownMap.get(entityUrn) || [];
                   const existingObj = objEntries.find(e => e.objective === objective);
@@ -2505,13 +2509,14 @@ serve(async (req) => {
                     existingObj.clicks += clicks;
                     existingObj.spent += spent;
                     existingObj.leads += leads;
+                    existingObj.landingPageClicks += landingPageClicks;
                     existingObj.engagements += engagements;
                     existingObj.likes += likes;
                     existingObj.comments += comments;
                     existingObj.reactions += reactions;
                     existingObj.shares += shares;
                   } else {
-                    objEntries.push({ objective, impressions, clicks, spent, leads, engagements, likes, comments, reactions, shares });
+                    objEntries.push({ objective, impressions, clicks, spent, leads, landingPageClicks, engagements, likes, comments, reactions, shares });
                   }
                   objectiveBreakdownMap.set(entityUrn, objEntries);
                 }
@@ -2550,6 +2555,7 @@ serve(async (req) => {
             clicks: b.clicks,
             spent: parseFloat(b.spent.toFixed(2)),
             leads: b.leads,
+            landingPageClicks: b.landingPageClicks || 0,
             engagements: b.engagements || 0,
             likes: b.likes || 0,
             comments: b.comments || 0,
@@ -2569,6 +2575,7 @@ serve(async (req) => {
             enrichmentStatus: websiteInfo.status,
             impressions: metrics.impressions,
             clicks: metrics.clicks,
+            landingPageClicks: metrics.landingPageClicks,
             costInLocalCurrency: metrics.spent.toFixed(2),
             costInUsd: metrics.spentUsd.toFixed(2),
             leads: metrics.leads,
@@ -2642,7 +2649,7 @@ serve(async (req) => {
                 `pivot=MEMBER_COMPANY&` +
                 `accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
                 `campaigns[0]=urn:li:sponsoredCampaign:${campaignId}&` +
-                `fields=impressions,clicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions,totalEngagements,likes,comments,reactions,shares,pivotValue&` +
+                `fields=impressions,clicks,landingPageClicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions,totalEngagements,likes,comments,reactions,shares,pivotValue&` +
                 `count=10000`;
               
               const response = await fetch(url, {
@@ -2664,7 +2671,7 @@ serve(async (req) => {
         console.log(`[get_company_campaign_breakdown] Completed ${allResults.length} campaign queries`);
         
         // Build breakdowns: companyUrn -> [{ campaignId, campaignName, metrics }]
-        const breakdowns: Record<string, Array<{ campaignId: string; campaignName: string; impressions: number; clicks: number; spent: number; leads: number; engagements: number; likes: number; comments: number; reactions: number; shares: number; ctr: number; cpc: number; cpm: number }>> = {};
+        const breakdowns: Record<string, Array<{ campaignId: string; campaignName: string; impressions: number; clicks: number; landingPageClicks: number; spent: number; leads: number; engagements: number; likes: number; comments: number; reactions: number; shares: number; ctr: number; cpc: number; cpm: number }>> = {};
         const nameMap = objCampaignNames || {};
         
         for (const { campaignId, elements } of allResults) {
@@ -2678,13 +2685,14 @@ serve(async (req) => {
             const clicks = el.clicks || 0;
             const spent = parseFloat(el.costInLocalCurrency || '0');
             const leads = (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
+            const landingPageClicks = el.landingPageClicks || 0;
             const engagements = el.totalEngagements || 0;
             const likes = el.likes || 0;
             const comments = el.comments || 0;
             const reactions = el.reactions || 0;
             const shares = el.shares || 0;
             
-            if (impressions === 0 && clicks === 0 && spent === 0 && leads === 0 && engagements === 0) continue;
+            if (impressions === 0 && clicks === 0 && spent === 0 && leads === 0 && engagements === 0 && landingPageClicks === 0) continue;
             
             if (!breakdowns[entityUrn]) breakdowns[entityUrn] = [];
             
@@ -2694,6 +2702,7 @@ serve(async (req) => {
               existing.clicks += clicks;
               existing.spent += spent;
               existing.leads += leads;
+              existing.landingPageClicks += landingPageClicks;
               existing.engagements += engagements;
               existing.likes += likes;
               existing.comments += comments;
@@ -2708,6 +2717,7 @@ serve(async (req) => {
                 campaignName: campName,
                 impressions,
                 clicks,
+                landingPageClicks,
                 spent: parseFloat(spent.toFixed(2)),
                 leads,
                 engagements,
@@ -3325,6 +3335,221 @@ serve(async (req) => {
         console.log(`[get_creative_performance_report] Complete. ${cpElements.length} creatives, ${dateRanges.length} periods`);
 
         return new Response(JSON.stringify({ periods: dateRanges.map((r: any) => r.key), elements: cpElements }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      case 'get_campaign_performance_report': {
+        // Multi-period campaign trend report: fetches campaign metadata ONCE, analytics for multiple date ranges in parallel
+        // Each campaign row expands to show its individual ad (creative) breakdown
+        const { accountId: campPerfAccountId, dateRanges: campPerfDateRanges } = params || {};
+        if (!campPerfAccountId || !campPerfDateRanges || !Array.isArray(campPerfDateRanges)) {
+          return new Response(JSON.stringify({ error: 'accountId and dateRanges[] required' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        console.log(`[get_campaign_performance_report] Starting for account ${campPerfAccountId}, ${campPerfDateRanges.length} periods`);
+
+        // Step 1: Fetch ALL campaigns (paginated) - name, status, objective
+        const campPerfCampaigns = new Map<string, { name: string; status: string; objectiveType: string; groupId: string }>();
+        try {
+          let cpStart = 0; let cpTotal = 0;
+          do {
+            const url = `https://api.linkedin.com/rest/adAccounts/${campPerfAccountId}/adCampaigns?q=search&sortOrder=DESCENDING&count=100&start=${cpStart}`;
+            const r = await fetch(url, { headers: { 'Authorization': `Bearer ${accessToken}`, 'LinkedIn-Version': '202511', 'X-Restli-Protocol-Version': '2.0.0' } });
+            if (r.ok) {
+              const d = await r.json();
+              const els = d.elements || [];
+              cpTotal = d.paging?.total || els.length;
+              for (const c of els) {
+                const cid = c.id?.toString() || c.$URN?.split(':').pop();
+                if (cid) {
+                  const groupId = (c.campaignGroup || '').split(':').pop() || '';
+                  campPerfCampaigns.set(cid, {
+                    name: c.name || `Campaign ${cid}`,
+                    status: String(c.status || 'UNKNOWN').toUpperCase(),
+                    objectiveType: String(c.objectiveType || 'UNKNOWN').toUpperCase(),
+                    groupId,
+                  });
+                }
+              }
+              cpStart += els.length;
+              if (els.length === 0) break;
+            } else { break; }
+          } while (cpStart < cpTotal);
+          console.log(`[get_campaign_performance_report Step 1] Fetched ${campPerfCampaigns.size} campaigns`);
+        } catch (e) { console.error('[get_campaign_performance_report Step 1] error', e); }
+
+        // Step 2: Fetch campaign-pivot analytics for all periods in parallel
+        const campPerfPeriodResults = await Promise.all(campPerfDateRanges.map(async (range: { start: string; end: string; key: string }) => {
+          const [sY, sM, sD] = range.start.split('-').map(Number);
+          const [eY, eM, eD] = range.end.split('-').map(Number);
+          const url = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&dateRange.start.day=${sD}&dateRange.start.month=${sM}&dateRange.start.year=${sY}&dateRange.end.day=${eD}&dateRange.end.month=${eM}&dateRange.end.year=${eY}&timeGranularity=ALL&pivot=CAMPAIGN&accounts[0]=urn:li:sponsoredAccount:${campPerfAccountId}&fields=impressions,clicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions,pivotValue&count=10000`;
+          try {
+            const resp = await fetch(url, { headers: { 'Authorization': `Bearer ${accessToken}` } });
+            if (resp.ok) { const d = await resp.json(); return { key: range.key, elements: d.elements || [] }; }
+          } catch (e) { /* ignore */ }
+          return { key: range.key, elements: [] };
+        }));
+
+        // Step 3: Fetch creative-pivot analytics for all periods (for ad breakdown)
+        const campPerfCreativePeriodResults = await Promise.all(campPerfDateRanges.map(async (range: { start: string; end: string; key: string }) => {
+          const [sY, sM, sD] = range.start.split('-').map(Number);
+          const [eY, eM, eD] = range.end.split('-').map(Number);
+          const url = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&dateRange.start.day=${sD}&dateRange.start.month=${sM}&dateRange.start.year=${sY}&dateRange.end.day=${eD}&dateRange.end.month=${eM}&dateRange.end.year=${eY}&timeGranularity=ALL&pivot=CREATIVE&accounts[0]=urn:li:sponsoredAccount:${campPerfAccountId}&fields=impressions,clicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions,pivotValue&count=10000`;
+          try {
+            const resp = await fetch(url, { headers: { 'Authorization': `Bearer ${accessToken}` } });
+            if (resp.ok) { const d = await resp.json(); return { key: range.key, elements: d.elements || [] }; }
+          } catch (e) { /* ignore */ }
+          return { key: range.key, elements: [] };
+        }));
+
+        // Build campaign-level metrics map
+        const campPerfMetrics = new Map<string, Map<string, { impressions: number; clicks: number; spent: number; leads: number }>>();
+        const allCampIds = new Set<string>();
+        for (const pr of campPerfPeriodResults) {
+          const m = new Map<string, { impressions: number; clicks: number; spent: number; leads: number }>();
+          for (const el of pr.elements) {
+            const cid = el.pivotValue?.split(':').pop() || '';
+            if (!cid) continue;
+            allCampIds.add(cid);
+            const ex = m.get(cid) || { impressions: 0, clicks: 0, spent: 0, leads: 0 };
+            ex.impressions += el.impressions || 0;
+            ex.clicks += el.clicks || 0;
+            ex.spent += parseFloat(el.costInLocalCurrency || '0');
+            ex.leads += (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
+            m.set(cid, ex);
+          }
+          campPerfMetrics.set(pr.key, m);
+        }
+
+        // Step 4: Fetch creative metadata for all creatives seen in analytics
+        const campCreativeMetrics = new Map<string, Map<string, { impressions: number; clicks: number; spent: number; leads: number }>>();
+        const allCreativeIdsForCamp = new Set<string>();
+        for (const pr of campPerfCreativePeriodResults) {
+          const m = new Map<string, { impressions: number; clicks: number; spent: number; leads: number }>();
+          for (const el of pr.elements) {
+            const cid = el.pivotValue?.split(':').pop() || '';
+            if (!cid) continue;
+            allCreativeIdsForCamp.add(cid);
+            const ex = m.get(cid) || { impressions: 0, clicks: 0, spent: 0, leads: 0 };
+            ex.impressions += el.impressions || 0;
+            ex.clicks += el.clicks || 0;
+            ex.spent += parseFloat(el.costInLocalCurrency || '0');
+            ex.leads += (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
+            m.set(cid, ex);
+          }
+          campCreativeMetrics.set(pr.key, m);
+        }
+
+        console.log(`[get_campaign_performance_report Step 3] ${allCreativeIdsForCamp.size} unique creatives`);
+
+        // Fetch creative metadata (name + campaign association) in parallel batches
+        const campPerfCreativeInfo = new Map<string, { name: string; campaignId: string; status: string; reference: string }>();
+        const cpCreativeIds = [...allCreativeIdsForCamp];
+        for (let i = 0; i < cpCreativeIds.length; i += 50) {
+          const batch = cpCreativeIds.slice(i, i + 50);
+          await Promise.all(batch.map(async (creativeId) => {
+            try {
+              const urn = encodeURIComponent(`urn:li:sponsoredCreative:${creativeId}`);
+              const r = await fetch(`https://api.linkedin.com/rest/adAccounts/${campPerfAccountId}/creatives/${urn}`, {
+                headers: { 'Authorization': `Bearer ${accessToken}`, 'LinkedIn-Version': '202511', 'X-Restli-Protocol-Version': '2.0.0' },
+              });
+              if (r.ok) {
+                const d = await r.json();
+                const campaignId = (d.campaign || '').split(':').pop() || '';
+                let name = d.name || '';
+                // Extract reference URN for UGC/share name resolution
+                const content = d.content || {};
+                const reference = typeof content === 'string' ? content : (content.reference || d.reference || '');
+                campPerfCreativeInfo.set(creativeId, { name, campaignId, status: String(d.status || 'UNKNOWN').toUpperCase(), reference: String(reference) });
+              }
+            } catch (e) { /* ignore */ }
+          }));
+        }
+
+        // Resolve creative names from UGC posts / shares for any without a direct name
+        const campPerfRefNameCache = new Map<string, string>();
+        const refsToResolve = new Set<string>();
+        for (const [, info] of campPerfCreativeInfo) {
+          if (!info.name && info.reference && (info.reference.includes('ugcPost') || info.reference.includes('share'))) {
+            refsToResolve.add(info.reference);
+          }
+        }
+        if (refsToResolve.size > 0) {
+          await Promise.all([...refsToResolve].slice(0, 80).map(async (ref) => {
+            try {
+              const isUgc = ref.includes('ugcPost');
+              const endpoint = isUgc
+                ? `https://api.linkedin.com/v2/ugcPosts/${encodeURIComponent(ref)}`
+                : `https://api.linkedin.com/v2/shares/${encodeURIComponent(ref)}`;
+              const resp = await fetch(endpoint, { headers: { 'Authorization': `Bearer ${accessToken}` } });
+              if (resp.ok) {
+                const data = await resp.json();
+                let text = '';
+                if (isUgc) {
+                  text = data.specificContent?.['com.linkedin.ugc.ShareContent']?.shareCommentary?.text || '';
+                } else {
+                  text = data.text?.text || '';
+                }
+                if (text.trim()) {
+                  campPerfRefNameCache.set(ref, text.replace(/\s+/g, ' ').trim().slice(0, 80));
+                }
+              }
+            } catch (e) { /* ignore */ }
+          }));
+        }
+        // Apply resolved names
+        for (const [creativeId, info] of campPerfCreativeInfo) {
+          if (!info.name && info.reference) {
+            const resolved = campPerfRefNameCache.get(info.reference);
+            if (resolved) info.name = resolved;
+          }
+          if (!info.name) info.name = `Ad ${creativeId}`;
+        }
+
+        // Build per-campaign ad breakdown
+        const campPerfAdsByCampaign = new Map<string, Array<{ creativeId: string; name: string; status: string; periods: Record<string, any> }>>();
+        for (const creativeId of allCreativeIdsForCamp) {
+          const info = campPerfCreativeInfo.get(creativeId);
+          const campaignId = info?.campaignId || '';
+          if (!campaignId) continue;
+          if (!campPerfAdsByCampaign.has(campaignId)) campPerfAdsByCampaign.set(campaignId, []);
+          const adPeriods: Record<string, any> = {};
+          for (const pr of campPerfCreativePeriodResults) {
+            const m = campCreativeMetrics.get(pr.key)?.get(creativeId);
+            if (m) adPeriods[pr.key] = m;
+          }
+          campPerfAdsByCampaign.get(campaignId)!.push({
+            creativeId,
+            name: info?.name || `Ad ${creativeId}`,
+            status: info?.status || 'UNKNOWN',
+            periods: adPeriods,
+          });
+        }
+
+        // Step 5: Build final campaign elements
+        const campPerfElements: any[] = [];
+        for (const campId of allCampIds) {
+          const meta = campPerfCampaigns.get(campId);
+          const periodData: Record<string, any> = {};
+          for (const pr of campPerfPeriodResults) {
+            const m = campPerfMetrics.get(pr.key)?.get(campId);
+            if (m) periodData[pr.key] = m;
+          }
+          const ads = campPerfAdsByCampaign.get(campId) || [];
+          campPerfElements.push({
+            campaignId: campId,
+            campaignName: meta?.name || `Campaign ${campId}`,
+            campaignStatus: meta?.status || 'UNKNOWN',
+            objectiveType: meta?.objectiveType || 'UNKNOWN',
+            adCount: ads.length,
+            ads,
+            periods: periodData,
+          });
+        }
+
+        console.log(`[get_campaign_performance_report] Complete. ${campPerfElements.length} campaigns`);
+        return new Response(JSON.stringify({ periods: campPerfDateRanges.map((r: any) => r.key), elements: campPerfElements }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
@@ -4775,6 +5000,28 @@ serve(async (req) => {
               // Silently continue on individual lookup failures
             }
           }
+        }
+
+        // Step 3c: Hardcoded canonical names for known form IDs — always override API-resolved names
+        const knownFormNames: Record<string, string> = {
+          '12758933': 'privacy-demo-banner',
+          '12759063': 'privacy-demo-message',
+          '12401253': '5_actionable_lessions_top_dpos',
+          '12401203': 'creating_managing_ropa',
+          '1003452086': 'easy-compliance-demo-banner',
+          '12743913': 'AI governance-demo-message',
+          '1002616045': 'ROPA 2026',
+          '13339823': 'security-demo-banner-calendly',
+          '1003553081': '2026 checklist doc',
+          '1002614051': 'DPAs 2026 2.0',
+          '1002617057': 'AI governance-demo-banner_EMEA2',
+          '1002615056': 'DSAR 2026',
+          '13512463': 'outbound_email_privacy',
+          '13104613': 'AI governance-demo-banner_NA',
+        };
+        // Always apply known names — overrides whatever the API returned
+        for (const [formId, formName] of Object.entries(knownFormNames)) {
+          lgfFormNames.set(formId, formName);
         }
 
         console.log(`[Step 3] Resolved ${lgfFormNames.size} form names:`,

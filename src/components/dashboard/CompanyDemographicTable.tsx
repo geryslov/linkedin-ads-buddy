@@ -21,14 +21,15 @@ interface CompanyDemographicTableProps {
   loadingObjectives?: Set<string>;
 }
 
-type SortField = 'entityName' | 'impressions' | 'clicks' | 'spent' | 'leads' | 'engagements' | 'ctr' | 'cpc' | 'cpm' | 'enrichmentStatus';
+type SortField = 'entityName' | 'impressions' | 'clicks' | 'landingPageClicks' | 'spent' | 'leads' | 'engagements' | 'ctr' | 'cpc' | 'cpm' | 'enrichmentStatus';
 type SortDirection = 'asc' | 'desc';
-type ColumnKey = 'website' | 'impressions' | 'clicks' | 'spent' | 'leads' | 'engagements' | 'ctr' | 'cpc' | 'cpm';
+type ColumnKey = 'website' | 'impressions' | 'clicks' | 'landingPageClicks' | 'spent' | 'leads' | 'engagements' | 'ctr' | 'cpc' | 'cpm';
 
 const ALL_COLUMNS: { key: ColumnKey; label: string; sortField: SortField }[] = [
   { key: 'website', label: 'Website', sortField: 'enrichmentStatus' },
   { key: 'impressions', label: 'Impressions', sortField: 'impressions' },
   { key: 'clicks', label: 'Clicks', sortField: 'clicks' },
+  { key: 'landingPageClicks', label: 'LP Clicks', sortField: 'landingPageClicks' },
   { key: 'spent', label: 'Spent', sortField: 'spent' },
   { key: 'leads', label: 'Leads', sortField: 'leads' },
   { key: 'engagements', label: 'Engagements', sortField: 'engagements' },
@@ -126,7 +127,7 @@ export function CompanyDemographicTable({ data, isLoading, onExpandObjective, ca
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(25);
   const [visibleColumns, setVisibleColumns] = useState<Set<ColumnKey>>(
-    new Set(['website', 'impressions', 'clicks', 'spent', 'leads', 'engagements', 'ctr', 'cpc', 'cpm'])
+    new Set(['website', 'impressions', 'clicks', 'landingPageClicks', 'spent', 'leads', 'engagements', 'ctr', 'cpc', 'cpm'])
   );
 
   const isColumnVisible = (key: ColumnKey) => visibleColumns.has(key);
@@ -230,6 +231,7 @@ export function CompanyDemographicTable({ data, isLoading, onExpandObjective, ca
       (acc, item) => ({
         impressions: acc.impressions + item.impressions,
         clicks: acc.clicks + item.clicks,
+        landingPageClicks: acc.landingPageClicks + item.landingPageClicks,
         spent: acc.spent + item.spent,
         leads: acc.leads + item.leads,
         engagements: acc.engagements + item.engagements,
@@ -238,7 +240,7 @@ export function CompanyDemographicTable({ data, isLoading, onExpandObjective, ca
         reactions: acc.reactions + item.reactions,
         shares: acc.shares + item.shares,
       }),
-      { impressions: 0, clicks: 0, spent: 0, leads: 0, engagements: 0, likes: 0, comments: 0, reactions: 0, shares: 0 }
+      { impressions: 0, clicks: 0, landingPageClicks: 0, spent: 0, leads: 0, engagements: 0, likes: 0, comments: 0, reactions: 0, shares: 0 }
     );
   }, [filteredAndSortedData]);
 
@@ -328,6 +330,7 @@ export function CompanyDemographicTable({ data, isLoading, onExpandObjective, ca
               {isColumnVisible('website') && <TableHead className="max-w-[200px]"><SortButton field="enrichmentStatus">Website</SortButton></TableHead>}
               {isColumnVisible('impressions') && <TableHead className="text-right"><SortButton field="impressions">Impressions</SortButton></TableHead>}
               {isColumnVisible('clicks') && <TableHead className="text-right"><SortButton field="clicks">Clicks</SortButton></TableHead>}
+              {isColumnVisible('landingPageClicks') && <TableHead className="text-right"><SortButton field="landingPageClicks">LP Clicks</SortButton></TableHead>}
               {isColumnVisible('spent') && <TableHead className="text-right"><SortButton field="spent">Spent</SortButton></TableHead>}
               {isColumnVisible('leads') && <TableHead className="text-right"><SortButton field="leads">Leads</SortButton></TableHead>}
               {isColumnVisible('engagements') && <TableHead className="text-right"><SortButton field="engagements">Engagements</SortButton></TableHead>}
@@ -392,6 +395,7 @@ export function CompanyDemographicTable({ data, isLoading, onExpandObjective, ca
                       )}
                       {isColumnVisible('impressions') && <TableCell className="text-right tabular-nums">{item.impressions.toLocaleString()}</TableCell>}
                       {isColumnVisible('clicks') && <TableCell className="text-right tabular-nums">{item.clicks.toLocaleString()}</TableCell>}
+                      {isColumnVisible('landingPageClicks') && <TableCell className="text-right tabular-nums">{item.landingPageClicks.toLocaleString()}</TableCell>}
                       {isColumnVisible('spent') && <TableCell className="text-right tabular-nums">${item.spent.toFixed(2)}</TableCell>}
                       {isColumnVisible('leads') && <TableCell className="text-right tabular-nums">{item.leads.toLocaleString()}</TableCell>}
                       {isColumnVisible('engagements') && (
@@ -455,6 +459,7 @@ export function CompanyDemographicTable({ data, isLoading, onExpandObjective, ca
                             </TableCell>
                             {isColumnVisible('impressions') && <TableCell className="text-right tabular-nums text-sm text-muted-foreground">{breakdown.impressions.toLocaleString()}</TableCell>}
                             {isColumnVisible('clicks') && <TableCell className="text-right tabular-nums text-sm text-muted-foreground">{breakdown.clicks.toLocaleString()}</TableCell>}
+                            {isColumnVisible('landingPageClicks') && <TableCell className="text-right tabular-nums text-sm text-muted-foreground">{breakdown.landingPageClicks.toLocaleString()}</TableCell>}
                             {isColumnVisible('spent') && <TableCell className="text-right tabular-nums text-sm text-muted-foreground">${breakdown.spent.toFixed(2)}</TableCell>}
                             {isColumnVisible('leads') && <TableCell className="text-right tabular-nums text-sm text-muted-foreground">{breakdown.leads.toLocaleString()}</TableCell>}
                             {isColumnVisible('engagements') && (
@@ -500,6 +505,7 @@ export function CompanyDemographicTable({ data, isLoading, onExpandObjective, ca
                               </TableCell>
                               {isColumnVisible('impressions') && <TableCell className="text-right tabular-nums text-xs text-muted-foreground">{camp.impressions.toLocaleString()}</TableCell>}
                               {isColumnVisible('clicks') && <TableCell className="text-right tabular-nums text-xs text-muted-foreground">{camp.clicks.toLocaleString()}</TableCell>}
+                              {isColumnVisible('landingPageClicks') && <TableCell className="text-right tabular-nums text-xs text-muted-foreground">{camp.landingPageClicks.toLocaleString()}</TableCell>}
                               {isColumnVisible('spent') && <TableCell className="text-right tabular-nums text-xs text-muted-foreground">${camp.spent.toFixed(2)}</TableCell>}
                               {isColumnVisible('leads') && <TableCell className="text-right tabular-nums text-xs text-muted-foreground">{camp.leads.toLocaleString()}</TableCell>}
                               {isColumnVisible('engagements') && (
@@ -542,6 +548,7 @@ export function CompanyDemographicTable({ data, isLoading, onExpandObjective, ca
                 {isColumnVisible('website') && <TableCell></TableCell>}
                 {isColumnVisible('impressions') && <TableCell className="text-right tabular-nums">{totals.impressions.toLocaleString()}</TableCell>}
                 {isColumnVisible('clicks') && <TableCell className="text-right tabular-nums">{totals.clicks.toLocaleString()}</TableCell>}
+                {isColumnVisible('landingPageClicks') && <TableCell className="text-right tabular-nums">{totals.landingPageClicks.toLocaleString()}</TableCell>}
                 {isColumnVisible('spent') && <TableCell className="text-right tabular-nums">${totals.spent.toFixed(2)}</TableCell>}
                 {isColumnVisible('leads') && <TableCell className="text-right tabular-nums">{totals.leads.toLocaleString()}</TableCell>}
                 {isColumnVisible('engagements') && (
