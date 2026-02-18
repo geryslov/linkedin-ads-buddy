@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { RefreshCw, FileBarChart, Users, Target, PieChart, Globe, List, Download, Grid3X3, Settings, CheckCircle2, XCircle, Loader2, ClipboardList, Search, Pencil, Wallet, AlertTriangle, Sparkles, Building2 } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { RefreshCw, FileBarChart, Users, Target, PieChart, Globe, List, Download, Grid3X3, Settings, CheckCircle2, XCircle, Loader2, ClipboardList, Search, Pencil, Wallet, AlertTriangle, Sparkles, Building2, Eye, MousePointerClick, DollarSign, TrendingUp, BarChart3, CheckCircle, AlertCircle, ChevronDown, ChevronRight } from 'lucide-react';
 import { useDemographicReporting, TimeFrameOption as DemoTimeFrameOption, TimeGranularity, DemographicPivot, DEMOGRAPHIC_PIVOT_OPTIONS } from '@/hooks/useDemographicReporting';
 import { useCompanyDemographic, TimeFrameOption as CompanyDemoTimeFrameOption } from '@/hooks/useCompanyDemographic';
 import { useCreativeNamesReport, TimeFrameOption as CreativeNamesTimeFrameOption } from '@/hooks/useCreativeNamesReport';
@@ -14,6 +15,7 @@ import { useCampaignGroupPerformance, TimeFrameOption as CampaignGroupTimeFrameO
 import { useCustomFields } from '@/hooks/useCustomFields';
 import { DemographicTable } from './DemographicTable';
 import { CompanyDemographicTable } from './CompanyDemographicTable';
+import { CompanyDemographicCharts } from './CompanyDemographicCharts';
 import { CreativeNamesReportTable } from './CreativeNamesReportTable';
 import { CampaignReportingTable } from './CampaignReportingTable';
 import { CampaignGroupPerformanceTable } from './CampaignGroupPerformanceTable';
@@ -65,6 +67,17 @@ export function ReportingSection({ accessToken, selectedAccount, canWrite = fals
   const [titlesApiStatus, setTitlesApiStatus] = useState<'unknown' | 'enabled' | 'disabled'>('unknown');
   const [titlesApiTesting, setTitlesApiTesting] = useState(false);
   const [titlesApiMessage, setTitlesApiMessage] = useState<string | null>(null);
+  const [chartsExpanded, setChartsExpanded] = useState(false);
+
+  const enrichmentCounts = useMemo(() => {
+    const counts = { resolved: 0, fallback: 0, unresolved: 0 };
+    companyDemographic.companyData.forEach(c => {
+      if (c.enrichmentStatus === 'resolved') counts.resolved++;
+      else if (c.enrichmentStatus === 'fallback') counts.fallback++;
+      else counts.unresolved++;
+    });
+    return { ...counts, total: companyDemographic.companyData.length };
+  }, [companyDemographic.companyData]);
 
   const handleExportCSV = () => {
     let data: Record<string, any>[] = [];
@@ -831,43 +844,92 @@ export function ReportingSection({ accessToken, selectedAccount, canWrite = fals
             </CardContent>
           </Card>
 
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-7 gap-4">
             <MetricCard
               title="Impressions"
               value={companyDemographic.totals.impressions.toLocaleString()}
-              icon={FileBarChart}
+              icon={Eye}
             />
             <MetricCard
               title="Clicks"
               value={companyDemographic.totals.clicks.toLocaleString()}
-              icon={FileBarChart}
+              icon={MousePointerClick}
             />
             <MetricCard
               title="Spent"
               value={`$${companyDemographic.totals.spent.toFixed(2)}`}
-              icon={FileBarChart}
+              icon={DollarSign}
             />
             <MetricCard
               title="Leads"
               value={companyDemographic.totals.leads.toLocaleString()}
-              icon={FileBarChart}
+              icon={Users}
             />
             <MetricCard
               title="Avg CTR"
               value={`${companyDemographic.totals.impressions > 0 ? ((companyDemographic.totals.clicks / companyDemographic.totals.impressions) * 100).toFixed(2) : '0.00'}%`}
-              icon={FileBarChart}
+              icon={TrendingUp}
             />
             <MetricCard
               title="Avg CPC"
               value={`$${companyDemographic.totals.clicks > 0 ? (companyDemographic.totals.spent / companyDemographic.totals.clicks).toFixed(2) : '0.00'}`}
-              icon={FileBarChart}
+              icon={Wallet}
             />
             <MetricCard
               title="Avg CPM"
               value={`$${companyDemographic.totals.impressions > 0 ? ((companyDemographic.totals.spent / companyDemographic.totals.impressions) * 1000).toFixed(2) : '0.00'}`}
-              icon={FileBarChart}
+              icon={BarChart3}
             />
           </div>
+
+          {enrichmentCounts.total > 0 && (
+            <Card className="bg-card/50 backdrop-blur-sm border-border/50">
+              <CardContent className="pt-4 pb-4">
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                  <div className="flex-shrink-0">
+                    <p className="text-sm font-medium">Website Enrichment</p>
+                    <p className="text-xs text-muted-foreground">{enrichmentCounts.total} companies</p>
+                  </div>
+                  <div className="flex-1 min-w-[120px] max-w-sm">
+                    <div className="h-2.5 rounded-full flex overflow-hidden bg-muted/30">
+                      {enrichmentCounts.resolved > 0 && (
+                        <div
+                          className="bg-green-500 transition-all duration-500"
+                          style={{ width: `${(enrichmentCounts.resolved / enrichmentCounts.total) * 100}%` }}
+                        />
+                      )}
+                      {enrichmentCounts.fallback > 0 && (
+                        <div
+                          className="bg-yellow-500 transition-all duration-500"
+                          style={{ width: `${(enrichmentCounts.fallback / enrichmentCounts.total) * 100}%` }}
+                        />
+                      )}
+                      {enrichmentCounts.unresolved > 0 && (
+                        <div
+                          className="bg-muted-foreground/30 transition-all duration-500"
+                          style={{ width: `${(enrichmentCounts.unresolved / enrichmentCounts.total) * 100}%` }}
+                        />
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="secondary" className="bg-green-500/10 text-green-600 gap-1">
+                      <CheckCircle className="h-3 w-3" />
+                      {enrichmentCounts.resolved} Resolved
+                    </Badge>
+                    <Badge variant="secondary" className="bg-yellow-500/10 text-yellow-600 gap-1">
+                      <Globe className="h-3 w-3" />
+                      {enrichmentCounts.fallback} Fallback
+                    </Badge>
+                    <Badge variant="secondary" className="bg-muted text-muted-foreground gap-1">
+                      <AlertCircle className="h-3 w-3" />
+                      {enrichmentCounts.unresolved} Unresolved
+                    </Badge>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           {companyDemographic.error && (
             <Card className="bg-destructive/10 border-destructive/30">
@@ -876,6 +938,30 @@ export function ReportingSection({ accessToken, selectedAccount, canWrite = fals
                   <strong>Note:</strong> {companyDemographic.error}
                 </p>
               </CardContent>
+            </Card>
+          )}
+
+          {companyDemographic.companyData.length > 0 && (
+            <Card className="bg-card/50 backdrop-blur-sm border-border/50">
+              <CardHeader
+                className="pb-2 cursor-pointer select-none"
+                onClick={() => setChartsExpanded(prev => !prev)}
+              >
+                <div className="flex items-center justify-between">
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <BarChart3 className="h-4 w-4 text-primary" />
+                    Visual Summary
+                  </CardTitle>
+                  <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                    {chartsExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                  </Button>
+                </div>
+              </CardHeader>
+              {chartsExpanded && (
+                <CardContent>
+                  <CompanyDemographicCharts data={companyDemographic.companyData} />
+                </CardContent>
+              )}
             </Card>
           )}
 
