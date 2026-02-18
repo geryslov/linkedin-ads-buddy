@@ -63,15 +63,25 @@ function AggregatedCreativeRow({ agg }: { agg: AggregatedCreative }) {
       {isOpen && agg.instances.map((c) => (
         <tr key={c.creativeId} className="bg-muted/50 border-b border-border/40">
           <td />
-          <td colSpan={9} className="px-4 py-2">
-            <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs">
+          <td className="px-4 py-2 text-xs">
+            <div className="flex flex-col gap-0.5">
               <span className="text-muted-foreground font-mono">
                 ID: <span className="text-foreground select-all">{c.creativeId}</span>
               </span>
-              <span className="text-muted-foreground">
+              <span className="text-muted-foreground text-[11px]">
                 Campaign: <span className="text-foreground">{c.campaignName || c.campaignId || '—'}</span>
               </span>
             </div>
+          </td>
+          <td className="p-2 text-right tabular-nums text-xs">{c.impressions.toLocaleString()}</td>
+          <td className="p-2 text-right tabular-nums text-xs">{c.clicks.toLocaleString()}</td>
+          <td className="p-2 text-right tabular-nums text-xs">${c.spent.toFixed(2)}</td>
+          <td className="p-2 text-right tabular-nums text-xs font-medium">{c.leads}</td>
+          <td className="p-2 text-right tabular-nums text-xs">{c.ctr.toFixed(2)}%</td>
+          <td className="p-2 text-right tabular-nums text-xs">${c.cpc.toFixed(2)}</td>
+          <td className="p-2 text-right tabular-nums text-xs">${c.cpl.toFixed(2)}</td>
+          <td className="p-2 text-right tabular-nums text-xs">
+            {c.formOpens > 0 ? `${c.lgfRate.toFixed(1)}%` : '—'}
           </td>
         </tr>
       ))}
