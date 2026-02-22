@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import { RefreshCw, FileBarChart, Users, Target, PieChart, Globe, List, Download, Grid3X3, Settings, CheckCircle2, XCircle, Loader2, ClipboardList, Search, Pencil, Wallet, AlertTriangle, Sparkles, Building2, Eye, MousePointerClick, DollarSign, TrendingUp, BarChart3, CheckCircle, AlertCircle, ChevronDown, ChevronRight } from 'lucide-react';
+import { RefreshCw, FileBarChart, Users, Target, PieChart, Globe, List, Download, Grid3X3, Settings, CheckCircle2, XCircle, Loader2, ClipboardList, Search, Pencil, Wallet, AlertTriangle, Sparkles, Building2, Eye, MousePointerClick, DollarSign, TrendingUp, BarChart3, CheckCircle, AlertCircle, ChevronDown, ChevronRight, Trophy } from 'lucide-react';
 import { useDemographicReporting, TimeFrameOption as DemoTimeFrameOption, TimeGranularity, DemographicPivot, DEMOGRAPHIC_PIVOT_OPTIONS } from '@/hooks/useDemographicReporting';
 import { useCompanyDemographic, TimeFrameOption as CompanyDemoTimeFrameOption } from '@/hooks/useCompanyDemographic';
 import { useCreativeNamesReport, TimeFrameOption as CreativeNamesTimeFrameOption } from '@/hooks/useCreativeNamesReport';
@@ -32,6 +32,7 @@ import { BudgetPacingDashboard } from './BudgetPacingDashboard';
 import { CreativeFatigueDetector } from './CreativeFatigueDetector';
 import { AudienceExpansionSuggester } from './AudienceExpansionSuggester';
 import { CompanyInfluenceReport } from './CompanyInfluenceReport';
+import { TopCompaniesReport } from './TopCompaniesReport';
 import { CompanyEngagementReport } from './CompanyEngagementReport';
 import { useToast } from '@/hooks/use-toast';
 import { 
@@ -168,6 +169,11 @@ export function ReportingSection({ accessToken, selectedAccount, canWrite = fals
       } else if (reportType === 'campaign_performance') {
         campaignGroupPerformance.fetchCampaignGroupPerformance(selectedAccount);
         customFields.fetchCustomFields(selectedAccount, 'campaign_group');
+      } else if (reportType === 'top_companies') {
+        companyDemographic.fetchCompanyDemographic(selectedAccount);
+        if (campaignReporting.campaignData.length === 0) {
+          campaignReporting.fetchCampaignReport(selectedAccount);
+        }
       }
     }
   }, [selectedAccount, reportType]);
@@ -181,7 +187,7 @@ export function ReportingSection({ accessToken, selectedAccount, canWrite = fals
 
   // Re-fetch when time/granularity/campaigns changes for company demographics
   useEffect(() => {
-    if (selectedAccount && reportType === 'company_demo') {
+    if (selectedAccount && (reportType === 'company_demo' || reportType === 'top_companies')) {
       companyDemographic.fetchCompanyDemographic(selectedAccount);
     }
   }, [companyDemographic.dateRange, companyDemographic.timeGranularity, companyDemographic.selectedCampaignIds]);
@@ -302,6 +308,8 @@ export function ReportingSection({ accessToken, selectedAccount, canWrite = fals
         leadGenForms.fetchLeadGenForms(selectedAccount);
       } else if (reportType === 'campaign_performance') {
         campaignGroupPerformance.fetchCampaignGroupPerformance(selectedAccount);
+      } else if (reportType === 'top_companies') {
+        companyDemographic.fetchCompanyDemographic(selectedAccount);
       }
     }
   };
@@ -401,7 +409,8 @@ export function ReportingSection({ accessToken, selectedAccount, canWrite = fals
     reportType === 'company_demo' ? companyDemographic.isLoading :
     reportType === 'job_seniority' ? jobSeniorityMatrix.isLoading :
     reportType === 'lead_gen_forms' ? leadGenForms.isLoading :
-    reportType === 'campaign_performance' ? campaignGroupPerformance.isLoading : false;
+    reportType === 'campaign_performance' ? campaignGroupPerformance.isLoading :
+    reportType === 'top_companies' ? companyDemographic.isLoading : false;
 
   const handleLeadGenTimeFrameChange = (option: LeadGenTimeFrameOption) => {
     setSelectedTimeFrame(option.value);
@@ -506,6 +515,10 @@ export function ReportingSection({ accessToken, selectedAccount, canWrite = fals
           <TabsTrigger value="company_engagement" className="gap-2">
             <Building2 className="h-4 w-4" />
             Company Engagement
+          </TabsTrigger>
+          <TabsTrigger value="top_companies" className="gap-2">
+            <Trophy className="h-4 w-4" />
+            Top Companies
           </TabsTrigger>
           <TabsTrigger value="audiences" className="gap-2" disabled>
             <Users className="h-4 w-4" />
@@ -1284,6 +1297,24 @@ export function ReportingSection({ accessToken, selectedAccount, canWrite = fals
             </CardContent>
           </Card>
 
+        </TabsContent>
+
+        {/* Top Companies Tab */}
+        <TabsContent value="top_companies" className="space-y-6 mt-6">
+          <TopCompaniesReport
+            companyData={companyDemographic.companyData}
+            isLoading={companyDemographic.isLoading}
+            error={companyDemographic.error}
+            accessToken={accessToken}
+            selectedAccount={selectedAccount}
+            campaigns={campaignReporting.campaignData.map(c => ({ id: c.campaignId, name: c.campaignName, status: c.status }))}
+            timeFrameOptions={companyDemographic.timeFrameOptions}
+            selectedTimeFrame={selectedTimeFrame}
+            onTimeFrameChange={handleCompanyDemoTimeFrameChange}
+            dateRange={companyDemographic.dateRange}
+            onCustomDateChange={handleCompanyDemoCustomDate}
+            onRefresh={handleRefresh}
+          />
         </TabsContent>
       </Tabs>
     </div>

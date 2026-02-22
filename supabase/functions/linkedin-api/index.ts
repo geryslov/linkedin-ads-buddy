@@ -6867,6 +6867,115 @@ serve(async (req) => {
         });
       }
 
+      case 'exclude_companies_from_campaigns': {
+        // Exclude companies from campaign targeting
+        const { campaignIds: excludeCampaignIds, companyUrns } = params || {};
+        
+        if (!excludeCampaignIds || excludeCampaignIds.length === 0) {
+          return new Response(JSON.stringify({ error: 'campaignIds required' }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+        
+        if (!companyUrns || companyUrns.length === 0) {
+          return new Response(JSON.stringify({ error: 'companyUrns required' }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+        
+        console.log(`[exclude_companies] Excluding ${companyUrns.length} companies from ${excludeCampaignIds.length} campaigns`);
+        
+        const excludeResults: any[] = [];
+        
+        for (const campaignId of excludeCampaignIds) {
+          try {
+            // Fetch existing campaign targeting
+            const campUrl = `https://api.linkedin.com/v2/adCampaignsV2/${campaignId}?fields=targetingCriteria`;
+            const campResp = await fetch(campUrl, {
+              headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'X-Restli-Protocol-Version': '2.0.0',
+                'LinkedIn-Version': '202511',
+              },
+            });
+            
+            if (!campResp.ok) {
+              const errText = await campResp.text();
+              excludeResults.push({ campaignId, success: false, message: `Failed to fetch campaign: ${campResp.status}` });
+              continue;
+            }
+            
+            const campData = await campResp.json();
+            const existingTargeting = campData.targetingCriteria || {};
+            
+            // Build new exclude criteria - merge with existing
+            const existingExclude = existingTargeting.exclude || {};
+            const existingExcludeOr = existingExclude.or || {};
+            
+            // LinkedIn uses "urn:li:adTargetingFacet:employers" for company exclusions
+            const existingEmployerExclusions: string[] = existingExcludeOr['urn:li:adTargetingFacet:employers'] || [];
+            
+            // Merge new company URNs (avoid duplicates)
+            const newExclusions = [...new Set([...existingEmployerExclusions, ...companyUrns])];
+            
+            const targetingCriteria = {
+              include: existingTargeting.include || { and: [] },
+              exclude: {
+                or: {
+                  ...existingExcludeOr,
+                  'urn:li:adTargetingFacet:employers': newExclusions,
+                }
+              }
+            };
+            
+            // PATCH update
+            const updateUrl = `https://api.linkedin.com/v2/adCampaignsV2/${campaignId}`;
+            const updatePayload = {
+              patch: {
+                $set: { targetingCriteria }
+              }
+            };
+            
+            const updateResp = await fetch(updateUrl, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'Content-Type': 'application/json',
+                'X-Restli-Method': 'partial_update',
+                'X-Restli-Protocol-Version': '2.0.0',
+                'LinkedIn-Version': '202511',
+              },
+              body: JSON.stringify(updatePayload),
+            });
+            
+            if (updateResp.ok) {
+              excludeResults.push({ campaignId, success: true });
+            } else {
+              const errText = await updateResp.text();
+              console.error(`[exclude_companies] LinkedIn error for ${campaignId}: ${updateResp.status}`, errText);
+              excludeResults.push({ campaignId, success: false, message: `LinkedIn error: ${updateResp.status}` });
+            }
+            
+            // Rate limit delay
+            if (excludeCampaignIds.length > 1) {
+              await new Promise(r => setTimeout(r, 200));
+            }
+          } catch (err) {
+            excludeResults.push({ campaignId, success: false, message: err.message || 'Unknown error' });
+          }
+        }
+        
+        const excSuccessCount = excludeResults.filter(r => r.success).length;
+        console.log(`[exclude_companies] Completed: ${excSuccessCount}/${excludeCampaignIds.length} successful`);
+        
+        return new Response(JSON.stringify({
+          success: excSuccessCount === excludeCampaignIds.length,
+          results: excludeResults,
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
       case 'get_budget_pacing': {
         // Budget Pacing Dashboard - compares actual spend vs planned budget
         const { accountId, dateRange } = params || {};
