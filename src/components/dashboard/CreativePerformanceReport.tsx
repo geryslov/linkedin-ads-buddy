@@ -11,6 +11,7 @@ import { Search, ArrowUp, ArrowDown, TrendingUp, TrendingDown, ChevronRight, Che
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
 import { AIAnalysisPanel } from './AIAnalysisPanel';
+import { CreativeThumbnail } from './CreativeThumbnail';
 
 interface Props {
   accessToken: string | null;
@@ -233,7 +234,7 @@ export function CreativePerformanceReport({ accessToken, selectedAccount }: Prop
     </Fragment>
   );
 
-  const COL_COUNT = 2 + PERIODS.length * 3 + 1; // name + #camp + periods*3 + fatigue
+  const COL_COUNT = 3 + PERIODS.length * 3 + 1; // thumb + name + #camp + periods*3 + fatigue
 
   return (
     <div className="space-y-4">
@@ -277,7 +278,7 @@ export function CreativePerformanceReport({ accessToken, selectedAccount }: Prop
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border">
-                <th colSpan={2} className="bg-muted/30" />
+                <th colSpan={3} className="bg-muted/30" />
                 {PERIODS.map((p, i) => (
                   <th key={p.key} colSpan={3} className={`text-center p-2 font-semibold border-b border-border text-xs uppercase tracking-wider ${PERIOD_HEADER_BG[i]}`}>
                     <div className="flex items-center justify-center gap-1.5">
@@ -289,6 +290,7 @@ export function CreativePerformanceReport({ accessToken, selectedAccount }: Prop
                 <th className="bg-muted/30" />
               </tr>
               <tr className="border-b border-border bg-muted/40">
+                <th className="p-2 w-[50px]" />
                 <th className="text-left p-2 font-semibold min-w-[200px] cursor-pointer hover:bg-muted/60" onClick={() => handleSort('creativeName')}>
                   <div className="flex items-center gap-1">Creative Name <SortIcon col="creativeName" /></div>
                 </th>
@@ -317,6 +319,9 @@ export function CreativePerformanceReport({ accessToken, selectedAccount }: Prop
                         onClick={hasMultipleCampaigns ? () => toggleExpand(row.creativeName) : undefined}
                       >
                         <td className="p-2">
+                          <CreativeThumbnail imageUrl={row.imageUrl} creativeName={row.creativeName} size={36} />
+                        </td>
+                        <td className="p-2">
                           <div className="flex items-center gap-1.5 group">
                             {hasMultipleCampaigns && (
                               isExpanded
@@ -342,6 +347,7 @@ export function CreativePerformanceReport({ accessToken, selectedAccount }: Prop
                         : row.campaigns
                       ).map(camp => (
                         <tr key={`${row.creativeName}-${camp.campaignName}`} className="bg-muted/10 border-t border-border/30">
+                          <td className="p-2" />
                           <td className="p-2 pl-8">
                             <div className="flex items-center gap-2">
                               <span className="text-xs text-muted-foreground truncate max-w-[180px]">{camp.campaignName}</span>
@@ -359,6 +365,7 @@ export function CreativePerformanceReport({ accessToken, selectedAccount }: Prop
               )}
               {sorted.length > 0 && (
                 <tr className="bg-muted/50 font-semibold border-t-2 border-border">
+                  <td className="p-2" />
                   <td className="p-2 text-xs">Totals</td>
                   <td className="p-2" />
                   {PERIODS.map((p, i) => {
