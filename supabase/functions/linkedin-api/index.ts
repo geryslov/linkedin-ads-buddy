@@ -16,6 +16,87 @@ const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
 const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const supabaseClient = createClient(supabaseUrl, supabaseServiceKey);
 
+// Helper: Extract image URNs from creative content object (deep scan)
+function extractImageUrns(content: any): string[] {
+  const urns: string[] = [];
+  if (!content || typeof content !== 'object') return urns;
+
+  function scan(obj: any) {
+    if (!obj || typeof obj !== 'object') {
+      if (typeof obj === 'string' && obj.startsWith('urn:li:image:')) {
+        urns.push(obj);
+      }
+      return;
+    }
+    if (Array.isArray(obj)) {
+      for (const item of obj) scan(item);
+      return;
+    }
+    for (const key of Object.keys(obj)) {
+      const val = obj[key];
+      if (typeof val === 'string' && val.startsWith('urn:li:image:')) {
+        urns.push(val);
+      } else if (typeof val === 'object' && val !== null) {
+        scan(val);
+      }
+    }
+  }
+  scan(content);
+  return [...new Set(urns)];
+}
+
+// Helper: Batch resolve image URNs via LinkedIn /rest/images API
+async function resolveImageUrnsBatch(imageUrns: string[], token: string): Promise<Map<string, string>> {
+  const resolved = new Map<string, string>();
+  if (imageUrns.length === 0) return resolved;
+
+  // Chunk into batches of 20 to avoid URI length limits
+  const chunkSize = 20;
+  for (let i = 0; i < imageUrns.length; i += chunkSize) {
+    const chunk = imageUrns.slice(i, i + chunkSize);
+    const encodedIds = chunk.map(u => encodeURIComponent(u)).join(',');
+    const url = `https://api.linkedin.com/rest/images?ids=List(${encodedIds})`;
+
+    try {
+      const resp = await fetch(url, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'LinkedIn-Version': '202511',
+          'X-Restli-Protocol-Version': '2.0.0',
+        },
+      });
+
+      if (resp.ok) {
+        const data = await resp.json();
+        // Response structure: { results: { "urn:li:image:XXX": { downloadUrl, downloadUrlExpiresAt, ... }, ... } }
+        const results = data.results || data.elements || {};
+        if (typeof results === 'object' && !Array.isArray(results)) {
+          for (const [urn, record] of Object.entries(results)) {
+            const rec = record as any;
+            if (rec?.downloadUrl) {
+              resolved.set(urn, rec.downloadUrl);
+            }
+          }
+        }
+        // Also handle if it's an array format
+        if (Array.isArray(results)) {
+          for (const rec of results) {
+            if (rec?.id && rec?.downloadUrl) resolved.set(rec.id, rec.downloadUrl);
+          }
+        }
+      } else {
+        const errText = await resp.text();
+        console.error(`[resolveImageUrnsBatch] Failed: ${resp.status} ${errText.substring(0, 200)}`);
+      }
+    } catch (err) {
+      console.error('[resolveImageUrnsBatch] Error:', err);
+    }
+  }
+
+  console.log(`[resolveImageUrnsBatch] Resolved ${resolved.size} of ${imageUrns.length} image URNs`);
+  return resolved;
+}
+
 // Helper function to format pivot values into human-readable names
 function formatPivotValue(urn: string, pivot: string): string {
   const parts = urn.split(':');
@@ -956,6 +1037,8 @@ serve(async (req) => {
         // Helper: Fetch ALL creatives via V2 adCreativesV2 API (this works reliably)
         // Then fetch names from individual creative lookup if needed
         async function fetchCreativesVersioned(accountId: string, token: string): Promise<Map<string, { name: string; campaignId: string; status: string; type: string; reference: string; imageUrl: string }>> {
+          // Track image URNs found in creative content for batch resolution
+          const creativeImageUrns = new Map<string, string[]>(); // creativeId -> URNs
           const creativeData = new Map<string, { name: string; campaignId: string; status: string; type: string; reference: string; imageUrl: string }>();
           
           console.log('[Creative Metadata] Fetching creatives from V2 adCreativesV2 API...');
@@ -1073,10 +1156,19 @@ serve(async (req) => {
                           imageUrl = content.followCompany.logo.downloadUrl;
                         }
                       }
+                      // If no direct URL found, extract image URNs for batch resolution
+                      if (!imageUrl && content) {
+                        const urns = extractImageUrns(content);
+                        if (urns.length > 0) {
+                          creativeImageUrns.set(creativeId, urns);
+                        }
+                      }
                       // Log first creative's structure for debugging
                       if (namesResolved === 0) {
                         console.log(`[Creative Detail] Sample content keys: ${content ? JSON.stringify(Object.keys(content)) : 'null'}`);
                         console.log(`[Creative Detail] Extracted imageUrl: ${imageUrl || 'none'}`);
+                        const urns = extractImageUrns(content);
+                        console.log(`[Creative Detail] Image URNs found: ${urns.length > 0 ? urns.join(', ') : 'none'}`);
                       }
                       existing.imageUrl = imageUrl;
                       creativeData.set(creativeId, existing);
@@ -1092,12 +1184,40 @@ serve(async (req) => {
             
             console.log(`[Creative Metadata] Resolved ${namesResolved} creative names via individual lookup`);
             
+            // Batch resolve image URNs for creatives without direct URLs
+            if (creativeImageUrns.size > 0) {
+              const allUrns = new Set<string>();
+              for (const urns of creativeImageUrns.values()) {
+                for (const u of urns) allUrns.add(u);
+              }
+              console.log(`[Creative Metadata] Resolving ${allUrns.size} unique image URNs via /rest/images...`);
+              const resolvedUrls = await resolveImageUrnsBatch([...allUrns], token);
+              
+              // Apply resolved URLs to creatives
+              let resolvedCount = 0;
+              for (const [cid, urns] of creativeImageUrns) {
+                const existing = creativeData.get(cid);
+                if (existing && !existing.imageUrl) {
+                  for (const urn of urns) {
+                    const url = resolvedUrls.get(urn);
+                    if (url) {
+                      existing.imageUrl = url;
+                      resolvedCount++;
+                      break;
+                    }
+                  }
+                }
+              }
+              console.log(`[Creative Metadata] Applied ${resolvedCount} resolved image URLs from URNs`);
+            }
+            
           } catch (err) {
             console.error('[Creative Metadata] Error:', err);
           }
           
           const totalWithNames = [...creativeData.values()].filter(v => v.name).length;
-          console.log(`[Creative Metadata] Total creatives: ${creativeData.size}, with names: ${totalWithNames}`);
+          const totalWithImages = [...creativeData.values()].filter(v => v.imageUrl).length;
+          console.log(`[Creative Metadata] Total creatives: ${creativeData.size}, with names: ${totalWithNames}, with images: ${totalWithImages}`);
           return creativeData;
         }
         
@@ -1367,8 +1487,9 @@ serve(async (req) => {
         console.log(`  - Total creatives: ${resolutionStats.total}`);
         
         const creativesWithData = reportElements.filter(r => r.impressions > 0 || parseFloat(r.costInLocalCurrency) > 0).length;
+        const creativesWithImages = reportElements.filter(r => r.imageUrl).length;
         
-        console.log(`[get_creative_report] Complete. Total: ${reportElements.length}, with data: ${creativesWithData}`);
+        console.log(`[get_creative_report] Complete. Total: ${reportElements.length}, with data: ${creativesWithData}, with images: ${creativesWithImages}`);
         
         return new Response(JSON.stringify({ 
           elements: reportElements,
@@ -3176,6 +3297,7 @@ serve(async (req) => {
         interface CPCreativeInfo { name: string; campaignId: string; campaignName: string; campaignStatus: string; creativeStatus: string; type: string; reference?: string; imageUrl?: string; }
         const cpCreativeInfo = new Map<string, CPCreativeInfo>();
         const cpRefImageCache = new Map<string, string>();
+        const cpCreativeImageUrns = new Map<string, string[]>(); // creativeId -> image URNs for batch resolution
 
         const cpIds = [...allCreativeIds];
         // Fire ALL creative metadata fetches in parallel (max 50 concurrent)
@@ -3218,6 +3340,13 @@ serve(async (req) => {
 
                   if (!imageUrl && Array.isArray(content.mediaContent) && content.mediaContent[0]) {
                     imageUrl = content.mediaContent[0]?.media?.downloadUrl || content.mediaContent[0]?.downloadUrl || '';
+                  }
+                  // If no direct URL, collect image URNs for batch resolution
+                  if (!imageUrl && content && typeof content === 'object') {
+                    const urns = extractImageUrns(content);
+                    if (urns.length > 0) {
+                      cpCreativeImageUrns.set(creativeId, urns);
+                    }
                   }
                 }
 
@@ -3270,6 +3399,32 @@ serve(async (req) => {
           typeDistribution[info.type] = (typeDistribution[info.type] || 0) + 1;
         }
         console.log(`[Step 3] Creative type distribution:`, JSON.stringify(typeDistribution));
+
+        // Step 3b: Batch resolve image URNs for creatives without direct URLs
+        if (cpCreativeImageUrns.size > 0) {
+          const allCpUrns = new Set<string>();
+          for (const urns of cpCreativeImageUrns.values()) {
+            for (const u of urns) allCpUrns.add(u);
+          }
+          console.log(`[Step 3b] Resolving ${allCpUrns.size} unique image URNs via /rest/images...`);
+          const cpResolvedUrls = await resolveImageUrnsBatch([...allCpUrns], accessToken);
+          
+          let cpResolvedCount = 0;
+          for (const [cid, urns] of cpCreativeImageUrns) {
+            const info = cpCreativeInfo.get(cid);
+            if (info && !info.imageUrl) {
+              for (const urn of urns) {
+                const url = cpResolvedUrls.get(urn);
+                if (url) {
+                  info.imageUrl = url;
+                  cpResolvedCount++;
+                  break;
+                }
+              }
+            }
+          }
+          console.log(`[Step 3b] Applied ${cpResolvedCount} resolved image URLs from URNs`);
+        }
 
         // Step 4: Resolve references for images/names in parallel
         const cpUniqueRefs = new Set<string>();
