@@ -3197,6 +3197,29 @@ serve(async (req) => {
                 const content = d.content || {};
                 const ref = (typeof content === 'string' ? content : content.reference) || '';
                 let creativeType = 'SPONSORED_CONTENT';
+                let imageUrl = '';
+
+                // Extract image URL directly from creative detail content first
+                // (most reliable for sponsored creatives)
+                if (content && typeof content === 'object') {
+                  imageUrl = content.media?.downloadUrl || '';
+
+                  if (!imageUrl && content.landingPage?.landingPageMedia?.thumbnail) {
+                    imageUrl = content.landingPage.landingPageMedia.thumbnail;
+                  }
+
+                  if (!imageUrl && content.spotlight?.logo?.downloadUrl) {
+                    imageUrl = content.spotlight.logo.downloadUrl;
+                  }
+
+                  if (!imageUrl && content.followCompany?.logo?.downloadUrl) {
+                    imageUrl = content.followCompany.logo.downloadUrl;
+                  }
+
+                  if (!imageUrl && Array.isArray(content.mediaContent) && content.mediaContent[0]) {
+                    imageUrl = content.mediaContent[0]?.media?.downloadUrl || content.mediaContent[0]?.downloadUrl || '';
+                  }
+                }
 
                 if (campaignType === 'TEXT_AD') {
                   creativeType = 'TEXT_AD';
@@ -3234,6 +3257,7 @@ serve(async (req) => {
                   creativeStatus,
                   type: creativeType,
                   reference: content.reference || undefined,
+                  imageUrl: imageUrl || undefined,
                 });
               } else { await resp.text(); }
             } catch (e) { /* ignore */ }
@@ -3294,7 +3318,7 @@ serve(async (req) => {
         for (const [, info] of cpCreativeInfo) {
           if (info.reference) {
             if (!info.name) info.name = cpRefNameCache.get(info.reference) || '';
-            info.imageUrl = cpRefImageCache.get(info.reference) || undefined;
+            if (!info.imageUrl) info.imageUrl = cpRefImageCache.get(info.reference) || undefined;
           }
         }
 
