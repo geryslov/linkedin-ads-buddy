@@ -1225,83 +1225,158 @@ serve(async (req) => {
         async function fetchShareContent(shareUrns: string[], token: string): Promise<Map<string, { text: string; imageUrl: string }>> {
           const shareData = new Map<string, { text: string; imageUrl: string }>();
           if (shareUrns.length === 0) return shareData;
-          
+
           console.log(`[Share API] Fetching content for ${shareUrns.length} shares...`);
-          
+
+          // Track URNs that have a media ID but no direct URL, for batch resolution later
+          const unresolvedMediaIds = new Map<string, string>(); // shareUrn -> imageUrn
+
           for (const urn of shareUrns.slice(0, 100)) { // Limit to first 100
             try {
-              // Determine if it's a share or ugcPost
-              const isUgc = urn.includes('ugcPost');
-              const endpoint = isUgc 
-                ? `https://api.linkedin.com/v2/ugcPosts/${encodeURIComponent(urn)}`
-                : `https://api.linkedin.com/v2/shares/${encodeURIComponent(urn)}`;
-              
-              const response: Response = await fetch(endpoint, {
-                headers: { 'Authorization': `Bearer ${token}` }
-              });
-              
-              if (response.ok) {
-                const data: any = await response.json();
-                
-                // Debug: log first share response structure
-                if (shareData.size === 0) {
-                  console.log(`[Share API] Sample response keys for ${urn}:`, JSON.stringify(Object.keys(data)));
-                  if (isUgc) {
-                    const sc = data.specificContent?.['com.linkedin.ugc.ShareContent'];
-                    console.log(`[Share API] UGC specificContent keys:`, sc ? JSON.stringify(Object.keys(sc)) : 'null');
-                    console.log(`[Share API] UGC media:`, sc?.media ? JSON.stringify(sc.media[0]?.thumbnails?.[0] || sc.media[0]?.originalUrl || 'no-thumb-or-url') : 'no-media');
-                  } else {
-                    console.log(`[Share API] Share content keys:`, data.content ? JSON.stringify(Object.keys(data.content)) : 'null');
-                    console.log(`[Share API] Share distribution:`, data.distribution ? JSON.stringify(Object.keys(data.distribution)) : 'null');
-                    const ce = data.content?.contentEntities?.[0];
-                    console.log(`[Share API] contentEntity:`, ce ? JSON.stringify(Object.keys(ce)) : 'null');
-                    console.log(`[Share API] Full content sample:`, JSON.stringify(data.content || data).substring(0, 500));
+              // First, try the versioned /rest/posts API which returns richer media data (including downloadUrl)
+              let data: any = null;
+              let usedPostsApi = false;
+
+              try {
+                const postsResp = await fetch(`https://api.linkedin.com/rest/posts/${encodeURIComponent(urn)}`, {
+                  headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'LinkedIn-Version': '202511',
+                    'X-Restli-Protocol-Version': '2.0.0',
                   }
+                });
+                if (postsResp.ok) {
+                  data = await postsResp.json();
+                  usedPostsApi = true;
                 }
-                
-                // Extract text from share/ugcPost
-                let text = '';
-                let imageUrl = '';
-                if (isUgc) {
-                  // UGC Post structure
-                  const shareContent = data.specificContent?.['com.linkedin.ugc.ShareContent'];
-                  text = shareContent?.shareCommentary?.text || '';
-                  // Extract image from UGC post media
-                  const media = shareContent?.media?.[0];
-                  if (media) {
-                    imageUrl = media.thumbnails?.[0]?.url || media.originalUrl || '';
-                  }
+              } catch (e) {
+                // /rest/posts failed, will fall back to v2 below
+              }
+
+              // Fallback: v2 shares/ugcPosts API
+              if (!data) {
+                const isUgc = urn.includes('ugcPost');
+                const endpoint = isUgc
+                  ? `https://api.linkedin.com/v2/ugcPosts/${encodeURIComponent(urn)}`
+                  : `https://api.linkedin.com/v2/shares/${encodeURIComponent(urn)}`;
+
+                const response: Response = await fetch(endpoint, {
+                  headers: { 'Authorization': `Bearer ${token}` }
+                });
+
+                if (response.ok) {
+                  data = await response.json();
+                }
+              }
+
+              if (!data) continue;
+
+              // Debug: log first share response structure
+              if (shareData.size === 0) {
+                console.log(`[Share API] Sample response keys for ${urn} (postsApi=${usedPostsApi}):`, JSON.stringify(Object.keys(data)));
+                if (usedPostsApi) {
+                  console.log(`[Share API] Posts API content:`, JSON.stringify(data.content || {}).substring(0, 500));
+                } else if (urn.includes('ugcPost')) {
+                  const sc = data.specificContent?.['com.linkedin.ugc.ShareContent'];
+                  console.log(`[Share API] UGC specificContent keys:`, sc ? JSON.stringify(Object.keys(sc)) : 'null');
+                  console.log(`[Share API] UGC media:`, sc?.media ? JSON.stringify(sc.media[0]?.thumbnails?.[0] || sc.media[0]?.originalUrl || 'no-thumb-or-url') : 'no-media');
                 } else {
-                  // Share structure
-                  text = data.text?.text || data.commentary || '';
-                  // Extract image from share content
-                  const contentEntity = data.content?.contentEntities?.[0];
-                  if (contentEntity) {
-                    imageUrl = contentEntity.thumbnails?.[0]?.resolvedUrl || '';
-                  }
-                  // Fallback: try multiImage or other structures
-                  if (!imageUrl && data.content?.multiImage?.images?.[0]) {
-                    const img = data.content.multiImage.images[0];
-                    imageUrl = img.resolvedUrl || img.url || '';
-                  }
-                  if (!imageUrl && data.content?.media?.id) {
-                    // Sometimes media is referenced by ID
-                    console.log(`[Share API] Share has media ID but no direct URL:`, data.content.media.id);
+                  console.log(`[Share API] Share content keys:`, data.content ? JSON.stringify(Object.keys(data.content)) : 'null');
+                  console.log(`[Share API] Full content sample:`, JSON.stringify(data.content || data).substring(0, 500));
+                }
+              }
+
+              // Extract text and image URL
+              let text = '';
+              let imageUrl = '';
+              const isUgc = urn.includes('ugcPost');
+
+              if (usedPostsApi) {
+                // /rest/posts response structure
+                text = data.commentary || '';
+                const mediaContent = data.content?.media;
+                if (mediaContent) {
+                  // The Posts API may include the image ID directly
+                  const mediaId = mediaContent.id || '';
+                  if (mediaId.startsWith('urn:li:image:')) {
+                    // Collect for batch resolution via /rest/images
+                    unresolvedMediaIds.set(urn, mediaId);
                   }
                 }
-                
-                if (text || imageUrl) {
-                  // Truncate long text
-                  const truncated = text.length > 80 ? text.substring(0, 77) + '...' : text;
-                  shareData.set(urn, { text: truncated, imageUrl });
+              } else if (isUgc) {
+                // UGC Post structure
+                const shareContent = data.specificContent?.['com.linkedin.ugc.ShareContent'];
+                text = shareContent?.shareCommentary?.text || '';
+                const media = shareContent?.media?.[0];
+                if (media) {
+                  imageUrl = media.thumbnails?.[0]?.url || media.originalUrl || '';
+                  // If no direct URL, check for media URN
+                  if (!imageUrl) {
+                    const mediaUrn = media.media || media.id || '';
+                    if (typeof mediaUrn === 'string' && mediaUrn.startsWith('urn:li:image:')) {
+                      unresolvedMediaIds.set(urn, mediaUrn);
+                    }
+                  }
                 }
+              } else {
+                // v2 Share structure
+                text = data.text?.text || data.commentary || '';
+                const contentEntity = data.content?.contentEntities?.[0];
+                if (contentEntity) {
+                  imageUrl = contentEntity.thumbnails?.[0]?.resolvedUrl || '';
+                }
+                if (!imageUrl && data.content?.multiImage?.images?.[0]) {
+                  const img = data.content.multiImage.images[0];
+                  imageUrl = img.resolvedUrl || img.url || '';
+                }
+                if (!imageUrl && data.content?.media?.id) {
+                  const mediaId = data.content.media.id;
+                  if (typeof mediaId === 'string' && mediaId.startsWith('urn:li:image:')) {
+                    unresolvedMediaIds.set(urn, mediaId);
+                  } else {
+                    console.log(`[Share API] Share has non-image media ID: ${mediaId}`);
+                  }
+                }
+              }
+
+              // Store what we have so far (imageUrl may still be empty, will be filled after batch resolution)
+              const truncated = text.length > 80 ? text.substring(0, 77) + '...' : text;
+              if (text || imageUrl) {
+                shareData.set(urn, { text: truncated, imageUrl });
+              } else {
+                // Still store entry with empty values so batch resolution can fill imageUrl later
+                shareData.set(urn, { text: truncated, imageUrl: '' });
               }
             } catch (err) {
               console.error(`[Share API] Error fetching ${urn}:`, err);
             }
           }
-          
-          console.log(`[Share API] Resolved ${shareData.size} share entries`);
+
+          // Batch resolve all unresolved media IDs via /rest/images API
+          if (unresolvedMediaIds.size > 0) {
+            console.log(`[Share API] Batch resolving ${unresolvedMediaIds.size} unresolved media IDs via /rest/images...`);
+            const uniqueUrns = [...new Set(unresolvedMediaIds.values())];
+            const resolvedUrls = await resolveImageUrnsBatch(uniqueUrns, token);
+
+            let resolvedCount = 0;
+            for (const [shareUrn, imageUrn] of unresolvedMediaIds) {
+              const downloadUrl = resolvedUrls.get(imageUrn);
+              if (downloadUrl) {
+                const existing = shareData.get(shareUrn);
+                if (existing) {
+                  existing.imageUrl = downloadUrl;
+                  shareData.set(shareUrn, existing);
+                } else {
+                  shareData.set(shareUrn, { text: '', imageUrl: downloadUrl });
+                }
+                resolvedCount++;
+              }
+            }
+            console.log(`[Share API] Batch resolution: resolved ${resolvedCount} of ${unresolvedMediaIds.size} media IDs`);
+          }
+
+          const withImages = [...shareData.values()].filter(v => v.imageUrl).length;
+          console.log(`[Share API] Resolved ${shareData.size} share entries, ${withImages} with images`);
           return shareData;
         }
 
