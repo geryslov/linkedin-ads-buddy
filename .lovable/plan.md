@@ -1,34 +1,21 @@
 
 
-# Add Landing Page Clicks to Company Demographic Report
+# Fix: Add Creative Thumbnails to Creative Performance Report
 
-## Overview
-Add a "LP Clicks" (Landing Page Clicks) column to the Company Demographic with Website Enrichment report. This metric from LinkedIn's `adAnalyticsV2` API counts clicks that navigate users to the advertiser's landing page, as opposed to social engagement clicks.
+## Problem
+The `CreativePerformanceReport.tsx` component has access to `imageUrl` on each `CreativePerformanceRow` but does not import or render the `CreativeThumbnail` component. No thumbnail column exists in the table.
 
-## Changes (3 files + 1 edge function)
+## Changes
 
-### 1. Edge Function: `supabase/functions/linkedin-api/index.ts`
-- **`get_company_demographic` action (line ~2179):** Add `landingPageClicks` to the `fields` parameter in the API request
-- **Aggregation map (line ~2191):** Add `landingPageClicks: number` to the company map type and aggregate it during pagination
-- **Output mapping (line ~2535+):** Include `landingPageClicks` in the final response elements
+### `src/components/dashboard/CreativePerformanceReport.tsx`
+1. **Import** `CreativeThumbnail` from `./CreativeThumbnail`
+2. **Add a thumbnail column** in the table header (before "Creative Name")
+   - In the top header row: add an empty `<th>` for the thumbnail column
+   - In the sub-header row: add a narrow `<th>` labeled with an image icon or left blank
+3. **Render thumbnail in each creative row** — add a `<td>` before the name cell containing `<CreativeThumbnail imageUrl={row.imageUrl} creativeName={row.creativeName} size={36} />`
+4. **Add an empty `<td>`** in the campaign drill-down sub-rows to keep column alignment
+5. **Add an empty `<td>`** in the totals row for alignment
+6. **Update `COL_COUNT`** from `2 + PERIODS.length * 3 + 1` to `3 + PERIODS.length * 3 + 1` to account for the new column
 
-### 2. Hook: `src/hooks/useCompanyDemographic.ts`
-- Add `landingPageClicks: number` to:
-  - `CompanyDemographicItem` interface (line 41)
-  - `ObjectiveBreakdownItem` interface (line 22)
-  - `CampaignBreakdownItem` interface (line 5)
-- Map the field from API response in `fetchCompanyDemographic` (line 135)
-- Add to `totals` computation (line 252)
+This reuses the existing `CreativeThumbnail` component which already handles loading states, error fallbacks, and a click-to-expand full-size preview dialog.
 
-### 3. Table UI: `src/components/dashboard/CompanyDemographicTable.tsx`
-- Add `landingPageClicks` as a sortable column header between "Clicks" and "Spent"
-- Display value in each company row, objective breakdown row, and campaign breakdown row
-- Include in footer totals row
-
-### 4. Export: `src/lib/exportUtils.ts`
-- Add `{ key: 'landingPageClicks', label: 'LP Clicks' }` to `companyDemographicColumns`
-
-## Technical Notes
-- `landingPageClicks` is a standard LinkedIn adAnalyticsV2 field -- no special API provisioning required
-- The field will be aggregated the same way as `clicks` (summed across time periods per company)
-- The objective and campaign breakdown sub-rows will also show LP clicks when available
