@@ -7215,7 +7215,7 @@ serve(async (req) => {
               await new Promise(r => setTimeout(r, 200));
             }
           } catch (err) {
-            excludeResults.push({ campaignId, success: false, message: err.message || 'Unknown error' });
+            excludeResults.push({ campaignId, success: false, message: (err as Error).message || 'Unknown error' });
           }
         }
         
