@@ -15,14 +15,30 @@ export default function Callback() {
 
     if (code && state === storedState) {
       exchangeToken(code).then((token) => {
-        if (token) {
-          navigate("/dashboard");
+        // If opened as a popup (by iframe preview), post message back to opener
+        if (window.opener) {
+          window.opener.postMessage(
+            { type: 'linkedin-oauth-complete', token: token || null },
+            window.location.origin
+          );
+          // Don't navigate — the popup will be closed by the opener
         } else {
-          navigate("/");
+          if (token) {
+            navigate("/dashboard");
+          } else {
+            navigate("/");
+          }
         }
       });
     } else {
-      navigate("/");
+      if (window.opener) {
+        window.opener.postMessage(
+          { type: 'linkedin-oauth-complete', token: null },
+          window.location.origin
+        );
+      } else {
+        navigate("/");
+      }
     }
   }, [searchParams, exchangeToken, navigate]);
 

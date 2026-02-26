@@ -27,7 +27,41 @@ export function useLinkedInAuth() {
       if (error) throw error;
       
       localStorage.setItem('linkedin_oauth_state', data.state);
-      window.location.href = data.authUrl;
+
+      // Detect if running inside an iframe (e.g. Lovable preview) — use popup flow
+      const isInIframe = window.self !== window.top;
+      if (isInIframe) {
+        const popup = window.open(data.authUrl, 'linkedin-oauth', 'width=600,height=700');
+        if (!popup) {
+          toast({
+            title: 'Popup Blocked',
+            description: 'Please allow popups for this site to sign in, then try again.',
+            variant: 'destructive',
+          });
+          return;
+        }
+        // Listen for completion message from popup callback page
+        const messageHandler = (event: MessageEvent) => {
+          if (event.origin === window.location.origin && event.data?.type === 'linkedin-oauth-complete') {
+            popup?.close();
+            window.removeEventListener('message', messageHandler);
+            const token = event.data.token;
+            if (token) {
+              setAccessToken(token);
+              localStorage.setItem('linkedin_access_token', token);
+              toast({
+                title: 'Connected!',
+                description: 'Successfully connected to LinkedIn Ads',
+              });
+            } else {
+              window.location.reload();
+            }
+          }
+        };
+        window.addEventListener('message', messageHandler);
+      } else {
+        window.location.href = data.authUrl;
+      }
     } catch (error: any) {
       console.error('Auth initiation error:', error);
       toast({
