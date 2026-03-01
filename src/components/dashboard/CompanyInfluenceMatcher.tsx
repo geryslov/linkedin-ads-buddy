@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useCompanyDemographic } from '@/hooks/useCompanyDemographic';
 import {
   useCompanyInfluenceMatcher,
@@ -91,6 +91,15 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
     getExportData,
   } = useCompanyInfluenceMatcher(companyData);
 
+  // Auto-fetch LinkedIn data on mount so it's ready when user uploads CSV
+  const [hasFetched, setHasFetched] = useState(false);
+  useEffect(() => {
+    if (selectedAccount && accessToken && !hasFetched) {
+      setHasFetched(true);
+      fetchCompanyDemographic(selectedAccount);
+    }
+  }, [selectedAccount, accessToken, hasFetched, fetchCompanyDemographic]);
+
   const handleFetch = useCallback(() => {
     if (selectedAccount) {
       fetchCompanyDemographic(selectedAccount);
@@ -140,9 +149,9 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
   }, [handleFileSelect]);
 
   const handleExport = useCallback(() => {
-    const data = getExportData();
+    const data = getExportData(dateRange);
     exportToCSV(data, 'influence_match_results', companyInfluenceColumns);
-  }, [getExportData]);
+  }, [getExportData, dateRange]);
 
   const SortHeader = ({ field, children }: { field: string; children: React.ReactNode }) => (
     <TableHead
@@ -172,7 +181,23 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
     <div className="space-y-6">
       {/* Step 1: Date Range + Fetch */}
       <div className="glass rounded-xl p-6 animate-slide-up">
-        <h3 className="text-sm font-semibold mb-4">Step 1: Load LinkedIn Company Data</h3>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-sm font-semibold">Step 1: LinkedIn Company Data</h3>
+          <div className="flex items-center gap-2">
+            {isLoadingLinkedIn && (
+              <Badge variant="outline" className="animate-pulse">
+                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                Loading...
+              </Badge>
+            )}
+            {!isLoadingLinkedIn && companyData.length > 0 && (
+              <Badge variant="secondary">
+                <CheckCircle2 className="h-3 w-3 mr-1" />
+                {companyData.length} companies loaded ({dateRange.start} to {dateRange.end})
+              </Badge>
+            )}
+          </div>
+        </div>
         <div className="flex flex-col gap-4">
           <TimeFrameSelector
             timeFrameOptions={timeFrameOptions}
@@ -184,20 +209,14 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
             onCustomDateChange={handleCustomDateChange}
           />
           <div className="flex items-center gap-3">
-            <Button onClick={handleFetch} disabled={isLoadingLinkedIn || !selectedAccount}>
+            <Button onClick={handleFetch} disabled={isLoadingLinkedIn || !selectedAccount} variant="outline" size="sm">
               {isLoadingLinkedIn ? (
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
               ) : (
                 <Download className="h-4 w-4 mr-2" />
               )}
-              Fetch LinkedIn Data
+              {companyData.length > 0 ? 'Reload Data' : 'Fetch LinkedIn Data'}
             </Button>
-            {companyData.length > 0 && (
-              <Badge variant="secondary">
-                <CheckCircle2 className="h-3 w-3 mr-1" />
-                {companyData.length} companies loaded
-              </Badge>
-            )}
             {!selectedAccount && (
               <span className="text-sm text-muted-foreground">Select an ad account first</span>
             )}
@@ -415,10 +434,14 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
                     <>
                       <TableHead>Match Type</TableHead>
                       <TableHead>LinkedIn Name</TableHead>
+                      <TableHead>Objectives</TableHead>
+                      <TableHead>Campaigns</TableHead>
+                      <TableHead>Impact Period</TableHead>
                       <SortHeader field="impressions">Impressions</SortHeader>
                       <SortHeader field="clicks">Clicks</SortHeader>
                       <SortHeader field="spent">Spend</SortHeader>
                       <SortHeader field="leads">Leads</SortHeader>
+                      <SortHeader field="engagements">Engagements</SortHeader>
                       <TableHead>CTR</TableHead>
                     </>
                   )}
@@ -427,7 +450,7 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
               <TableBody>
                 {filteredData.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={activeTab !== 'unmatched' ? 10 : 3} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={activeTab !== 'unmatched' ? 14 : 3} className="text-center py-8 text-muted-foreground">
                       No results found
                     </TableCell>
                   </TableRow>
@@ -457,6 +480,29 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
                           <TableCell className="max-w-[180px] truncate text-sm">
                             {isMatched(item) ? item.linkedin.entityName : '—'}
                           </TableCell>
+                          <TableCell className="max-w-[200px]">
+                            {isMatched(item) && item.objectives.length > 0 ? (
+                              <div className="flex flex-wrap gap-1">
+                                {item.objectives.map((obj, i) => (
+                                  <Badge key={i} variant="outline" className="text-[10px] font-normal">
+                                    {obj.replace(/_/g, ' ')}
+                                  </Badge>
+                                ))}
+                              </div>
+                            ) : '—'}
+                          </TableCell>
+                          <TableCell className="max-w-[250px]">
+                            {isMatched(item) && item.campaignNames.length > 0 ? (
+                              <div className="text-xs text-muted-foreground space-y-0.5 max-h-[60px] overflow-auto">
+                                {item.campaignNames.map((name, i) => (
+                                  <div key={i} className="truncate" title={name}>{name}</div>
+                                ))}
+                              </div>
+                            ) : '—'}
+                          </TableCell>
+                          <TableCell className="text-xs whitespace-nowrap text-muted-foreground">
+                            {isMatched(item) ? `${dateRange.start} → ${dateRange.end}` : '—'}
+                          </TableCell>
                           <TableCell className="text-right tabular-nums">
                             {isMatched(item) ? item.linkedin.impressions.toLocaleString() : '—'}
                           </TableCell>
@@ -468,6 +514,9 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
                           </TableCell>
                           <TableCell className="text-right tabular-nums">
                             {isMatched(item) ? item.linkedin.leads.toLocaleString() : '—'}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            {isMatched(item) ? item.linkedin.engagements.toLocaleString() : '—'}
                           </TableCell>
                           <TableCell className="text-right tabular-nums">
                             {isMatched(item) ? `${item.linkedin.ctr.toFixed(2)}%` : '—'}
