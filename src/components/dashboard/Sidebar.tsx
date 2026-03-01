@@ -16,6 +16,7 @@ import {
   ImageIcon,
   TrendingUp,
   LineChart,
+  Crosshair,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -38,6 +39,7 @@ const navItems = [
   { id: "campaign_reports", label: "Campaign Reports", icon: LineChart },
   { id: "reports", label: "Reports", icon: FileBarChart },
   { id: "title_checker", label: "Title Checker", icon: Crown },
+  { id: "influence_matcher", label: "Influence Matcher", icon: Crosshair },
 ];
 
 export function Sidebar({ activeTab, onTabChange, onLogout, profileName, isAdmin }: SidebarProps) {

@@ -15,6 +15,7 @@ import { MegaBudgetPacingDashboard } from "@/components/dashboard/MegaBudgetPaci
 import { CreativeGallery } from "@/components/dashboard/CreativeGallery";
 import { CreativePerformanceReport } from "@/components/dashboard/CreativePerformanceReport";
 import { CampaignPerformanceReport } from "@/components/dashboard/CampaignPerformanceReport";
+import { CompanyInfluenceMatcher } from "@/components/dashboard/CompanyInfluenceMatcher";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { 
@@ -132,6 +133,7 @@ export default function Dashboard() {
               {activeTab === "campaign_reports" && "Campaign Reports"}
               {activeTab === "reports" && "Reports"}
               {activeTab === "title_checker" && "Title Checker"}
+              {activeTab === "influence_matcher" && "Influence Matcher"}
             </h1>
             <p className="text-muted-foreground">
               Manage your LinkedIn advertising campaigns
@@ -360,6 +362,13 @@ export default function Dashboard() {
 
         {activeTab === "title_checker" && (
           <TitleCheckerPage
+            accessToken={accessToken}
+            selectedAccount={selectedAccount}
+          />
+        )}
+
+        {activeTab === "influence_matcher" && (
+          <CompanyInfluenceMatcher
             accessToken={accessToken}
             selectedAccount={selectedAccount}
           />
