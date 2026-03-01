@@ -137,6 +137,20 @@ export const jobSeniorityMatrixColumns = [
   { key: 'cpl', label: 'CPL' },
 ];
 
+export const companyInfluenceColumns = [
+  { key: 'companyName', label: 'Company Name' },
+  { key: 'companyUrl', label: 'Company URL' },
+  { key: 'companyDate', label: 'Date' },
+  { key: 'matchType', label: 'Match Type' },
+  { key: 'linkedInName', label: 'LinkedIn Name' },
+  { key: 'linkedInWebsite', label: 'LinkedIn Website' },
+  { key: 'impressions', label: 'Impressions' },
+  { key: 'clicks', label: 'Clicks' },
+  { key: 'spent', label: 'Spend' },
+  { key: 'leads', label: 'Leads' },
+  { key: 'ctr', label: 'CTR %' },
+];
+
 export const jobTitleDrilldownColumns = [
   { key: 'title', label: 'Job Title' },
   { key: 'impressions', label: 'Impressions' },
