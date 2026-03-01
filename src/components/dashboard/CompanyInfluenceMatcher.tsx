@@ -224,7 +224,7 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
             <Upload className="h-8 w-8 mx-auto mb-3 text-muted-foreground" />
             <p className="text-sm font-medium">Drag & drop your CSV file here</p>
             <p className="text-xs text-muted-foreground mt-1">
-              or click to browse. Expected columns: Company Name, URL/Website, Date
+              or click to browse. Expected columns: Company Name, URL/Website/Email, Date
             </p>
             <input
               ref={fileInputRef}
@@ -267,7 +267,7 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
                   </Select>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="text-muted-foreground">URL:</span>
+                  <span className="text-muted-foreground">URL/Email:</span>
                   <Select
                     value={urlColumn || ''}
                     onValueChange={(v) => updateColumnMapping('url', v || null)}

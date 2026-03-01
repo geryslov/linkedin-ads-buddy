@@ -33,11 +33,23 @@ function normalizeName(name: string): string {
     .trim();
 }
 
+function extractDomainFromEmail(value: string): string {
+  const atIndex = value.indexOf('@');
+  if (atIndex !== -1) {
+    return value.substring(atIndex + 1).toLowerCase().trim();
+  }
+  return '';
+}
+
 function standardizeUrl(url: string): string {
   if (!url) return '';
-  return url
+  const trimmed = url.trim();
+  // If it looks like an email, extract domain from after the @
+  if (trimmed.includes('@')) {
+    return extractDomainFromEmail(trimmed);
+  }
+  return trimmed
     .toLowerCase()
-    .trim()
     .replace(/^https?:\/\//, '')
     .replace(/^www\./, '')
     .replace(/\/.*$/, '')
@@ -48,7 +60,7 @@ function detectColumns(headers: string[]): { nameCol: string | null; urlCol: str
   const lower = headers.map(h => h.toLowerCase().trim());
 
   const namePatterns = ['company name', 'company', 'name', 'account name', 'organization', 'org'];
-  const urlPatterns = ['url', 'website', 'domain', 'company url', 'website url', 'web', 'site'];
+  const urlPatterns = ['url', 'website', 'domain', 'company url', 'website url', 'web', 'site', 'email', 'e-mail', 'email address', 'contact email'];
   const datePatterns = ['date', 'close date', 'created date', 'created', 'closed', 'deal date', 'opportunity date'];
 
   const find = (patterns: string[]) => {
@@ -244,7 +256,7 @@ export function useCompanyInfluenceMatcher(linkedInData: CompanyDemographicItem[
         setDateColumn(detected.dateCol);
 
         if (!detected.nameCol && !detected.urlCol) {
-          setParseError('Could not detect company name or URL columns. Please ensure your CSV has columns like "Company Name", "URL", or "Website".');
+          setParseError('Could not detect company name, URL, or email columns. Please ensure your CSV has columns like "Company Name", "URL", "Website", or "Email".');
           return;
         }
 
