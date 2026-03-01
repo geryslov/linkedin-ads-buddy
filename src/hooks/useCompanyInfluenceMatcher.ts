@@ -21,6 +21,8 @@ export interface MatchedObjective {
   cpc: number;
   cpm: number;
   campaignNames: string[];
+  campaignIds: string[];
+  campaignNamesMap: Record<string, string>;
 }
 
 export interface MatchedCompany {
@@ -127,6 +129,8 @@ function buildObjectives(ob: ObjectiveBreakdownItem[]): { objectives: MatchedObj
       cpc: item.cpc,
       cpm: item.cpm,
       campaignNames: names,
+      campaignIds: item.campaignIds || [],
+      campaignNamesMap: item.campaignNames || {},
     };
   });
   return { objectives, allNames: Array.from(allNames) };
