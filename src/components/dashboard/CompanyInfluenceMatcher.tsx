@@ -3,7 +3,9 @@ import { useCompanyDemographic } from '@/hooks/useCompanyDemographic';
 import {
   useCompanyInfluenceMatcher,
   MatchedCompany,
+  MatchedObjective,
   InfluenceTab,
+  isMatchedItem,
 } from '@/hooks/useCompanyInfluenceMatcher';
 import { TimeFrameSelector } from '@/components/dashboard/TimeFrameSelector';
 import { MetricCard } from '@/components/dashboard/MetricCard';
@@ -25,6 +27,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { Progress } from '@/components/ui/progress';
 import { exportToCSV, companyInfluenceColumns } from '@/lib/exportUtils';
 import {
   Upload,
@@ -41,11 +44,30 @@ import {
   FileSpreadsheet,
   Loader2,
   ArrowUpDown,
+  ChevronRight,
+  ChevronDown,
+  Target,
+  TrendingUp,
+  Zap,
+  Activity,
+  Share2,
+  Heart,
 } from 'lucide-react';
 
 interface CompanyInfluenceMatcherProps {
   accessToken: string | null;
   selectedAccount: string | null;
+}
+
+function formatObjective(obj: string): string {
+  return obj
+    .replace(/_/g, ' ')
+    .toLowerCase()
+    .replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function formatCurrency(n: number): string {
+  return `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: CompanyInfluenceMatcherProps) {
@@ -64,6 +86,8 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
   const [selectedTimeFrame, setSelectedTimeFrame] = useState('30d');
   const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [expandedCompanies, setExpandedCompanies] = useState<Set<string>>(new Set());
+  const [expandedObjectives, setExpandedObjectives] = useState<Set<string>>(new Set());
 
   const {
     uploadedCompanies,
@@ -75,8 +99,11 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
     parseError,
     matched,
     unmatched,
+    uniqueUploadedCount,
     matchedTotals,
     matchRate,
+    avgCostPerLead,
+    overallCtr,
     activeTab,
     setActiveTab,
     searchQuery,
@@ -91,7 +118,7 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
     getExportData,
   } = useCompanyInfluenceMatcher(companyData);
 
-  // Auto-fetch LinkedIn data on mount so it's ready when user uploads CSV
+  // Auto-fetch LinkedIn data on mount
   const [hasFetched, setHasFetched] = useState(false);
   useEffect(() => {
     if (selectedAccount && accessToken && !hasFetched) {
@@ -120,7 +147,7 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
   }, [setDateRange]);
 
   const handleFileSelect = useCallback((file: File) => {
-    if (file && file.type === 'text/csv' || file?.name.endsWith('.csv')) {
+    if (file && (file.type === 'text/csv' || file?.name.endsWith('.csv'))) {
       parseCSV(file);
     }
   }, [parseCSV]);
@@ -144,7 +171,6 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
   const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) handleFileSelect(file);
-    // Reset input so re-uploading same file triggers onChange
     e.target.value = '';
   }, [handleFileSelect]);
 
@@ -153,385 +179,487 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
     exportToCSV(data, 'influence_match_results', companyInfluenceColumns);
   }, [getExportData, dateRange]);
 
+  const toggleCompany = useCallback((key: string) => {
+    setExpandedCompanies(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+        // Also collapse any expanded objectives under this company
+        setExpandedObjectives(prevObj => {
+          const nextObj = new Set(prevObj);
+          for (const k of nextObj) {
+            if (k.startsWith(key + '::')) nextObj.delete(k);
+          }
+          return nextObj;
+        });
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  }, []);
+
+  const toggleObjective = useCallback((key: string) => {
+    setExpandedObjectives(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+
   const SortHeader = ({ field, children }: { field: string; children: React.ReactNode }) => (
     <TableHead
-      className="cursor-pointer hover:text-foreground select-none"
+      className="cursor-pointer hover:text-foreground select-none whitespace-nowrap"
       onClick={() => handleSort(field)}
     >
       <div className="flex items-center gap-1">
         {children}
-        {sortField === field && (
+        {sortField === field ? (
           <span className="text-xs">{sortDirection === 'asc' ? '↑' : '↓'}</span>
+        ) : (
+          <ArrowUpDown className="h-3 w-3 opacity-30" />
         )}
-        {sortField !== field && <ArrowUpDown className="h-3 w-3 opacity-40" />}
       </div>
     </TableHead>
   );
 
-  const isMatched = (item: any): item is MatchedCompany => 'linkedin' in item;
-
   const hasData = uploadedCompanies.length > 0 && companyData.length > 0;
   const tabOptions: { value: InfluenceTab; label: string; count: number }[] = [
-    { value: 'matched', label: 'Matched', count: matched.length },
-    { value: 'unmatched', label: 'Unmatched', count: unmatched.length },
-    { value: 'all', label: 'All', count: uploadedCompanies.length },
+    { value: 'matched', label: 'Influenced', count: matched.length },
+    { value: 'unmatched', label: 'Not Reached', count: unmatched.length },
+    { value: 'all', label: 'All Companies', count: uniqueUploadedCount },
   ];
+
+  // Find highest spend for relative bar widths
+  const maxSpend = Math.max(...matched.map(m => m.linkedin.spent), 1);
 
   return (
     <div className="space-y-6">
-      {/* Step 1: Date Range + Fetch */}
-      <div className="glass rounded-xl p-6 animate-slide-up">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-sm font-semibold">Step 1: LinkedIn Company Data</h3>
-          <div className="flex items-center gap-2">
+      {/* Setup Section: side-by-side */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* LinkedIn Data */}
+        <div className="glass rounded-xl p-5 animate-slide-up">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold flex items-center gap-2">
+              <div className="p-1.5 rounded-md bg-blue-500/10">
+                <Activity className="h-3.5 w-3.5 text-blue-500" />
+              </div>
+              LinkedIn Data
+            </h3>
             {isLoadingLinkedIn && (
-              <Badge variant="outline" className="animate-pulse">
+              <Badge variant="outline" className="animate-pulse text-xs">
                 <Loader2 className="h-3 w-3 mr-1 animate-spin" />
                 Loading...
               </Badge>
             )}
             {!isLoadingLinkedIn && companyData.length > 0 && (
-              <Badge variant="secondary">
-                <CheckCircle2 className="h-3 w-3 mr-1" />
-                {companyData.length} companies loaded ({dateRange.start} to {dateRange.end})
+              <Badge variant="secondary" className="text-xs">
+                <CheckCircle2 className="h-3 w-3 mr-1 text-green-500" />
+                {companyData.length} companies
               </Badge>
             )}
           </div>
-        </div>
-        <div className="flex flex-col gap-4">
-          <TimeFrameSelector
-            timeFrameOptions={timeFrameOptions}
-            selectedTimeFrame={selectedTimeFrame}
-            onTimeFrameChange={handleTimeFrameChange}
-            timeGranularity={timeGranularity}
-            onGranularityChange={setTimeGranularity}
-            dateRange={dateRange}
-            onCustomDateChange={handleCustomDateChange}
-          />
-          <div className="flex items-center gap-3">
-            <Button onClick={handleFetch} disabled={isLoadingLinkedIn || !selectedAccount} variant="outline" size="sm">
-              {isLoadingLinkedIn ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              ) : (
-                <Download className="h-4 w-4 mr-2" />
-              )}
-              {companyData.length > 0 ? 'Reload Data' : 'Fetch LinkedIn Data'}
-            </Button>
-            {!selectedAccount && (
-              <span className="text-sm text-muted-foreground">Select an ad account first</span>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Step 2: CSV Upload */}
-      <div className="glass rounded-xl p-6 animate-slide-up" style={{ animationDelay: '50ms' }}>
-        <h3 className="text-sm font-semibold mb-4">Step 2: Upload Your Company List (CSV)</h3>
-
-        {!fileName ? (
-          <div
-            className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors cursor-pointer ${
-              isDragOver
-                ? 'border-primary bg-primary/5'
-                : 'border-border/50 hover:border-primary/50'
-            }`}
-            onDrop={handleDrop}
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            onClick={() => fileInputRef.current?.click()}
-          >
-            <Upload className="h-8 w-8 mx-auto mb-3 text-muted-foreground" />
-            <p className="text-sm font-medium">Drag & drop your CSV file here</p>
-            <p className="text-xs text-muted-foreground mt-1">
-              or click to browse. Expected columns: Company Name, URL/Website/Email, Date
-            </p>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".csv"
-              className="hidden"
-              onChange={handleInputChange}
-            />
-          </div>
-        ) : (
           <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <FileSpreadsheet className="h-4 w-4 text-primary" />
-                <span className="text-sm font-medium">{fileName}</span>
-                <Badge variant="outline">{uploadedCompanies.length} rows</Badge>
-              </div>
-              <Button variant="ghost" size="sm" onClick={clearUpload}>
-                <X className="h-4 w-4" />
+            <TimeFrameSelector
+              timeFrameOptions={timeFrameOptions}
+              selectedTimeFrame={selectedTimeFrame}
+              onTimeFrameChange={handleTimeFrameChange}
+              timeGranularity={timeGranularity}
+              onGranularityChange={setTimeGranularity}
+              dateRange={dateRange}
+              onCustomDateChange={handleCustomDateChange}
+            />
+            <div className="flex items-center gap-2">
+              <Button onClick={handleFetch} disabled={isLoadingLinkedIn || !selectedAccount} variant="outline" size="sm">
+                {isLoadingLinkedIn ? (
+                  <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                ) : (
+                  <Download className="h-3.5 w-3.5 mr-1.5" />
+                )}
+                {companyData.length > 0 ? 'Reload' : 'Fetch Data'}
               </Button>
+              {!selectedAccount && (
+                <span className="text-xs text-muted-foreground">Select an ad account first</span>
+              )}
             </div>
+          </div>
+        </div>
 
-            {/* Column mapping */}
-            {csvHeaders.length > 0 && (
-              <div className="flex flex-wrap gap-3 text-sm">
+        {/* CSV Upload */}
+        <div className="glass rounded-xl p-5 animate-slide-up" style={{ animationDelay: '50ms' }}>
+          <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
+            <div className="p-1.5 rounded-md bg-orange-500/10">
+              <FileSpreadsheet className="h-3.5 w-3.5 text-orange-500" />
+            </div>
+            Your Company List
+          </h3>
+
+          {!fileName ? (
+            <div
+              className={`border-2 border-dashed rounded-lg p-6 text-center transition-all cursor-pointer ${
+                isDragOver
+                  ? 'border-primary bg-primary/5 scale-[1.01]'
+                  : 'border-border/50 hover:border-primary/40 hover:bg-primary/[0.02]'
+              }`}
+              onDrop={handleDrop}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <Upload className="h-6 w-6 mx-auto mb-2 text-muted-foreground" />
+              <p className="text-sm font-medium">Drop CSV here or click to browse</p>
+              <p className="text-[11px] text-muted-foreground mt-1">
+                Columns: Company Name, URL/Website/Email, Date
+              </p>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".csv"
+                className="hidden"
+                onChange={handleInputChange}
+              />
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <span className="text-muted-foreground">Name:</span>
-                  <Select
-                    value={nameColumn || ''}
-                    onValueChange={(v) => updateColumnMapping('name', v || null)}
-                  >
-                    <SelectTrigger className="w-[160px] h-8 text-xs">
-                      <SelectValue placeholder="Select column" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {csvHeaders.map(h => (
-                        <SelectItem key={h} value={h}>{h}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <FileSpreadsheet className="h-4 w-4 text-primary" />
+                  <span className="text-sm font-medium">{fileName}</span>
+                  <Badge variant="outline" className="text-xs">{uploadedCompanies.length} rows</Badge>
+                  {uploadedCompanies.length !== uniqueUploadedCount && (
+                    <Badge variant="secondary" className="text-xs">{uniqueUploadedCount} unique</Badge>
+                  )}
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-muted-foreground">URL/Email:</span>
-                  <Select
-                    value={urlColumn || ''}
-                    onValueChange={(v) => updateColumnMapping('url', v || null)}
-                  >
-                    <SelectTrigger className="w-[160px] h-8 text-xs">
-                      <SelectValue placeholder="Select column" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {csvHeaders.map(h => (
-                        <SelectItem key={h} value={h}>{h}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-muted-foreground">Date:</span>
-                  <Select
-                    value={dateColumn || ''}
-                    onValueChange={(v) => updateColumnMapping('date', v || null)}
-                  >
-                    <SelectTrigger className="w-[160px] h-8 text-xs">
-                      <SelectValue placeholder="Select column" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {csvHeaders.map(h => (
-                        <SelectItem key={h} value={h}>{h}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+                <Button variant="ghost" size="sm" onClick={clearUpload} className="h-7 w-7 p-0">
+                  <X className="h-3.5 w-3.5" />
+                </Button>
               </div>
-            )}
-          </div>
-        )}
 
-        {parseError && (
-          <div className="mt-3 text-sm text-destructive flex items-center gap-2">
-            <XCircle className="h-4 w-4" />
-            {parseError}
-          </div>
-        )}
+              {csvHeaders.length > 0 && (
+                <div className="flex flex-wrap gap-2 text-xs">
+                  {[
+                    { label: 'Name', value: nameColumn, type: 'name' as const },
+                    { label: 'URL/Email', value: urlColumn, type: 'url' as const },
+                    { label: 'Date', value: dateColumn, type: 'date' as const },
+                  ].map(({ label, value, type }) => (
+                    <div key={type} className="flex items-center gap-1.5">
+                      <span className="text-muted-foreground">{label}:</span>
+                      <Select
+                        value={value || ''}
+                        onValueChange={(v) => updateColumnMapping(type, v || null)}
+                      >
+                        <SelectTrigger className="w-[130px] h-7 text-xs">
+                          <SelectValue placeholder="Select" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {csvHeaders.map(h => (
+                            <SelectItem key={h} value={h}>{h}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {parseError && (
+            <div className="mt-2 text-xs text-destructive flex items-center gap-1.5">
+              <XCircle className="h-3.5 w-3.5 shrink-0" />
+              {parseError}
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* Summary Cards */}
+      {/* Impact Summary */}
       {hasData && (
-        <div className="space-y-4 animate-slide-up" style={{ animationDelay: '100ms' }}>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            <MetricCard
-              title="Uploaded Companies"
-              value={uploadedCompanies.length}
-              icon={FileSpreadsheet}
-              delay={0}
-            />
-            <MetricCard
-              title="Matched (Influenced)"
-              value={matched.length}
-              icon={CheckCircle2}
-              delay={50}
-            />
-            <MetricCard
-              title="Unmatched"
-              value={unmatched.length}
-              icon={XCircle}
-              delay={100}
-            />
-            <MetricCard
-              title="Match Rate"
-              value={`${matchRate}%`}
-              icon={Percent}
-              delay={150}
-            />
+        <div className="animate-slide-up" style={{ animationDelay: '100ms' }}>
+          {/* Match rate banner */}
+          <div className="glass rounded-xl p-5 mb-4">
+            <div className="flex items-center justify-between mb-2">
+              <div>
+                <h3 className="text-sm font-semibold">LinkedIn Influence Coverage</h3>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {matched.length} of {uniqueUploadedCount} companies in your list were reached by LinkedIn ads
+                  <span className="text-muted-foreground/70"> ({dateRange.start} to {dateRange.end})</span>
+                </p>
+              </div>
+              <div className="text-right">
+                <span className="text-3xl font-bold tracking-tight">{matchRate}%</span>
+                <p className="text-[11px] text-muted-foreground">match rate</p>
+              </div>
+            </div>
+            <Progress value={matchRate} className="h-2" />
+            <div className="flex justify-between mt-1.5 text-[11px] text-muted-foreground">
+              <span>{matched.length} influenced</span>
+              <span>{unmatched.length} not reached</span>
+            </div>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            <MetricCard
-              title="LinkedIn Impressions"
-              value={matchedTotals.impressions.toLocaleString()}
-              icon={Eye}
-              delay={200}
-            />
-            <MetricCard
-              title="LinkedIn Clicks"
-              value={matchedTotals.clicks.toLocaleString()}
-              icon={MousePointerClick}
-              delay={250}
-            />
-            <MetricCard
-              title="LinkedIn Spend"
-              value={`$${matchedTotals.spent.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-              icon={DollarSign}
-              delay={300}
-            />
-            <MetricCard
-              title="LinkedIn Leads"
-              value={matchedTotals.leads.toLocaleString()}
-              icon={Users}
-              delay={350}
-            />
+
+          {/* Metric cards */}
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
+            <MetricCard title="Impressions" value={matchedTotals.impressions.toLocaleString()} icon={Eye} delay={0} />
+            <MetricCard title="Clicks" value={matchedTotals.clicks.toLocaleString()} icon={MousePointerClick} delay={30} />
+            <MetricCard title="Ad Spend" value={formatCurrency(matchedTotals.spent)} icon={DollarSign} delay={60} />
+            <MetricCard title="Leads" value={matchedTotals.leads.toLocaleString()} icon={Target} delay={90} />
+            <MetricCard title="CTR" value={`${overallCtr.toFixed(2)}%`} icon={TrendingUp} delay={120} />
+            <MetricCard title="Cost/Lead" value={avgCostPerLead > 0 ? formatCurrency(avgCostPerLead) : '—'} icon={Zap} delay={150} />
+            <MetricCard title="Engagements" value={matchedTotals.engagements.toLocaleString()} icon={Heart} delay={180} />
+            <MetricCard title="Shares" value={matchedTotals.shares.toLocaleString()} icon={Share2} delay={210} />
           </div>
         </div>
       )}
 
       {/* Results Table */}
       {hasData && (
-        <div className="glass rounded-xl p-6 animate-slide-up" style={{ animationDelay: '150ms' }}>
-          {/* Tab bar + search + export */}
+        <div className="glass rounded-xl p-5 animate-slide-up" style={{ animationDelay: '150ms' }}>
           <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
             <div className="flex gap-1">
               {tabOptions.map(tab => (
                 <Button
                   key={tab.value}
-                  variant={activeTab === tab.value ? 'default' : 'outline'}
+                  variant={activeTab === tab.value ? 'default' : 'ghost'}
                   size="sm"
+                  className="text-xs"
                   onClick={() => setActiveTab(tab.value)}
                 >
-                  {tab.label} ({tab.count})
+                  {tab.label}
+                  <Badge variant={activeTab === tab.value ? 'outline' : 'secondary'} className="ml-1.5 text-[10px] px-1.5 py-0">
+                    {tab.count}
+                  </Badge>
                 </Button>
               ))}
             </div>
             <div className="flex items-center gap-2">
               <div className="relative">
-                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-muted-foreground" />
                 <Input
-                  placeholder="Search companies..."
+                  placeholder="Search..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-9 w-[220px] h-9"
+                  className="pl-8 w-[180px] h-8 text-xs"
                 />
               </div>
-              <Button variant="outline" size="sm" onClick={handleExport} disabled={matched.length === 0}>
-                <Download className="h-4 w-4 mr-1" />
-                Export CSV
+              <Button variant="outline" size="sm" className="text-xs h-8" onClick={handleExport} disabled={matched.length === 0}>
+                <Download className="h-3.5 w-3.5 mr-1" />
+                Export
               </Button>
             </div>
           </div>
 
-          {/* Table */}
-          <div className="rounded-md border overflow-auto max-h-[600px]">
+          <div className="rounded-lg border overflow-auto max-h-[650px]">
             <Table>
               <TableHeader>
-                <TableRow>
-                  <SortHeader field="name">Company Name</SortHeader>
-                  <TableHead>URL</TableHead>
-                  <SortHeader field="date">Date</SortHeader>
-                  {activeTab !== 'unmatched' && (
-                    <>
-                      <TableHead>Match Type</TableHead>
-                      <TableHead>LinkedIn Name</TableHead>
-                      <TableHead>Objectives</TableHead>
-                      <TableHead>Campaigns</TableHead>
-                      <TableHead>Impact Period</TableHead>
-                      <SortHeader field="impressions">Impressions</SortHeader>
-                      <SortHeader field="clicks">Clicks</SortHeader>
-                      <SortHeader field="spent">Spend</SortHeader>
-                      <SortHeader field="leads">Leads</SortHeader>
-                      <SortHeader field="engagements">Engagements</SortHeader>
-                      <TableHead>CTR</TableHead>
-                    </>
-                  )}
+                <TableRow className="bg-muted/30">
+                  {activeTab !== 'unmatched' && <TableHead className="w-8" />}
+                  <SortHeader field="name">Company</SortHeader>
+                  <TableHead className="whitespace-nowrap">Match</TableHead>
+                  <SortHeader field="impressions">Impr.</SortHeader>
+                  <SortHeader field="clicks">Clicks</SortHeader>
+                  <SortHeader field="spent">Spend</SortHeader>
+                  <SortHeader field="leads">Leads</SortHeader>
+                  <SortHeader field="engagements">Engage.</SortHeader>
+                  <TableHead className="whitespace-nowrap">CTR</TableHead>
+                  <TableHead className="whitespace-nowrap">CPL</TableHead>
+                  <TableHead className="whitespace-nowrap min-w-[100px]">Spend Share</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filteredData.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={activeTab !== 'unmatched' ? 14 : 3} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={11} className="text-center py-12 text-muted-foreground">
                       No results found
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filteredData.map((item, idx) => (
-                    <TableRow key={idx}>
-                      <TableCell className="font-medium max-w-[200px] truncate">
-                        {item.uploaded.name || '—'}
-                      </TableCell>
-                      <TableCell className="max-w-[180px] truncate text-xs text-muted-foreground">
-                        {item.uploaded.url || '—'}
-                      </TableCell>
-                      <TableCell className="text-xs whitespace-nowrap">
-                        {item.uploaded.date || '—'}
-                      </TableCell>
-                      {activeTab !== 'unmatched' && (
-                        <>
+                  filteredData.map((item, idx) => {
+                    const companyKey = isMatchedItem(item) ? item.linkedin.entityUrn : `unmatched-${idx}`;
+                    const isExpanded = expandedCompanies.has(companyKey);
+                    const matched_ = isMatchedItem(item) ? item : null;
+
+                    return (
+                      <>
+                        {/* Company Row */}
+                        <TableRow
+                          key={companyKey}
+                          className={`${matched_ ? 'cursor-pointer hover:bg-muted/40' : ''} ${isExpanded ? 'bg-muted/20' : ''}`}
+                          onClick={matched_ ? () => toggleCompany(companyKey) : undefined}
+                        >
+                          {activeTab !== 'unmatched' && (
+                            <TableCell className="w-8 pr-0">
+                              {matched_ && matched_.objectives.length > 0 && (
+                                isExpanded
+                                  ? <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                                  : <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                              )}
+                            </TableCell>
+                          )}
                           <TableCell>
-                            {isMatched(item) ? (
-                              <Badge variant={item.matchType === 'name' ? 'default' : 'secondary'}>
-                                {item.matchType}
+                            <div className="min-w-[150px]">
+                              <div className="font-medium text-sm truncate max-w-[220px]" title={matched_ ? matched_.linkedin.entityName : item.uploaded.name}>
+                                {matched_ ? matched_.linkedin.entityName : item.uploaded.name || '—'}
+                              </div>
+                              <div className="text-[11px] text-muted-foreground truncate max-w-[220px]">
+                                {matched_ ? (matched_.linkedin.website || item.uploaded.url || '') : (item.uploaded.url || '')}
+                              </div>
+                              {matched_ && matched_.uploadedEntries.length > 1 && (
+                                <Badge variant="outline" className="text-[10px] mt-0.5 font-normal">
+                                  {matched_.uploadedEntries.length} entries in CSV
+                                </Badge>
+                              )}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            {matched_ ? (
+                              <Badge
+                                variant={matched_.matchType === 'name' ? 'default' : 'secondary'}
+                                className="text-[10px]"
+                              >
+                                {matched_.matchType}
                               </Badge>
                             ) : (
-                              <Badge variant="outline" className="text-muted-foreground">none</Badge>
+                              <Badge variant="outline" className="text-[10px] text-muted-foreground">—</Badge>
                             )}
                           </TableCell>
-                          <TableCell className="max-w-[180px] truncate text-sm">
-                            {isMatched(item) ? item.linkedin.entityName : '—'}
+                          <TableCell className="text-right tabular-nums text-sm">
+                            {matched_ ? matched_.linkedin.impressions.toLocaleString() : '—'}
                           </TableCell>
-                          <TableCell className="max-w-[200px]">
-                            {isMatched(item) && item.objectives.length > 0 ? (
-                              <div className="flex flex-wrap gap-1">
-                                {item.objectives.map((obj, i) => (
-                                  <Badge key={i} variant="outline" className="text-[10px] font-normal">
-                                    {obj.replace(/_/g, ' ')}
-                                  </Badge>
-                                ))}
+                          <TableCell className="text-right tabular-nums text-sm">
+                            {matched_ ? matched_.linkedin.clicks.toLocaleString() : '—'}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums text-sm font-medium">
+                            {matched_ ? formatCurrency(matched_.linkedin.spent) : '—'}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums text-sm">
+                            {matched_ ? (
+                              <span className={matched_.linkedin.leads > 0 ? 'text-green-600 font-medium' : ''}>
+                                {matched_.linkedin.leads.toLocaleString()}
+                              </span>
+                            ) : '—'}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums text-sm">
+                            {matched_ ? matched_.linkedin.engagements.toLocaleString() : '—'}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums text-sm">
+                            {matched_ ? `${matched_.linkedin.ctr.toFixed(2)}%` : '—'}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums text-sm">
+                            {matched_ && matched_.costPerLead > 0
+                              ? formatCurrency(matched_.costPerLead)
+                              : '—'}
+                          </TableCell>
+                          <TableCell>
+                            {matched_ ? (
+                              <div className="flex items-center gap-2 min-w-[80px]">
+                                <div className="flex-1 bg-muted rounded-full h-1.5 overflow-hidden">
+                                  <div
+                                    className="h-full bg-primary/60 rounded-full"
+                                    style={{ width: `${Math.max((matched_.linkedin.spent / maxSpend) * 100, 2)}%` }}
+                                  />
+                                </div>
+                                <span className="text-[10px] text-muted-foreground tabular-nums w-8 text-right">
+                                  {((matched_.linkedin.spent / matchedTotals.spent) * 100).toFixed(0)}%
+                                </span>
                               </div>
                             ) : '—'}
                           </TableCell>
-                          <TableCell className="max-w-[250px]">
-                            {isMatched(item) && item.campaignNames.length > 0 ? (
-                              <div className="text-xs text-muted-foreground space-y-0.5 max-h-[60px] overflow-auto">
-                                {item.campaignNames.map((name, i) => (
-                                  <div key={i} className="truncate" title={name}>{name}</div>
-                                ))}
-                              </div>
-                            ) : '—'}
-                          </TableCell>
-                          <TableCell className="text-xs whitespace-nowrap text-muted-foreground">
-                            {isMatched(item) ? `${dateRange.start} → ${dateRange.end}` : '—'}
-                          </TableCell>
-                          <TableCell className="text-right tabular-nums">
-                            {isMatched(item) ? item.linkedin.impressions.toLocaleString() : '—'}
-                          </TableCell>
-                          <TableCell className="text-right tabular-nums">
-                            {isMatched(item) ? item.linkedin.clicks.toLocaleString() : '—'}
-                          </TableCell>
-                          <TableCell className="text-right tabular-nums">
-                            {isMatched(item) ? `$${item.linkedin.spent.toFixed(2)}` : '—'}
-                          </TableCell>
-                          <TableCell className="text-right tabular-nums">
-                            {isMatched(item) ? item.linkedin.leads.toLocaleString() : '—'}
-                          </TableCell>
-                          <TableCell className="text-right tabular-nums">
-                            {isMatched(item) ? item.linkedin.engagements.toLocaleString() : '—'}
-                          </TableCell>
-                          <TableCell className="text-right tabular-nums">
-                            {isMatched(item) ? `${item.linkedin.ctr.toFixed(2)}%` : '—'}
-                          </TableCell>
-                        </>
-                      )}
-                    </TableRow>
-                  ))
+                        </TableRow>
+
+                        {/* Expanded: Objective Rows */}
+                        {matched_ && isExpanded && matched_.objectives.map((obj, objIdx) => {
+                          const objKey = `${companyKey}::${objIdx}`;
+                          const isObjExpanded = expandedObjectives.has(objKey);
+
+                          return (
+                            <>
+                              <TableRow
+                                key={objKey}
+                                className="bg-muted/10 cursor-pointer hover:bg-muted/25 border-l-2 border-l-primary/30"
+                                onClick={(e) => { e.stopPropagation(); toggleObjective(objKey); }}
+                              >
+                                {activeTab !== 'unmatched' && (
+                                  <TableCell className="w-8 pr-0 pl-4">
+                                    {obj.campaignNames.length > 0 && (
+                                      isObjExpanded
+                                        ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                                        : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                                    )}
+                                  </TableCell>
+                                )}
+                                <TableCell className="pl-6">
+                                  <div className="flex items-center gap-2">
+                                    <Badge variant="outline" className="text-[10px] font-normal shrink-0 bg-blue-500/5 border-blue-500/20 text-blue-700">
+                                      {formatObjective(obj.objective)}
+                                    </Badge>
+                                    <span className="text-[11px] text-muted-foreground">
+                                      {obj.campaignNames.length} campaign{obj.campaignNames.length !== 1 ? 's' : ''}
+                                    </span>
+                                  </div>
+                                </TableCell>
+                                <TableCell />
+                                <TableCell className="text-right tabular-nums text-xs text-muted-foreground">
+                                  {obj.impressions.toLocaleString()}
+                                </TableCell>
+                                <TableCell className="text-right tabular-nums text-xs text-muted-foreground">
+                                  {obj.clicks.toLocaleString()}
+                                </TableCell>
+                                <TableCell className="text-right tabular-nums text-xs text-muted-foreground">
+                                  {formatCurrency(obj.spent)}
+                                </TableCell>
+                                <TableCell className="text-right tabular-nums text-xs text-muted-foreground">
+                                  {obj.leads > 0 ? obj.leads.toLocaleString() : '—'}
+                                </TableCell>
+                                <TableCell className="text-right tabular-nums text-xs text-muted-foreground">
+                                  {obj.engagements.toLocaleString()}
+                                </TableCell>
+                                <TableCell className="text-right tabular-nums text-xs text-muted-foreground">
+                                  {obj.ctr.toFixed(2)}%
+                                </TableCell>
+                                <TableCell className="text-right tabular-nums text-xs text-muted-foreground">
+                                  {obj.leads > 0 ? formatCurrency(obj.spent / obj.leads) : '—'}
+                                </TableCell>
+                                <TableCell />
+                              </TableRow>
+
+                              {/* Expanded: Campaign Names */}
+                              {isObjExpanded && obj.campaignNames.map((name, cIdx) => (
+                                <TableRow
+                                  key={`${objKey}::c${cIdx}`}
+                                  className="bg-muted/5 border-l-2 border-l-primary/15"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  {activeTab !== 'unmatched' && <TableCell className="w-8" />}
+                                  <TableCell className="pl-10">
+                                    <div className="flex items-center gap-2">
+                                      <div className="w-1 h-1 rounded-full bg-muted-foreground/40 shrink-0" />
+                                      <span className="text-xs text-muted-foreground truncate max-w-[250px]" title={name}>
+                                        {name}
+                                      </span>
+                                    </div>
+                                  </TableCell>
+                                  <TableCell colSpan={9} />
+                                </TableRow>
+                              ))}
+                            </>
+                          );
+                        })}
+                      </>
+                    );
+                  })
                 )}
               </TableBody>
             </Table>
           </div>
 
-          <div className="mt-3 text-xs text-muted-foreground">
-            Showing {filteredData.length} of {uploadedCompanies.length} companies
+          <div className="flex items-center justify-between mt-3 text-xs text-muted-foreground">
+            <span>
+              Showing {filteredData.length} companies
+              {searchQuery && ` matching "${searchQuery}"`}
+            </span>
+            <span>Impact period: {dateRange.start} to {dateRange.end}</span>
           </div>
         </div>
       )}
