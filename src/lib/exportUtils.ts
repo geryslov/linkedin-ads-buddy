@@ -153,6 +153,7 @@ export const companyInfluenceColumns = [
   { key: 'spent', label: 'Spend' },
   { key: 'leads', label: 'Leads' },
   { key: 'engagements', label: 'Engagements' },
+  { key: 'costPerLead', label: 'Cost Per Lead' },
   { key: 'ctr', label: 'CTR %' },
   { key: 'cpc', label: 'CPC' },
   { key: 'cpm', label: 'CPM' },

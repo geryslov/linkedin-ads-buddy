@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo } from 'react';
 import Papa from 'papaparse';
-import { CompanyDemographicItem } from '@/hooks/useCompanyDemographic';
+import { CompanyDemographicItem, ObjectiveBreakdownItem } from '@/hooks/useCompanyDemographic';
 
 export interface UploadedCompany {
   name: string;
@@ -9,12 +9,32 @@ export interface UploadedCompany {
   rawRow: Record<string, string>;
 }
 
+export interface MatchedObjective {
+  objective: string;
+  impressions: number;
+  clicks: number;
+  landingPageClicks: number;
+  spent: number;
+  leads: number;
+  engagements: number;
+  ctr: number;
+  cpc: number;
+  cpm: number;
+  campaignNames: string[];
+}
+
 export interface MatchedCompany {
+  /** First uploaded entry used as display name */
   uploaded: UploadedCompany;
+  /** All CSV rows that matched to this LinkedIn company */
+  uploadedEntries: UploadedCompany[];
   linkedin: CompanyDemographicItem;
   matchType: 'name' | 'domain';
-  objectives: string[];
-  campaignNames: string[];
+  objectives: MatchedObjective[];
+  allCampaignNames: string[];
+  /** Derived metrics */
+  costPerLead: number;
+  engagementRate: number;
 }
 
 export interface UnmatchedCompany {
@@ -46,7 +66,6 @@ function extractDomainFromEmail(value: string): string {
 function standardizeUrl(url: string): string {
   if (!url) return '';
   const trimmed = url.trim();
-  // If it looks like an email, extract domain from after the @
   if (trimmed.includes('@')) {
     return extractDomainFromEmail(trimmed);
   }
@@ -70,7 +89,6 @@ function detectColumns(headers: string[]): { nameCol: string | null; urlCol: str
       const idx = lower.indexOf(p);
       if (idx !== -1) return headers[idx];
     }
-    // Partial match fallback
     for (const p of patterns) {
       const idx = lower.findIndex(h => h.includes(p));
       if (idx !== -1) return headers[idx];
@@ -85,7 +103,36 @@ function detectColumns(headers: string[]): { nameCol: string | null; urlCol: str
   };
 }
 
-function isMatchedItem(item: MatchedCompany | UnmatchedCompany): item is MatchedCompany {
+function buildObjectives(ob: ObjectiveBreakdownItem[]): { objectives: MatchedObjective[]; allNames: string[] } {
+  const allNames = new Set<string>();
+  const objectives: MatchedObjective[] = ob.map(item => {
+    const names: string[] = [];
+    if (item.campaignNames) {
+      for (const n of Object.values(item.campaignNames)) {
+        if (n) {
+          names.push(n);
+          allNames.add(n);
+        }
+      }
+    }
+    return {
+      objective: item.objective,
+      impressions: item.impressions,
+      clicks: item.clicks,
+      landingPageClicks: item.landingPageClicks,
+      spent: item.spent,
+      leads: item.leads,
+      engagements: item.engagements,
+      ctr: item.ctr,
+      cpc: item.cpc,
+      cpm: item.cpm,
+      campaignNames: names,
+    };
+  });
+  return { objectives, allNames: Array.from(allNames) };
+}
+
+export function isMatchedItem(item: MatchedCompany | UnmatchedCompany): item is MatchedCompany {
   return 'linkedin' in item;
 }
 
@@ -99,8 +146,8 @@ export function useCompanyInfluenceMatcher(linkedInData: CompanyDemographicItem[
   const [parseError, setParseError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<InfluenceTab>('matched');
   const [searchQuery, setSearchQuery] = useState('');
-  const [sortField, setSortField] = useState<string>('name');
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [sortField, setSortField] = useState<string>('spent');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
 
   // Build lookup maps from LinkedIn data
   const { nameMap, domainMap } = useMemo(() => {
@@ -125,55 +172,78 @@ export function useCompanyInfluenceMatcher(linkedInData: CompanyDemographicItem[
     return { nameMap: nMap, domainMap: dMap };
   }, [linkedInData]);
 
-  // Perform matching
-  const { matched, unmatched } = useMemo(() => {
-    const matchedResults: MatchedCompany[] = [];
+  // Perform matching with deduplication
+  const { matched, unmatched, uniqueUploadedCount } = useMemo(() => {
+    // Deduplicate: group uploaded companies by their normalized match key
+    // so the same company appearing N times only produces 1 matched row
+    const matchedMap = new Map<string, MatchedCompany>();
     const unmatchedResults: UnmatchedCompany[] = [];
+    const seenUnmatched = new Set<string>();
 
     for (const company of uploadedCompanies) {
       let linkedinMatch: CompanyDemographicItem | undefined;
       let matchType: 'name' | 'domain' = 'name';
+      let dedupeKey = '';
 
       // Try name match first
       if (company.name) {
         const normalizedName = normalizeName(company.name);
         linkedinMatch = nameMap.get(normalizedName);
+        if (linkedinMatch) dedupeKey = linkedinMatch.entityUrn || normalizedName;
       }
 
       // Fall back to URL match
       if (!linkedinMatch && company.url) {
         const standardizedUrl = standardizeUrl(company.url);
         linkedinMatch = domainMap.get(standardizedUrl);
-        if (linkedinMatch) matchType = 'domain';
+        if (linkedinMatch) {
+          matchType = 'domain';
+          dedupeKey = linkedinMatch.entityUrn || standardizedUrl;
+        }
       }
 
       if (linkedinMatch) {
-        // Extract objectives and campaign names from objectiveBreakdown
-        const objectives: string[] = [];
-        const campaignNamesSet = new Set<string>();
-        if (linkedinMatch.objectiveBreakdown) {
-          for (const ob of linkedinMatch.objectiveBreakdown) {
-            if (ob.objective) objectives.push(ob.objective);
-            if (ob.campaignNames) {
-              for (const name of Object.values(ob.campaignNames)) {
-                if (name) campaignNamesSet.add(name);
-              }
-            }
-          }
+        const existing = matchedMap.get(dedupeKey);
+        if (existing) {
+          // Merge: just add this uploaded entry to the existing match
+          existing.uploadedEntries.push(company);
+        } else {
+          const { objectives, allNames } = linkedinMatch.objectiveBreakdown
+            ? buildObjectives(linkedinMatch.objectiveBreakdown)
+            : { objectives: [], allNames: [] };
+
+          const costPerLead = linkedinMatch.leads > 0
+            ? linkedinMatch.spent / linkedinMatch.leads
+            : 0;
+          const engagementRate = linkedinMatch.impressions > 0
+            ? (linkedinMatch.engagements / linkedinMatch.impressions) * 100
+            : 0;
+
+          matchedMap.set(dedupeKey, {
+            uploaded: company,
+            uploadedEntries: [company],
+            linkedin: linkedinMatch,
+            matchType,
+            objectives,
+            allCampaignNames: allNames,
+            costPerLead,
+            engagementRate,
+          });
         }
-        matchedResults.push({
-          uploaded: company,
-          linkedin: linkedinMatch,
-          matchType,
-          objectives,
-          campaignNames: Array.from(campaignNamesSet),
-        });
       } else {
-        unmatchedResults.push({ uploaded: company });
+        // Deduplicate unmatched too
+        const unmatchedKey = normalizeName(company.name) || standardizeUrl(company.url);
+        if (!seenUnmatched.has(unmatchedKey)) {
+          seenUnmatched.add(unmatchedKey);
+          unmatchedResults.push({ uploaded: company });
+        }
       }
     }
 
-    return { matched: matchedResults, unmatched: unmatchedResults };
+    const matchedResults = Array.from(matchedMap.values());
+    const uniqueCount = matchedResults.length + unmatchedResults.length;
+
+    return { matched: matchedResults, unmatched: unmatchedResults, uniqueUploadedCount: uniqueCount };
   }, [uploadedCompanies, nameMap, domainMap]);
 
   // Summary totals for matched companies
@@ -186,24 +256,33 @@ export function useCompanyInfluenceMatcher(linkedInData: CompanyDemographicItem[
         leads: acc.leads + m.linkedin.leads,
         engagements: acc.engagements + m.linkedin.engagements,
         landingPageClicks: acc.landingPageClicks + m.linkedin.landingPageClicks,
+        reactions: acc.reactions + m.linkedin.reactions,
+        shares: acc.shares + m.linkedin.shares,
       }),
-      { impressions: 0, clicks: 0, spent: 0, leads: 0, engagements: 0, landingPageClicks: 0 }
+      { impressions: 0, clicks: 0, spent: 0, leads: 0, engagements: 0, landingPageClicks: 0, reactions: 0, shares: 0 }
     );
   }, [matched]);
 
-  const matchRate = uploadedCompanies.length > 0
-    ? Math.round((matched.length / uploadedCompanies.length) * 100)
+  const matchRate = uniqueUploadedCount > 0
+    ? Math.round((matched.length / uniqueUploadedCount) * 100)
+    : 0;
+
+  const avgCostPerLead = matchedTotals.leads > 0
+    ? matchedTotals.spent / matchedTotals.leads
+    : 0;
+
+  const overallCtr = matchedTotals.impressions > 0
+    ? (matchedTotals.clicks / matchedTotals.impressions) * 100
     : 0;
 
   // Sorting and filtering
   const filteredData = useMemo(() => {
     let data: (MatchedCompany | UnmatchedCompany)[];
 
-    if (activeTab === 'matched') data = matched;
-    else if (activeTab === 'unmatched') data = unmatched;
+    if (activeTab === 'matched') data = [...matched];
+    else if (activeTab === 'unmatched') data = [...unmatched];
     else data = [...matched, ...unmatched];
 
-    // Filter by search
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       data = data.filter(item => {
@@ -211,23 +290,22 @@ export function useCompanyInfluenceMatcher(linkedInData: CompanyDemographicItem[
         const url = item.uploaded.url?.toLowerCase() || '';
         if (isMatchedItem(item)) {
           const liName = item.linkedin.entityName?.toLowerCase() || '';
-          const campaigns = item.campaignNames.join(' ').toLowerCase();
-          const objectives = item.objectives.join(' ').toLowerCase();
+          const campaigns = item.allCampaignNames.join(' ').toLowerCase();
+          const objectives = item.objectives.map(o => o.objective).join(' ').toLowerCase();
           return name.includes(q) || url.includes(q) || liName.includes(q) || campaigns.includes(q) || objectives.includes(q);
         }
         return name.includes(q) || url.includes(q);
       });
     }
 
-    // Sort
     data.sort((a, b) => {
       let aVal: string | number = '';
       let bVal: string | number = '';
 
       switch (sortField) {
         case 'name':
-          aVal = a.uploaded.name?.toLowerCase() || '';
-          bVal = b.uploaded.name?.toLowerCase() || '';
+          aVal = (isMatchedItem(a) ? a.linkedin.entityName : a.uploaded.name)?.toLowerCase() || '';
+          bVal = (isMatchedItem(b) ? b.linkedin.entityName : b.uploaded.name)?.toLowerCase() || '';
           break;
         case 'date':
           aVal = a.uploaded.date || '';
@@ -327,7 +405,6 @@ export function useCompanyInfluenceMatcher(linkedInData: CompanyDemographicItem[
     else if (type === 'url') setUrlColumn(column);
     else setDateColumn(column);
 
-    // Re-map uploaded companies with new column selection
     if (uploadedCompanies.length > 0) {
       const newNameCol = type === 'name' ? column : nameColumn;
       const newUrlCol = type === 'url' ? column : urlColumn;
@@ -344,17 +421,16 @@ export function useCompanyInfluenceMatcher(linkedInData: CompanyDemographicItem[
     }
   }, [uploadedCompanies, nameColumn, urlColumn, dateColumn]);
 
-  // Export data for matched results
   const getExportData = useCallback((linkedInDateRange?: { start: string; end: string }) => {
     return matched.map(m => ({
       companyName: m.uploaded.name,
       companyUrl: m.uploaded.url,
-      companyDate: m.uploaded.date,
+      companyDate: m.uploadedEntries.map(e => e.date).filter(Boolean).join('; '),
       matchType: m.matchType,
       linkedInName: m.linkedin.entityName,
       linkedInWebsite: m.linkedin.website || '',
-      objectives: m.objectives.join('; '),
-      campaignNames: m.campaignNames.join('; '),
+      objectives: m.objectives.map(o => o.objective).join('; '),
+      campaignNames: m.allCampaignNames.join('; '),
       impactPeriod: linkedInDateRange ? `${linkedInDateRange.start} to ${linkedInDateRange.end}` : '',
       impressions: m.linkedin.impressions,
       clicks: m.linkedin.clicks,
@@ -362,6 +438,7 @@ export function useCompanyInfluenceMatcher(linkedInData: CompanyDemographicItem[
       spent: m.linkedin.spent.toFixed(2),
       leads: m.linkedin.leads,
       engagements: m.linkedin.engagements,
+      costPerLead: m.costPerLead > 0 ? m.costPerLead.toFixed(2) : '',
       ctr: m.linkedin.ctr.toFixed(2),
       cpc: m.linkedin.cpc.toFixed(2),
       cpm: m.linkedin.cpm.toFixed(2),
@@ -369,7 +446,6 @@ export function useCompanyInfluenceMatcher(linkedInData: CompanyDemographicItem[
   }, [matched]);
 
   return {
-    // CSV state
     uploadedCompanies,
     csvHeaders,
     nameColumn,
@@ -377,12 +453,13 @@ export function useCompanyInfluenceMatcher(linkedInData: CompanyDemographicItem[
     dateColumn,
     fileName,
     parseError,
-    // Matching results
     matched,
     unmatched,
+    uniqueUploadedCount,
     matchedTotals,
     matchRate,
-    // UI state
+    avgCostPerLead,
+    overallCtr,
     activeTab,
     setActiveTab,
     searchQuery,
@@ -391,7 +468,6 @@ export function useCompanyInfluenceMatcher(linkedInData: CompanyDemographicItem[
     sortDirection,
     handleSort,
     filteredData,
-    // Actions
     parseCSV,
     clearUpload,
     updateColumnMapping,
