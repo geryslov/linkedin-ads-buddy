@@ -144,11 +144,18 @@ export const companyInfluenceColumns = [
   { key: 'matchType', label: 'Match Type' },
   { key: 'linkedInName', label: 'LinkedIn Name' },
   { key: 'linkedInWebsite', label: 'LinkedIn Website' },
+  { key: 'objectives', label: 'Objectives' },
+  { key: 'campaignNames', label: 'Campaign Names' },
+  { key: 'impactPeriod', label: 'Impact Period' },
   { key: 'impressions', label: 'Impressions' },
   { key: 'clicks', label: 'Clicks' },
+  { key: 'landingPageClicks', label: 'LP Clicks' },
   { key: 'spent', label: 'Spend' },
   { key: 'leads', label: 'Leads' },
+  { key: 'engagements', label: 'Engagements' },
   { key: 'ctr', label: 'CTR %' },
+  { key: 'cpc', label: 'CPC' },
+  { key: 'cpm', label: 'CPM' },
 ];
 
 export const jobTitleDrilldownColumns = [
