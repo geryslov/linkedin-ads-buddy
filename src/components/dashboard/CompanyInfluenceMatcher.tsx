@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useCompanyDemographic, CampaignBreakdownItem } from '@/hooks/useCompanyDemographic';
+import { useCompanyDemographic, CampaignBreakdownItem, ObjectiveBreakdownItem } from '@/hooks/useCompanyDemographic';
 import { useCreativeReporting, CreativeData } from '@/hooks/useCreativeReporting';
 import {
   useCompanyInfluenceMatcher,
@@ -57,6 +57,33 @@ function fmtObj(s: string): string {
   return s.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
 }
 
+/** Convert lazy-loaded ObjectiveBreakdownItem[] to MatchedObjective[] */
+function toMatchedObjectives(items: ObjectiveBreakdownItem[]): MatchedObjective[] {
+  return items.map(item => {
+    const names: string[] = [];
+    if (item.campaignNames) {
+      for (const n of Object.values(item.campaignNames)) {
+        if (n) names.push(n);
+      }
+    }
+    return {
+      objective: item.objective,
+      impressions: item.impressions,
+      clicks: item.clicks,
+      landingPageClicks: item.landingPageClicks,
+      spent: item.spent,
+      leads: item.leads,
+      engagements: item.engagements,
+      ctr: item.ctr,
+      cpc: item.cpc,
+      cpm: item.cpm,
+      campaignNames: names,
+      campaignIds: item.campaignIds || [],
+      campaignNamesMap: item.campaignNames || {},
+    };
+  });
+}
+
 function fmtCur(n: number): string {
   return `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
@@ -94,6 +121,9 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
     fetchCampaignBreakdown,
     campaignBreakdownCache,
     loadingObjectives,
+    fetchObjectiveBreakdowns,
+    objectiveBreakdownCache,
+    isLoadingObjectiveBreakdowns,
   } = useCompanyDemographic(accessToken);
 
   const {
@@ -205,7 +235,7 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
     exportToCSV(getExportData(dateRange), 'influence_match_results', companyInfluenceColumns);
   }, [getExportData, dateRange]);
 
-  const toggleCompany = useCallback((key: string) => {
+  const toggleCompany = useCallback((key: string, m?: MatchedCompany) => {
     setExpandedCompanies(prev => {
       const next = new Set(prev);
       if (next.has(key)) {
@@ -222,10 +252,14 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
         });
       } else {
         next.add(key);
+        // If this company has no objectives (skipped for large accounts), trigger lazy load
+        if (m && m.objectives.length === 0 && selectedAccount && !objectiveBreakdownCache.has(m.linkedin.entityUrn)) {
+          fetchObjectiveBreakdowns(selectedAccount);
+        }
       }
       return next;
     });
-  }, []);
+  }, [selectedAccount, objectiveBreakdownCache, fetchObjectiveBreakdowns]);
 
   const toggleObjective = useCallback((key: string, entityUrn: string, obj: MatchedObjective) => {
     setExpandedObjectives(prev => {
@@ -724,7 +758,7 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
                         <tr
                           key={companyKey}
                           className={`border-b border-border/30 ${m ? 'cursor-pointer hover:bg-muted/30' : ''} ${isExpanded ? 'bg-muted/15' : ''}`}
-                          onClick={m ? () => toggleCompany(companyKey) : undefined}
+                          onClick={m ? () => toggleCompany(companyKey, m) : undefined}
                         >
                           {activeTab !== 'unmatched' && (
                             <td className="w-8 px-3 py-3 pr-0">
@@ -787,58 +821,80 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
                             </tr>
 
                             {/* Objective rows */}
-                            {m.objectives.map((obj, objIdx) => {
-                              const objKey = `${companyKey}::${objIdx}`;
-                              const isObjExpanded = expandedObjectives.has(objKey);
-                              const objCpl = obj.leads > 0 ? obj.spent / obj.leads : 0;
+                            {(() => {
+                              // Use hook objectives if available, otherwise fall back to lazy-loaded cache
+                              const objectives = m.objectives.length > 0
+                                ? m.objectives
+                                : (objectiveBreakdownCache.has(m.linkedin.entityUrn)
+                                    ? toMatchedObjectives(objectiveBreakdownCache.get(m.linkedin.entityUrn)!)
+                                    : []);
 
-                              return (
-                                <>
-                                  <tr
-                                    key={objKey}
-                                    className={`border-l-4 border-l-primary/25 cursor-pointer hover:bg-muted/20 ${isObjExpanded ? 'bg-muted/10' : ''}`}
-                                    onClick={(e) => { e.stopPropagation(); toggleObjective(objKey, m.linkedin.entityUrn, obj); }}
-                                  >
-                                    <td className="w-8 px-3 py-2 pl-5">
-                                      {obj.campaignIds.length > 0 ? (
-                                        isObjExpanded
-                                          ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-                                          : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-                                      ) : null}
+                              if (isLoadingObjectiveBreakdowns && objectives.length === 0) {
+                                return (
+                                  <tr key={`${companyKey}::loading-obj`} onClick={(e) => e.stopPropagation()}>
+                                    <td colSpan={12} className="px-8 py-3 text-xs text-muted-foreground border-l-4 border-l-primary/10">
+                                      <Loader2 className="h-3.5 w-3.5 animate-spin inline mr-2" />
+                                      Loading objective breakdowns...
                                     </td>
-                                    <td className="px-3 py-2" colSpan={2}>
-                                      <div className="flex items-center gap-2 pl-2">
-                                        <Badge variant="outline" className="text-[10px] font-normal shrink-0 bg-blue-500/5 border-blue-500/20 text-blue-700 dark:text-blue-400">
-                                          {fmtObj(obj.objective)}
-                                        </Badge>
-                                        <span className="text-[11px] text-muted-foreground">
-                                          {obj.campaignNames.length} campaign{obj.campaignNames.length !== 1 ? 's' : ''}
-                                        </span>
-                                      </div>
-                                    </td>
-                                    <MetricCell value={fmtNum(obj.impressions)} className="text-muted-foreground" />
-                                    <MetricCell value={fmtNum(obj.clicks)} className="text-muted-foreground" />
-                                    <MetricCell value={fmtCur(obj.spent)} className="text-muted-foreground" />
-                                    <MetricCell value={obj.leads > 0 ? fmtNum(obj.leads) : '—'} className="text-muted-foreground" />
-                                    <MetricCell value={fmtNum(obj.engagements)} className="text-muted-foreground" />
-                                    <MetricCell value={`${obj.ctr.toFixed(2)}%`} className="text-muted-foreground" />
-                                    <MetricCell value={objCpl > 0 ? fmtCur(objCpl) : '—'} className="text-muted-foreground" />
-                                    <td />
                                   </tr>
+                                );
+                              }
 
-                                  {/* Campaign rows under objective */}
-                                  {isObjExpanded && renderCampaignRows(companyKey, objIdx, m.linkedin.entityUrn, obj)}
-                                </>
-                              );
-                            })}
+                              if (objectives.length === 0) {
+                                return (
+                                  <tr key={`${companyKey}::no-obj`} onClick={(e) => e.stopPropagation()}>
+                                    <td colSpan={12} className="px-8 py-2.5 text-xs text-muted-foreground italic border-l-4 border-l-primary/10">
+                                      No objective breakdown available
+                                    </td>
+                                  </tr>
+                                );
+                              }
 
-                            {m.objectives.length === 0 && (
-                              <tr key={`${companyKey}::no-obj`} onClick={(e) => e.stopPropagation()}>
-                                <td colSpan={12} className="px-8 py-2.5 text-xs text-muted-foreground italic border-l-4 border-l-primary/10">
-                                  No objective breakdown available
-                                </td>
-                              </tr>
-                            )}
+                              return objectives.map((obj, objIdx) => {
+                                const objKey = `${companyKey}::${objIdx}`;
+                                const isObjExpanded = expandedObjectives.has(objKey);
+                                const objCpl = obj.leads > 0 ? obj.spent / obj.leads : 0;
+
+                                return (
+                                  <>
+                                    <tr
+                                      key={objKey}
+                                      className={`border-l-4 border-l-primary/25 cursor-pointer hover:bg-muted/20 ${isObjExpanded ? 'bg-muted/10' : ''}`}
+                                      onClick={(e) => { e.stopPropagation(); toggleObjective(objKey, m.linkedin.entityUrn, obj); }}
+                                    >
+                                      <td className="w-8 px-3 py-2 pl-5">
+                                        {obj.campaignIds.length > 0 ? (
+                                          isObjExpanded
+                                            ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                                            : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                                        ) : null}
+                                      </td>
+                                      <td className="px-3 py-2" colSpan={2}>
+                                        <div className="flex items-center gap-2 pl-2">
+                                          <Badge variant="outline" className="text-[10px] font-normal shrink-0 bg-blue-500/5 border-blue-500/20 text-blue-700 dark:text-blue-400">
+                                            {fmtObj(obj.objective)}
+                                          </Badge>
+                                          <span className="text-[11px] text-muted-foreground">
+                                            {obj.campaignNames.length} campaign{obj.campaignNames.length !== 1 ? 's' : ''}
+                                          </span>
+                                        </div>
+                                      </td>
+                                      <MetricCell value={fmtNum(obj.impressions)} className="text-muted-foreground" />
+                                      <MetricCell value={fmtNum(obj.clicks)} className="text-muted-foreground" />
+                                      <MetricCell value={fmtCur(obj.spent)} className="text-muted-foreground" />
+                                      <MetricCell value={obj.leads > 0 ? fmtNum(obj.leads) : '—'} className="text-muted-foreground" />
+                                      <MetricCell value={fmtNum(obj.engagements)} className="text-muted-foreground" />
+                                      <MetricCell value={`${obj.ctr.toFixed(2)}%`} className="text-muted-foreground" />
+                                      <MetricCell value={objCpl > 0 ? fmtCur(objCpl) : '—'} className="text-muted-foreground" />
+                                      <td />
+                                    </tr>
+
+                                    {/* Campaign rows under objective */}
+                                    {isObjExpanded && renderCampaignRows(companyKey, objIdx, m.linkedin.entityUrn, obj)}
+                                  </>
+                                );
+                              });
+                            })()}
                           </>
                         )}
                       </>
