@@ -19,6 +19,9 @@ interface CompanyDemographicTableProps {
   onExpandObjective?: (entityUrn: string, objective: string, campaignIds: string[], campaignNames: Record<string, string>) => void;
   campaignBreakdownCache?: Map<string, CampaignBreakdownItem[]>;
   loadingObjectives?: Set<string>;
+  onExpandCompany?: (entityUrn: string) => void;
+  objectiveBreakdownCache?: Map<string, ObjectiveBreakdownItem[]>;
+  isLoadingObjectiveBreakdowns?: boolean;
 }
 
 type SortField = 'entityName' | 'impressions' | 'clicks' | 'landingPageClicks' | 'spent' | 'leads' | 'engagements' | 'ctr' | 'cpc' | 'cpm' | 'enrichmentStatus';
@@ -117,7 +120,7 @@ function EngagementBreakdownPopover({ engagements, likes, comments, reactions, s
   );
 }
 
-export function CompanyDemographicTable({ data, isLoading, onExpandObjective, campaignBreakdownCache, loadingObjectives }: CompanyDemographicTableProps) {
+export function CompanyDemographicTable({ data, isLoading, onExpandObjective, campaignBreakdownCache, loadingObjectives, onExpandCompany, objectiveBreakdownCache, isLoadingObjectiveBreakdowns }: CompanyDemographicTableProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [sortField, setSortField] = useState<SortField>('impressions');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
@@ -170,6 +173,8 @@ export function CompanyDemographicTable({ data, isLoading, onExpandObjective, ca
         });
       } else {
         next.add(entityUrn);
+        // Trigger lazy load of objective breakdowns
+        onExpandCompany?.(entityUrn);
       }
       return next;
     });
@@ -352,21 +357,30 @@ export function CompanyDemographicTable({ data, isLoading, onExpandObjective, ca
             ) : (
               paginatedData.map((item, index) => {
                 const isCompanyExpanded = expandedCompanies.has(item.entityUrn);
-                const hasBreakdown = item.objectiveBreakdown && item.objectiveBreakdown.length > 0;
+                // Use inline breakdown if available, otherwise check lazy-loaded cache
+                const inlineBreakdown = item.objectiveBreakdown && item.objectiveBreakdown.length > 0 ? item.objectiveBreakdown : null;
+                const cachedBreakdown = objectiveBreakdownCache?.get(item.entityUrn);
+                const effectiveBreakdown = inlineBreakdown || (cachedBreakdown && cachedBreakdown.length > 0 ? cachedBreakdown : null);
+                const hasBreakdown = !!effectiveBreakdown;
+                // All companies are expandable (lazy loading will fetch breakdowns)
+                const isExpandable = true;
+                const isLoadingThisCompany = isCompanyExpanded && !hasBreakdown && isLoadingObjectiveBreakdowns;
 
                 return (
                   <>
                     <TableRow
                       key={item.entityUrn || index}
-                      className={`transition-colors duration-150 hover:bg-muted/20 ${hasBreakdown ? 'cursor-pointer' : ''} ${isCompanyExpanded ? 'bg-primary/[0.03]' : ''}`}
-                      onClick={() => hasBreakdown && toggleCompany(item.entityUrn)}
+                      className={`transition-colors duration-150 hover:bg-muted/20 cursor-pointer ${isCompanyExpanded ? 'bg-primary/[0.03]' : ''}`}
+                      onClick={() => toggleCompany(item.entityUrn)}
                     >
                       <TableCell className="font-medium min-w-[200px] max-w-[280px]">
                         <div className="flex items-center gap-2">
-                          {hasBreakdown ? (
-                            isCompanyExpanded ? <ChevronDown className="h-4 w-4 text-muted-foreground flex-shrink-0" /> : <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                          {isLoadingThisCompany ? (
+                            <Loader2 className="h-4 w-4 text-muted-foreground flex-shrink-0 animate-spin" />
+                          ) : isCompanyExpanded ? (
+                            <ChevronDown className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                           ) : (
-                            <Building2 className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                            <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                           )}
                           <Tooltip>
                             <TooltipTrigger asChild>
@@ -414,8 +428,29 @@ export function CompanyDemographicTable({ data, isLoading, onExpandObjective, ca
                       {isColumnVisible('cpm') && <TableCell className="text-right tabular-nums">${item.cpm.toFixed(2)}</TableCell>}
                     </TableRow>
 
+                    {/* Loading state for objective breakdowns */}
+                    {isLoadingThisCompany && (
+                      <TableRow key={`${item.entityUrn}-obj-loading`} className="bg-primary/[0.04] border-l-2 border-l-primary/30">
+                        <TableCell colSpan={dynamicColSpan} className="pl-10">
+                          <div className="flex items-center gap-2 py-2">
+                            <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
+                            <span className="text-xs text-muted-foreground">Loading objective breakdown...</span>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    )}
+
+                    {/* No breakdown available */}
+                    {isCompanyExpanded && !hasBreakdown && !isLoadingThisCompany && (
+                      <TableRow key={`${item.entityUrn}-obj-empty`} className="bg-primary/[0.04] border-l-2 border-l-primary/30">
+                        <TableCell colSpan={dynamicColSpan} className="pl-10">
+                          <span className="text-xs text-muted-foreground">No objective breakdown available for this company</span>
+                        </TableCell>
+                      </TableRow>
+                    )}
+
                     {/* Objective breakdown rows (Level 2) */}
-                    {isCompanyExpanded && hasBreakdown && item.objectiveBreakdown!.map((breakdown, bIdx) => {
+                    {isCompanyExpanded && hasBreakdown && effectiveBreakdown!.map((breakdown, bIdx) => {
                       const objKey = `${item.entityUrn}::${breakdown.objective}`;
                       const isObjExpanded = expandedObjectives.has(objKey);
                       const hasCampaignIds = breakdown.campaignIds && breakdown.campaignIds.length > 0;

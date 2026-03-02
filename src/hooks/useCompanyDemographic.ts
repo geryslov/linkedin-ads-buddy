@@ -85,6 +85,10 @@ export function useCompanyDemographic(accessToken: string | null) {
   const [loadingObjectives, setLoadingObjectives] = useState<Set<string>>(new Set());
   // Cache loaded campaign breakdowns by key: "entityUrn::objective"
   const [campaignBreakdownCache, setCampaignBreakdownCache] = useState<Map<string, CampaignBreakdownItem[]>>(new Map());
+  // Lazy-loaded objective breakdowns cache: entityUrn -> ObjectiveBreakdownItem[]
+  const [objectiveBreakdownCache, setObjectiveBreakdownCache] = useState<Map<string, ObjectiveBreakdownItem[]>>(new Map());
+  const [isLoadingObjectiveBreakdowns, setIsLoadingObjectiveBreakdowns] = useState(false);
+  const [objectiveBreakdownsFetched, setObjectiveBreakdownsFetched] = useState(false);
   const { toast } = useToast();
 
   const timeFrameOptions: TimeFrameOption[] = useMemo(() => {
@@ -103,9 +107,12 @@ export function useCompanyDemographic(accessToken: string | null) {
     if (!accessToken || !accountId) return;
     setIsLoading(true);
     setError(null);
-    // Clear campaign breakdown cache on new fetch
+    // Clear caches on new fetch
     setCampaignBreakdownCache(new Map());
     setLoadingObjectives(new Set());
+    setObjectiveBreakdownCache(new Map());
+    setObjectiveBreakdownsFetched(false);
+    setIsLoadingObjectiveBreakdowns(false);
     
     const campaignsToFilter = campaignIds || selectedCampaignIds;
     
@@ -254,6 +261,65 @@ export function useCompanyDemographic(accessToken: string | null) {
     }
   }, [accessToken, dateRange, campaignBreakdownCache, loadingObjectives]);
 
+  // Lazy-load objective breakdowns for all companies (called on first company expand)
+  const fetchObjectiveBreakdowns = useCallback(async (accountId: string) => {
+    if (!accessToken || !accountId || objectiveBreakdownsFetched || isLoadingObjectiveBreakdowns) return;
+    
+    setIsLoadingObjectiveBreakdowns(true);
+    
+    try {
+      console.log('Fetching objective breakdowns lazily...');
+      const campaignsToFilter = selectedCampaignIds;
+      
+      const { data, error: fetchError } = await supabase.functions.invoke('linkedin-api', {
+        body: {
+          action: 'get_objective_breakdowns',
+          accessToken,
+          params: {
+            accountId,
+            dateRange,
+            campaignIds: campaignsToFilter.length > 0 ? campaignsToFilter : undefined,
+          }
+        }
+      });
+      
+      if (fetchError) throw fetchError;
+      
+      const breakdowns = data?.breakdowns || {};
+      const cache = new Map<string, ObjectiveBreakdownItem[]>();
+      
+      for (const [entityUrn, items] of Object.entries(breakdowns)) {
+        cache.set(entityUrn, (items as any[]).map(b => ({
+          objective: b.objective,
+          impressions: b.impressions || 0,
+          clicks: b.clicks || 0,
+          landingPageClicks: b.landingPageClicks || 0,
+          spent: b.spent || 0,
+          leads: b.leads || 0,
+          engagements: b.engagements || 0,
+          likes: b.likes || 0,
+          comments: b.comments || 0,
+          reactions: b.reactions || 0,
+          shares: b.shares || 0,
+          ctr: b.ctr || 0,
+          cpc: b.cpc || 0,
+          cpm: b.cpm || 0,
+          campaignIds: b.campaignIds || [],
+          campaignNames: b.campaignNames || {},
+        })));
+      }
+      
+      setObjectiveBreakdownCache(cache);
+      setObjectiveBreakdownsFetched(true);
+      console.log(`Objective breakdowns loaded for ${cache.size} companies`);
+    } catch (err: any) {
+      console.error('Fetch objective breakdowns error:', err);
+      setObjectiveBreakdownsFetched(true); // prevent re-fetch
+    } finally {
+      setIsLoadingObjectiveBreakdowns(false);
+    }
+  }, [accessToken, dateRange, selectedCampaignIds, objectiveBreakdownsFetched, isLoadingObjectiveBreakdowns]);
+
   const totals = useMemo(() => {
     return companyData.reduce(
       (acc, item) => ({
@@ -293,5 +359,8 @@ export function useCompanyDemographic(accessToken: string | null) {
     fetchCampaignBreakdown,
     campaignBreakdownCache,
     loadingObjectives,
+    fetchObjectiveBreakdowns,
+    objectiveBreakdownCache,
+    isLoadingObjectiveBreakdowns,
   };
 }
