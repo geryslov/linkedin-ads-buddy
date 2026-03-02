@@ -2479,6 +2479,18 @@ serve(async (req) => {
         
         console.log(`[get_company_demographic] Total received: ${totalReceived} records, aggregated to ${companyMap.size} unique companies`);
 
+        // For large datasets, limit to top companies by impressions to avoid CPU timeout
+        const MAX_COMPANIES = 2000;
+        const SKIP_OBJECTIVES_THRESHOLD = 500;
+        if (companyMap.size > MAX_COMPANIES) {
+          console.log(`[get_company_demographic] Trimming from ${companyMap.size} to top ${MAX_COMPANIES} companies by impressions`);
+          const sorted = Array.from(companyMap.entries()).sort((a, b) => b[1].impressions - a[1].impressions);
+          const keep = new Set(sorted.slice(0, MAX_COMPANIES).map(([k]) => k));
+          for (const key of Array.from(companyMap.keys())) {
+            if (!keep.has(key)) companyMap.delete(key);
+          }
+        }
+
         // Run name resolution (Steps 2+3) and objective breakdown (Step 4) in PARALLEL
         const companyUrns = Array.from(companyMap.keys());
         const companyNames = new Map<string, string>();
@@ -2729,9 +2741,15 @@ serve(async (req) => {
           }
         };
 
-        // Run name resolution and objective breakdown IN PARALLEL
-        console.log(`[get_company_demographic] Running name resolution and objective breakdown in parallel...`);
-        await Promise.all([nameResolutionTask(), objectiveBreakdownTask()]);
+        // Run name resolution and optionally objective breakdown IN PARALLEL
+        const skipObjectives = companyMap.size > SKIP_OBJECTIVES_THRESHOLD;
+        if (skipObjectives) {
+          console.log(`[get_company_demographic] Skipping objective breakdown for ${companyMap.size} companies (threshold: ${SKIP_OBJECTIVES_THRESHOLD}). Running name resolution only...`);
+          await nameResolutionTask();
+        } else {
+          console.log(`[get_company_demographic] Running name resolution and objective breakdown in parallel...`);
+          await Promise.all([nameResolutionTask(), objectiveBreakdownTask()]);
+        }
 
         // Build final report
         const reportElements: any[] = [];
