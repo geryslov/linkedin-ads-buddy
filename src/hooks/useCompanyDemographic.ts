@@ -81,14 +81,13 @@ export function useCompanyDemographic(accessToken: string | null) {
     end: new Date().toISOString().split('T')[0],
   });
   const [selectedCampaignIds, setSelectedCampaignIds] = useState<string[]>([]);
-  // Track which objective keys are currently loading campaign breakdowns
   const [loadingObjectives, setLoadingObjectives] = useState<Set<string>>(new Set());
-  // Cache loaded campaign breakdowns by key: "entityUrn::objective"
   const [campaignBreakdownCache, setCampaignBreakdownCache] = useState<Map<string, CampaignBreakdownItem[]>>(new Map());
-  // Lazy-loaded objective breakdowns cache: entityUrn -> ObjectiveBreakdownItem[]
   const [objectiveBreakdownCache, setObjectiveBreakdownCache] = useState<Map<string, ObjectiveBreakdownItem[]>>(new Map());
   const [isLoadingObjectiveBreakdowns, setIsLoadingObjectiveBreakdowns] = useState(false);
   const [objectiveBreakdownsFetched, setObjectiveBreakdownsFetched] = useState(false);
+  // Pagination progress state
+  const [loadingProgress, setLoadingProgress] = useState<{ loaded: number; total: number } | null>(null);
   const { toast } = useToast();
 
   const timeFrameOptions: TimeFrameOption[] = useMemo(() => {
@@ -107,81 +106,98 @@ export function useCompanyDemographic(accessToken: string | null) {
     if (!accessToken || !accountId) return;
     setIsLoading(true);
     setError(null);
-    // Clear caches on new fetch
     setCampaignBreakdownCache(new Map());
     setLoadingObjectives(new Set());
     setObjectiveBreakdownCache(new Map());
     setObjectiveBreakdownsFetched(false);
     setIsLoadingObjectiveBreakdowns(false);
+    setCompanyData([]);
+    setLoadingProgress(null);
     
     const campaignsToFilter = campaignIds || selectedCampaignIds;
     
     try {
-      console.log('Fetching company demographic with params:', { accountId, dateRange, timeGranularity, campaignIds: campaignsToFilter });
+      let page = 0;
+      let hasMore = true;
+      let allCompanies: CompanyDemographicItem[] = [];
       
-      const { data, error: fetchError } = await supabase.functions.invoke('linkedin-api', {
-        body: { 
-          action: 'get_company_demographic', 
-          accessToken,
-          params: { 
-            accountId, 
-            dateRange,
-            timeGranularity,
-            campaignIds: campaignsToFilter.length > 0 ? campaignsToFilter : undefined,
+      while (hasMore) {
+        console.log(`Fetching company demographic page ${page}...`);
+        
+        const { data, error: fetchError } = await supabase.functions.invoke('linkedin-api', {
+          body: { 
+            action: 'get_company_demographic', 
+            accessToken,
+            params: { 
+              accountId, 
+              dateRange,
+              timeGranularity,
+              campaignIds: campaignsToFilter.length > 0 ? campaignsToFilter : undefined,
+              page,
+            }
           }
-        }
-      });
+        });
 
-      if (fetchError) throw fetchError;
-      
-      if (data.error) {
-        setError(data.error);
-        setCompanyData([]);
-        return;
+        if (fetchError) throw fetchError;
+        if (data.error) {
+          setError(data.error);
+          setCompanyData([]);
+          return;
+        }
+        
+        const companies: CompanyDemographicItem[] = (data.elements || []).map((el: any) => ({
+          entityUrn: el.entityUrn || '',
+          entityName: el.entityName || 'Unknown',
+          website: el.website || null,
+          linkedInUrl: el.linkedInUrl || null,
+          enrichmentStatus: el.enrichmentStatus || 'unresolved',
+          impressions: el.impressions || 0,
+          clicks: el.clicks || 0,
+          landingPageClicks: el.landingPageClicks || 0,
+          spent: parseFloat(el.costInLocalCurrency || '0'),
+          leads: el.leads || 0,
+          engagements: el.engagements || 0,
+          likes: el.likes || 0,
+          comments: el.comments || 0,
+          reactions: el.reactions || 0,
+          shares: el.shares || 0,
+          ctr: parseFloat(el.ctr || '0'),
+          cpc: parseFloat(el.cpc || '0'),
+          cpm: parseFloat(el.cpm || '0'),
+          objectiveBreakdown: el.objectiveBreakdown?.map((b: any) => ({
+            objective: b.objective || 'UNKNOWN',
+            impressions: b.impressions || 0,
+            clicks: b.clicks || 0,
+            landingPageClicks: b.landingPageClicks || 0,
+            spent: b.spent || 0,
+            leads: b.leads || 0,
+            engagements: b.engagements || 0,
+            likes: b.likes || 0,
+            comments: b.comments || 0,
+            reactions: b.reactions || 0,
+            shares: b.shares || 0,
+            ctr: b.ctr || 0,
+            cpc: b.cpc || 0,
+            cpm: b.cpm || 0,
+            campaignIds: b.campaignIds || [],
+            campaignNames: b.campaignNames || {},
+          })) || undefined,
+        }));
+        
+        allCompanies = [...allCompanies, ...companies];
+        
+        // Update state progressively so the user sees data arriving
+        setCompanyData([...allCompanies]);
+        
+        const totalCompanies = data.metadata?.totalCompanies || allCompanies.length;
+        hasMore = data.metadata?.hasMore === true;
+        setLoadingProgress({ loaded: allCompanies.length, total: totalCompanies });
+        
+        console.log(`Page ${page}: got ${companies.length} companies, total so far: ${allCompanies.length}/${totalCompanies}, hasMore: ${hasMore}`);
+        page++;
       }
       
-      console.log('Company demographic response:', data);
-      
-      const companies: CompanyDemographicItem[] = (data.elements || []).map((el: any) => ({
-        entityUrn: el.entityUrn || '',
-        entityName: el.entityName || 'Unknown',
-        website: el.website || null,
-        linkedInUrl: el.linkedInUrl || null,
-        enrichmentStatus: el.enrichmentStatus || 'unresolved',
-        impressions: el.impressions || 0,
-        clicks: el.clicks || 0,
-        landingPageClicks: el.landingPageClicks || 0,
-        spent: parseFloat(el.costInLocalCurrency || '0'),
-        leads: el.leads || 0,
-        engagements: el.engagements || 0,
-        likes: el.likes || 0,
-        comments: el.comments || 0,
-        reactions: el.reactions || 0,
-        shares: el.shares || 0,
-        ctr: parseFloat(el.ctr || '0'),
-        cpc: parseFloat(el.cpc || '0'),
-        cpm: parseFloat(el.cpm || '0'),
-        objectiveBreakdown: el.objectiveBreakdown?.map((b: any) => ({
-          objective: b.objective || 'UNKNOWN',
-          impressions: b.impressions || 0,
-          clicks: b.clicks || 0,
-          landingPageClicks: b.landingPageClicks || 0,
-          spent: b.spent || 0,
-          leads: b.leads || 0,
-          engagements: b.engagements || 0,
-          likes: b.likes || 0,
-          comments: b.comments || 0,
-          reactions: b.reactions || 0,
-          shares: b.shares || 0,
-          ctr: b.ctr || 0,
-          cpc: b.cpc || 0,
-          cpm: b.cpm || 0,
-          campaignIds: b.campaignIds || [],
-          campaignNames: b.campaignNames || {},
-        })) || undefined,
-      }));
-      
-      setCompanyData(companies);
+      setLoadingProgress(null);
     } catch (err: any) {
       console.error('Fetch company demographic error:', err);
       setError(err.message || 'Failed to fetch company demographic');
@@ -192,6 +208,7 @@ export function useCompanyDemographic(accessToken: string | null) {
       });
     } finally {
       setIsLoading(false);
+      setLoadingProgress(null);
     }
   }, [accessToken, dateRange, timeGranularity, selectedCampaignIds, toast]);
 
@@ -362,5 +379,6 @@ export function useCompanyDemographic(accessToken: string | null) {
     fetchObjectiveBreakdowns,
     objectiveBreakdownCache,
     isLoadingObjectiveBreakdowns,
+    loadingProgress,
   };
 }
