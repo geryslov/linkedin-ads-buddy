@@ -999,6 +999,13 @@ export function ReportingSection({ accessToken, selectedAccount, canWrite = fals
                 }}
                 campaignBreakdownCache={companyDemographic.campaignBreakdownCache}
                 loadingObjectives={companyDemographic.loadingObjectives}
+                onExpandCompany={() => {
+                  if (selectedAccount) {
+                    companyDemographic.fetchObjectiveBreakdowns(selectedAccount);
+                  }
+                }}
+                objectiveBreakdownCache={companyDemographic.objectiveBreakdownCache}
+                isLoadingObjectiveBreakdowns={companyDemographic.isLoadingObjectiveBreakdowns}
               />
             </CardContent>
           </Card>
