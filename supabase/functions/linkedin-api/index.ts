@@ -2874,19 +2874,21 @@ serve(async (req) => {
           const uniqueObjectives = Array.from(objectiveToCampaigns.keys());
           console.log(`[get_objective_breakdowns] Found ${uniqueObjectives.length} objectives: ${uniqueObjectives.join(', ')}`);
 
-          // Step 3: Query per objective group sequentially
-          // companyUrn -> [{objective, metrics, campaignIds, campaignNames}]
+          // Step 3: Query all objective groups IN PARALLEL for speed
           const result: Record<string, any[]> = {};
           const objectiveCampaignInfo: Record<string, { campaignIds: string[]; campaignNames: Record<string, string> }> = {};
 
+          // Pre-build campaign info for each objective
           for (const objective of uniqueObjectives) {
             const campIds = objectiveToCampaigns.get(objective) || [];
             if (campIds.length === 0) continue;
-
             const names: Record<string, string> = {};
             campIds.forEach(id => { names[id] = campaignNameMap.get(id) || `Campaign ${id}`; });
             objectiveCampaignInfo[objective] = { campaignIds: campIds, campaignNames: names };
+          }
 
+          const objectiveFetches = Object.keys(objectiveCampaignInfo).map(async (objective) => {
+            const campIds = objectiveCampaignInfo[objective].campaignIds;
             try {
               const qParams = new URLSearchParams();
               qParams.set('q', 'analytics');
@@ -2918,39 +2920,47 @@ serve(async (req) => {
                 response = await fetch(fullUrl, { headers: { 'Authorization': `Bearer ${accessToken}` } });
               }
 
-              if (!response.ok) { console.log(`[get_objective_breakdowns] Objective ${objective} failed: ${response.status}`); continue; }
+              if (!response.ok) { console.log(`[get_objective_breakdowns] Objective ${objective} failed: ${response.status}`); return; }
               const data = await response.json();
               const elements = data.elements || [];
-
-              for (const el of elements) {
-                const entityUrn = el.pivotValue || '';
-                if (!entityUrn) continue;
-                const impressions = el.impressions || 0;
-                const clicks = el.clicks || 0;
-                const spent = parseFloat(el.costInLocalCurrency || '0');
-                const leads = (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
-                const landingPageClicks = el.landingPageClicks || 0;
-                const engagements = el.totalEngagements || 0;
-                const likes = el.likes || 0;
-                const comments = el.comments || 0;
-                const reactions = el.reactions || 0;
-                const shares = el.shares || 0;
-                if (impressions === 0 && clicks === 0 && spent === 0 && leads === 0 && engagements === 0 && landingPageClicks === 0) continue;
-
-                if (!result[entityUrn]) result[entityUrn] = [];
-                const existing = result[entityUrn].find((e: any) => e.objective === objective);
-                if (existing) {
-                  existing.impressions += impressions; existing.clicks += clicks; existing.spent += spent;
-                  existing.leads += leads; existing.landingPageClicks += landingPageClicks;
-                  existing.engagements += engagements; existing.likes += likes;
-                  existing.comments += comments; existing.reactions += reactions; existing.shares += shares;
-                } else {
-                  result[entityUrn].push({ objective, impressions, clicks, spent: parseFloat(spent.toFixed(2)), leads, landingPageClicks, engagements, likes, comments, reactions, shares });
-                }
-              }
               console.log(`[get_objective_breakdowns] Objective ${objective}: processed ${elements.length} elements`);
+              return { objective, elements };
             } catch (e) {
               console.log(`[get_objective_breakdowns] Objective ${objective} error:`, e);
+              return null;
+            }
+          });
+
+          const settledResults = await Promise.allSettled(objectiveFetches);
+
+          for (const settled of settledResults) {
+            if (settled.status !== 'fulfilled' || !settled.value) continue;
+            const { objective, elements } = settled.value;
+            for (const el of elements) {
+              const entityUrn = el.pivotValue || '';
+              if (!entityUrn) continue;
+              const impressions = el.impressions || 0;
+              const clicks = el.clicks || 0;
+              const spent = parseFloat(el.costInLocalCurrency || '0');
+              const leads = (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
+              const landingPageClicks = el.landingPageClicks || 0;
+              const engagements = el.totalEngagements || 0;
+              const likes = el.likes || 0;
+              const comments = el.comments || 0;
+              const reactions = el.reactions || 0;
+              const shares = el.shares || 0;
+              if (impressions === 0 && clicks === 0 && spent === 0 && leads === 0 && engagements === 0 && landingPageClicks === 0) continue;
+
+              if (!result[entityUrn]) result[entityUrn] = [];
+              const existing = result[entityUrn].find((e: any) => e.objective === objective);
+              if (existing) {
+                existing.impressions += impressions; existing.clicks += clicks; existing.spent += spent;
+                existing.leads += leads; existing.landingPageClicks += landingPageClicks;
+                existing.engagements += engagements; existing.likes += likes;
+                existing.comments += comments; existing.reactions += reactions; existing.shares += shares;
+              } else {
+                result[entityUrn].push({ objective, impressions, clicks, spent: parseFloat(spent.toFixed(2)), leads, landingPageClicks, engagements, likes, comments, reactions, shares });
+              }
             }
           }
 
