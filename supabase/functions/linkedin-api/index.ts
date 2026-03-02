@@ -2418,7 +2418,7 @@ serve(async (req) => {
               details: errorText,
               elements: [] 
             }), {
-              status: analyticsResponse.status,
+              status: 200,
               headers: { ...corsHeaders, 'Content-Type': 'application/json' },
             });
           }
