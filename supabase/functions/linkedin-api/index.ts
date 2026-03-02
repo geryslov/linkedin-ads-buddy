@@ -2479,17 +2479,21 @@ serve(async (req) => {
         
         console.log(`[get_company_demographic] Total received: ${totalReceived} records, aggregated to ${companyMap.size} unique companies`);
 
-        // For large datasets, limit to top companies by impressions to avoid CPU timeout
-        const MAX_COMPANIES = 2000;
-        const SKIP_OBJECTIVES_THRESHOLD = 500;
-        if (companyMap.size > MAX_COMPANIES) {
-          console.log(`[get_company_demographic] Trimming from ${companyMap.size} to top ${MAX_COMPANIES} companies by impressions`);
-          const sorted = Array.from(companyMap.entries()).sort((a, b) => b[1].impressions - a[1].impressions);
-          const keep = new Set(sorted.slice(0, MAX_COMPANIES).map(([k]) => k));
-          for (const key of Array.from(companyMap.keys())) {
-            if (!keep.has(key)) companyMap.delete(key);
-          }
+        // Pagination: sort all companies by impressions, return requested page
+        const PAGE_SIZE = 2000;
+        const requestedPage = params?.page || 0;
+        const totalCompaniesCount = companyMap.size;
+        const sortedEntries = Array.from(companyMap.entries()).sort((a, b) => b[1].impressions - a[1].impressions);
+        const pageStart = requestedPage * PAGE_SIZE;
+        const pageEnd = Math.min(pageStart + PAGE_SIZE, sortedEntries.length);
+        const hasMorePages = pageEnd < sortedEntries.length;
+        
+        const pageEntries = sortedEntries.slice(pageStart, pageEnd);
+        companyMap.clear();
+        for (const [key, value] of pageEntries) {
+          companyMap.set(key, value);
         }
+        console.log(`[get_company_demographic] Page ${requestedPage}: returning companies ${pageStart+1}-${pageEnd} of ${totalCompaniesCount} (hasMore: ${hasMorePages})`);
 
         // Run name resolution (Steps 2+3) and objective breakdown (Step 4) in PARALLEL
         const companyUrns = Array.from(companyMap.keys());
@@ -2819,7 +2823,10 @@ serve(async (req) => {
             accountId,
             dateRange: { start: startDate, end: endDate },
             timeGranularity: granularity,
-            totalCompanies: filteredElements.length,
+            totalCompanies: totalCompaniesCount,
+            pageCompanies: filteredElements.length,
+            page: requestedPage,
+            hasMore: hasMorePages,
             resolvedCount, unresolvedCount,
           }
         }), {
