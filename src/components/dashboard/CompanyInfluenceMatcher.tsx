@@ -8,6 +8,7 @@ import {
   InfluenceTab,
   isMatchedItem,
 } from '@/hooks/useCompanyInfluenceMatcher';
+import { useCompanyPeriodTrend } from '@/hooks/useCompanyPeriodTrend';
 import { TimeFrameSelector } from '@/components/dashboard/TimeFrameSelector';
 import { MetricCard } from '@/components/dashboard/MetricCard';
 import { Button } from '@/components/ui/button';
@@ -43,10 +44,20 @@ import {
   Activity,
   Share2,
   Heart,
-  Calendar,
+  BarChart3,
   Sparkles,
   ImageIcon,
 } from 'lucide-react';
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip as RechartsTooltip,
+  ResponsiveContainer,
+  CartesianGrid,
+  Legend,
+} from 'recharts';
 
 interface CompanyInfluenceMatcherProps {
   accessToken: string | null;
@@ -92,14 +103,6 @@ function fmtNum(n: number): string {
   return n.toLocaleString();
 }
 
-/** Calculate days between two date strings. Negative = date2 is before date1 */
-function daysBetween(d1: string, d2: string): number | null {
-  const a = new Date(d1);
-  const b = new Date(d2);
-  if (isNaN(a.getTime()) || isNaN(b.getTime())) return null;
-  return Math.round((b.getTime() - a.getTime()) / (1000 * 60 * 60 * 24));
-}
-
 /** Mini metric cell for drill-down rows */
 function MetricCell({ value, className = '' }: { value: string; className?: string }) {
   return (
@@ -132,6 +135,13 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
     setDateRange: setCreativeDateRange,
     fetchCreativeAnalytics,
   } = useCreativeReporting(accessToken);
+
+  const {
+    isLoading: isLoadingTrend,
+    fetchTrend,
+    getCompanyTrend,
+    getMatchedAggregateTrend,
+  } = useCompanyPeriodTrend(accessToken);
 
   const [selectedTimeFrame, setSelectedTimeFrame] = useState('30d');
   const [isDragOver, setIsDragOver] = useState(false);
@@ -180,7 +190,7 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
     return map;
   }, [creativeData]);
 
-  // Auto-fetch LinkedIn + creative data on mount
+  // Auto-fetch LinkedIn + creative + trend data on mount
   const [hasFetched, setHasFetched] = useState(false);
   useEffect(() => {
     if (selectedAccount && accessToken && !hasFetched) {
@@ -188,16 +198,18 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
       fetchCompanyDemographic(selectedAccount);
       setCreativeDateRange(dateRange);
       fetchCreativeAnalytics(selectedAccount);
+      fetchTrend(selectedAccount);
     }
-  }, [selectedAccount, accessToken, hasFetched, fetchCompanyDemographic, fetchCreativeAnalytics, setCreativeDateRange, dateRange]);
+  }, [selectedAccount, accessToken, hasFetched, fetchCompanyDemographic, fetchCreativeAnalytics, setCreativeDateRange, dateRange, fetchTrend]);
 
   const handleFetch = useCallback(() => {
     if (selectedAccount) {
       fetchCompanyDemographic(selectedAccount);
       setCreativeDateRange(dateRange);
       fetchCreativeAnalytics(selectedAccount);
+      fetchTrend(selectedAccount);
     }
-  }, [selectedAccount, fetchCompanyDemographic, fetchCreativeAnalytics, setCreativeDateRange, dateRange]);
+  }, [selectedAccount, fetchCompanyDemographic, fetchCreativeAnalytics, setCreativeDateRange, dateRange, fetchTrend]);
 
   const handleTimeFrameChange = useCallback((option: any) => {
     setSelectedTimeFrame(option.value);
@@ -321,60 +333,69 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
 
   /** Render the per-company expanded detail panel */
   const renderCompanyDetail = (m: MatchedCompany) => {
-    const dealDate = m.uploadedEntries.find(e => e.date)?.date || '';
-    const daysBeforeDeal = dealDate ? daysBetween(dateRange.start, dealDate) : null;
-    const daysAfterStart = dealDate ? daysBetween(dateRange.start, dealDate) : null;
-    const totalDays = daysBetween(dateRange.start, dateRange.end) || 1;
-    const dealPosition = daysAfterStart !== null && totalDays > 0
-      ? Math.max(0, Math.min(100, (daysAfterStart / totalDays) * 100))
-      : null;
-
     const touchpoints = m.objectives.reduce((sum, o) => sum + o.campaignNames.length, 0);
+
+    // Build trend chart data for this company
+    const companyTrend = getCompanyTrend(m.linkedin.entityUrn);
+    const trendChartData = companyTrend
+      .filter(t => t.metrics !== null)
+      .map(t => ({
+        period: t.period === '7d' ? '7 Days' : t.period === '30d' ? '30 Days' : '90 Days',
+        Impressions: t.metrics!.impressions,
+        Clicks: t.metrics!.clicks,
+        Spend: parseFloat(t.metrics!.spent.toFixed(2)),
+        Leads: t.metrics!.leads,
+      }));
+
+    const hasTrendData = trendChartData.length > 0;
 
     return (
       <td colSpan={12} className="p-0">
         <div className="bg-muted/10 border-t border-b border-border/30 px-6 py-4 space-y-4">
-          {/* Timeline + Key Insights side by side */}
+          {/* Impact Trend + Key Insights side by side */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {/* Timeline */}
-            {dealDate && dealPosition !== null && (
-              <div className="bg-background/60 rounded-lg p-4 border border-border/20">
-                <div className="flex items-center gap-2 mb-3">
-                  <Calendar className="h-3.5 w-3.5 text-primary" />
-                  <span className="text-xs font-semibold">Impact Timeline</span>
-                </div>
-                <div className="relative h-8 mb-1">
-                  {/* Bar = LinkedIn exposure period */}
-                  <div className="absolute inset-x-0 top-3 h-2 rounded-full bg-primary/15" />
-                  <div className="absolute inset-x-0 top-3 h-2 rounded-full bg-gradient-to-r from-primary/40 to-primary/20" />
-                  {/* Deal date marker */}
-                  <div
-                    className="absolute top-0 w-0.5 h-8 bg-orange-500"
-                    style={{ left: `${dealPosition}%` }}
-                  >
-                    <div className="absolute -top-4 -translate-x-1/2 whitespace-nowrap text-[10px] font-medium text-orange-600 bg-orange-50 dark:bg-orange-950/50 px-1.5 py-0.5 rounded">
-                      Deal: {dealDate}
-                    </div>
-                  </div>
-                </div>
-                <div className="flex justify-between text-[10px] text-muted-foreground">
-                  <span>{dateRange.start}</span>
-                  <span>{dateRange.end}</span>
-                </div>
-                <div className="mt-2 text-xs text-muted-foreground">
-                  {daysBeforeDeal !== null && daysBeforeDeal > 0 && (
-                    <span className="text-green-600 font-medium">
-                      {daysBeforeDeal} days of LinkedIn exposure before deal
-                    </span>
-                  )}
-                  {daysBeforeDeal !== null && daysBeforeDeal <= 0 && (
-                    <span className="text-blue-600 font-medium">
-                      Deal occurred {Math.abs(daysBeforeDeal)} days before ad exposure period
-                    </span>
-                  )}
-                </div>
+            {/* Impact Trend Chart */}
+            <div className="bg-background/60 rounded-lg p-4 border border-border/20">
+              <div className="flex items-center gap-2 mb-3">
+                <BarChart3 className="h-3.5 w-3.5 text-primary" />
+                <span className="text-xs font-semibold">Impact Trend</span>
+                {isLoadingTrend && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
               </div>
-            )}
+              {hasTrendData ? (
+                <ResponsiveContainer width="100%" height={140}>
+                  <BarChart data={trendChartData} barGap={2}>
+                    <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
+                    <XAxis dataKey="period" tick={{ fontSize: 10 }} />
+                    <YAxis tick={{ fontSize: 10 }} width={45} />
+                    <RechartsTooltip
+                      contentStyle={{ fontSize: 11, borderRadius: 8, border: '1px solid hsl(var(--border))' }}
+                      formatter={(value: number, name: string) => {
+                        if (name === 'Spend') return [`$${value.toLocaleString()}`, name];
+                        return [value.toLocaleString(), name];
+                      }}
+                    />
+                    <Legend iconSize={8} wrapperStyle={{ fontSize: 10 }} />
+                    <Bar dataKey="Impressions" fill="hsl(var(--primary))" radius={[2, 2, 0, 0]} />
+                    <Bar dataKey="Clicks" fill="hsl(210 80% 55%)" radius={[2, 2, 0, 0]} />
+                    <Bar dataKey="Leads" fill="hsl(150 60% 45%)" radius={[2, 2, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="flex items-center justify-center h-[140px] text-xs text-muted-foreground">
+                  {isLoadingTrend ? 'Loading trend data...' : 'No trend data available'}
+                </div>
+              )}
+              {hasTrendData && (
+                <div className="flex gap-3 mt-2 text-[10px] text-muted-foreground">
+                  {companyTrend.filter(t => t.metrics).map(t => (
+                    <span key={t.period}>
+                      <span className="font-medium text-foreground">{t.period}:</span>{' '}
+                      ${t.metrics!.spent.toFixed(0)} spend
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
 
             {/* Key Insights */}
             <div className="bg-background/60 rounded-lg p-4 border border-border/20">
@@ -417,11 +438,11 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">CPC</span>
-                  <span className="font-medium">{fmtCur(m.linkedin.cpc)}</span>
+                  <span className="font-medium">{m.linkedin.clicks > 0 ? fmtCur(m.linkedin.spent / m.linkedin.clicks) : '—'}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">CPM</span>
-                  <span className="font-medium">{fmtCur(m.linkedin.cpm)}</span>
+                  <span className="font-medium">{m.linkedin.impressions > 0 ? fmtCur((m.linkedin.spent / m.linkedin.impressions) * 1000) : '—'}</span>
                 </div>
               </div>
               {m.uploadedEntries.length > 1 && (
@@ -700,6 +721,109 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
             <MetricCard title="Engagements" value={fmtNum(matchedTotals.engagements)} icon={Heart} delay={180} />
             <MetricCard title="Shares" value={fmtNum(matchedTotals.shares)} icon={Share2} delay={210} />
           </div>
+
+          {/* Aggregate Impact Trend */}
+          {(() => {
+            const matchedUrns = matched.map(m => m.linkedin.entityUrn);
+            const aggTrend = getMatchedAggregateTrend(matchedUrns);
+            const hasAggTrend = aggTrend.some(t => t.totals.impressions > 0);
+
+            if (!hasAggTrend && !isLoadingTrend) return null;
+
+            const aggChartData = aggTrend.map(t => ({
+              period: t.period === '7d' ? 'Last 7 Days' : t.period === '30d' ? 'Last 30 Days' : 'Last 90 Days',
+              Impressions: t.totals.impressions,
+              Clicks: t.totals.clicks,
+              Leads: t.totals.leads,
+              Spend: parseFloat(t.totals.spent.toFixed(2)),
+              'Companies Reached': t.totals.companyCount,
+            }));
+
+            return (
+              <div className="glass rounded-xl p-5 mt-4 animate-slide-up" style={{ animationDelay: '130ms' }}>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 rounded-md bg-primary/10">
+                      <BarChart3 className="h-3.5 w-3.5 text-primary" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-semibold">Influence Impact Trend</h3>
+                      <p className="text-[11px] text-muted-foreground">Matched companies' aggregate metrics across time windows</p>
+                    </div>
+                  </div>
+                  {isLoadingTrend && (
+                    <Badge variant="outline" className="animate-pulse text-[10px]">
+                      <Loader2 className="h-3 w-3 mr-1 animate-spin" />Loading trend...
+                    </Badge>
+                  )}
+                </div>
+                {hasAggTrend ? (
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* Impressions & Clicks trend */}
+                    <div>
+                      <p className="text-[11px] font-medium text-muted-foreground mb-2">Impressions & Clicks</p>
+                      <ResponsiveContainer width="100%" height={180}>
+                        <BarChart data={aggChartData} barGap={4}>
+                          <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
+                          <XAxis dataKey="period" tick={{ fontSize: 10 }} />
+                          <YAxis tick={{ fontSize: 10 }} width={55} tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : v} />
+                          <RechartsTooltip
+                            contentStyle={{ fontSize: 11, borderRadius: 8, border: '1px solid hsl(var(--border))' }}
+                            formatter={(value: number) => [value.toLocaleString(), undefined]}
+                          />
+                          <Legend iconSize={8} wrapperStyle={{ fontSize: 10 }} />
+                          <Bar dataKey="Impressions" fill="hsl(var(--primary))" radius={[3, 3, 0, 0]} />
+                          <Bar dataKey="Clicks" fill="hsl(210 80% 55%)" radius={[3, 3, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                    {/* Spend & Leads trend */}
+                    <div>
+                      <p className="text-[11px] font-medium text-muted-foreground mb-2">Spend & Leads</p>
+                      <ResponsiveContainer width="100%" height={180}>
+                        <BarChart data={aggChartData} barGap={4}>
+                          <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
+                          <XAxis dataKey="period" tick={{ fontSize: 10 }} />
+                          <YAxis tick={{ fontSize: 10 }} width={55} tickFormatter={(v) => v >= 1000 ? `$${(v/1000).toFixed(0)}k` : `$${v}`} />
+                          <RechartsTooltip
+                            contentStyle={{ fontSize: 11, borderRadius: 8, border: '1px solid hsl(var(--border))' }}
+                            formatter={(value: number, name: string) => {
+                              if (name === 'Spend') return [`$${value.toLocaleString()}`, name];
+                              return [value.toLocaleString(), name];
+                            }}
+                          />
+                          <Legend iconSize={8} wrapperStyle={{ fontSize: 10 }} />
+                          <Bar dataKey="Spend" fill="hsl(30 80% 55%)" radius={[3, 3, 0, 0]} />
+                          <Bar dataKey="Leads" fill="hsl(150 60% 45%)" radius={[3, 3, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-center h-[180px] text-xs text-muted-foreground">
+                    Loading trend data...
+                  </div>
+                )}
+                {/* Period summary row */}
+                {hasAggTrend && (
+                  <div className="grid grid-cols-3 gap-4 mt-4 pt-3 border-t border-border/30">
+                    {aggTrend.map(t => (
+                      <div key={t.period} className="text-center">
+                        <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">{t.label}</p>
+                        <div className="flex items-center justify-center gap-3 mt-1.5 text-xs">
+                          <span><span className="font-semibold">{t.totals.companyCount}</span> <span className="text-muted-foreground">companies</span></span>
+                          <span className="text-muted-foreground">|</span>
+                          <span><span className="font-semibold">{fmtCur(t.totals.spent)}</span> <span className="text-muted-foreground">spend</span></span>
+                          <span className="text-muted-foreground">|</span>
+                          <span><span className="font-semibold">{fmtNum(t.totals.leads)}</span> <span className="text-muted-foreground">leads</span></span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </div>
       )}
 
