@@ -57,8 +57,16 @@ export function useCompanyPeriodTrend(accessToken: string | null) {
         },
       });
 
-      if (res.error || res.data?.error) {
-        setError(res.data?.error || 'Failed to fetch multi-period analytics');
+      if (res.error) {
+        // Non-fatal: trend data is supplementary, don't block the main report
+        console.warn('Multi-period analytics fetch error (non-fatal):', res.error);
+        setError(null);
+        return;
+      }
+
+      if (res.data?.error) {
+        console.warn('Multi-period analytics data error (non-fatal):', res.data.error);
+        setError(null);
         return;
       }
 
@@ -92,8 +100,8 @@ export function useCompanyPeriodTrend(accessToken: string | null) {
 
       setData({ periods: periodsMap, aggregates });
     } catch (err: any) {
-      console.error('Multi-period analytics error:', err);
-      setError(err.message || 'Failed to fetch multi-period analytics');
+      // Non-fatal: trend data is supplementary
+      console.warn('Multi-period analytics error (non-fatal):', err);
     } finally {
       setIsLoading(false);
     }
