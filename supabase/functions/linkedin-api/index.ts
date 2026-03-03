@@ -2834,69 +2834,6 @@ serve(async (req) => {
         });
       }
 
-      case 'get_company_multi_period_analytics': {
-        // Lightweight multi-period company analytics: fetches MEMBER_COMPANY pivot for multiple date ranges in parallel
-        // No name resolution – caller already has names from get_company_demographic
-        const { accountId: mpAccountId, dateRanges: mpDateRanges } = params || {};
-        if (!mpAccountId || !mpDateRanges || !Array.isArray(mpDateRanges)) {
-          return new Response(JSON.stringify({ error: 'accountId and dateRanges[] required' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-        }
-
-        console.log(`[get_company_multi_period_analytics] Starting for account ${mpAccountId}, ${mpDateRanges.length} periods`);
-
-        const mpResults = await Promise.all(mpDateRanges.map(async (range: { key: string; start: string; end: string }) => {
-          const [sY, sM, sD] = range.start.split('-').map(Number);
-          const [eY, eM, eD] = range.end.split('-').map(Number);
-          const url = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics` +
-            `&dateRange.start.day=${sD}&dateRange.start.month=${sM}&dateRange.start.year=${sY}` +
-            `&dateRange.end.day=${eD}&dateRange.end.month=${eM}&dateRange.end.year=${eY}` +
-            `&timeGranularity=ALL&pivot=MEMBER_COMPANY` +
-            `&accounts[0]=urn:li:sponsoredAccount:${mpAccountId}` +
-            `&fields=impressions,clicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions,totalEngagements,likes,comments,reactions,shares,pivotValue` +
-            `&count=10000`;
-          try {
-            const resp = await fetch(url, { headers: { 'Authorization': `Bearer ${accessToken}` } });
-            if (resp.ok) {
-              const d = await resp.json();
-              const companies: Record<string, { impressions: number; clicks: number; spent: number; leads: number; engagements: number }> = {};
-              for (const el of (d.elements || [])) {
-                const urn = el.pivotValue || '';
-                if (!urn) continue;
-                const existing = companies[urn] || { impressions: 0, clicks: 0, spent: 0, leads: 0, engagements: 0 };
-                existing.impressions += (el.impressions || 0);
-                existing.clicks += (el.clicks || 0);
-                existing.spent += parseFloat(el.costInLocalCurrency || '0');
-                existing.leads += (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
-                const eng = el.totalEngagements || 0;
-                existing.engagements += eng > 0 ? eng : ((el.likes || 0) + (el.comments || 0) + (el.reactions || 0) + (el.shares || 0));
-                companies[urn] = existing;
-              }
-              return { key: range.key, companies };
-            }
-          } catch (e) { console.error(`[get_company_multi_period_analytics] Period ${range.key} error:`, e); }
-          return { key: range.key, companies: {} };
-        }));
-
-        // Also compute aggregate totals per period
-        const mpAggregates = mpResults.map(r => {
-          const totals = { impressions: 0, clicks: 0, spent: 0, leads: 0, engagements: 0, companyCount: 0 };
-          for (const c of Object.values(r.companies)) {
-            totals.impressions += c.impressions;
-            totals.clicks += c.clicks;
-            totals.spent += c.spent;
-            totals.leads += c.leads;
-            totals.engagements += c.engagements;
-            totals.companyCount++;
-          }
-          return { key: r.key, totals };
-        });
-
-        console.log(`[get_company_multi_period_analytics] Complete. Periods: ${mpResults.map(r => `${r.key}=${Object.keys(r.companies).length} companies`).join(', ')}`);
-        return new Response(JSON.stringify({ periods: mpResults, aggregates: mpAggregates }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
-      }
-
       case 'get_objective_breakdowns': {
         // Lazy-load objective breakdowns for all companies in an account
         const { accountId, dateRange, campaignIds: filterCampaignIds } = params || {};

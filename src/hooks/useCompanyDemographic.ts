@@ -145,84 +145,58 @@ export function useCompanyDemographic(accessToken: string | null) {
           return;
         }
         
-        const companies: CompanyDemographicItem[] = (data.elements || []).map((el: any) => {
-          const impressions = el.impressions || 0;
-          const clicks = el.clicks || 0;
-          const spent = parseFloat(el.costInLocalCurrency || '0');
-          const likes = el.likes || 0;
-          const comments = el.comments || 0;
-          const reactions = el.reactions || 0;
-          const shares = el.shares || 0;
-          // Fallback: compute engagements from social metrics if totalEngagements is 0
-          const rawEngagements = el.engagements || 0;
-          const engagements = rawEngagements > 0 ? rawEngagements : (likes + comments + reactions + shares);
-
-          return {
-            entityUrn: el.entityUrn || '',
-            entityName: el.entityName || 'Unknown',
-            website: el.website || null,
-            linkedInUrl: el.linkedInUrl || null,
-            enrichmentStatus: el.enrichmentStatus || 'unresolved',
-            impressions,
-            clicks,
+        const companies: CompanyDemographicItem[] = (data.elements || []).map((el: any) => ({
+          entityUrn: el.entityUrn || '',
+          entityName: el.entityName || 'Unknown',
+          website: el.website || null,
+          linkedInUrl: el.linkedInUrl || null,
+          enrichmentStatus: el.enrichmentStatus || 'unresolved',
+          impressions: el.impressions || 0,
+          clicks: el.clicks || 0,
           landingPageClicks: el.landingPageClicks || 0,
-          spent,
+          spent: parseFloat(el.costInLocalCurrency || '0'),
           leads: el.leads || 0,
-          engagements,
-          likes,
-          comments,
-          reactions,
-          shares,
-          // Compute metrics from raw data for accuracy
-          ctr: impressions > 0 ? (clicks / impressions) * 100 : 0,
-          cpc: clicks > 0 ? spent / clicks : 0,
-          cpm: impressions > 0 ? (spent / impressions) * 1000 : 0,
-          objectiveBreakdown: el.objectiveBreakdown?.map((b: any) => {
-            const bImpressions = b.impressions || 0;
-            const bClicks = b.clicks || 0;
-            const bSpent = b.spent || 0;
-            const bLikes = b.likes || 0;
-            const bComments = b.comments || 0;
-            const bReactions = b.reactions || 0;
-            const bShares = b.shares || 0;
-            const bRawEngagements = b.engagements || 0;
-            const bEngagements = bRawEngagements > 0 ? bRawEngagements : (bLikes + bComments + bReactions + bShares);
-            return {
-              objective: b.objective || 'UNKNOWN',
-              impressions: bImpressions,
-              clicks: bClicks,
-              landingPageClicks: b.landingPageClicks || 0,
-              spent: bSpent,
-              leads: b.leads || 0,
-              engagements: bEngagements,
-              likes: bLikes,
-              comments: bComments,
-              reactions: bReactions,
-              shares: bShares,
-              // Compute metrics from raw data for accuracy
-              ctr: bImpressions > 0 ? (bClicks / bImpressions) * 100 : 0,
-              cpc: bClicks > 0 ? bSpent / bClicks : 0,
-              cpm: bImpressions > 0 ? (bSpent / bImpressions) * 1000 : 0,
-              campaignIds: b.campaignIds || [],
-              campaignNames: b.campaignNames || {},
-            };
-          }) || undefined,
-        };
-        });
-
+          engagements: el.engagements || 0,
+          likes: el.likes || 0,
+          comments: el.comments || 0,
+          reactions: el.reactions || 0,
+          shares: el.shares || 0,
+          ctr: parseFloat(el.ctr || '0'),
+          cpc: parseFloat(el.cpc || '0'),
+          cpm: parseFloat(el.cpm || '0'),
+          objectiveBreakdown: el.objectiveBreakdown?.map((b: any) => ({
+            objective: b.objective || 'UNKNOWN',
+            impressions: b.impressions || 0,
+            clicks: b.clicks || 0,
+            landingPageClicks: b.landingPageClicks || 0,
+            spent: b.spent || 0,
+            leads: b.leads || 0,
+            engagements: b.engagements || 0,
+            likes: b.likes || 0,
+            comments: b.comments || 0,
+            reactions: b.reactions || 0,
+            shares: b.shares || 0,
+            ctr: b.ctr || 0,
+            cpc: b.cpc || 0,
+            cpm: b.cpm || 0,
+            campaignIds: b.campaignIds || [],
+            campaignNames: b.campaignNames || {},
+          })) || undefined,
+        }));
+        
         allCompanies = [...allCompanies, ...companies];
-
+        
         // Update state progressively so the user sees data arriving
         setCompanyData([...allCompanies]);
-
+        
         const totalCompanies = data.metadata?.totalCompanies || allCompanies.length;
         hasMore = data.metadata?.hasMore === true;
         setLoadingProgress({ loaded: allCompanies.length, total: totalCompanies });
-
+        
         console.log(`Page ${page}: got ${companies.length} companies, total so far: ${allCompanies.length}/${totalCompanies}, hasMore: ${hasMore}`);
         page++;
       }
-
+      
       setLoadingProgress(null);
     } catch (err: any) {
       console.error('Fetch company demographic error:', err);
