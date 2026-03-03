@@ -140,7 +140,7 @@ export function isMatchedItem(item: MatchedCompany | UnmatchedCompany): item is 
   return 'linkedin' in item;
 }
 
-export function useCompanyInfluenceMatcher(linkedInData: CompanyDemographicItem[]) {
+export function useCompanyInfluenceMatcher(linkedInData: CompanyDemographicItem[], objectiveBreakdownCache?: Map<string, ObjectiveBreakdownItem[]>) {
   const [uploadedCompanies, setUploadedCompanies] = useState<UploadedCompany[]>([]);
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
   const [nameColumn, setNameColumn] = useState<string | null>(null);
@@ -212,8 +212,11 @@ export function useCompanyInfluenceMatcher(linkedInData: CompanyDemographicItem[
           // Merge: just add this uploaded entry to the existing match
           existing.uploadedEntries.push(company);
         } else {
-          const { objectives, allNames } = linkedinMatch.objectiveBreakdown
-            ? buildObjectives(linkedinMatch.objectiveBreakdown)
+          const breakdownSource = linkedinMatch.objectiveBreakdown 
+            || objectiveBreakdownCache?.get(linkedinMatch.entityUrn) 
+            || [];
+          const { objectives, allNames } = breakdownSource.length > 0
+            ? buildObjectives(breakdownSource)
             : { objectives: [], allNames: [] };
 
           const costPerLead = linkedinMatch.leads > 0
@@ -248,7 +251,7 @@ export function useCompanyInfluenceMatcher(linkedInData: CompanyDemographicItem[
     const uniqueCount = matchedResults.length + unmatchedResults.length;
 
     return { matched: matchedResults, unmatched: unmatchedResults, uniqueUploadedCount: uniqueCount };
-  }, [uploadedCompanies, nameMap, domainMap]);
+  }, [uploadedCompanies, nameMap, domainMap, objectiveBreakdownCache]);
 
   // Summary totals for matched companies
   const matchedTotals = useMemo(() => {
