@@ -989,21 +989,9 @@ export function ReportingSection({ accessToken, selectedAccount, canWrite = fals
               </CardDescription>
             </CardHeader>
             <CardContent>
-              {companyDemographic.loadingProgress && (
-                <div className="flex items-center gap-2 mb-3 text-sm text-muted-foreground">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  <span>Loading companies: {companyDemographic.loadingProgress.loaded.toLocaleString()} / {companyDemographic.loadingProgress.total.toLocaleString()}</span>
-                  <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden max-w-xs">
-                    <div 
-                      className="h-full bg-primary rounded-full transition-all duration-300" 
-                      style={{ width: `${Math.round((companyDemographic.loadingProgress.loaded / companyDemographic.loadingProgress.total) * 100)}%` }} 
-                    />
-                  </div>
-                </div>
-              )}
               <CompanyDemographicTable 
                 data={companyDemographic.companyData} 
-                isLoading={companyDemographic.isLoading && companyDemographic.companyData.length === 0}
+                isLoading={companyDemographic.isLoading}
                 onExpandObjective={(entityUrn, objective, campaignIds, campaignNames) => {
                   if (selectedAccount) {
                     companyDemographic.fetchCampaignBreakdown(selectedAccount, entityUrn, objective, campaignIds, campaignNames);
