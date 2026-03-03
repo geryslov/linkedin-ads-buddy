@@ -54,11 +54,10 @@ export function StandardizedTitlesPage({ accessToken, selectedAccount }: Standar
     try {
       const { data, error: fnError } = await supabase.functions.invoke('linkedin-api', {
         body: {
-          action: 'search_job_titles',
+          action: 'get_title_details',
           accessToken,
           params: {
             query: query.trim(),
-            accountId: selectedAccount,
           },
         },
       });

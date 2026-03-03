@@ -6385,6 +6385,168 @@ serve(async (req) => {
         });
       }
 
+      case 'get_title_details': {
+        // Search titles via typeahead, then fetch full details from /v2/titles API
+        // Returns each title with its resolved function name and super title name
+        const { query: tdQuery } = params || {};
+        if (!tdQuery || tdQuery.trim().length < 2) {
+          return new Response(JSON.stringify({ titles: [], message: 'Query must be at least 2 characters' }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+
+        console.log(`[get_title_details] Searching for: "${tdQuery}"`);
+
+        // Step 1: Use typeahead to find matching title IDs
+        const tdSearchParams = new URLSearchParams({
+          q: 'typeahead',
+          facet: 'urn:li:adTargetingFacet:titles',
+          query: tdQuery.trim(),
+          count: '50',
+        });
+        const tdSearchUrl = `https://api.linkedin.com/rest/adTargetingEntities?${tdSearchParams.toString()}`;
+        const tdSearchResp = await fetch(tdSearchUrl, {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'X-Restli-Protocol-Version': '2.0.0',
+            'LinkedIn-Version': '202511',
+          },
+        });
+
+        if (!tdSearchResp.ok) {
+          const errText = await tdSearchResp.text();
+          console.error(`[get_title_details] Typeahead failed ${tdSearchResp.status}: ${errText.slice(0, 200)}`);
+          return new Response(JSON.stringify({ error: 'Title search not available', titles: [] }), {
+            status: tdSearchResp.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+
+        const tdSearchData = await tdSearchResp.json();
+        const tdElements = tdSearchData.elements || [];
+        console.log(`[get_title_details] Typeahead returned ${tdElements.length} results`);
+
+        // Extract title IDs from typeahead results
+        const tdParsed = tdElements.map((el: any) => {
+          const urn = el.urn || el.entity || '';
+          const name = el.name?.localized?.en_US ||
+                       el.name?.localized?.[Object.keys(el.name?.localized || {})[0]] ||
+                       el.displayName || el.name || '';
+          const titleMatch = urn.match(/urn:li:title:(\d+)/);
+          const superTitleMatch = urn.match(/urn:li:superTitle:(\d+)/);
+          const id = titleMatch ? titleMatch[1] : (superTitleMatch ? superTitleMatch[1] : '');
+          const isSuperTitle = urn.includes(':superTitle:');
+          return { id, urn, name: typeof name === 'string' ? name : JSON.stringify(name), isSuperTitle };
+        }).filter((t: any) => t.id);
+
+        // Step 2: Batch fetch full title details from /v2/titles API
+        // This returns { function: "urn:li:function:8", superTitle: "urn:li:superTitle:407", name: {...} }
+        const titleIds = tdParsed.filter((t: any) => !t.isSuperTitle).map((t: any) => t.id);
+        const tdFunctionMap: Record<string, string> = {};
+        const tdSuperTitleUrnMap: Record<string, string> = {};
+
+        if (titleIds.length > 0) {
+          // Batch in groups of 20 (using ids=X&ids=Y format from LinkedIn docs)
+          for (let i = 0; i < titleIds.length; i += 20) {
+            const batch = titleIds.slice(i, i + 20);
+            const idsParam = batch.map((id: string) => `ids=${id}`).join('&');
+            const titlesUrl = `https://api.linkedin.com/v2/titles?${idsParam}&locale=en_US`;
+            console.log(`[get_title_details] Fetching /v2/titles batch: ${batch.length} IDs`);
+
+            try {
+              const titlesResp = await fetch(titlesUrl, {
+                headers: { 'Authorization': `Bearer ${accessToken}`, 'X-Restli-Protocol-Version': '2.0.0' },
+              });
+              if (titlesResp.ok) {
+                const titlesData = await titlesResp.json();
+                const results = titlesData.results || {};
+                for (const [key, value] of Object.entries(results)) {
+                  const d = value as any;
+                  const tid = key.replace(/^urn:li:title:/, '');
+                  if (d.function) tdFunctionMap[tid] = d.function;
+                  if (d.superTitle) tdSuperTitleUrnMap[tid] = d.superTitle;
+                }
+                console.log(`[get_title_details] /v2/titles batch returned ${Object.keys(results).length} results`);
+              } else {
+                console.log(`[get_title_details] /v2/titles batch failed: ${titlesResp.status}`);
+              }
+            } catch (e) {
+              console.log(`[get_title_details] /v2/titles batch error:`, e);
+            }
+          }
+        }
+
+        // Step 3: Batch resolve super title names
+        const tdUniqueSuperTitleIds = new Set<string>();
+        for (const stUrn of Object.values(tdSuperTitleUrnMap)) {
+          const stId = stUrn.replace(/^urn:li:superTitle:/, '');
+          if (stId) tdUniqueSuperTitleIds.add(stId);
+        }
+
+        const tdSuperTitleNames: Record<string, string> = {};
+        if (tdUniqueSuperTitleIds.size > 0) {
+          const stUrl = `https://api.linkedin.com/v2/superTitles?ids=List(${[...tdUniqueSuperTitleIds].join(',')})`;
+          console.log(`[get_title_details] Resolving ${tdUniqueSuperTitleIds.size} super titles`);
+          try {
+            const stResp = await fetch(stUrl, {
+              headers: { 'Authorization': `Bearer ${accessToken}`, 'X-Restli-Protocol-Version': '2.0.0' },
+            });
+            if (stResp.ok) {
+              const stData = await stResp.json();
+              for (const [key, value] of Object.entries(stData.results || {})) {
+                const d = value as any;
+                const stId = key.replace(/^urn:li:superTitle:/, '');
+                let name = '';
+                if (d.name) {
+                  if (typeof d.name === 'string') name = d.name;
+                  else if (d.name.localized) name = d.name.localized.en_US || d.name.localized[Object.keys(d.name.localized)[0]] || '';
+                }
+                if (name) tdSuperTitleNames[stId] = name;
+              }
+              console.log(`[get_title_details] Resolved ${Object.keys(tdSuperTitleNames).length} super title names`);
+            }
+          } catch (e) {
+            console.log(`[get_title_details] Super titles error:`, e);
+          }
+        }
+
+        // Step 4: Build enriched response
+        const tdFunctionNames: Record<string, string> = {
+          'urn:li:function:1': 'Accounting', 'urn:li:function:2': 'Administrative',
+          'urn:li:function:3': 'Arts & Design', 'urn:li:function:4': 'Business Development',
+          'urn:li:function:5': 'Community & Social Services', 'urn:li:function:6': 'Consulting',
+          'urn:li:function:7': 'Education', 'urn:li:function:8': 'Engineering',
+          'urn:li:function:9': 'Entrepreneurship', 'urn:li:function:10': 'Finance',
+          'urn:li:function:11': 'Healthcare Services', 'urn:li:function:12': 'Human Resources',
+          'urn:li:function:13': 'Information Technology', 'urn:li:function:14': 'Legal',
+          'urn:li:function:15': 'Marketing', 'urn:li:function:16': 'Media & Communications',
+          'urn:li:function:17': 'Military & Protective Services', 'urn:li:function:18': 'Operations',
+          'urn:li:function:19': 'Product Management', 'urn:li:function:20': 'Program & Project Management',
+          'urn:li:function:21': 'Purchasing', 'urn:li:function:22': 'Quality Assurance',
+          'urn:li:function:23': 'Real Estate', 'urn:li:function:24': 'Research',
+          'urn:li:function:25': 'Sales', 'urn:li:function:26': 'Support',
+        };
+
+        const tdTitles = tdParsed.map((t: any) => {
+          const funcUrn = tdFunctionMap[t.id] || null;
+          const stUrn = tdSuperTitleUrnMap[t.id] || null;
+          const stId = stUrn ? stUrn.replace(/^urn:li:superTitle:/, '') : null;
+
+          return {
+            id: t.id,
+            urn: t.urn,
+            name: t.name,
+            isSuperTitle: t.isSuperTitle,
+            jobFunction: funcUrn ? { urn: funcUrn, name: tdFunctionNames[funcUrn] || funcUrn } : null,
+            parentSuperTitle: stId && tdSuperTitleNames[stId] ? { urn: stUrn, name: tdSuperTitleNames[stId] } : null,
+          };
+        });
+
+        console.log(`[get_title_details] Complete: ${tdTitles.length} titles with ${Object.keys(tdFunctionMap).length} functions resolved, ${Object.keys(tdSuperTitleNames).length} super titles resolved`);
+        return new Response(JSON.stringify({ titles: tdTitles, count: tdTitles.length }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
       case 'search_skills': {
         const { query } = params;
         
