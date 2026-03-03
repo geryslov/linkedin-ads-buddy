@@ -236,6 +236,61 @@ export function useCompanyDemographic(accessToken: string | null) {
         
         setIsLoadingMore(false);
       }
+      
+      // Auto-fetch objective breakdowns after all companies are loaded
+      console.log('All company batches loaded, auto-fetching objective breakdowns...');
+      setIsLoadingObjectiveBreakdowns(true);
+      try {
+        const { data: objData, error: objError } = await supabase.functions.invoke('linkedin-api', {
+          body: {
+            action: 'get_objective_breakdowns',
+            accessToken,
+            params: {
+              accountId,
+              dateRange,
+              campaignIds: campaignsToFilter.length > 0 ? campaignsToFilter : undefined,
+            }
+          }
+        });
+        
+        if (!objError && !objData?.error) {
+          const breakdowns = objData?.breakdowns || {};
+          const cache = new Map<string, ObjectiveBreakdownItem[]>();
+          
+          for (const [entityUrn, items] of Object.entries(breakdowns)) {
+            cache.set(entityUrn, (items as any[]).map(b => ({
+              objective: b.objective,
+              impressions: b.impressions || 0,
+              clicks: b.clicks || 0,
+              landingPageClicks: b.landingPageClicks || 0,
+              spent: b.spent || 0,
+              leads: b.leads || 0,
+              engagements: b.engagements || 0,
+              likes: b.likes || 0,
+              comments: b.comments || 0,
+              reactions: b.reactions || 0,
+              shares: b.shares || 0,
+              ctr: b.ctr || 0,
+              cpc: b.cpc || 0,
+              cpm: b.cpm || 0,
+              campaignIds: b.campaignIds || [],
+              campaignNames: b.campaignNames || {},
+            })));
+          }
+          
+          setObjectiveBreakdownCache(cache);
+          setObjectiveBreakdownsFetched(true);
+          console.log(`Objective breakdowns loaded for ${cache.size} companies`);
+        } else {
+          console.error('Objective breakdown fetch failed:', objError || objData?.error);
+          setObjectiveBreakdownsFetched(true);
+        }
+      } catch (objErr: any) {
+        console.error('Objective breakdown fetch error:', objErr);
+        setObjectiveBreakdownsFetched(true);
+      } finally {
+        setIsLoadingObjectiveBreakdowns(false);
+      }
     } catch (err: any) {
       console.error('Fetch company demographic error:', err);
       setError(err.message || 'Failed to fetch company demographic');

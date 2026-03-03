@@ -95,7 +95,7 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
     fetchCampaignBreakdown,
     campaignBreakdownCache,
     loadingObjectives,
-    fetchObjectiveBreakdowns,
+    // fetchObjectiveBreakdowns is no longer needed — auto-triggered in hook
     objectiveBreakdownCache,
     isLoadingObjectiveBreakdowns,
   } = useCompanyDemographic(accessToken);
@@ -165,12 +165,7 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
     }
   }, [selectedAccount, accessToken, hasFetched, fetchCompanyDemographic, fetchCreativeAnalytics, setCreativeDateRange, dateRange]);
 
-  // Auto-fetch objective breakdowns once company data is loaded
-  useEffect(() => {
-    if (selectedAccount && companyData.length > 0 && !isLoadingLinkedIn && !isLoadingMore) {
-      fetchObjectiveBreakdowns(selectedAccount);
-    }
-  }, [selectedAccount, companyData.length, isLoadingLinkedIn, isLoadingMore, fetchObjectiveBreakdowns]);
+  // Objective breakdowns are now auto-fetched after company data loads in useCompanyDemographic
 
   const handleFetch = useCallback(() => {
     if (selectedAccount) {
