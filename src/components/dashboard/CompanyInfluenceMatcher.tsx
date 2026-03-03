@@ -190,24 +190,33 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
     return map;
   }, [creativeData]);
 
-  // Auto-fetch LinkedIn + creative + trend data on mount
+  // Auto-fetch LinkedIn + creative data on mount
+  // Trend fetch is deferred until main data loads to avoid Edge Function errors
   const [hasFetched, setHasFetched] = useState(false);
+  const [trendEnabled, setTrendEnabled] = useState(false);
   useEffect(() => {
     if (selectedAccount && accessToken && !hasFetched) {
       setHasFetched(true);
       fetchCompanyDemographic(selectedAccount);
       setCreativeDateRange(dateRange);
       fetchCreativeAnalytics(selectedAccount);
+    }
+  }, [selectedAccount, accessToken, hasFetched, fetchCompanyDemographic, fetchCreativeAnalytics, setCreativeDateRange, dateRange]);
+
+  // Fetch trend data only after main company data has loaded successfully
+  useEffect(() => {
+    if (companyData.length > 0 && selectedAccount && !trendEnabled) {
+      setTrendEnabled(true);
       fetchTrend(selectedAccount);
     }
-  }, [selectedAccount, accessToken, hasFetched, fetchCompanyDemographic, fetchCreativeAnalytics, setCreativeDateRange, dateRange, fetchTrend]);
+  }, [companyData.length, selectedAccount, trendEnabled, fetchTrend]);
 
   const handleFetch = useCallback(() => {
     if (selectedAccount) {
       fetchCompanyDemographic(selectedAccount);
       setCreativeDateRange(dateRange);
       fetchCreativeAnalytics(selectedAccount);
-      fetchTrend(selectedAccount);
+      setTrendEnabled(false); // re-trigger trend after data loads
     }
   }, [selectedAccount, fetchCompanyDemographic, fetchCreativeAnalytics, setCreativeDateRange, dateRange, fetchTrend]);
 
