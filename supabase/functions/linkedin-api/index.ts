@@ -6188,7 +6188,7 @@ serve(async (req) => {
                           urn: superTitleUrn,
                           name: '', // Will be resolved below by fetching from API
                           _superTitleId: superTitleId,
-                          _functionUrn: typeof titleFunctionUrn === 'string' ? titleFunctionUrn : null,
+                          _functionUrn: typeof titleFunctionUrn === 'string' ? titleFunctionUrn : undefined,
                         };
                         uniqueSuperTitleIds.add(superTitleId);
                         console.log(`[search_job_titles] ✓ Stored: title "${normalizedTitleId}" -> superTitleId "${superTitleId}" (${superTitleUrn})`);
@@ -6206,7 +6206,7 @@ serve(async (req) => {
                         superTitleMetadata[normalizedTitleId] = {
                           urn: '',
                           name: '',
-                          _functionUrn: typeof titleFunctionUrn === 'string' ? titleFunctionUrn : null,
+                          _functionUrn: typeof titleFunctionUrn === 'string' ? titleFunctionUrn : undefined,
                         };
                       }
                     }
