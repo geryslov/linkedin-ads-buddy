@@ -358,7 +358,9 @@ export function useCompanyDemographic(accessToken: string | null) {
 
   // Lazy-load objective breakdowns for all companies
   const fetchObjectiveBreakdowns = useCallback(async (accountId: string) => {
-    if (!accessToken || !accountId || objectiveBreakdownsFetched || isLoadingObjectiveBreakdowns) return;
+    // Allow re-fetch if previous attempt failed (cache is empty but flag was set)
+    const hasData = objectiveBreakdownCache.size > 0;
+    if (!accessToken || !accountId || isLoadingObjectiveBreakdowns || (objectiveBreakdownsFetched && hasData)) return;
     
     setIsLoadingObjectiveBreakdowns(true);
     
@@ -413,7 +415,7 @@ export function useCompanyDemographic(accessToken: string | null) {
     } finally {
       setIsLoadingObjectiveBreakdowns(false);
     }
-  }, [accessToken, dateRange, selectedCampaignIds, objectiveBreakdownsFetched, isLoadingObjectiveBreakdowns]);
+  }, [accessToken, dateRange, selectedCampaignIds, objectiveBreakdownsFetched, isLoadingObjectiveBreakdowns, objectiveBreakdownCache.size]);
 
   const totals = useMemo(() => {
     return companyData.reduce(

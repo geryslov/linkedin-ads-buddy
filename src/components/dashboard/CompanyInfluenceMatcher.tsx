@@ -95,7 +95,7 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
     fetchCampaignBreakdown,
     campaignBreakdownCache,
     loadingObjectives,
-    // fetchObjectiveBreakdowns is no longer needed — auto-triggered in hook
+    fetchObjectiveBreakdowns,
     objectiveBreakdownCache,
     isLoadingObjectiveBreakdowns,
   } = useCompanyDemographic(accessToken);
@@ -165,7 +165,12 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
     }
   }, [selectedAccount, accessToken, hasFetched, fetchCompanyDemographic, fetchCreativeAnalytics, setCreativeDateRange, dateRange]);
 
-  // Objective breakdowns are now auto-fetched after company data loads in useCompanyDemographic
+  // Explicitly fetch objective breakdowns once company data is loaded
+  useEffect(() => {
+    if (selectedAccount && companyData.length > 0 && !isLoadingLinkedIn && !isLoadingMore && !isLoadingObjectiveBreakdowns) {
+      fetchObjectiveBreakdowns(selectedAccount);
+    }
+  }, [selectedAccount, companyData.length, isLoadingLinkedIn, isLoadingMore, isLoadingObjectiveBreakdowns, fetchObjectiveBreakdowns]);
 
   const handleFetch = useCallback(() => {
     if (selectedAccount) {
@@ -853,7 +858,12 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
                             {m.objectives.length === 0 && (
                               <tr key={`${companyKey}::no-obj`} onClick={(e) => e.stopPropagation()}>
                                 <td colSpan={12} className="px-8 py-2.5 text-xs text-muted-foreground italic border-l-4 border-l-primary/10">
-                                  No objective breakdown available
+                                  {isLoadingObjectiveBreakdowns ? (
+                                    <span className="flex items-center gap-2">
+                                      <Loader2 className="h-3 w-3 animate-spin" />
+                                      Loading objective breakdowns...
+                                    </span>
+                                  ) : 'No objective breakdown available'}
                                 </td>
                               </tr>
                             )}
