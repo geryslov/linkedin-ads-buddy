@@ -16,6 +16,9 @@ import { CompanyDemographicItem, ObjectiveBreakdownItem, CampaignBreakdownItem }
 interface CompanyDemographicTableProps {
   data: CompanyDemographicItem[];
   isLoading: boolean;
+  isLoadingMore?: boolean;
+  totalCompanies?: number | null;
+  loadedCount?: number;
   onExpandObjective?: (entityUrn: string, objective: string, campaignIds: string[], campaignNames: Record<string, string>) => void;
   campaignBreakdownCache?: Map<string, CampaignBreakdownItem[]>;
   loadingObjectives?: Set<string>;
@@ -120,7 +123,7 @@ function EngagementBreakdownPopover({ engagements, likes, comments, reactions, s
   );
 }
 
-export function CompanyDemographicTable({ data, isLoading, onExpandObjective, campaignBreakdownCache, loadingObjectives, onExpandCompany, objectiveBreakdownCache, isLoadingObjectiveBreakdowns }: CompanyDemographicTableProps) {
+export function CompanyDemographicTable({ data, isLoading, isLoadingMore, totalCompanies, loadedCount, onExpandObjective, campaignBreakdownCache, loadingObjectives, onExpandCompany, objectiveBreakdownCache, isLoadingObjectiveBreakdowns }: CompanyDemographicTableProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [sortField, setSortField] = useState<SortField>('impressions');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
@@ -324,8 +327,27 @@ export function CompanyDemographicTable({ data, isLoading, onExpandObjective, ca
             </div>
           </PopoverContent>
         </Popover>
-        <span className="text-sm text-muted-foreground ml-auto">{filteredAndSortedData.length} companies</span>
+        <span className="text-sm text-muted-foreground ml-auto">
+          {filteredAndSortedData.length} companies
+          {isLoadingMore && totalCompanies ? ` (loading… ${loadedCount || 0} of ~${totalCompanies})` : ''}
+        </span>
       </div>
+
+      {/* Progressive loading progress bar */}
+      {isLoadingMore && totalCompanies && totalCompanies > 0 && (
+        <div className="space-y-1">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            <span>Loading companies: {loadedCount || 0} of ~{totalCompanies}</span>
+          </div>
+          <div className="h-1.5 w-full rounded-full bg-muted/50 overflow-hidden">
+            <div
+              className="h-full rounded-full bg-primary transition-all duration-500"
+              style={{ width: `${Math.min(((loadedCount || 0) / totalCompanies) * 100, 100)}%` }}
+            />
+          </div>
+        </div>
+      )}
 
       <div className="rounded-lg border border-border/50 overflow-x-auto">
         <Table className="w-full">

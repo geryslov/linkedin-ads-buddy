@@ -2351,15 +2351,17 @@ serve(async (req) => {
       }
 
       case 'get_company_demographic': {
-        const { accountId, dateRange, timeGranularity, campaignIds } = params || {};
+        const { accountId, dateRange, timeGranularity, campaignIds, offset: reqOffset, limit: reqLimit } = params || {};
         const startDate = dateRange?.start || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
         const endDate = dateRange?.end || new Date().toISOString().split('T')[0];
         const granularity = timeGranularity || 'ALL';
+        const batchOffset = typeof reqOffset === 'number' ? reqOffset : 0;
+        const batchLimit = typeof reqLimit === 'number' ? reqLimit : 2000;
         
         const [startYear, startMonth, startDay] = startDate.split('-').map(Number);
         const [endYear, endMonth, endDay] = endDate.split('-').map(Number);
         
-        console.log(`[get_company_demographic] Starting for account ${accountId}, date range: ${startDate} to ${endDate}, campaigns: ${campaignIds?.length || 'all'}`);
+        console.log(`[get_company_demographic] Starting for account ${accountId}, date range: ${startDate} to ${endDate}, campaigns: ${campaignIds?.length || 'all'}, offset: ${batchOffset}, limit: ${batchLimit}`);
 
         // Step 1: Fetch demographic analytics with MEMBER_COMPANY pivot (account-level aggregation)
         let analyticsUrl = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
@@ -2479,20 +2481,18 @@ serve(async (req) => {
         
         console.log(`[get_company_demographic] Total received: ${totalReceived} records, aggregated to ${companyMap.size} unique companies`);
 
-        // For large datasets, limit to top companies by impressions to avoid CPU timeout
-        const MAX_COMPANIES = 2000;
-        const SKIP_OBJECTIVES_THRESHOLD = 500;
-        if (companyMap.size > MAX_COMPANIES) {
-          console.log(`[get_company_demographic] Trimming from ${companyMap.size} to top ${MAX_COMPANIES} companies by impressions`);
-          const sorted = Array.from(companyMap.entries()).sort((a, b) => b[1].impressions - a[1].impressions);
-          const keep = new Set(sorted.slice(0, MAX_COMPANIES).map(([k]) => k));
-          for (const key of Array.from(companyMap.keys())) {
-            if (!keep.has(key)) companyMap.delete(key);
-          }
-        }
+        // Sort all companies by impressions and take the requested slice
+        const allCompaniesSorted = Array.from(companyMap.entries()).sort((a, b) => b[1].impressions - a[1].impressions);
+        const totalCompaniesCount = allCompaniesSorted.length;
+        const slicedCompanies = allCompaniesSorted.slice(batchOffset, batchOffset + batchLimit);
+        const hasMoreCompanies = (batchOffset + batchLimit) < totalCompaniesCount;
+        
+        // Build a trimmed companyMap for this batch only
+        const batchCompanyMap = new Map(slicedCompanies);
+        console.log(`[get_company_demographic] Returning batch: offset=${batchOffset}, limit=${batchLimit}, batchSize=${slicedCompanies.length}, total=${totalCompaniesCount}, hasMore=${hasMoreCompanies}`);
 
-        // Run name resolution (Steps 2+3) and objective breakdown (Step 4) in PARALLEL
-        const companyUrns = Array.from(companyMap.keys());
+        // Run name resolution (Steps 2+3) — objective breakdown is always lazy-loaded via get_objective_breakdowns
+        const companyUrns = Array.from(batchCompanyMap.keys());
         const companyNames = new Map<string, string>();
         const companyWebsites = new Map<string, { website: string | null; linkedInUrl: string | null; status: string }>();
 
@@ -2580,207 +2580,20 @@ serve(async (req) => {
           }
         };
 
-        // Objective breakdown task (Step 4) - queries per OBJECTIVE GROUP, not per campaign
-        let objectiveBreakdownMap = new Map<string, Array<{ objective: string; impressions: number; clicks: number; spent: number; leads: number; landingPageClicks: number; engagements: number; likes: number; comments: number; reactions: number; shares: number }>>();
-        // Also store which campaigns belong to each objective so the frontend can request campaign breakdown lazily
-        let objectiveCampaignMap = new Map<string, { campaignIds: string[]; campaignNames: Record<string, string> }>();
-
-        const objectiveBreakdownTask = async () => {
-          try {
-            console.log(`[get_company_demographic] Step 4: Fetching campaigns for objective breakdown...`);
-            
-            // Fetch all campaigns with pagination
-            const allCampaigns: any[] = [];
-            let campStart = 0;
-            const campPageSize = 500;
-            let hasMoreCamps = true;
-            
-            while (hasMoreCamps) {
-              const campUrl = `https://api.linkedin.com/v2/adCampaignsV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=${campPageSize}&start=${campStart}`;
-              const campResponse = await fetch(campUrl, {
-                headers: { 'Authorization': `Bearer ${accessToken}` }
-              });
-              if (!campResponse.ok) { hasMoreCamps = false; break; }
-              const campData = await campResponse.json();
-              const pageCamps = campData.elements || [];
-              allCampaigns.push(...pageCamps);
-              if (pageCamps.length < campPageSize) { hasMoreCamps = false; } else { campStart += campPageSize; }
-            }
-            
-            console.log(`[get_company_demographic] Fetched ${allCampaigns.length} campaigns`);
-            
-            // Group campaigns by objective
-            const objectiveToCampaigns = new Map<string, string[]>();
-            const campaignNameMap = new Map<string, string>();
-            const filteredCampaignSet = campaignIds && campaignIds.length > 0 ? new Set(campaignIds.map(String)) : null;
-            
-            for (const campaign of allCampaigns) {
-              const objective = campaign.objectiveType || campaign.type || 'UNKNOWN';
-              const campaignId = campaign.id?.toString() || '';
-              const campaignName = campaign.name || `Campaign ${campaignId}`;
-              if (!campaignId || objective === 'UNKNOWN') continue;
-              if (filteredCampaignSet && !filteredCampaignSet.has(campaignId)) continue;
-              
-              campaignNameMap.set(campaignId, campaignName);
-              const existing = objectiveToCampaigns.get(objective) || [];
-              existing.push(campaignId);
-              objectiveToCampaigns.set(objective, existing);
-            }
-            
-            const uniqueObjectives = Array.from(objectiveToCampaigns.keys());
-            console.log(`[get_company_demographic] Found ${uniqueObjectives.length} unique objectives: ${uniqueObjectives.join(', ')}`);
-            
-            // Store campaign mapping per objective for lazy loading
-            for (const [objective, campIds] of objectiveToCampaigns) {
-              const names: Record<string, string> = {};
-              campIds.forEach(id => { names[id] = campaignNameMap.get(id) || `Campaign ${id}`; });
-              objectiveCampaignMap.set(objective, { campaignIds: campIds, campaignNames: names });
-            }
-            
-            // Query per OBJECTIVE GROUP SEQUENTIALLY to reduce peak memory
-            for (const objective of uniqueObjectives) {
-              const campIds = objectiveToCampaigns.get(objective) || [];
-              if (campIds.length === 0) continue;
-              
-              try {
-                const params = new URLSearchParams();
-                params.set('q', 'analytics');
-                params.set('dateRange.start.day', String(startDay));
-                params.set('dateRange.start.month', String(startMonth));
-                params.set('dateRange.start.year', String(startYear));
-                params.set('dateRange.end.day', String(endDay));
-                params.set('dateRange.end.month', String(endMonth));
-                params.set('dateRange.end.year', String(endYear));
-                params.set('timeGranularity', granularity === 'ALL' ? 'ALL' : granularity);
-                params.set('pivot', 'MEMBER_COMPANY');
-                params.set('accounts[0]', `urn:li:sponsoredAccount:${accountId}`);
-                params.set('fields', 'impressions,clicks,landingPageClicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions,totalEngagements,likes,comments,reactions,shares,pivotValue');
-                params.set('count', '10000');
-                
-                campIds.forEach((id, idx) => {
-                  params.set(`campaigns[${idx}]`, `urn:li:sponsoredCampaign:${id}`);
-                });
-                
-                const queryString = params.toString();
-                const baseUrl = 'https://api.linkedin.com/v2/adAnalyticsV2';
-                const fullUrl = `${baseUrl}?${queryString}`;
-                
-                let response: Response;
-                
-                if (fullUrl.length > 4000) {
-                  console.log(`[get_company_demographic] Objective ${objective}: URL too long (${fullUrl.length}), using query tunneling`);
-                  response = await fetch(baseUrl, {
-                    method: 'POST',
-                    headers: {
-                      'Authorization': `Bearer ${accessToken}`,
-                      'Content-Type': 'application/x-www-form-urlencoded',
-                      'X-HTTP-Method-Override': 'GET',
-                    },
-                    body: queryString,
-                  });
-                } else {
-                  response = await fetch(fullUrl, {
-                    headers: { 'Authorization': `Bearer ${accessToken}` },
-                  });
-                }
-                
-                if (!response.ok) {
-                  console.log(`[get_company_demographic] Objective ${objective} analytics failed: ${response.status}`);
-                  continue;
-                }
-                
-                const data = await response.json();
-                const elements = data.elements || [];
-                
-                // Process elements immediately and discard
-                for (const el of elements) {
-                  const entityUrn = el.pivotValue || '';
-                  if (!entityUrn) continue;
-                  
-                  const impressions = el.impressions || 0;
-                  const clicks = el.clicks || 0;
-                  const spent = parseFloat(el.costInLocalCurrency || '0');
-                  const leads = (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
-                  const landingPageClicks = el.landingPageClicks || 0;
-                  const engagements = el.totalEngagements || 0;
-                  const likes = el.likes || 0;
-                  const comments = el.comments || 0;
-                  const reactions = el.reactions || 0;
-                  const shares = el.shares || 0;
-                  
-                  if (impressions === 0 && clicks === 0 && spent === 0 && leads === 0 && engagements === 0 && landingPageClicks === 0) continue;
-                  
-                  const objEntries = objectiveBreakdownMap.get(entityUrn) || [];
-                  const existingObj = objEntries.find(e => e.objective === objective);
-                  if (existingObj) {
-                    existingObj.impressions += impressions;
-                    existingObj.clicks += clicks;
-                    existingObj.spent += spent;
-                    existingObj.leads += leads;
-                    existingObj.landingPageClicks += landingPageClicks;
-                    existingObj.engagements += engagements;
-                    existingObj.likes += likes;
-                    existingObj.comments += comments;
-                    existingObj.reactions += reactions;
-                    existingObj.shares += shares;
-                  } else {
-                    objEntries.push({ objective, impressions, clicks, spent, leads, landingPageClicks, engagements, likes, comments, reactions, shares });
-                  }
-                  objectiveBreakdownMap.set(entityUrn, objEntries);
-                }
-                
-                console.log(`[get_company_demographic] Objective ${objective}: processed ${elements.length} elements`);
-              } catch (e) {
-                console.log(`[get_company_demographic] Objective ${objective} query error:`, e);
-              }
-            }
-            
-            console.log(`[get_company_demographic] Objective breakdown populated for ${objectiveBreakdownMap.size} companies with ${uniqueObjectives.length} sequential objective queries`);
-          } catch (e) {
-            console.log(`[get_company_demographic] Objective breakdown failed (non-fatal):`, e);
-          }
-        };
-
-        // Run name resolution and optionally objective breakdown IN PARALLEL
-        const skipObjectives = companyMap.size > SKIP_OBJECTIVES_THRESHOLD;
-        if (skipObjectives) {
-          console.log(`[get_company_demographic] Skipping objective breakdown for ${companyMap.size} companies (threshold: ${SKIP_OBJECTIVES_THRESHOLD}). Running name resolution only...`);
-          await nameResolutionTask();
-        } else {
-          console.log(`[get_company_demographic] Running name resolution and objective breakdown in parallel...`);
-          await Promise.all([nameResolutionTask(), objectiveBreakdownTask()]);
-        }
+        // Objective breakdowns are always lazy-loaded via get_objective_breakdowns action
+        // Just run name resolution
+        console.log(`[get_company_demographic] Running name resolution for ${companyUrns.length} companies...`);
+        await nameResolutionTask();
 
         // Build final report
         const reportElements: any[] = [];
-        companyMap.forEach((metrics, entityUrn) => {
+        batchCompanyMap.forEach((metrics, entityUrn) => {
           const entityName = companyNames.get(entityUrn) || extractNameFromUrn(entityUrn);
           const websiteInfo = companyWebsites.get(entityUrn) || { website: null, linkedInUrl: null, status: 'unresolved' };
           
           const ctr = metrics.impressions > 0 ? (metrics.clicks / metrics.impressions) * 100 : 0;
           const cpc = metrics.clicks > 0 ? metrics.spent / metrics.clicks : 0;
           const cpm = metrics.impressions > 0 ? (metrics.spent / metrics.impressions) * 1000 : 0;
-          
-          // Build objective breakdown (no campaign breakdown — that's lazy loaded now)
-          const rawBreakdown = objectiveBreakdownMap.get(entityUrn) || [];
-          const objectiveBreakdown = rawBreakdown.map(b => ({
-            objective: b.objective,
-            impressions: b.impressions,
-            clicks: b.clicks,
-            spent: parseFloat(b.spent.toFixed(2)),
-            leads: b.leads,
-            landingPageClicks: b.landingPageClicks || 0,
-            engagements: b.engagements || 0,
-            likes: b.likes || 0,
-            comments: b.comments || 0,
-            reactions: b.reactions || 0,
-            shares: b.shares || 0,
-            ctr: b.impressions > 0 ? parseFloat(((b.clicks / b.impressions) * 100).toFixed(2)) : 0,
-            cpc: b.clicks > 0 ? parseFloat((b.spent / b.clicks).toFixed(2)) : 0,
-            cpm: b.impressions > 0 ? parseFloat(((b.spent / b.impressions) * 1000).toFixed(2)) : 0,
-            campaignIds: objectiveCampaignMap.get(b.objective)?.campaignIds || [],
-            campaignNames: objectiveCampaignMap.get(b.objective)?.campaignNames || {},
-          }));
           
           reportElements.push({
             entityUrn, entityName,
@@ -2799,7 +2612,6 @@ serve(async (req) => {
             reactions: metrics.reactions,
             shares: metrics.shares,
             ctr: ctr.toFixed(2), cpc: cpc.toFixed(2), cpm: cpm.toFixed(2),
-            objectiveBreakdown: objectiveBreakdown.length > 0 ? objectiveBreakdown : undefined,
           });
         });
 
@@ -2811,7 +2623,7 @@ serve(async (req) => {
         const resolvedCount = filteredElements.filter(r => r.enrichmentStatus === 'resolved').length;
         const unresolvedCount = filteredElements.filter(r => r.enrichmentStatus === 'unresolved').length;
         
-        console.log(`[get_company_demographic] Complete. Total: ${filteredElements.length}, Resolved: ${resolvedCount}, Unresolved: ${unresolvedCount}`);
+        console.log(`[get_company_demographic] Complete. Batch: ${filteredElements.length}, Total: ${totalCompaniesCount}, HasMore: ${hasMoreCompanies}`);
         
         return new Response(JSON.stringify({ 
           elements: filteredElements,
@@ -2819,7 +2631,10 @@ serve(async (req) => {
             accountId,
             dateRange: { start: startDate, end: endDate },
             timeGranularity: granularity,
-            totalCompanies: filteredElements.length,
+            totalCompanies: totalCompaniesCount,
+            batchSize: filteredElements.length,
+            offset: batchOffset,
+            hasMore: hasMoreCompanies,
             resolvedCount, unresolvedCount,
           }
         }), {
