@@ -124,6 +124,7 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
     fetchObjectiveBreakdowns,
     objectiveBreakdownCache,
     isLoadingObjectiveBreakdowns,
+    objectiveBreakdownProgress,
   } = useCompanyDemographic(accessToken);
 
   const {
@@ -830,11 +831,19 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
                                     : []);
 
                               if (isLoadingObjectiveBreakdowns && objectives.length === 0) {
+                                const progressText = objectiveBreakdownProgress
+                                  ? `Loading objective ${objectiveBreakdownProgress.loaded} of ${objectiveBreakdownProgress.total}...`
+                                  : 'Loading objective breakdowns...';
                                 return (
                                   <tr key={`${companyKey}::loading-obj`} onClick={(e) => e.stopPropagation()}>
                                     <td colSpan={12} className="px-8 py-3 text-xs text-muted-foreground border-l-4 border-l-primary/10">
-                                      <Loader2 className="h-3.5 w-3.5 animate-spin inline mr-2" />
-                                      Loading objective breakdowns...
+                                      <div className="flex items-center gap-2">
+                                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                        <span>{progressText}</span>
+                                        {objectiveBreakdownProgress && (
+                                          <Progress value={(objectiveBreakdownProgress.loaded / objectiveBreakdownProgress.total) * 100} className="h-1.5 w-24" />
+                                        )}
+                                      </div>
                                     </td>
                                   </tr>
                                 );
