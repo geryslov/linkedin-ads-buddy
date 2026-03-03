@@ -2835,14 +2835,10 @@ serve(async (req) => {
       }
 
       case 'get_objective_breakdowns': {
-        // Lazy-load objective breakdowns for all companies in an account
+        // Returns only the objective→campaign mapping (no analytics queries)
         const { accountId, dateRange, campaignIds: filterCampaignIds } = params || {};
-        const startDate = dateRange?.start || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-        const endDate = dateRange?.end || new Date().toISOString().split('T')[0];
-        const [startYear, startMonth, startDay] = startDate.split('-').map(Number);
-        const [endYear, endMonth, endDay] = endDate.split('-').map(Number);
 
-        console.log(`[get_objective_breakdowns] Starting for account ${accountId}`);
+        console.log(`[get_objective_breakdowns] Starting metadata-only fetch for account ${accountId}`);
 
         try {
           // Step 1: Fetch all campaigns with pagination
@@ -2878,123 +2874,136 @@ serve(async (req) => {
             objectiveToCampaigns.set(objective, existing);
           }
 
-          const uniqueObjectives = Array.from(objectiveToCampaigns.keys());
-          console.log(`[get_objective_breakdowns] Found ${uniqueObjectives.length} objectives: ${uniqueObjectives.join(', ')}`);
-
-          // Step 3: Query all objective groups IN PARALLEL for speed
-          const result: Record<string, any[]> = {};
-          const objectiveCampaignInfo: Record<string, { campaignIds: string[]; campaignNames: Record<string, string> }> = {};
-
-          // Pre-build campaign info for each objective
-          for (const objective of uniqueObjectives) {
-            const campIds = objectiveToCampaigns.get(objective) || [];
-            if (campIds.length === 0) continue;
+          // Build response: objective → { campaignIds, campaignNames }
+          const objectives: Record<string, { campaignIds: string[]; campaignNames: Record<string, string> }> = {};
+          for (const [objective, campIds] of objectiveToCampaigns.entries()) {
             const names: Record<string, string> = {};
             campIds.forEach(id => { names[id] = campaignNameMap.get(id) || `Campaign ${id}`; });
-            objectiveCampaignInfo[objective] = { campaignIds: campIds, campaignNames: names };
+            objectives[objective] = { campaignIds: campIds, campaignNames: names };
           }
 
-          const objectiveFetches = Object.keys(objectiveCampaignInfo).map(async (objective) => {
-            const campIds = objectiveCampaignInfo[objective].campaignIds;
-            try {
-              const qParams = new URLSearchParams();
-              qParams.set('q', 'analytics');
-              qParams.set('dateRange.start.day', String(startDay));
-              qParams.set('dateRange.start.month', String(startMonth));
-              qParams.set('dateRange.start.year', String(startYear));
-              qParams.set('dateRange.end.day', String(endDay));
-              qParams.set('dateRange.end.month', String(endMonth));
-              qParams.set('dateRange.end.year', String(endYear));
-              qParams.set('timeGranularity', 'ALL');
-              qParams.set('pivot', 'MEMBER_COMPANY');
-              qParams.set('accounts[0]', `urn:li:sponsoredAccount:${accountId}`);
-              qParams.set('fields', 'impressions,clicks,landingPageClicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions,totalEngagements,likes,comments,reactions,shares,pivotValue');
-              qParams.set('count', '10000');
-              campIds.forEach((id, idx) => { qParams.set(`campaigns[${idx}]`, `urn:li:sponsoredCampaign:${id}`); });
+          console.log(`[get_objective_breakdowns] Returning ${Object.keys(objectives).length} objectives (metadata only)`);
 
-              const queryString = qParams.toString();
-              const baseUrl = 'https://api.linkedin.com/v2/adAnalyticsV2';
-              const fullUrl = `${baseUrl}?${queryString}`;
-
-              let response: Response;
-              if (fullUrl.length > 4000) {
-                response = await fetch(baseUrl, {
-                  method: 'POST',
-                  headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/x-www-form-urlencoded', 'X-HTTP-Method-Override': 'GET' },
-                  body: queryString,
-                });
-              } else {
-                response = await fetch(fullUrl, { headers: { 'Authorization': `Bearer ${accessToken}` } });
-              }
-
-              if (!response.ok) { console.log(`[get_objective_breakdowns] Objective ${objective} failed: ${response.status}`); return; }
-              const data = await response.json();
-              const elements = data.elements || [];
-              console.log(`[get_objective_breakdowns] Objective ${objective}: processed ${elements.length} elements`);
-              return { objective, elements };
-            } catch (e) {
-              console.log(`[get_objective_breakdowns] Objective ${objective} error:`, e);
-              return null;
-            }
-          });
-
-          const settledResults = await Promise.allSettled(objectiveFetches);
-
-          for (const settled of settledResults) {
-            if (settled.status !== 'fulfilled' || !settled.value) continue;
-            const { objective, elements } = settled.value;
-            for (const el of elements) {
-              const entityUrn = el.pivotValue || '';
-              if (!entityUrn) continue;
-              const impressions = el.impressions || 0;
-              const clicks = el.clicks || 0;
-              const spent = parseFloat(el.costInLocalCurrency || '0');
-              const leads = (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
-              const landingPageClicks = el.landingPageClicks || 0;
-              const engagements = el.totalEngagements || 0;
-              const likes = el.likes || 0;
-              const comments = el.comments || 0;
-              const reactions = el.reactions || 0;
-              const shares = el.shares || 0;
-              if (impressions === 0 && clicks === 0 && spent === 0 && leads === 0 && engagements === 0 && landingPageClicks === 0) continue;
-
-              if (!result[entityUrn]) result[entityUrn] = [];
-              const existing = result[entityUrn].find((e: any) => e.objective === objective);
-              if (existing) {
-                existing.impressions += impressions; existing.clicks += clicks; existing.spent += spent;
-                existing.leads += leads; existing.landingPageClicks += landingPageClicks;
-                existing.engagements += engagements; existing.likes += likes;
-                existing.comments += comments; existing.reactions += reactions; existing.shares += shares;
-              } else {
-                result[entityUrn].push({ objective, impressions, clicks, spent: parseFloat(spent.toFixed(2)), leads, landingPageClicks, engagements, likes, comments, reactions, shares });
-              }
-            }
-          }
-
-          // Compute derived metrics and attach campaign info
-          const finalResult: Record<string, any[]> = {};
-          for (const [entityUrn, breakdowns] of Object.entries(result)) {
-            finalResult[entityUrn] = breakdowns.map((b: any) => {
-              const info = objectiveCampaignInfo[b.objective] || { campaignIds: [], campaignNames: {} };
-              return {
-                ...b,
-                ctr: b.impressions > 0 ? parseFloat(((b.clicks / b.impressions) * 100).toFixed(2)) : 0,
-                cpc: b.clicks > 0 ? parseFloat((b.spent / b.clicks).toFixed(2)) : 0,
-                cpm: b.impressions > 0 ? parseFloat(((b.spent / b.impressions) * 1000).toFixed(2)) : 0,
-                campaignIds: info.campaignIds,
-                campaignNames: info.campaignNames,
-              };
-            });
-          }
-
-          console.log(`[get_objective_breakdowns] Complete. Breakdowns for ${Object.keys(finalResult).length} companies`);
-
-          return new Response(JSON.stringify({ breakdowns: finalResult }), {
+          return new Response(JSON.stringify({ objectives }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           });
         } catch (e: any) {
           console.error(`[get_objective_breakdowns] Fatal error:`, e);
-          return new Response(JSON.stringify({ error: e.message || 'Failed to fetch objective breakdowns' }), {
+          return new Response(JSON.stringify({ error: e.message || 'Failed to fetch objective metadata' }), {
+            status: 200,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+      }
+
+      case 'get_objective_breakdown_single': {
+        // Fetch analytics for a single objective's campaigns, pivoted by MEMBER_COMPANY
+        const { accountId, dateRange, objective, campaignIds: objCampIds, campaignNames: objCampNames } = params || {};
+        const startDate = dateRange?.start || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        const endDate = dateRange?.end || new Date().toISOString().split('T')[0];
+        const [startYear, startMonth, startDay] = startDate.split('-').map(Number);
+        const [endYear, endMonth, endDay] = endDate.split('-').map(Number);
+
+        console.log(`[get_objective_breakdown_single] Objective: ${objective}, campaigns: ${(objCampIds || []).length}`);
+
+        try {
+          const campIds: string[] = objCampIds || [];
+          if (campIds.length === 0) {
+            return new Response(JSON.stringify({ objective, breakdowns: {} }), {
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+
+          const qParams = new URLSearchParams();
+          qParams.set('q', 'analytics');
+          qParams.set('dateRange.start.day', String(startDay));
+          qParams.set('dateRange.start.month', String(startMonth));
+          qParams.set('dateRange.start.year', String(startYear));
+          qParams.set('dateRange.end.day', String(endDay));
+          qParams.set('dateRange.end.month', String(endMonth));
+          qParams.set('dateRange.end.year', String(endYear));
+          qParams.set('timeGranularity', 'ALL');
+          qParams.set('pivot', 'MEMBER_COMPANY');
+          qParams.set('accounts[0]', `urn:li:sponsoredAccount:${accountId}`);
+          qParams.set('fields', 'impressions,clicks,landingPageClicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions,totalEngagements,likes,comments,reactions,shares,pivotValue');
+          qParams.set('count', '10000');
+          campIds.forEach((id, idx) => { qParams.set(`campaigns[${idx}]`, `urn:li:sponsoredCampaign:${id}`); });
+
+          const queryString = qParams.toString();
+          const baseUrl = 'https://api.linkedin.com/v2/adAnalyticsV2';
+          const fullUrl = `${baseUrl}?${queryString}`;
+
+          let response: Response;
+          if (fullUrl.length > 4000) {
+            response = await fetch(baseUrl, {
+              method: 'POST',
+              headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/x-www-form-urlencoded', 'X-HTTP-Method-Override': 'GET' },
+              body: queryString,
+            });
+          } else {
+            response = await fetch(fullUrl, { headers: { 'Authorization': `Bearer ${accessToken}` } });
+          }
+
+          if (!response.ok) {
+            const errText = await response.text();
+            console.log(`[get_objective_breakdown_single] Failed: ${response.status} ${errText.substring(0, 200)}`);
+            return new Response(JSON.stringify({ objective, breakdowns: {} }), {
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+
+          const data = await response.json();
+          const elements = data.elements || [];
+          console.log(`[get_objective_breakdown_single] ${objective}: ${elements.length} elements`);
+
+          // Build breakdowns keyed by entityUrn
+          const breakdowns: Record<string, any> = {};
+          const campNames: Record<string, string> = objCampNames || {};
+
+          for (const el of elements) {
+            const entityUrn = el.pivotValue || '';
+            if (!entityUrn) continue;
+            const impressions = el.impressions || 0;
+            const clicks = el.clicks || 0;
+            const spent = parseFloat(el.costInLocalCurrency || '0');
+            const leads = (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
+            const landingPageClicks = el.landingPageClicks || 0;
+            const engagements = el.totalEngagements || 0;
+            const likes = el.likes || 0;
+            const comments = el.comments || 0;
+            const reactions = el.reactions || 0;
+            const shares = el.shares || 0;
+            if (impressions === 0 && clicks === 0 && spent === 0 && leads === 0 && engagements === 0 && landingPageClicks === 0) continue;
+
+            if (!breakdowns[entityUrn]) {
+              breakdowns[entityUrn] = { objective, impressions: 0, clicks: 0, spent: 0, leads: 0, landingPageClicks: 0, engagements: 0, likes: 0, comments: 0, reactions: 0, shares: 0 };
+            }
+            const b = breakdowns[entityUrn];
+            b.impressions += impressions; b.clicks += clicks; b.spent += spent;
+            b.leads += leads; b.landingPageClicks += landingPageClicks;
+            b.engagements += engagements; b.likes += likes;
+            b.comments += comments; b.reactions += reactions; b.shares += shares;
+          }
+
+          // Compute derived metrics and attach campaign info
+          for (const entityUrn of Object.keys(breakdowns)) {
+            const b = breakdowns[entityUrn];
+            b.spent = parseFloat(b.spent.toFixed(2));
+            b.ctr = b.impressions > 0 ? parseFloat(((b.clicks / b.impressions) * 100).toFixed(2)) : 0;
+            b.cpc = b.clicks > 0 ? parseFloat((b.spent / b.clicks).toFixed(2)) : 0;
+            b.cpm = b.impressions > 0 ? parseFloat(((b.spent / b.impressions) * 1000).toFixed(2)) : 0;
+            b.campaignIds = campIds;
+            b.campaignNames = campNames;
+          }
+
+          console.log(`[get_objective_breakdown_single] Complete. ${Object.keys(breakdowns).length} companies for ${objective}`);
+
+          return new Response(JSON.stringify({ objective, breakdowns }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        } catch (e: any) {
+          console.error(`[get_objective_breakdown_single] Fatal error:`, e);
+          return new Response(JSON.stringify({ error: e.message || 'Failed to fetch objective breakdown' }), {
             status: 200,
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           });

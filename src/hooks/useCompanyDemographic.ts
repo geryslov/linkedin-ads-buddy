@@ -86,6 +86,7 @@ export function useCompanyDemographic(accessToken: string | null) {
   const [objectiveBreakdownCache, setObjectiveBreakdownCache] = useState<Map<string, ObjectiveBreakdownItem[]>>(new Map());
   const [isLoadingObjectiveBreakdowns, setIsLoadingObjectiveBreakdowns] = useState(false);
   const [objectiveBreakdownsFetched, setObjectiveBreakdownsFetched] = useState(false);
+  const [objectiveBreakdownProgress, setObjectiveBreakdownProgress] = useState<{ loaded: number; total: number } | null>(null);
   // Pagination progress state
   const [loadingProgress, setLoadingProgress] = useState<{ loaded: number; total: number } | null>(null);
   const { toast } = useToast();
@@ -278,17 +279,19 @@ export function useCompanyDemographic(accessToken: string | null) {
     }
   }, [accessToken, dateRange, campaignBreakdownCache, loadingObjectives]);
 
-  // Lazy-load objective breakdowns for all companies (called on first company expand)
+  // Lazy-load objective breakdowns one objective at a time (called on first company expand)
   const fetchObjectiveBreakdowns = useCallback(async (accountId: string) => {
     if (!accessToken || !accountId || objectiveBreakdownsFetched || isLoadingObjectiveBreakdowns) return;
     
     setIsLoadingObjectiveBreakdowns(true);
+    setObjectiveBreakdownProgress(null);
     
     try {
-      console.log('Fetching objective breakdowns lazily...');
+      console.log('Fetching objective metadata...');
       const campaignsToFilter = selectedCampaignIds;
       
-      const { data, error: fetchError } = await supabase.functions.invoke('linkedin-api', {
+      // Step 1: Get objective → campaign mapping (metadata only, fast)
+      const { data: metaData, error: metaError } = await supabase.functions.invoke('linkedin-api', {
         body: {
           action: 'get_objective_breakdowns',
           accessToken,
@@ -300,40 +303,89 @@ export function useCompanyDemographic(accessToken: string | null) {
         }
       });
       
-      if (fetchError) throw fetchError;
+      if (metaError) throw metaError;
+      if (metaData?.error) throw new Error(metaData.error);
       
-      const breakdowns = data?.breakdowns || {};
-      const cache = new Map<string, ObjectiveBreakdownItem[]>();
+      const objectivesMap = metaData?.objectives || {};
+      const objectiveKeys = Object.keys(objectivesMap);
+      const total = objectiveKeys.length;
       
-      for (const [entityUrn, items] of Object.entries(breakdowns)) {
-        cache.set(entityUrn, (items as any[]).map(b => ({
-          objective: b.objective,
-          impressions: b.impressions || 0,
-          clicks: b.clicks || 0,
-          landingPageClicks: b.landingPageClicks || 0,
-          spent: b.spent || 0,
-          leads: b.leads || 0,
-          engagements: b.engagements || 0,
-          likes: b.likes || 0,
-          comments: b.comments || 0,
-          reactions: b.reactions || 0,
-          shares: b.shares || 0,
-          ctr: b.ctr || 0,
-          cpc: b.cpc || 0,
-          cpm: b.cpm || 0,
-          campaignIds: b.campaignIds || [],
-          campaignNames: b.campaignNames || {},
-        })));
+      if (total === 0) {
+        setObjectiveBreakdownsFetched(true);
+        setIsLoadingObjectiveBreakdowns(false);
+        setObjectiveBreakdownProgress(null);
+        return;
       }
       
-      setObjectiveBreakdownCache(cache);
+      console.log(`Found ${total} objectives, fetching one at a time...`);
+      setObjectiveBreakdownProgress({ loaded: 0, total });
+      
+      // Step 2: Fetch each objective's analytics one at a time
+      const cache = new Map<string, ObjectiveBreakdownItem[]>();
+      
+      for (let i = 0; i < objectiveKeys.length; i++) {
+        const objective = objectiveKeys[i];
+        const info = objectivesMap[objective];
+        
+        try {
+          const { data: objData, error: objError } = await supabase.functions.invoke('linkedin-api', {
+            body: {
+              action: 'get_objective_breakdown_single',
+              accessToken,
+              params: {
+                accountId,
+                dateRange,
+                objective,
+                campaignIds: info.campaignIds,
+                campaignNames: info.campaignNames,
+              }
+            }
+          });
+          
+          if (objError) {
+            console.error(`Objective ${objective} fetch error:`, objError);
+          } else if (objData?.breakdowns) {
+            // Merge into cache
+            for (const [entityUrn, b] of Object.entries(objData.breakdowns) as [string, any][]) {
+              const existing = cache.get(entityUrn) || [];
+              existing.push({
+                objective: b.objective,
+                impressions: b.impressions || 0,
+                clicks: b.clicks || 0,
+                landingPageClicks: b.landingPageClicks || 0,
+                spent: b.spent || 0,
+                leads: b.leads || 0,
+                engagements: b.engagements || 0,
+                likes: b.likes || 0,
+                comments: b.comments || 0,
+                reactions: b.reactions || 0,
+                shares: b.shares || 0,
+                ctr: b.ctr || 0,
+                cpc: b.cpc || 0,
+                cpm: b.cpm || 0,
+                campaignIds: b.campaignIds || [],
+                campaignNames: b.campaignNames || {},
+              });
+              cache.set(entityUrn, existing);
+            }
+          }
+        } catch (err) {
+          console.error(`Objective ${objective} error:`, err);
+        }
+        
+        // Update progress and cache progressively
+        setObjectiveBreakdownProgress({ loaded: i + 1, total });
+        setObjectiveBreakdownCache(new Map(cache));
+      }
+      
       setObjectiveBreakdownsFetched(true);
-      console.log(`Objective breakdowns loaded for ${cache.size} companies`);
+      console.log(`Objective breakdowns loaded for ${cache.size} companies across ${total} objectives`);
     } catch (err: any) {
       console.error('Fetch objective breakdowns error:', err);
-      setObjectiveBreakdownsFetched(true); // prevent re-fetch
+      setObjectiveBreakdownsFetched(true);
     } finally {
       setIsLoadingObjectiveBreakdowns(false);
+      setObjectiveBreakdownProgress(null);
     }
   }, [accessToken, dateRange, selectedCampaignIds, objectiveBreakdownsFetched, isLoadingObjectiveBreakdowns]);
 
@@ -379,6 +431,7 @@ export function useCompanyDemographic(accessToken: string | null) {
     fetchObjectiveBreakdowns,
     objectiveBreakdownCache,
     isLoadingObjectiveBreakdowns,
+    objectiveBreakdownProgress,
     loadingProgress,
   };
 }
