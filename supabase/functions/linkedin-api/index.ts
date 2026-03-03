@@ -6349,6 +6349,169 @@ serve(async (req) => {
         });
       }
 
+      case 'get_standardized_titles': {
+        // Fetch LinkedIn standardized titles with resolved function names and super title names
+        // Supports: GET_ALL (paginated), BATCH_GET (by IDs), or single GET (by ID)
+        const { titleIds, locale: stLocale } = params || {};
+        const stLocaleParam = stLocale || 'en_US';
+
+        const functionNames: Record<string, string> = {
+          'urn:li:function:1': 'Accounting', 'urn:li:function:2': 'Administrative',
+          'urn:li:function:3': 'Arts & Design', 'urn:li:function:4': 'Business Development',
+          'urn:li:function:5': 'Community & Social Services', 'urn:li:function:6': 'Consulting',
+          'urn:li:function:7': 'Education', 'urn:li:function:8': 'Engineering',
+          'urn:li:function:9': 'Entrepreneurship', 'urn:li:function:10': 'Finance',
+          'urn:li:function:11': 'Healthcare Services', 'urn:li:function:12': 'Human Resources',
+          'urn:li:function:13': 'Information Technology', 'urn:li:function:14': 'Legal',
+          'urn:li:function:15': 'Marketing', 'urn:li:function:16': 'Media & Communications',
+          'urn:li:function:17': 'Military & Protective Services', 'urn:li:function:18': 'Operations',
+          'urn:li:function:19': 'Product Management', 'urn:li:function:20': 'Program & Project Management',
+          'urn:li:function:21': 'Purchasing', 'urn:li:function:22': 'Quality Assurance',
+          'urn:li:function:23': 'Real Estate', 'urn:li:function:24': 'Research',
+          'urn:li:function:25': 'Sales', 'urn:li:function:26': 'Support',
+        };
+
+        let allElements: any[] = [];
+
+        if (titleIds && Array.isArray(titleIds) && titleIds.length > 0) {
+          // BATCH_GET: fetch specific titles by IDs
+          console.log(`[get_standardized_titles] Batch-fetching ${titleIds.length} titles`);
+          const idsParam = titleIds.map((id: number) => `ids=${id}`).join('&');
+          const batchUrl = `https://api.linkedin.com/v2/titles?${idsParam}&locale=${stLocaleParam}`;
+          const batchResp = await fetch(batchUrl, {
+            headers: { 'Authorization': `Bearer ${accessToken}`, 'X-Restli-Protocol-Version': '2.0.0' },
+          });
+          if (!batchResp.ok) {
+            const errText = await batchResp.text();
+            console.error(`[get_standardized_titles] Batch GET failed ${batchResp.status}: ${errText.slice(0, 300)}`);
+            return new Response(JSON.stringify({ error: `LinkedIn API error: ${batchResp.status}`, details: errText.slice(0, 300) }), {
+              status: batchResp.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+          const batchData = await batchResp.json();
+          // BATCH_GET returns { results: { "9": {...}, "10": {...} }, statuses: {}, errors: {} }
+          for (const [key, value] of Object.entries(batchData.results || {})) {
+            allElements.push(value);
+          }
+          console.log(`[get_standardized_titles] Batch returned ${allElements.length} titles`);
+        } else {
+          // GET_ALL: paginate through all titles (50 per page, cap at 2000)
+          const PAGE_SIZE = 50;
+          const MAX_TITLES = 2000;
+          let start = 0;
+          let hasMore = true;
+
+          console.log(`[get_standardized_titles] Fetching all titles (paginated, max ${MAX_TITLES})...`);
+          while (hasMore && start < MAX_TITLES) {
+            const pageUrl = `https://api.linkedin.com/v2/titles?locale=${stLocaleParam}&start=${start}&count=${PAGE_SIZE}`;
+            const pageResp = await fetch(pageUrl, {
+              headers: { 'Authorization': `Bearer ${accessToken}`, 'X-Restli-Protocol-Version': '2.0.0' },
+            });
+            if (!pageResp.ok) {
+              const errText = await pageResp.text();
+              console.error(`[get_standardized_titles] Page fetch failed at start=${start}: ${pageResp.status} ${errText.slice(0, 200)}`);
+              break;
+            }
+            const pageData = await pageResp.json();
+            const elements = pageData.elements || [];
+            allElements.push(...elements);
+
+            // Check pagination: if fewer than PAGE_SIZE returned or no next link, we're done
+            const hasNextLink = (pageData.paging?.links || []).some((l: any) => l.rel === 'next');
+            hasMore = elements.length === PAGE_SIZE && hasNextLink;
+            start += PAGE_SIZE;
+            console.log(`[get_standardized_titles] Page fetched: ${elements.length} titles (total so far: ${allElements.length})`);
+          }
+          console.log(`[get_standardized_titles] Pagination complete: ${allElements.length} total titles`);
+        }
+
+        // Collect unique superTitle URNs for batch resolution
+        const uniqueSuperTitleIds = new Set<string>();
+        for (const el of allElements) {
+          const stUrn = el.superTitle || '';
+          if (stUrn) {
+            const stId = stUrn.replace(/^urn:li:superTitle:/, '');
+            if (stId) uniqueSuperTitleIds.add(stId);
+          }
+        }
+
+        // Batch-resolve super title names
+        const superTitleNames: Record<string, string> = {};
+        if (uniqueSuperTitleIds.size > 0) {
+          console.log(`[get_standardized_titles] Resolving ${uniqueSuperTitleIds.size} super titles...`);
+          // Batch in groups of 50 to avoid URL length limits
+          const stIdArray = [...uniqueSuperTitleIds];
+          for (let i = 0; i < stIdArray.length; i += 50) {
+            const batch = stIdArray.slice(i, i + 50);
+            const stUrl = `https://api.linkedin.com/v2/superTitles?ids=List(${batch.join(',')})`;
+            try {
+              const stResp = await fetch(stUrl, {
+                headers: { 'Authorization': `Bearer ${accessToken}`, 'X-Restli-Protocol-Version': '2.0.0' },
+              });
+              if (stResp.ok) {
+                const stData = await stResp.json();
+                for (const [key, value] of Object.entries(stData.results || {})) {
+                  const d = value as any;
+                  const stId = key.replace(/^urn:li:superTitle:/, '');
+                  let name = '';
+                  if (d.name) {
+                    if (typeof d.name === 'string') {
+                      name = d.name;
+                    } else if (d.name.localized) {
+                      name = d.name.localized.en_US || d.name.localized[Object.keys(d.name.localized)[0]] || '';
+                    }
+                  }
+                  if (name) superTitleNames[stId] = name;
+                }
+              } else {
+                console.log(`[get_standardized_titles] /v2/superTitles batch failed: ${stResp.status}`);
+              }
+            } catch (e) {
+              console.log(`[get_standardized_titles] Super title batch error:`, e);
+            }
+          }
+          console.log(`[get_standardized_titles] Resolved ${Object.keys(superTitleNames).length} super title names`);
+        }
+
+        // Build enriched response
+        const enrichedTitles = allElements.map((el: any) => {
+          const funcUrn = el.function || '';
+          const stUrn = el.superTitle || '';
+          const stId = stUrn.replace(/^urn:li:superTitle:/, '');
+          let titleName = '';
+          if (el.name) {
+            if (typeof el.name === 'string') {
+              titleName = el.name;
+            } else if (el.name.localized) {
+              titleName = el.name.localized[stLocaleParam] || el.name.localized.en_US ||
+                          el.name.localized[Object.keys(el.name.localized)[0]] || '';
+            }
+          }
+
+          return {
+            id: el.id,
+            urn: el['$URN'] || `urn:li:title:${el.id}`,
+            name: titleName,
+            function: {
+              urn: funcUrn,
+              name: functionNames[funcUrn] || funcUrn || null,
+            },
+            superTitle: {
+              urn: stUrn,
+              name: superTitleNames[stId] || null,
+            },
+          };
+        });
+
+        console.log(`[get_standardized_titles] Complete: ${enrichedTitles.length} titles enriched`);
+        return new Response(JSON.stringify({
+          titles: enrichedTitles,
+          metadata: { total: enrichedTitles.length, locale: stLocaleParam, superTitlesResolved: Object.keys(superTitleNames).length },
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
       case 'search_skills': {
         const { query } = params;
         

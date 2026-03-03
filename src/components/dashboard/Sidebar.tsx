@@ -17,6 +17,7 @@ import {
   TrendingUp,
   LineChart,
   Crosshair,
+  BookOpen,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -40,6 +41,7 @@ const navItems = [
   { id: "reports", label: "Reports", icon: FileBarChart },
   { id: "title_checker", label: "Title Checker", icon: Crown },
   { id: "influence_matcher", label: "Influence Matcher", icon: Crosshair },
+  { id: "standardized_titles", label: "Titles", icon: BookOpen },
 ];
 
 export function Sidebar({ activeTab, onTabChange, onLogout, profileName, isAdmin }: SidebarProps) {
@@ -59,7 +61,7 @@ export function Sidebar({ activeTab, onTabChange, onLogout, profileName, isAdmin
         </div>
       </div>
 
-      <nav className="flex-1 p-4 space-y-1">
+      <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
         {navItems.map((item) => (
           <Button
             key={item.id}
