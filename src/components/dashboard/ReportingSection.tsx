@@ -992,6 +992,9 @@ export function ReportingSection({ accessToken, selectedAccount, canWrite = fals
               <CompanyDemographicTable 
                 data={companyDemographic.companyData} 
                 isLoading={companyDemographic.isLoading}
+                isLoadingMore={companyDemographic.isLoadingMore}
+                totalCompanies={companyDemographic.totalCompanies}
+                loadedCount={companyDemographic.loadedCount}
                 onExpandObjective={(entityUrn, objective, campaignIds, campaignNames) => {
                   if (selectedAccount) {
                     companyDemographic.fetchCampaignBreakdown(selectedAccount, entityUrn, objective, campaignIds, campaignNames);
