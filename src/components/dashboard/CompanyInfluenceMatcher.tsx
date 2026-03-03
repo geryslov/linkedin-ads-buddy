@@ -84,6 +84,7 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
   const {
     companyData,
     isLoading: isLoadingLinkedIn,
+    isLoadingMore,
     timeGranularity,
     setTimeGranularity,
     dateRange,
@@ -94,6 +95,9 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
     fetchCampaignBreakdown,
     campaignBreakdownCache,
     loadingObjectives,
+    fetchObjectiveBreakdowns,
+    objectiveBreakdownCache,
+    isLoadingObjectiveBreakdowns,
   } = useCompanyDemographic(accessToken);
 
   const {
@@ -137,7 +141,7 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
     clearUpload,
     updateColumnMapping,
     getExportData,
-  } = useCompanyInfluenceMatcher(companyData);
+  } = useCompanyInfluenceMatcher(companyData, objectiveBreakdownCache);
 
   // Build campaign name → creatives map
   const creativeByCampaign = useMemo(() => {
@@ -160,6 +164,13 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
       fetchCreativeAnalytics(selectedAccount);
     }
   }, [selectedAccount, accessToken, hasFetched, fetchCompanyDemographic, fetchCreativeAnalytics, setCreativeDateRange, dateRange]);
+
+  // Auto-fetch objective breakdowns once company data is loaded
+  useEffect(() => {
+    if (selectedAccount && companyData.length > 0 && !isLoadingLinkedIn && !isLoadingMore) {
+      fetchObjectiveBreakdowns(selectedAccount);
+    }
+  }, [selectedAccount, companyData.length, isLoadingLinkedIn, isLoadingMore, fetchObjectiveBreakdowns]);
 
   const handleFetch = useCallback(() => {
     if (selectedAccount) {
@@ -522,11 +533,23 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
               </div>
               LinkedIn Data
             </h3>
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5 flex-wrap">
               {(isLoadingLinkedIn || isLoadingCreatives) && (
                 <Badge variant="outline" className="animate-pulse text-[10px]">
                   <Loader2 className="h-3 w-3 mr-1 animate-spin" />
                   {isLoadingLinkedIn ? 'Companies...' : 'Creatives...'}
+                </Badge>
+              )}
+              {isLoadingMore && (
+                <Badge variant="outline" className="animate-pulse text-[10px]">
+                  <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                  Loading more...
+                </Badge>
+              )}
+              {isLoadingObjectiveBreakdowns && (
+                <Badge variant="outline" className="animate-pulse text-[10px]">
+                  <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                  Objectives...
                 </Badge>
               )}
               {!isLoadingLinkedIn && companyData.length > 0 && (
