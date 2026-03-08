@@ -1,16 +1,16 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { 
+import { Separator } from '@/components/ui/separator';
+import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-  DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
@@ -18,13 +18,13 @@ import { useSavedAudiences, TargetingEntity } from '@/hooks/useSavedAudiences';
 import { SaveAudienceDialog } from './SaveAudienceDialog';
 import { BulkImportDialog } from './BulkImportDialog';
 import { CampaignSearchSelect } from './CampaignSearchSelect';
-import { 
-  Search, 
-  Plus, 
-  X, 
-  Briefcase, 
-  Sparkles, 
-  ShoppingCart, 
+import {
+  Search,
+  Plus,
+  X,
+  Briefcase,
+  Sparkles,
+  ShoppingCart,
   Loader2,
   AlertCircle,
   CheckCircle2,
@@ -33,7 +33,9 @@ import {
   Save,
   FolderOpen,
   Upload,
-  Trash2,
+  ChevronDown,
+  Info,
+  Megaphone,
 } from 'lucide-react';
 
 interface Campaign {
@@ -453,308 +455,25 @@ export function CampaignTargetingEditor({
   
   const titleCount = selectedEntities.filter(e => e.type === 'title').length;
   const skillCount = selectedEntities.filter(e => e.type === 'skill').length;
-  
+
+  const currentSuggestions = searchType === 'titles' ? titleSuggestions : skillSuggestions;
+  const isFetchingCurrentSuggestions = searchType === 'titles' ? isFetchingTitleSuggestions : isFetchingSuggestions;
+  const visibleSuggestions = currentSuggestions.filter(s => !selectedEntities.some(e => e.urn === s.urn));
+
   return (
-    <div className="space-y-6">
-      <div className="space-y-2">
-        <h3 className="text-lg font-semibold">Campaign Targeting Editor</h3>
-        <p className="text-sm text-muted-foreground">
-          Search for targeting entities, add them to your selection, then apply to campaigns.
-        </p>
-      </div>
-      
-      <div className="grid gap-6 lg:grid-cols-2">
-        {/* Left: Search Panel */}
-        <Card className="bg-card/50 backdrop-blur-sm border-border/50">
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Search className="h-4 w-4 text-primary" />
-              Search Targeting Entities
-            </CardTitle>
-            <CardDescription>Find job titles and skills to target</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {/* Search Type Tabs */}
-            <Tabs value={searchType} onValueChange={(v) => setSearchType(v as 'titles' | 'skills')}>
-              <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger value="titles" className="gap-2">
-                  <Briefcase className="h-4 w-4" />
-                  Job Titles
-                </TabsTrigger>
-                <TabsTrigger value="skills" className="gap-2">
-                  <Sparkles className="h-4 w-4" />
-                  Skills
-                </TabsTrigger>
-              </TabsList>
-            </Tabs>
-            
-            {/* Search Input */}
-            <div className="flex gap-2">
-              <Input
-                placeholder={`Search ${searchType}...`}
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                onKeyPress={handleKeyPress}
-                disabled={isSearching}
-              />
-              <Button onClick={handleSearch} disabled={isSearching || !searchQuery.trim()}>
-                {isSearching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-              </Button>
-              {searchType === 'skills' && (
-                <Button variant="outline" onClick={() => setShowBulkSkillsImport(true)} title="Bulk import skills">
-                  <Upload className="h-4 w-4" />
-                </Button>
-              )}
-            </div>
-            
-            {/* Search Error */}
-            {searchError && (
-              <div className="flex items-center gap-2 text-destructive text-sm p-2 bg-destructive/10 rounded-md">
-                <AlertCircle className="h-4 w-4" />
-                {searchError}
-              </div>
-            )}
-            
-            {/* Search Results */}
-            <ScrollArea className="h-[300px] pr-4">
-              {searchResults.length > 0 ? (
-                <div className="space-y-2">
-                  {searchResults.map((entity) => {
-                    const isSelected = selectedEntities.some(e => e.urn === entity.urn);
-                    return (
-                      <div
-                        key={entity.urn}
-                        className={`flex items-center justify-between p-3 rounded-lg border transition-colors ${
-                          isSelected
-                            ? 'bg-primary/10 border-primary/30'
-                            : 'bg-muted/30 border-border/50 hover:bg-muted/50'
-                        }`}
-                      >
-                        <div className="flex-1 min-w-0">
-                          <div className="font-medium truncate">{entity.name}</div>
-                          <div className="flex items-center gap-2 mt-1">
-                            {entity.targetable && (
-                              <Badge variant="default" className="text-xs bg-green-600">Targetable</Badge>
-                            )}
-                          </div>
-                        </div>
-                        <Button
-                          size="sm"
-                          variant={isSelected ? 'secondary' : 'default'}
-                          onClick={() => addToSelection(entity)}
-                          disabled={isSelected}
-                          className="ml-2"
-                        >
-                          {isSelected ? <CheckCircle2 className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-                        </Button>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-                  <Search className="h-8 w-8 mb-2 opacity-50" />
-                  <p className="text-sm">Search for {searchType} to add to your selection</p>
-                </div>
-              )}
-            </ScrollArea>
+    <TooltipProvider>
+      <div className="space-y-4">
 
-            {/* Title Suggestions */}
-            {searchType === 'titles' && (isFetchingTitleSuggestions || titleSuggestions.length > 0) && (
-              <div className="space-y-2 pt-2 border-t border-border/50">
-                <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-                  <Briefcase className="h-3 w-3 text-blue-500" />
-                  {isFetchingTitleSuggestions ? 'Fetching suggestions...' : 'Suggested Job Titles'}
-                  {isFetchingTitleSuggestions && <Loader2 className="h-3 w-3 animate-spin ml-auto" />}
+        {/* ── Zone 1: Deploy Bar ── */}
+        <Card className="border-primary/20 bg-primary/5">
+          <CardContent className="p-4">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+              {/* Campaign selector */}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1.5 mb-1.5">
+                  <Megaphone className="h-3.5 w-3.5 text-primary" />
+                  <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Target Campaigns</span>
                 </div>
-                {!isFetchingTitleSuggestions && (
-                  <div className="flex flex-wrap gap-2">
-                    {titleSuggestions
-                      .filter(t => !selectedEntities.some(e => e.urn === t.urn))
-                      .map((title) => (
-                        <button
-                          key={title.urn}
-                          onClick={() => addToSelection(title)}
-                          className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs bg-blue-500/10 border border-blue-500/30 text-blue-300 hover:bg-blue-500/20 transition-colors"
-                        >
-                          <Plus className="h-3 w-3" />
-                          {title.name}
-                        </button>
-                      ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Skill Suggestions */}
-            {searchType === 'skills' && (isFetchingSuggestions || skillSuggestions.length > 0) && (
-              <div className="space-y-2 pt-2 border-t border-border/50">
-                <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-                  <Sparkles className="h-3 w-3 text-purple-500" />
-                  {isFetchingSuggestions ? 'Fetching suggestions...' : 'Suggested Skills'}
-                  {isFetchingSuggestions && <Loader2 className="h-3 w-3 animate-spin ml-auto" />}
-                </div>
-                {!isFetchingSuggestions && (
-                  <div className="flex flex-wrap gap-2">
-                    {skillSuggestions
-                      .filter(s => !selectedEntities.some(e => e.urn === s.urn))
-                      .map((skill) => (
-                        <button
-                          key={skill.urn}
-                          onClick={() => addToSelection(skill)}
-                          className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs bg-purple-500/10 border border-purple-500/30 text-purple-300 hover:bg-purple-500/20 transition-colors"
-                        >
-                          <Plus className="h-3 w-3" />
-                          {skill.name}
-                        </button>
-                      ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-        
-        {/* Right: Selection Cart + Campaign Selector */}
-        <div className="space-y-4">
-          {/* Selection Cart */}
-          <Card className="bg-card/50 backdrop-blur-sm border-border/50">
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <ShoppingCart className="h-4 w-4 text-primary" />
-                  Selection Cart
-                  {selectedEntities.length > 0 && (
-                    <Badge variant="secondary">{selectedEntities.length}</Badge>
-                  )}
-                </CardTitle>
-                <div className="flex items-center gap-1">
-                  {/* Bulk Import Button */}
-                  <Button variant="ghost" size="sm" onClick={() => setShowBulkImport(true)}>
-                    <Upload className="h-4 w-4 mr-1" />
-                    Import
-                  </Button>
-                  
-                  {/* Save Audience Dropdown */}
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="sm">
-                        <FolderOpen className="h-4 w-4 mr-1" />
-                        Audiences
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-56">
-                      <DropdownMenuItem 
-                        onClick={() => setShowSaveDialog(true)}
-                        disabled={selectedEntities.length === 0}
-                      >
-                        <Save className="h-4 w-4 mr-2" />
-                        Save Current Selection
-                      </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      {isLoadingAudiences ? (
-                        <DropdownMenuItem disabled>
-                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                          Loading...
-                        </DropdownMenuItem>
-                      ) : audiences.length === 0 ? (
-                        <DropdownMenuItem disabled>
-                          <span className="text-muted-foreground">No saved audiences</span>
-                        </DropdownMenuItem>
-                      ) : (
-                        audiences.map((audience) => (
-                          <DropdownMenuItem 
-                            key={audience.id}
-                            className="flex items-center justify-between"
-                          >
-                            <span 
-                              className="flex-1 truncate cursor-pointer"
-                              onClick={() => handleLoadAudience(audience.entities)}
-                            >
-                              {audience.name}
-                              <Badge variant="outline" className="ml-2 text-xs">
-                                {audience.entities.length}
-                              </Badge>
-                            </span>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                deleteAudience(audience.id);
-                              }}
-                            >
-                              <Trash2 className="h-3 w-3" />
-                            </Button>
-                          </DropdownMenuItem>
-                        ))
-                      )}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                  
-                  {selectedEntities.length > 0 && (
-                    <Button variant="ghost" size="sm" onClick={clearSelection}>
-                      Clear
-                    </Button>
-                  )}
-                </div>
-              </div>
-              <CardDescription>
-                {titleCount > 0 && `${titleCount} title${titleCount > 1 ? 's' : ''}`}
-                {titleCount > 0 && skillCount > 0 && ', '}
-                {skillCount > 0 && `${skillCount} skill${skillCount > 1 ? 's' : ''}`}
-                {selectedEntities.length === 0 && 'Add targeting entities from search or import'}
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <ScrollArea className="h-[200px] pr-4">
-                {selectedEntities.length > 0 ? (
-                  <div className="space-y-2">
-                    {selectedEntities.map((entity) => (
-                      <div 
-                        key={entity.urn}
-                        className="flex items-center justify-between p-2 rounded-lg bg-muted/30 border border-border/50"
-                      >
-                        <div className="flex items-center gap-2 min-w-0">
-                          {entity.type === 'title' ? (
-                            <Briefcase className="h-4 w-4 text-blue-500 shrink-0" />
-                          ) : (
-                            <Sparkles className="h-4 w-4 text-purple-500 shrink-0" />
-                          )}
-                          <span className="truncate font-medium">{entity.name}</span>
-                        </div>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => removeFromSelection(entity.urn)}
-                          className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
-                        >
-                          <X className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-                    <ShoppingCart className="h-8 w-8 mb-2 opacity-50" />
-                    <p className="text-sm">Your selection is empty</p>
-                  </div>
-                )}
-              </ScrollArea>
-            </CardContent>
-          </Card>
-          
-          {/* Campaign Selector + Apply */}
-          <Card className="bg-card/50 backdrop-blur-sm border-border/50">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">Apply to Campaigns</CardTitle>
-              <CardDescription>Select campaigns and update mode</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {/* Campaign Multi-Select with Search */}
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Target Campaigns</label>
                 <CampaignSearchSelect
                   campaigns={campaigns}
                   selectedCampaignIds={selectedCampaignIds}
@@ -762,100 +481,394 @@ export function CampaignTargetingEditor({
                   disabled={!canWrite}
                 />
               </div>
-              
-              {/* Update Mode */}
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Update Mode</label>
-                <div className="grid grid-cols-2 gap-2">
-                  <Button
-                    variant={updateMode === 'append' ? 'default' : 'outline'}
-                    onClick={() => setUpdateMode('append')}
-                    className="w-full gap-2"
-                  >
-                    <PlusCircle className="h-4 w-4" />
-                    Append
-                  </Button>
-                  <Button
-                    variant={updateMode === 'replace' ? 'default' : 'outline'}
-                    onClick={() => setUpdateMode('replace')}
-                    className="w-full gap-2"
-                  >
-                    <Replace className="h-4 w-4" />
-                    Replace
-                  </Button>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  {updateMode === 'append' 
-                    ? 'Add as AND condition to narrow existing audience' 
-                    : 'Remove all existing targeting and use only selected'}
-                </p>
+
+              {/* Mode toggle */}
+              <div className="flex items-center gap-1.5 shrink-0">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Info className="h-3.5 w-3.5 text-muted-foreground cursor-help" />
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" className="max-w-[220px] text-xs">
+                    <p><strong>Append</strong> — adds targeting as an AND condition, narrowing existing audience.</p>
+                    <p className="mt-1"><strong>Replace</strong> — removes all existing targeting, uses only your selection.</p>
+                  </TooltipContent>
+                </Tooltip>
+                <Button
+                  size="sm"
+                  variant={updateMode === 'append' ? 'default' : 'outline'}
+                  onClick={() => setUpdateMode('append')}
+                  className="gap-1.5"
+                >
+                  <PlusCircle className="h-3.5 w-3.5" />
+                  Append
+                </Button>
+                <Button
+                  size="sm"
+                  variant={updateMode === 'replace' ? 'default' : 'outline'}
+                  onClick={() => setUpdateMode('replace')}
+                  className="gap-1.5"
+                >
+                  <Replace className="h-3.5 w-3.5" />
+                  Replace
+                </Button>
               </div>
-              
-              {/* Permission Warning for Viewers */}
-              {!canWrite && (
-                <div className="flex items-center gap-3 p-4 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400">
-                  <AlertCircle className="h-5 w-5 shrink-0" />
-                  <div className="text-sm">
-                    <p className="font-medium">Viewer Access Only</p>
-                    <p className="text-amber-400/80">
-                      You have read-only access to this account. Contact your Campaign Manager for write permissions.
-                    </p>
-                  </div>
-                </div>
-              )}
-              
-              {/* Apply Button */}
+
+              {/* Apply button */}
               <Button
-                className="w-full"
-                size="lg"
+                size="default"
                 onClick={handleApplyTargeting}
                 disabled={isUpdating || selectedEntities.length === 0 || selectedCampaignIds.length === 0 || !canWrite}
+                className="shrink-0 min-w-[140px]"
               >
                 {isUpdating ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Updating...
-                  </>
+                  <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Updating…</>
                 ) : !canWrite ? (
-                  <>
-                    <AlertCircle className="mr-2 h-4 w-4" />
-                    Viewer Access - Cannot Apply
-                  </>
+                  <><AlertCircle className="mr-2 h-4 w-4" />No Write Access</>
                 ) : (
-                  <>
-                    <CheckCircle2 className="mr-2 h-4 w-4" />
-                    Apply to {selectedCampaignIds.length} Campaign{selectedCampaignIds.length !== 1 ? 's' : ''} ({selectedEntities.length} entities)
+                  <><CheckCircle2 className="mr-2 h-4 w-4" />
+                    Apply
+                    {selectedCampaignIds.length > 0 && ` (${selectedCampaignIds.length})`}
                   </>
                 )}
               </Button>
+            </div>
+
+            {!canWrite && (
+              <div className="mt-3 flex items-center gap-2 text-xs text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-md px-3 py-2">
+                <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                Viewer access only — contact your Campaign Manager for write permissions.
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* ── Zones 2 + 3: Two-column layout ── */}
+        <div className="grid lg:grid-cols-[1fr_340px] gap-4">
+
+          {/* ── Zone 2: Search & Discover ── */}
+          <Card>
+            <CardContent className="p-4 space-y-3">
+
+              {/* Search row: type dropdown + input + search btn + bulk import */}
+              <div className="flex gap-2">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" className="w-32 justify-between shrink-0 gap-1">
+                      {searchType === 'titles' ? (
+                        <><Briefcase className="h-3.5 w-3.5 text-blue-400" /><span>Titles</span></>
+                      ) : (
+                        <><Sparkles className="h-3.5 w-3.5 text-purple-400" /><span>Skills</span></>
+                      )}
+                      <ChevronDown className="h-3.5 w-3.5 text-muted-foreground ml-auto" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start">
+                    <DropdownMenuItem onClick={() => { setSearchType('titles'); setSearchResults([]); }}>
+                      <Briefcase className="h-4 w-4 mr-2 text-blue-400" />
+                      Job Titles
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => { setSearchType('skills'); setSearchResults([]); }}>
+                      <Sparkles className="h-4 w-4 mr-2 text-purple-400" />
+                      Skills
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                <Input
+                  placeholder={`Search ${searchType === 'titles' ? 'job titles' : 'skills'}…`}
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyPress={handleKeyPress}
+                  disabled={isSearching}
+                  className="flex-1"
+                />
+
+                <Button onClick={handleSearch} disabled={isSearching || !searchQuery.trim()} size="icon">
+                  {isSearching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                </Button>
+
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      onClick={() => searchType === 'titles' ? setShowBulkImport(true) : setShowBulkSkillsImport(true)}
+                    >
+                      <Upload className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Bulk import {searchType === 'titles' ? 'job titles' : 'skills'}</TooltipContent>
+                </Tooltip>
+              </div>
+
+              {/* Search error */}
+              {searchError && (
+                <div className="flex items-center gap-2 text-destructive text-xs p-2 bg-destructive/10 rounded-md">
+                  <AlertCircle className="h-4 w-4 shrink-0" />
+                  {searchError}
+                </div>
+              )}
+
+              {/* Results */}
+              <ScrollArea className="h-[260px] pr-2">
+                {searchResults.length > 0 ? (
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs text-muted-foreground">{searchResults.length} result{searchResults.length !== 1 ? 's' : ''}</span>
+                      <Button variant="ghost" size="sm" className="h-6 text-xs gap-1 px-2" onClick={() => addMultipleToSelection(searchResults)}>
+                        <Plus className="h-3 w-3" /> Add all
+                      </Button>
+                    </div>
+                    {searchResults.map((entity) => {
+                      const isSelected = selectedEntities.some(e => e.urn === entity.urn);
+                      return (
+                        <div
+                          key={entity.urn}
+                          className={`flex items-center gap-2 px-3 py-2 rounded-lg border transition-colors ${
+                            isSelected
+                              ? 'bg-primary/10 border-primary/30'
+                              : 'bg-muted/20 border-border/40 hover:bg-muted/40'
+                          }`}
+                        >
+                          {entity.type === 'title'
+                            ? <Briefcase className="h-3.5 w-3.5 text-blue-400 shrink-0" />
+                            : <Sparkles className="h-3.5 w-3.5 text-purple-400 shrink-0" />
+                          }
+                          <span className="flex-1 text-sm truncate">{entity.name}</span>
+                          {entity.targetable && (
+                            <Badge variant="secondary" className="text-xs shrink-0">✓</Badge>
+                          )}
+                          <Button
+                            size="icon"
+                            variant={isSelected ? 'secondary' : 'ghost'}
+                            className="h-6 w-6 shrink-0"
+                            onClick={() => addToSelection(entity)}
+                            disabled={isSelected}
+                          >
+                            {isSelected ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
+                          </Button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center h-full text-muted-foreground py-8">
+                    <Search className="h-7 w-7 mb-2 opacity-30" />
+                    <p className="text-sm">Search {searchType === 'titles' ? 'job titles' : 'skills'} above</p>
+                  </div>
+                )}
+              </ScrollArea>
+
+              {/* Suggestions strip */}
+              <Separator />
+              <div className="space-y-2">
+                <div className="flex items-center gap-1.5">
+                  {searchType === 'titles'
+                    ? <Briefcase className="h-3 w-3 text-blue-400" />
+                    : <Sparkles className="h-3 w-3 text-purple-400" />
+                  }
+                  <span className="text-xs font-medium text-muted-foreground">
+                    {isFetchingCurrentSuggestions ? 'Fetching suggestions…' : `Suggested ${searchType === 'titles' ? 'Titles' : 'Skills'}`}
+                  </span>
+                  {isFetchingCurrentSuggestions && <Loader2 className="h-3 w-3 animate-spin ml-1" />}
+                </div>
+                <div className="flex flex-wrap gap-1.5 min-h-[28px]">
+                  {!isFetchingCurrentSuggestions && visibleSuggestions.length > 0 ? (
+                    visibleSuggestions.map((entity) => (
+                      <button
+                        key={entity.urn}
+                        onClick={() => addToSelection(entity)}
+                        className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs border transition-colors ${
+                          searchType === 'titles'
+                            ? 'bg-blue-500/10 border-blue-500/30 text-blue-300 hover:bg-blue-500/20'
+                            : 'bg-purple-500/10 border-purple-500/30 text-purple-300 hover:bg-purple-500/20'
+                        }`}
+                      >
+                        <Plus className="h-3 w-3" />
+                        {entity.name}
+                      </button>
+                    ))
+                  ) : !isFetchingCurrentSuggestions ? (
+                    <span className="text-xs text-muted-foreground italic">
+                      {selectedEntities.filter(e => e.type === (searchType === 'titles' ? 'title' : 'skill')).length === 0
+                        ? `Add ${searchType === 'titles' ? 'titles' : 'skills'} to your selection to see suggestions`
+                        : 'No suggestions available'}
+                    </span>
+                  ) : null}
+                </div>
+              </div>
             </CardContent>
           </Card>
-        </div>
-      </div>
-      
-      {/* Dialogs */}
-      <SaveAudienceDialog
-        open={showSaveDialog}
-        onOpenChange={setShowSaveDialog}
-        onSave={handleSaveAudience}
-        isLoading={isSaving}
-      />
-      
-      <BulkImportDialog
-        open={showBulkImport}
-        onOpenChange={setShowBulkImport}
-        onResolve={handleBulkResolve}
-        onAddToSelection={addMultipleToSelection}
-        type="titles"
-      />
 
-      <BulkImportDialog
-        open={showBulkSkillsImport}
-        onOpenChange={setShowBulkSkillsImport}
-        onResolve={handleBulkSkillsResolve}
-        onAddToSelection={addMultipleToSelection}
-        type="skills"
-      />
-    </div>
+          {/* ── Zone 3: Selection + Saved Audiences ── */}
+          <div className="space-y-4">
+
+            {/* Selection panel */}
+            <Card>
+              <CardHeader className="px-4 pt-4 pb-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <ShoppingCart className="h-4 w-4 text-primary" />
+                    <span className="font-medium text-sm">Selection</span>
+                    {selectedEntities.length > 0 && (
+                      <Badge variant="secondary" className="text-xs">{selectedEntities.length}</Badge>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          onClick={() => setShowSaveDialog(true)}
+                          disabled={selectedEntities.length === 0}
+                        >
+                          <Save className="h-3.5 w-3.5" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Save as audience</TooltipContent>
+                    </Tooltip>
+                    {selectedEntities.length > 0 && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 text-xs text-muted-foreground hover:text-destructive px-2"
+                        onClick={clearSelection}
+                      >
+                        Clear
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="px-4 pb-4">
+                <ScrollArea className="h-[220px] pr-2">
+                  {selectedEntities.length > 0 ? (
+                    <div className="space-y-1">
+                      {/* Titles group */}
+                      {titleCount > 0 && (
+                        <>
+                          <p className="text-xs font-semibold text-blue-400 flex items-center gap-1 mb-1 mt-1">
+                            <Briefcase className="h-3 w-3" /> Titles ({titleCount})
+                          </p>
+                          {selectedEntities.filter(e => e.type === 'title').map((entity) => (
+                            <div key={entity.urn} className="flex items-center gap-2 px-2 py-1.5 rounded-md bg-blue-500/10 border border-blue-500/20 group">
+                              <span className="flex-1 text-xs truncate">{entity.name}</span>
+                              <button
+                                onClick={() => removeFromSelection(entity.urn)}
+                                className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-opacity shrink-0"
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            </div>
+                          ))}
+                        </>
+                      )}
+
+                      {/* Skills group */}
+                      {skillCount > 0 && (
+                        <>
+                          <p className="text-xs font-semibold text-purple-400 flex items-center gap-1 mb-1 mt-3">
+                            <Sparkles className="h-3 w-3" /> Skills ({skillCount})
+                          </p>
+                          {selectedEntities.filter(e => e.type === 'skill').map((entity) => (
+                            <div key={entity.urn} className="flex items-center gap-2 px-2 py-1.5 rounded-md bg-purple-500/10 border border-purple-500/20 group">
+                              <span className="flex-1 text-xs truncate">{entity.name}</span>
+                              <button
+                                onClick={() => removeFromSelection(entity.urn)}
+                                className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-opacity shrink-0"
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            </div>
+                          ))}
+                        </>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center h-full text-muted-foreground py-6">
+                      <ShoppingCart className="h-7 w-7 mb-2 opacity-25" />
+                      <p className="text-sm">Empty</p>
+                      <p className="text-xs opacity-50 mt-0.5 text-center">Search or import entities to add them</p>
+                    </div>
+                  )}
+                </ScrollArea>
+              </CardContent>
+            </Card>
+
+            {/* Saved audiences panel */}
+            <Card>
+              <CardHeader className="px-4 pt-4 pb-2">
+                <div className="flex items-center gap-2">
+                  <FolderOpen className="h-4 w-4 text-primary" />
+                  <span className="font-medium text-sm">Saved Audiences</span>
+                </div>
+              </CardHeader>
+              <CardContent className="px-4 pb-4">
+                {isLoadingAudiences ? (
+                  <div className="flex items-center gap-2 text-muted-foreground text-xs py-2">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading…
+                  </div>
+                ) : audiences.length === 0 ? (
+                  <p className="text-xs text-muted-foreground italic py-1">
+                    No saved audiences yet. Build a selection and save it for reuse.
+                  </p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {audiences.map((audience) => (
+                      <div
+                        key={audience.id}
+                        className="flex items-center gap-2 px-2.5 py-2 rounded-lg bg-muted/20 border border-border/40 hover:bg-muted/40 transition-colors group"
+                      >
+                        <button
+                          className="flex-1 text-left min-w-0"
+                          onClick={() => handleLoadAudience(audience.entities)}
+                        >
+                          <span className="text-sm font-medium truncate block">{audience.name}</span>
+                          <span className="text-xs text-muted-foreground">
+                            {audience.entities.filter((e: TargetingEntity) => e.type === 'title').length} titles · {audience.entities.filter((e: TargetingEntity) => e.type === 'skill').length} skills
+                          </span>
+                        </button>
+                        <button
+                          onClick={() => deleteAudience(audience.id)}
+                          className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-opacity shrink-0"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+
+        {/* Dialogs */}
+        <SaveAudienceDialog
+          open={showSaveDialog}
+          onOpenChange={setShowSaveDialog}
+          onSave={handleSaveAudience}
+          isLoading={isSaving}
+        />
+
+        <BulkImportDialog
+          open={showBulkImport}
+          onOpenChange={setShowBulkImport}
+          onResolve={handleBulkResolve}
+          onAddToSelection={addMultipleToSelection}
+          type="titles"
+        />
+
+        <BulkImportDialog
+          open={showBulkSkillsImport}
+          onOpenChange={setShowBulkSkillsImport}
+          onResolve={handleBulkSkillsResolve}
+          onAddToSelection={addMultipleToSelection}
+          type="skills"
+        />
+      </div>
+    </TooltipProvider>
   );
 }
