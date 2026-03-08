@@ -231,6 +231,7 @@ export function CampaignTargetingEditor({
 
   // Fetch skill suggestions based on currently selected skills
   const fetchSkillSuggestions = useCallback(async (selectedSkills: TargetingEntity[]) => {
+    console.log('[fetchSkillSuggestions] called, skills:', selectedSkills.length, 'hasToken:', !!accessToken);
     if (!accessToken || selectedSkills.length === 0) {
       setSkillSuggestions([]);
       return;
@@ -239,6 +240,7 @@ export function CampaignTargetingEditor({
     try {
       const skillNames = selectedSkills.map(s => s.name);
       const excludeUrns = selectedSkills.map(s => s.urn);
+      console.log('[fetchSkillSuggestions] querying with skillNames:', skillNames);
       const { data, error } = await supabase.functions.invoke('linkedin-api', {
         body: {
           action: 'get_skill_suggestions',
@@ -246,6 +248,7 @@ export function CampaignTargetingEditor({
           params: { skillNames, excludeUrns }
         }
       });
+      console.log('[fetchSkillSuggestions] response:', { data, error });
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
       const suggestions: TargetingEntity[] = (data.suggestions || []).map((s: any) => ({
@@ -255,6 +258,7 @@ export function CampaignTargetingEditor({
         type: 'skill' as const,
         targetable: s.targetable,
       }));
+      console.log('[fetchSkillSuggestions] parsed suggestions:', suggestions.length);
       setSkillSuggestions(suggestions);
     } catch (err) {
       console.error('[fetchSkillSuggestions] error:', err);
