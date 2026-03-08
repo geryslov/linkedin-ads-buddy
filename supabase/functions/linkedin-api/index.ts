@@ -7035,16 +7035,24 @@ serve(async (req) => {
         const excludeSet = new Set<string>(excludeUrns || []);
         const suggestionMap = new Map<string, any>();
 
-        // Search using up to 3 selected skill names to find related skills
+        // Build a deduplicated set of queries: for each skill, use the full name
+        // AND the first word (e.g. "Okta Identity Cloud" → also search "Okta")
+        // This casts a wider net when the full name returns only exact matches.
+        const queries = new Set<string>();
         for (const skillName of skillNames.slice(0, 3)) {
           const trimmed = skillName.trim();
           if (!trimmed || trimmed.length < 2) continue;
+          queries.add(trimmed);
+          const firstWord = trimmed.split(/\s+/)[0];
+          if (firstWord.length >= 3 && firstWord !== trimmed) queries.add(firstWord);
+        }
 
+        for (const query of queries) {
           try {
             const searchParams = new URLSearchParams({
               q: 'typeahead',
               facet: 'urn:li:adTargetingFacet:skills',
-              query: trimmed,
+              query,
               count: '20',
             });
 
@@ -7061,9 +7069,10 @@ serve(async (req) => {
 
             if (response.ok) {
               const data = await response.json();
+              console.log(`[get_skill_suggestions] query="${query}" returned ${data.elements?.length || 0} elements`);
               for (const el of (data.elements || [])) {
                 const urn = el.urn || el.entity || '';
-                if (!urn || excludeSet.has(urn) || suggestionMap.has(urn)) continue;
+                if (!urn || suggestionMap.has(urn)) continue;
                 const name = el.name?.localized?.en_US ||
                              el.name?.localized?.[Object.keys(el.name?.localized || {})[0]] ||
                              el.displayName ||
@@ -7078,17 +7087,22 @@ serve(async (req) => {
                   name: typeof name === 'string' ? name : String(name),
                   type: 'skill',
                   targetable: true,
+                  excluded: excludeSet.has(urn),
                 });
               }
             }
           } catch (err) {
-            console.log(`[get_skill_suggestions] Error for "${trimmed}":`, err);
+            console.log(`[get_skill_suggestions] Error for "${query}":`, err);
           }
 
           await new Promise(resolve => setTimeout(resolve, 50));
         }
 
-        const suggestions = Array.from(suggestionMap.values()).slice(0, 20);
+        // Return all results; frontend filters out already-selected ones
+        const suggestions = Array.from(suggestionMap.values())
+          .filter(s => !s.excluded)
+          .map(({ excluded: _excluded, ...s }) => s)
+          .slice(0, 20);
         console.log(`[get_skill_suggestions] Returning ${suggestions.length} suggestions for ${skillNames.length} seed skills`);
 
         return new Response(JSON.stringify({ suggestions }), {
