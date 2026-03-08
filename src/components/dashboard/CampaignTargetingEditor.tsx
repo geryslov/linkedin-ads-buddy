@@ -503,13 +503,9 @@ export function CampaignTargetingEditor({
     return n.toString();
   };
 
-  const currentSuggestions = searchType === 'titles' ? titleSuggestions : skillSuggestions;
-  const isFetchingCurrentSuggestions = searchType === 'titles' ? isFetchingTitleSuggestions : isFetchingSuggestions;
-  const visibleSuggestions = currentSuggestions.filter(s => !selectedEntities.some(e => e.urn === s.urn));
-
   // Label for skill suggestions — tells user whether they come from skills or titles
   const skillSuggestionLabel = (() => {
-    if (isFetchingSuggestions) return 'Fetching suggestions…';
+    if (isFetchingSuggestions) return 'Fetching skill suggestions…';
     const hasSkills = selectedEntities.some(e => e.type === 'skill');
     const hasTitles = selectedEntities.some(e => e.type === 'title');
     if (hasSkills) return 'Skills related to your selection';
@@ -732,49 +728,74 @@ export function CampaignTargetingEditor({
                 )}
               </ScrollArea>
 
-              {/* Suggestions strip */}
+              {/* Suggestions strip — always visible, both types */}
               <Separator />
-              <div className="space-y-2">
-                <div className="flex items-center gap-1.5">
-                  {searchType === 'titles'
-                    ? <Briefcase className="h-3 w-3 text-blue-400" />
-                    : <Sparkles className="h-3 w-3 text-purple-400" />
-                  }
-                  <span className="text-xs font-medium text-muted-foreground">
-                    {searchType === 'titles'
-                      ? (isFetchingTitleSuggestions ? 'Fetching suggestions…' : 'Suggested Titles')
-                      : skillSuggestionLabel
-                    }
-                  </span>
-                  {isFetchingCurrentSuggestions && <Loader2 className="h-3 w-3 animate-spin ml-1" />}
-                </div>
-                <div className="flex flex-wrap gap-1.5 min-h-[28px]">
-                  {!isFetchingCurrentSuggestions && visibleSuggestions.length > 0 ? (
-                    visibleSuggestions.map((entity) => (
-                      <button
-                        key={entity.urn}
-                        onClick={() => addToSelection(entity)}
-                        className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs border transition-colors ${
-                          searchType === 'titles'
-                            ? 'bg-blue-500/10 border-blue-500/30 text-blue-300 hover:bg-blue-500/20'
-                            : 'bg-purple-500/10 border-purple-500/30 text-purple-300 hover:bg-purple-500/20'
-                        }`}
-                      >
-                        <Plus className="h-3 w-3" />
-                        {entity.name}
-                      </button>
-                    ))
-                  ) : !isFetchingCurrentSuggestions ? (
-                    <span className="text-xs text-muted-foreground italic">
-                      {selectedEntities.filter(e => e.type === (searchType === 'titles' ? 'title' : 'skill')).length === 0
-                        ? (searchType === 'titles'
-                            ? 'Add titles to your selection to see suggestions'
-                            : 'Add titles or skills to your selection to see suggestions')
+              <div className="space-y-3">
 
-                        : 'No suggestions available'}
-                    </span>
-                  ) : null}
+                {/* Skill suggestions — shown always (derived from titles or skills) */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <Sparkles className="h-3 w-3 text-purple-400" />
+                    <span className="text-xs font-medium text-muted-foreground">{skillSuggestionLabel}</span>
+                    {isFetchingSuggestions && <Loader2 className="h-3 w-3 animate-spin ml-1" />}
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 min-h-[24px]">
+                    {!isFetchingSuggestions && skillSuggestions.filter(s => !selectedEntities.some(e => e.urn === s.urn)).length > 0 ? (
+                      skillSuggestions
+                        .filter(s => !selectedEntities.some(e => e.urn === s.urn))
+                        .map((entity) => (
+                          <button
+                            key={entity.urn}
+                            onClick={() => addToSelection(entity)}
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs border bg-purple-500/10 border-purple-500/30 text-purple-300 hover:bg-purple-500/20 transition-colors"
+                          >
+                            <Plus className="h-3 w-3" />
+                            {entity.name}
+                          </button>
+                        ))
+                    ) : !isFetchingSuggestions ? (
+                      <span className="text-xs text-muted-foreground italic">
+                        {selectedEntities.length === 0
+                          ? 'Add titles or skills to see skill suggestions'
+                          : 'No skill suggestions available'}
+                      </span>
+                    ) : null}
+                  </div>
                 </div>
+
+                {/* Title suggestions — shown always */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <Briefcase className="h-3 w-3 text-blue-400" />
+                    <span className="text-xs font-medium text-muted-foreground">
+                      {isFetchingTitleSuggestions ? 'Fetching title suggestions…' : 'Suggested Titles'}
+                    </span>
+                    {isFetchingTitleSuggestions && <Loader2 className="h-3 w-3 animate-spin ml-1" />}
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 min-h-[24px]">
+                    {!isFetchingTitleSuggestions && titleSuggestions.filter(t => !selectedEntities.some(e => e.urn === t.urn)).length > 0 ? (
+                      titleSuggestions
+                        .filter(t => !selectedEntities.some(e => e.urn === t.urn))
+                        .map((entity) => (
+                          <button
+                            key={entity.urn}
+                            onClick={() => addToSelection(entity)}
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs border bg-blue-500/10 border-blue-500/30 text-blue-300 hover:bg-blue-500/20 transition-colors"
+                          >
+                            <Plus className="h-3 w-3" />
+                            {entity.name}
+                          </button>
+                        ))
+                    ) : !isFetchingTitleSuggestions ? (
+                      <span className="text-xs text-muted-foreground italic">
+                        {selectedEntities.filter(e => e.type === 'title').length === 0
+                          ? 'Add titles to see title suggestions'
+                          : 'No title suggestions available'}
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
+
               </div>
             </CardContent>
           </Card>
