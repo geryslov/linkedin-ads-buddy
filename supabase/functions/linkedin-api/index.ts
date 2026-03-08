@@ -6922,6 +6922,90 @@ serve(async (req) => {
         });
       }
 
+      case 'get_title_suggestions': {
+        const { titleNames, excludeUrns: excludeTitleUrns } = params || {};
+
+        if (!titleNames || !Array.isArray(titleNames) || titleNames.length === 0) {
+          return new Response(JSON.stringify({ suggestions: [] }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+
+        const excludeTitleSet = new Set<string>(excludeTitleUrns || []);
+        const titleSuggestionMap = new Map<string, any>();
+
+        // Build queries: full title + first word for broader results
+        const titleQueries = new Set<string>();
+        for (const titleName of titleNames.slice(0, 3)) {
+          const trimmed = titleName.trim();
+          if (!trimmed || trimmed.length < 2) continue;
+          titleQueries.add(trimmed);
+          const firstWord = trimmed.split(/\s+/)[0];
+          if (firstWord.length >= 3 && firstWord !== trimmed) titleQueries.add(firstWord);
+        }
+
+        for (const query of titleQueries) {
+          try {
+            const searchParams = new URLSearchParams({
+              q: 'typeahead',
+              facet: 'urn:li:adTargetingFacet:titles',
+              query,
+              count: '20',
+            });
+
+            const response = await fetch(
+              `https://api.linkedin.com/rest/adTargetingEntities?${searchParams}`,
+              {
+                headers: {
+                  'Authorization': `Bearer ${accessToken}`,
+                  'X-Restli-Protocol-Version': '2.0.0',
+                  'LinkedIn-Version': '202511',
+                },
+              }
+            );
+
+            if (response.ok) {
+              const data = await response.json();
+              console.log(`[get_title_suggestions] query="${query}" returned ${data.elements?.length || 0} elements`);
+              for (const el of (data.elements || [])) {
+                const urn = el.urn || el.entity || '';
+                if (!urn || titleSuggestionMap.has(urn)) continue;
+                const name = el.name?.localized?.en_US ||
+                             el.name?.localized?.[Object.keys(el.name?.localized || {})[0]] ||
+                             el.displayName ||
+                             (typeof el.name === 'string' ? el.name : '') || '';
+                if (!name) continue;
+                let id = '';
+                const titleMatch = urn.match(/urn:li:title:(\d+)/);
+                if (titleMatch) id = titleMatch[1];
+                titleSuggestionMap.set(urn, {
+                  id,
+                  urn,
+                  name: typeof name === 'string' ? name : String(name),
+                  type: 'title',
+                  targetable: true,
+                  excluded: excludeTitleSet.has(urn),
+                });
+              }
+            }
+          } catch (err) {
+            console.log(`[get_title_suggestions] Error for "${query}":`, err);
+          }
+
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
+
+        const titleSuggestions = Array.from(titleSuggestionMap.values())
+          .filter(s => !s.excluded)
+          .map(({ excluded: _excluded, ...s }) => s)
+          .slice(0, 20);
+        console.log(`[get_title_suggestions] Returning ${titleSuggestions.length} suggestions for ${titleNames.length} seed titles`);
+
+        return new Response(JSON.stringify({ suggestions: titleSuggestions }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
       case 'bulk_search_skills': {
         const { skills } = params;
 

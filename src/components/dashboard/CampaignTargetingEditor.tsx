@@ -87,6 +87,11 @@ export function CampaignTargetingEditor({
   const [skillSuggestions, setSkillSuggestions] = useState<TargetingEntity[]>([]);
   const [isFetchingSuggestions, setIsFetchingSuggestions] = useState(false);
   const suggestionsDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Title suggestions
+  const [titleSuggestions, setTitleSuggestions] = useState<TargetingEntity[]>([]);
+  const [isFetchingTitleSuggestions, setIsFetchingTitleSuggestions] = useState(false);
+  const titleSuggestionsDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
   // Fetch saved audiences when account changes
   useEffect(() => {
@@ -280,6 +285,52 @@ export function CampaignTargetingEditor({
       if (suggestionsDebounceRef.current) clearTimeout(suggestionsDebounceRef.current);
     };
   }, [selectedEntities, fetchSkillSuggestions]);
+
+  const fetchTitleSuggestions = useCallback(async (selectedTitles: TargetingEntity[]) => {
+    if (!accessToken || selectedTitles.length === 0) {
+      setTitleSuggestions([]);
+      return;
+    }
+    setIsFetchingTitleSuggestions(true);
+    try {
+      const titleNames = selectedTitles.map(t => t.name);
+      const excludeUrns = selectedTitles.map(t => t.urn);
+      const { data, error } = await supabase.functions.invoke('linkedin-api', {
+        body: {
+          action: 'get_title_suggestions',
+          accessToken,
+          params: { titleNames, excludeUrns }
+        }
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      const suggestions: TargetingEntity[] = (data.suggestions || []).map((s: any) => ({
+        id: s.id,
+        urn: s.urn,
+        name: s.name,
+        type: 'title' as const,
+        targetable: s.targetable,
+      }));
+      setTitleSuggestions(suggestions);
+    } catch (err) {
+      console.error('[fetchTitleSuggestions] error:', err);
+      setTitleSuggestions([]);
+    } finally {
+      setIsFetchingTitleSuggestions(false);
+    }
+  }, [accessToken]);
+
+  // Auto-refresh title suggestions when selected titles change (debounced)
+  useEffect(() => {
+    const selectedTitles = selectedEntities.filter(e => e.type === 'title');
+    if (titleSuggestionsDebounceRef.current) clearTimeout(titleSuggestionsDebounceRef.current);
+    titleSuggestionsDebounceRef.current = setTimeout(() => {
+      fetchTitleSuggestions(selectedTitles);
+    }, 600);
+    return () => {
+      if (titleSuggestionsDebounceRef.current) clearTimeout(titleSuggestionsDebounceRef.current);
+    };
+  }, [selectedEntities, fetchTitleSuggestions]);
 
   // Save audience handler
   const handleSaveAudience = async (name: string, description: string) => {
@@ -507,6 +558,33 @@ export function CampaignTargetingEditor({
                 </div>
               )}
             </ScrollArea>
+
+            {/* Title Suggestions */}
+            {searchType === 'titles' && (isFetchingTitleSuggestions || titleSuggestions.length > 0) && (
+              <div className="space-y-2 pt-2 border-t border-border/50">
+                <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                  <Briefcase className="h-3 w-3 text-blue-500" />
+                  {isFetchingTitleSuggestions ? 'Fetching suggestions...' : 'Suggested Job Titles'}
+                  {isFetchingTitleSuggestions && <Loader2 className="h-3 w-3 animate-spin ml-auto" />}
+                </div>
+                {!isFetchingTitleSuggestions && (
+                  <div className="flex flex-wrap gap-2">
+                    {titleSuggestions
+                      .filter(t => !selectedEntities.some(e => e.urn === t.urn))
+                      .map((title) => (
+                        <button
+                          key={title.urn}
+                          onClick={() => addToSelection(title)}
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs bg-blue-500/10 border border-blue-500/30 text-blue-300 hover:bg-blue-500/20 transition-colors"
+                        >
+                          <Plus className="h-3 w-3" />
+                          {title.name}
+                        </button>
+                      ))}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Skill Suggestions */}
             {searchType === 'skills' && (isFetchingSuggestions || skillSuggestions.length > 0) && (
