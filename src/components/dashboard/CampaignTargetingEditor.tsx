@@ -94,6 +94,11 @@ export function CampaignTargetingEditor({
   const [titleSuggestions, setTitleSuggestions] = useState<TargetingEntity[]>([]);
   const [isFetchingTitleSuggestions, setIsFetchingTitleSuggestions] = useState(false);
   const titleSuggestionsDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Audience size estimate
+  const [audienceCount, setAudienceCount] = useState<{ total: number; active: number } | null>(null);
+  const [isFetchingAudienceCount, setIsFetchingAudienceCount] = useState(false);
+  const audienceCountDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
   // Fetch saved audiences when account changes
   useEffect(() => {
@@ -334,6 +339,43 @@ export function CampaignTargetingEditor({
     };
   }, [selectedEntities, fetchTitleSuggestions]);
 
+  // Audience size estimate
+  const fetchAudienceCount = useCallback(async (entities: TargetingEntity[]) => {
+    if (!accessToken || entities.length === 0) {
+      setAudienceCount(null);
+      return;
+    }
+    setIsFetchingAudienceCount(true);
+    try {
+      const titleUrns = entities.filter(e => e.type === 'title').map(e => e.urn);
+      const skillUrns = entities.filter(e => e.type === 'skill').map(e => e.urn);
+      const { data, error } = await supabase.functions.invoke('linkedin-api', {
+        body: { action: 'get_audience_count', accessToken, params: { titleUrns, skillUrns } }
+      });
+      if (error) throw error;
+      setAudienceCount({ total: data.total ?? 0, active: data.active ?? 0 });
+    } catch (err) {
+      console.error('[fetchAudienceCount] error:', err);
+      setAudienceCount(null);
+    } finally {
+      setIsFetchingAudienceCount(false);
+    }
+  }, [accessToken]);
+
+  useEffect(() => {
+    if (audienceCountDebounceRef.current) clearTimeout(audienceCountDebounceRef.current);
+    if (selectedEntities.length === 0) {
+      setAudienceCount(null);
+      return;
+    }
+    audienceCountDebounceRef.current = setTimeout(() => {
+      fetchAudienceCount(selectedEntities);
+    }, 800);
+    return () => {
+      if (audienceCountDebounceRef.current) clearTimeout(audienceCountDebounceRef.current);
+    };
+  }, [selectedEntities, fetchAudienceCount]);
+
   // Save audience handler
   const handleSaveAudience = async (name: string, description: string) => {
     setIsSaving(true);
@@ -456,6 +498,12 @@ export function CampaignTargetingEditor({
   const titleCount = selectedEntities.filter(e => e.type === 'title').length;
   const skillCount = selectedEntities.filter(e => e.type === 'skill').length;
 
+  const formatAudienceSize = (n: number) => {
+    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+    if (n >= 1_000) return `${Math.round(n / 1_000)}K`;
+    return n.toString();
+  };
+
   const currentSuggestions = searchType === 'titles' ? titleSuggestions : skillSuggestions;
   const isFetchingCurrentSuggestions = searchType === 'titles' ? isFetchingTitleSuggestions : isFetchingSuggestions;
   const visibleSuggestions = currentSuggestions.filter(s => !selectedEntities.some(e => e.urn === s.urn));
@@ -512,6 +560,22 @@ export function CampaignTargetingEditor({
                   Replace
                 </Button>
               </div>
+
+              {/* Audience size estimate */}
+              {selectedEntities.length > 0 && (
+                <div className="flex flex-col items-center shrink-0 px-3 py-1 rounded-lg bg-muted/30 border border-border/50 min-w-[90px]">
+                  <span className="text-xs text-muted-foreground">Audience</span>
+                  {isFetchingAudienceCount ? (
+                    <Loader2 className="h-4 w-4 animate-spin mt-0.5 text-muted-foreground" />
+                  ) : audienceCount ? (
+                    <span className="text-base font-semibold leading-tight">
+                      {formatAudienceSize(audienceCount.total)}
+                    </span>
+                  ) : (
+                    <span className="text-xs text-muted-foreground italic">—</span>
+                  )}
+                </div>
+              )}
 
               {/* Apply button */}
               <Button

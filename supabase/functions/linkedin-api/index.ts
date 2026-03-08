@@ -7194,6 +7194,64 @@ serve(async (req) => {
         });
       }
 
+      case 'get_audience_count': {
+        // LinkedIn Audience Counts API - estimate reach for targeting criteria
+        // Docs: https://learn.microsoft.com/en-us/linkedin/marketing/integrations/ads/advertising-targeting/audience-counts
+        const { titleUrns = [], skillUrns = [] } = params;
+
+        if (titleUrns.length === 0 && skillUrns.length === 0) {
+          return new Response(JSON.stringify({ total: 0, active: 0 }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+
+        // URL-encode URN colons per Restli 2.0 requirement
+        const e = (urn: string) => urn.replace(/:/g, '%3A');
+
+        const facets: string[] = [];
+        if (titleUrns.length > 0) {
+          const facetKey = e('urn:li:adTargetingFacet:titles');
+          const titleList = titleUrns.map((u: string) => e(u)).join(',');
+          facets.push(`(or:(${facetKey}:List(${titleList})))`);
+        }
+        if (skillUrns.length > 0) {
+          const facetKey = e('urn:li:adTargetingFacet:skills');
+          const skillList = skillUrns.map((u: string) => e(u)).join(',');
+          facets.push(`(or:(${facetKey}:List(${skillList})))`);
+        }
+
+        const targetingCriteria = `(include:(and:List(${facets.join(',')})))`;
+        const url = `https://api.linkedin.com/rest/audienceCounts?q=targetingCriteriaV2&targetingCriteria=${targetingCriteria}`;
+
+        console.log(`[get_audience_count] titles=${titleUrns.length} skills=${skillUrns.length}`);
+        const acResponse = await fetch(url, {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'X-Restli-Protocol-Version': '2.0.0',
+            'LinkedIn-Version': '202511',
+          }
+        });
+
+        if (!acResponse.ok) {
+          const errText = await acResponse.text();
+          console.error(`[get_audience_count] API error ${acResponse.status}: ${errText}`);
+          return new Response(JSON.stringify({ error: `API error ${acResponse.status}`, total: 0, active: 0 }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+
+        const acData = await acResponse.json();
+        const element = acData.elements?.[0];
+        console.log(`[get_audience_count] total=${element?.total} active=${element?.active}`);
+
+        return new Response(JSON.stringify({
+          total: element?.total ?? 0,
+          active: element?.active ?? 0,
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
       case 'update_campaign_targeting': {
         // Support both single campaignId and array of campaignIds
         // NOTE: accountId is no longer required - derived from campaign
