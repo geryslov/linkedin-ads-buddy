@@ -96,6 +96,13 @@ function parseCompany(el: any): CompanyDemographicItem {
   };
 }
 
+function toLocalDateStr(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
 export function useCompanyDemographic(accessToken: string | null) {
   const [companyData, setCompanyData] = useState<CompanyDemographicItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -103,8 +110,8 @@ export function useCompanyDemographic(accessToken: string | null) {
   const [error, setError] = useState<string | null>(null);
   const [timeGranularity, setTimeGranularity] = useState<TimeGranularity>('ALL');
   const [dateRange, setDateRange] = useState<{ start: string; end: string }>({
-    start: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-    end: new Date().toISOString().split('T')[0],
+    start: toLocalDateStr(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)),
+    end: toLocalDateStr(new Date()),
   });
   const [selectedCampaignIds, setSelectedCampaignIds] = useState<string[]>([]);
   const [loadingObjectives, setLoadingObjectives] = useState<Set<string>>(new Set());
@@ -434,8 +441,8 @@ export function useCompanyDemographic(accessToken: string | null) {
 
   const setTimeFrame = useCallback((option: TimeFrameOption) => {
     setDateRange({
-      start: option.startDate.toISOString().split('T')[0],
-      end: option.endDate.toISOString().split('T')[0],
+      start: toLocalDateStr(option.startDate),
+      end: toLocalDateStr(option.endDate),
     });
   }, []);
 

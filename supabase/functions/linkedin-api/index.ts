@@ -2481,8 +2481,10 @@ serve(async (req) => {
         
         console.log(`[get_company_demographic] Total received: ${totalReceived} records, aggregated to ${companyMap.size} unique companies`);
 
-        // Sort all companies by impressions and take the requested slice
-        const allCompaniesSorted = Array.from(companyMap.entries()).sort((a, b) => b[1].impressions - a[1].impressions);
+        // Filter out zero-metric entries before sorting/slicing so totalCompanies and hasMore are accurate
+        const allCompaniesSorted = Array.from(companyMap.entries())
+          .filter(([, m]) => m.impressions > 0 || m.clicks > 0 || m.spent > 0 || m.leads > 0)
+          .sort((a, b) => b[1].impressions - a[1].impressions);
         const totalCompaniesCount = allCompaniesSorted.length;
         const slicedCompanies = allCompaniesSorted.slice(batchOffset, batchOffset + batchLimit);
         const hasMoreCompanies = (batchOffset + batchLimit) < totalCompaniesCount;
@@ -2615,9 +2617,7 @@ serve(async (req) => {
           });
         });
 
-        const filteredElements = reportElements.filter(r => 
-          r.impressions > 0 || r.clicks > 0 || parseFloat(r.costInLocalCurrency) > 0 || r.leads > 0
-        );
+        const filteredElements = reportElements;
         filteredElements.sort((a, b) => b.impressions - a.impressions);
         
         const resolvedCount = filteredElements.filter(r => r.enrichmentStatus === 'resolved').length;

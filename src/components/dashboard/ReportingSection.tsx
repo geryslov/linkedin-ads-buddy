@@ -185,6 +185,11 @@ export function ReportingSection({ accessToken, selectedAccount, canWrite = fals
     }
   }, [demographicReporting.dateRange, demographicReporting.timeGranularity, demographicReporting.pivot, demographicReporting.selectedCampaignIds]);
 
+  // Reset campaign filter when account changes to prevent stale campaign IDs from a previous account
+  useEffect(() => {
+    companyDemographic.setSelectedCampaignIds([]);
+  }, [selectedAccount]);
+
   // Re-fetch when time/granularity/campaigns changes for company demographics
   useEffect(() => {
     if (selectedAccount && (reportType === 'company_demo' || reportType === 'top_companies')) {
