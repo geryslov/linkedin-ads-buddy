@@ -241,38 +241,36 @@ export function CampaignTargetingEditor({
     }
   };
 
-  // Fetch skill suggestions based on currently selected skills
-  const fetchSkillSuggestions = useCallback(async (selectedSkills: TargetingEntity[]) => {
-    console.log('[fetchSkillSuggestions] called, skills:', selectedSkills.length, 'hasToken:', !!accessToken);
-    if (!accessToken || selectedSkills.length === 0) {
+  // Fetch skill suggestions: uses selected skills if any, otherwise derives from selected titles
+  const fetchSkillSuggestions = useCallback(async (selectedSkills: TargetingEntity[], selectedTitles: TargetingEntity[]) => {
+    if (!accessToken || (selectedSkills.length === 0 && selectedTitles.length === 0)) {
       setSkillSuggestions([]);
       return;
     }
     setIsFetchingSuggestions(true);
     try {
-      const skillNames = selectedSkills.map(s => s.name);
       const excludeUrns = selectedSkills.map(s => s.urn);
-      console.log('[fetchSkillSuggestions] querying with skillNames:', skillNames);
-      const { data, error } = await supabase.functions.invoke('linkedin-api', {
-        body: {
-          action: 'get_skill_suggestions',
-          accessToken,
-          params: { skillNames, excludeUrns }
-        }
-      });
-      console.log('[fetchSkillSuggestions] response data:', JSON.stringify(data));
-      console.log('[fetchSkillSuggestions] response error:', error);
+      let data: any, error: any;
+
+      if (selectedSkills.length > 0) {
+        // Suggest more skills based on existing selected skills
+        const skillNames = selectedSkills.map(s => s.name);
+        ({ data, error } = await supabase.functions.invoke('linkedin-api', {
+          body: { action: 'get_skill_suggestions', accessToken, params: { skillNames, excludeUrns } }
+        }));
+      } else {
+        // Derive skill suggestions from the job titles in the selection
+        const titleNames = selectedTitles.map(t => t.name);
+        ({ data, error } = await supabase.functions.invoke('linkedin-api', {
+          body: { action: 'get_skills_for_titles', accessToken, params: { titleNames, excludeUrns } }
+        }));
+      }
+
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
-      const suggestions: TargetingEntity[] = (data.suggestions || []).map((s: any) => ({
-        id: s.id,
-        urn: s.urn,
-        name: s.name,
-        type: 'skill' as const,
-        targetable: s.targetable,
-      }));
-      console.log('[fetchSkillSuggestions] parsed suggestions:', suggestions.length);
-      setSkillSuggestions(suggestions);
+      setSkillSuggestions((data.suggestions || []).map((s: any) => ({
+        id: s.id, urn: s.urn, name: s.name, type: 'skill' as const, targetable: s.targetable,
+      })));
     } catch (err) {
       console.error('[fetchSkillSuggestions] error:', err);
       setSkillSuggestions([]);
@@ -281,12 +279,13 @@ export function CampaignTargetingEditor({
     }
   }, [accessToken]);
 
-  // Auto-refresh suggestions when selected skills change (debounced)
+  // Auto-refresh skill suggestions when selection changes (debounced)
   useEffect(() => {
     const selectedSkills = selectedEntities.filter(e => e.type === 'skill');
+    const selectedTitles = selectedEntities.filter(e => e.type === 'title');
     if (suggestionsDebounceRef.current) clearTimeout(suggestionsDebounceRef.current);
     suggestionsDebounceRef.current = setTimeout(() => {
-      fetchSkillSuggestions(selectedSkills);
+      fetchSkillSuggestions(selectedSkills, selectedTitles);
     }, 600);
     return () => {
       if (suggestionsDebounceRef.current) clearTimeout(suggestionsDebounceRef.current);
@@ -507,6 +506,16 @@ export function CampaignTargetingEditor({
   const currentSuggestions = searchType === 'titles' ? titleSuggestions : skillSuggestions;
   const isFetchingCurrentSuggestions = searchType === 'titles' ? isFetchingTitleSuggestions : isFetchingSuggestions;
   const visibleSuggestions = currentSuggestions.filter(s => !selectedEntities.some(e => e.urn === s.urn));
+
+  // Label for skill suggestions — tells user whether they come from skills or titles
+  const skillSuggestionLabel = (() => {
+    if (isFetchingSuggestions) return 'Fetching suggestions…';
+    const hasSkills = selectedEntities.some(e => e.type === 'skill');
+    const hasTitles = selectedEntities.some(e => e.type === 'title');
+    if (hasSkills) return 'Skills related to your selection';
+    if (hasTitles) return 'Skills related to your job titles';
+    return 'Suggested Skills';
+  })();
 
   return (
     <TooltipProvider>
@@ -732,7 +741,10 @@ export function CampaignTargetingEditor({
                     : <Sparkles className="h-3 w-3 text-purple-400" />
                   }
                   <span className="text-xs font-medium text-muted-foreground">
-                    {isFetchingCurrentSuggestions ? 'Fetching suggestions…' : `Suggested ${searchType === 'titles' ? 'Titles' : 'Skills'}`}
+                    {searchType === 'titles'
+                      ? (isFetchingTitleSuggestions ? 'Fetching suggestions…' : 'Suggested Titles')
+                      : skillSuggestionLabel
+                    }
                   </span>
                   {isFetchingCurrentSuggestions && <Loader2 className="h-3 w-3 animate-spin ml-1" />}
                 </div>
@@ -755,7 +767,10 @@ export function CampaignTargetingEditor({
                   ) : !isFetchingCurrentSuggestions ? (
                     <span className="text-xs text-muted-foreground italic">
                       {selectedEntities.filter(e => e.type === (searchType === 'titles' ? 'title' : 'skill')).length === 0
-                        ? `Add ${searchType === 'titles' ? 'titles' : 'skills'} to your selection to see suggestions`
+                        ? (searchType === 'titles'
+                            ? 'Add titles to your selection to see suggestions'
+                            : 'Add titles or skills to your selection to see suggestions')
+
                         : 'No suggestions available'}
                     </span>
                   ) : null}

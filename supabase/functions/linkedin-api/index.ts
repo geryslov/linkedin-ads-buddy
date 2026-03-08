@@ -7194,6 +7194,91 @@ serve(async (req) => {
         });
       }
 
+      case 'get_skills_for_titles': {
+        // Derive skill suggestions from job title names.
+        // LinkedIn has no direct cross-facet API, so we extract functional keywords
+        // from titles (skipping common title stop words) and run skills typeahead.
+        const { titleNames, excludeUrns: stExcludeUrns = [] } = params || {};
+
+        if (!titleNames || !Array.isArray(titleNames) || titleNames.length === 0) {
+          return new Response(JSON.stringify({ suggestions: [] }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+
+        // Stop words: common title qualifiers that don't map to skills
+        const titleStopWords = new Set([
+          'chief', 'vice', 'vp', 'president', 'director', 'manager', 'head',
+          'lead', 'senior', 'junior', 'associate', 'assistant', 'officer',
+          'executive', 'global', 'regional', 'national', 'principal', 'staff',
+          'the', 'of', 'and', 'for', 'in', 'at', 'to', 'a', 'an', 'de',
+          'general', 'group', 'corporate', 'enterprise', 'business', 'strategic',
+        ]);
+
+        const stExcludeSet = new Set<string>(stExcludeUrns);
+        const stSuggestionMap = new Map<string, any>();
+        const stQueries = new Set<string>();
+
+        for (const titleName of titleNames.slice(0, 5)) {
+          const words = titleName.toLowerCase().split(/[\s\-&/,]+/);
+          for (const word of words) {
+            const cleaned = word.replace(/[^a-z]/g, '');
+            if (cleaned.length >= 4 && !titleStopWords.has(cleaned)) {
+              stQueries.add(cleaned.charAt(0).toUpperCase() + cleaned.slice(1)); // capitalize
+            }
+          }
+        }
+
+        console.log(`[get_skills_for_titles] titles=${titleNames.length} → queries: ${JSON.stringify([...stQueries])}`);
+
+        for (const query of stQueries) {
+          try {
+            const sp = new URLSearchParams({ q: 'typeahead', facet: 'urn:li:adTargetingFacet:skills', query, count: '15' });
+            const resp = await fetch(`https://api.linkedin.com/rest/adTargetingEntities?${sp}`, {
+              headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'X-Restli-Protocol-Version': '2.0.0',
+                'LinkedIn-Version': '202511',
+              },
+            });
+            if (resp.ok) {
+              const d = await resp.json();
+              for (const el of (d.elements || [])) {
+                const urn = el.urn || el.entity || '';
+                if (!urn || stSuggestionMap.has(urn)) continue;
+                const name = el.name?.localized?.en_US ||
+                             el.name?.localized?.[Object.keys(el.name?.localized || {})[0]] ||
+                             el.displayName ||
+                             (typeof el.name === 'string' ? el.name : '') || '';
+                if (!name) continue;
+                const skillMatch = urn.match(/urn:li:skill:(\d+)/);
+                stSuggestionMap.set(urn, {
+                  id: skillMatch ? skillMatch[1] : '',
+                  urn,
+                  name: typeof name === 'string' ? name : String(name),
+                  type: 'skill',
+                  targetable: true,
+                  excluded: stExcludeSet.has(urn),
+                });
+              }
+            }
+          } catch (err) {
+            console.log(`[get_skills_for_titles] Error for "${query}":`, err);
+          }
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
+
+        const stSuggestions = Array.from(stSuggestionMap.values())
+          .filter(s => !s.excluded)
+          .map(({ excluded: _, ...s }) => s)
+          .slice(0, 20);
+
+        console.log(`[get_skills_for_titles] Returning ${stSuggestions.length} skill suggestions`);
+        return new Response(JSON.stringify({ suggestions: stSuggestions }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
       case 'get_audience_count': {
         // LinkedIn Audience Counts API - estimate reach for targeting criteria
         // Docs: https://learn.microsoft.com/en-us/linkedin/marketing/integrations/ads/advertising-targeting/audience-counts
