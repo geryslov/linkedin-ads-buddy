@@ -17,6 +17,7 @@ import { CreativePerformanceReport } from "@/components/dashboard/CreativePerfor
 import { CampaignPerformanceReport } from "@/components/dashboard/CampaignPerformanceReport";
 import { CompanyInfluenceMatcher } from "@/components/dashboard/CompanyInfluenceMatcher";
 import { StandardizedTitlesPage } from "@/components/dashboard/StandardizedTitlesPage";
+import { NamingConventionReport } from "@/components/dashboard/NamingConventionReport";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { 
@@ -136,6 +137,7 @@ export default function Dashboard() {
               {activeTab === "title_checker" && "Title Checker"}
               {activeTab === "influence_matcher" && "Influence Matcher"}
               {activeTab === "standardized_titles" && "Standardized Titles"}
+              {activeTab === "name_report" && "Name Report"}
             </h1>
             <p className="text-muted-foreground">
               Manage your LinkedIn advertising campaigns
@@ -378,6 +380,13 @@ export default function Dashboard() {
 
         {activeTab === "standardized_titles" && (
           <StandardizedTitlesPage
+            accessToken={accessToken}
+            selectedAccount={selectedAccount}
+          />
+        )}
+
+        {activeTab === "name_report" && (
+          <NamingConventionReport
             accessToken={accessToken}
             selectedAccount={selectedAccount}
           />

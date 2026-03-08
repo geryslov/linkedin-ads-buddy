@@ -18,6 +18,7 @@ import {
   LineChart,
   Crosshair,
   BookOpen,
+  Tags,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -42,6 +43,7 @@ const navItems = [
   { id: "title_checker", label: "Title Checker", icon: Crown },
   { id: "influence_matcher", label: "Influence Matcher", icon: Crosshair },
   { id: "standardized_titles", label: "Titles", icon: BookOpen },
+  { id: "name_report", label: "Name Report", icon: Tags },
 ];
 
 export function Sidebar({ activeTab, onTabChange, onLogout, profileName, isAdmin }: SidebarProps) {
