@@ -248,7 +248,8 @@ export function CampaignTargetingEditor({
           params: { skillNames, excludeUrns }
         }
       });
-      console.log('[fetchSkillSuggestions] response:', { data, error });
+      console.log('[fetchSkillSuggestions] response data:', JSON.stringify(data));
+      console.log('[fetchSkillSuggestions] response error:', error);
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
       const suggestions: TargetingEntity[] = (data.suggestions || []).map((s: any) => ({
