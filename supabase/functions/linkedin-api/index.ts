@@ -2466,14 +2466,16 @@ serve(async (req) => {
           }
           
           const paging = analyticsData.paging;
-          if (paging && paging.total && (startOffset + pageElements.length) < paging.total) {
-            startOffset += pageSize;
-          } else if (pageElements.length === pageSize) {
-            startOffset += pageSize;
+          if (pageElements.length === 0) {
+            hasMore = false;
+          } else if (paging && paging.total && (startOffset + pageElements.length) < paging.total) {
+            startOffset += pageElements.length;
+          } else if (!paging?.total && pageElements.length >= pageSize) {
+            startOffset += pageElements.length;
           } else {
             hasMore = false;
           }
-          
+
           if (startOffset > 100000) {
             hasMore = false;
           }
