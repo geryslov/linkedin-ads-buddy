@@ -7066,7 +7066,8 @@ serve(async (req) => {
                 if (!urn || excludeSet.has(urn) || suggestionMap.has(urn)) continue;
                 const name = el.name?.localized?.en_US ||
                              el.name?.localized?.[Object.keys(el.name?.localized || {})[0]] ||
-                             el.displayName || '';
+                             el.displayName ||
+                             (typeof el.name === 'string' ? el.name : '') || '';
                 if (!name) continue;
                 let id = '';
                 const skillMatch = urn.match(/urn:li:skill:(\d+)/);

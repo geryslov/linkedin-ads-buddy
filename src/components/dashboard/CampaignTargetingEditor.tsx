@@ -247,6 +247,7 @@ export function CampaignTargetingEditor({
         }
       });
       if (error) throw error;
+      if (data?.error) throw new Error(data.error);
       const suggestions: TargetingEntity[] = (data.suggestions || []).map((s: any) => ({
         id: s.id,
         urn: s.urn,
@@ -256,7 +257,8 @@ export function CampaignTargetingEditor({
       }));
       setSkillSuggestions(suggestions);
     } catch (err) {
-      // Silently ignore suggestion errors
+      console.error('[fetchSkillSuggestions] error:', err);
+      setSkillSuggestions([]);
     } finally {
       setIsFetchingSuggestions(false);
     }
