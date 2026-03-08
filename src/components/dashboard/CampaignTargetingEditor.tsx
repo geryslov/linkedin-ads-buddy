@@ -513,189 +513,179 @@ export function CampaignTargetingEditor({
     return 'Suggested Skills';
   })();
 
-  // shared style tokens
-  const panel = "bg-slate-950 border border-slate-800 rounded-xl";
-  const panelHeader = "px-4 pt-3 pb-2 border-b border-slate-800/60";
-  const label = "font-mono text-[10px] tracking-widest uppercase text-slate-500";
-  const titleChip = "inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono bg-sky-950 border border-sky-700/50 text-sky-300 hover:border-sky-500 hover:text-sky-200 hover:bg-sky-900/60 transition-all cursor-pointer";
-  const skillChip = "inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono bg-violet-950 border border-violet-700/50 text-violet-300 hover:border-violet-500 hover:text-violet-200 hover:bg-violet-900/60 transition-all cursor-pointer";
+  // shared tokens using platform design system
+  const sectionLabel = "text-xs font-semibold text-muted-foreground uppercase tracking-wider";
+  const titleChip = "inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-blue-50 border border-blue-200 text-blue-700 hover:bg-blue-100 hover:border-blue-300 transition-colors cursor-pointer";
+  const skillChip = "inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-purple-50 border border-purple-200 text-purple-700 hover:bg-purple-100 hover:border-purple-300 transition-colors cursor-pointer";
 
   return (
     <TooltipProvider>
-      <div className="space-y-3 font-sans">
+      <div className="space-y-4">
 
         {/* ── DEPLOY RAIL ── */}
-        <div className={`${panel} p-3`}>
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+        <Card className="border-border shadow-sm">
+          <CardContent className="p-4">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-end gap-3">
 
-            {/* Campaign selector */}
-            <div className="flex-1 min-w-0">
-              <p className={`${label} mb-1.5 flex items-center gap-1`}>
-                <Megaphone className="h-3 w-3" /> target campaigns
-              </p>
-              <CampaignSearchSelect
-                campaigns={campaigns}
-                selectedCampaignIds={selectedCampaignIds}
-                onChange={setSelectedCampaignIds}
-                disabled={!canWrite}
-              />
+              {/* Campaign selector */}
+              <div className="flex-1 min-w-0">
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 flex items-center gap-1.5">
+                  <Megaphone className="h-3.5 w-3.5 text-primary" /> Target Campaigns
+                </label>
+                <CampaignSearchSelect
+                  campaigns={campaigns}
+                  selectedCampaignIds={selectedCampaignIds}
+                  onChange={setSelectedCampaignIds}
+                  disabled={!canWrite}
+                />
+              </div>
+
+              {/* Mode toggle */}
+              <div className="flex flex-col gap-1 shrink-0">
+                <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+                  Mode
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Info className="h-3.5 w-3.5 cursor-help" />
+                    </TooltipTrigger>
+                    <TooltipContent side="top" className="max-w-[200px] text-xs">
+                      <p><strong>Append</strong> — AND with existing targeting (narrows audience).</p>
+                      <p className="mt-1"><strong>Replace</strong> — overwrites all existing targeting.</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </label>
+                <div className="flex rounded-lg border border-border overflow-hidden">
+                  {(['append', 'replace'] as const).map(mode => (
+                    <button
+                      key={mode}
+                      onClick={() => setUpdateMode(mode)}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium transition-colors ${
+                        updateMode === mode
+                          ? 'bg-primary text-primary-foreground'
+                          : 'bg-background text-muted-foreground hover:bg-muted hover:text-foreground'
+                      }`}
+                    >
+                      {mode === 'append' ? <PlusCircle className="h-3.5 w-3.5" /> : <Replace className="h-3.5 w-3.5" />}
+                      {mode === 'append' ? 'Append' : 'Replace'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Audience reach */}
+              <div className="flex flex-col items-center shrink-0 px-4 py-2 rounded-lg bg-muted/60 border border-border min-w-[90px]">
+                <span className="text-xs text-muted-foreground font-medium">Reach</span>
+                {isFetchingAudienceCount ? (
+                  <Loader2 className="h-4 w-4 animate-spin text-muted-foreground mt-0.5" />
+                ) : audienceCount && audienceCount.total > 0 ? (
+                  <span className="text-xl font-bold text-primary leading-tight">
+                    {formatAudienceSize(audienceCount.total)}
+                  </span>
+                ) : (
+                  <span className="text-lg font-semibold text-muted-foreground/40">—</span>
+                )}
+              </div>
+
+              {/* Apply */}
+              <Button
+                size="default"
+                onClick={handleApplyTargeting}
+                disabled={isUpdating || selectedEntities.length === 0 || selectedCampaignIds.length === 0 || !canWrite}
+                className="shrink-0 min-w-[160px] shadow-sm"
+              >
+                {isUpdating ? (
+                  <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Updating…</>
+                ) : !canWrite ? (
+                  <><AlertCircle className="mr-2 h-4 w-4" />Read Only</>
+                ) : (
+                  <><CheckCircle2 className="mr-2 h-4 w-4" />
+                    Apply{selectedCampaignIds.length > 0 ? ` to ${selectedCampaignIds.length} Campaign${selectedCampaignIds.length !== 1 ? 's' : ''}` : ''}
+                  </>
+                )}
+              </Button>
             </div>
 
-            {/* Mode buttons */}
-            <div className="flex items-center gap-1 shrink-0">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Info className="h-3.5 w-3.5 text-slate-600 cursor-help mr-0.5" />
-                </TooltipTrigger>
-                <TooltipContent side="bottom" className="max-w-[200px] text-xs bg-slate-900 border-slate-700 text-slate-200">
-                  <p><strong className="text-cyan-400">Append</strong> — AND with existing targeting (narrower).</p>
-                  <p className="mt-1"><strong className="text-amber-400">Replace</strong> — wipe existing, use only your selection.</p>
-                </TooltipContent>
-              </Tooltip>
-              {(['append', 'replace'] as const).map(mode => (
-                <button
-                  key={mode}
-                  onClick={() => setUpdateMode(mode)}
-                  className={`px-3 py-1.5 rounded text-xs font-mono tracking-wide border transition-all ${
-                    updateMode === mode
-                      ? mode === 'append'
-                        ? 'bg-cyan-500/15 border-cyan-500/60 text-cyan-300 shadow-[0_0_8px_rgba(34,211,238,0.15)]'
-                        : 'bg-amber-500/15 border-amber-500/60 text-amber-300 shadow-[0_0_8px_rgba(251,191,36,0.15)]'
-                      : 'bg-transparent border-slate-700 text-slate-500 hover:border-slate-500 hover:text-slate-300'
-                  }`}
-                >
-                  {mode === 'append' ? '+ append' : '↺ replace'}
-                </button>
-              ))}
-            </div>
-
-            {/* Audience readout */}
-            <div className="flex flex-col items-center shrink-0 px-4 py-1.5 rounded-lg bg-slate-900 border border-slate-700/60 min-w-[88px]">
-              <span className={`${label}`}>reach</span>
-              {isFetchingAudienceCount ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin text-slate-500 mt-0.5" />
-              ) : audienceCount && audienceCount.total > 0 ? (
-                <span className="text-lg font-mono font-bold text-cyan-400 leading-tight tracking-tight">
-                  {formatAudienceSize(audienceCount.total)}
-                </span>
-              ) : (
-                <span className="text-sm font-mono text-slate-600">—</span>
-              )}
-            </div>
-
-            {/* Apply */}
-            <button
-              onClick={handleApplyTargeting}
-              disabled={isUpdating || selectedEntities.length === 0 || selectedCampaignIds.length === 0 || !canWrite}
-              className={`shrink-0 px-5 py-2 rounded-lg text-sm font-mono font-semibold tracking-wide transition-all border ${
-                isUpdating || selectedEntities.length === 0 || selectedCampaignIds.length === 0 || !canWrite
-                  ? 'bg-slate-900 border-slate-700 text-slate-600 cursor-not-allowed'
-                  : 'bg-cyan-500 border-cyan-400 text-slate-950 hover:bg-cyan-400 shadow-[0_0_20px_rgba(34,211,238,0.3)] hover:shadow-[0_0_28px_rgba(34,211,238,0.45)]'
-              }`}
-            >
-              {isUpdating ? (
-                <span className="flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" />deploying…</span>
-              ) : !canWrite ? (
-                <span className="flex items-center gap-2"><AlertCircle className="h-4 w-4" />read-only</span>
-              ) : (
-                <span className="flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4" />
-                  deploy{selectedCampaignIds.length > 0 ? ` → ${selectedCampaignIds.length}` : ''}
-                </span>
-              )}
-            </button>
-          </div>
-
-          {!canWrite && (
-            <div className="mt-2.5 flex items-center gap-2 text-xs font-mono text-amber-400/80 bg-amber-500/5 border border-amber-500/20 rounded px-3 py-1.5">
-              <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-              viewer access — no write permissions
-            </div>
-          )}
-        </div>
+            {!canWrite && (
+              <div className="mt-3 flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                Viewer access only — contact your Campaign Manager for write permissions.
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
         {/* ── MAIN GRID ── */}
-        <div className="grid lg:grid-cols-[1fr_320px] gap-3">
+        <div className="grid lg:grid-cols-[1fr_320px] gap-4">
 
           {/* ── SEARCH & DISCOVER ── */}
-          <div className={panel}>
-            <div className={panelHeader}>
-              <p className={label}>search &amp; discover</p>
-            </div>
-            <div className="p-3 space-y-3">
+          <Card className="border-border shadow-sm">
+            <CardHeader className="px-4 pt-4 pb-3 border-b border-border/60">
+              <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+                <Search className="h-4 w-4 text-primary" /> Search &amp; Discover
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-4 space-y-4">
 
               {/* Search row */}
               <div className="flex gap-2">
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <button className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-sm font-mono text-slate-300 hover:border-slate-500 transition-colors shrink-0 w-28">
+                    <Button variant="outline" className="w-32 justify-between shrink-0">
                       {searchType === 'titles'
-                        ? <><Briefcase className="h-3.5 w-3.5 text-sky-400" />titles</>
-                        : <><Sparkles className="h-3.5 w-3.5 text-violet-400" />skills</>
+                        ? <><Briefcase className="h-3.5 w-3.5 text-blue-500" /><span>Titles</span></>
+                        : <><Sparkles className="h-3.5 w-3.5 text-purple-500" /><span>Skills</span></>
                       }
-                      <ChevronDown className="h-3 w-3 text-slate-500 ml-auto" />
-                    </button>
+                      <ChevronDown className="h-3.5 w-3.5 text-muted-foreground ml-auto" />
+                    </Button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="bg-slate-900 border-slate-700 text-slate-200">
-                    <DropdownMenuItem onClick={() => { setSearchType('titles'); setSearchResults([]); }} className="font-mono text-sm gap-2 focus:bg-slate-800">
-                      <Briefcase className="h-4 w-4 text-sky-400" /> job titles
+                  <DropdownMenuContent align="start">
+                    <DropdownMenuItem onClick={() => { setSearchType('titles'); setSearchResults([]); }} className="gap-2">
+                      <Briefcase className="h-4 w-4 text-blue-500" /> Job Titles
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => { setSearchType('skills'); setSearchResults([]); }} className="font-mono text-sm gap-2 focus:bg-slate-800">
-                      <Sparkles className="h-4 w-4 text-violet-400" /> skills
+                    <DropdownMenuItem onClick={() => { setSearchType('skills'); setSearchResults([]); }} className="gap-2">
+                      <Sparkles className="h-4 w-4 text-purple-500" /> Skills
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
 
                 <Input
-                  placeholder={`/ search ${searchType === 'titles' ? 'job titles' : 'skills'}…`}
+                  placeholder={`Search ${searchType === 'titles' ? 'job titles' : 'skills'}…`}
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   onKeyPress={handleKeyPress}
                   disabled={isSearching}
-                  className="flex-1 bg-slate-900 border-slate-700 text-slate-200 placeholder:text-slate-600 font-mono text-sm focus-visible:border-cyan-600 focus-visible:ring-0 focus-visible:ring-offset-0"
+                  className="flex-1"
                 />
 
-                <button
-                  onClick={handleSearch}
-                  disabled={isSearching || !searchQuery.trim()}
-                  className="px-3 rounded-lg bg-slate-900 border border-slate-700 text-slate-400 hover:border-cyan-600 hover:text-cyan-400 transition-all disabled:opacity-40"
-                >
+                <Button onClick={handleSearch} disabled={isSearching || !searchQuery.trim()} size="icon" variant="default">
                   {isSearching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-                </button>
+                </Button>
 
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <button
-                      onClick={() => searchType === 'titles' ? setShowBulkImport(true) : setShowBulkSkillsImport(true)}
-                      className="px-3 rounded-lg bg-slate-900 border border-slate-700 text-slate-400 hover:border-slate-500 hover:text-slate-200 transition-all"
-                    >
+                    <Button variant="outline" size="icon" onClick={() => searchType === 'titles' ? setShowBulkImport(true) : setShowBulkSkillsImport(true)}>
                       <Upload className="h-4 w-4" />
-                    </button>
+                    </Button>
                   </TooltipTrigger>
-                  <TooltipContent className="bg-slate-900 border-slate-700 text-slate-200 font-mono text-xs">
-                    bulk import {searchType === 'titles' ? 'titles' : 'skills'}
-                  </TooltipContent>
+                  <TooltipContent>Bulk import {searchType === 'titles' ? 'job titles' : 'skills'}</TooltipContent>
                 </Tooltip>
               </div>
 
               {searchError && (
-                <div className="flex items-center gap-2 text-red-400 text-xs font-mono p-2 bg-red-500/5 border border-red-500/20 rounded-lg">
-                  <AlertCircle className="h-3.5 w-3.5 shrink-0" />{searchError}
+                <div className="flex items-center gap-2 text-destructive text-xs p-2.5 bg-destructive/5 border border-destructive/20 rounded-lg">
+                  <AlertCircle className="h-4 w-4 shrink-0" />{searchError}
                 </div>
               )}
 
               {/* Results */}
-              <ScrollArea className="h-[240px] pr-1">
+              <ScrollArea className="h-[240px] pr-2">
                 {searchResults.length > 0 ? (
                   <div className="space-y-1">
                     <div className="flex items-center justify-between mb-2">
-                      <span className="font-mono text-[10px] text-slate-600">{searchResults.length} results</span>
-                      <button
-                        onClick={() => addMultipleToSelection(searchResults)}
-                        className="font-mono text-[10px] text-cyan-500 hover:text-cyan-300 transition-colors flex items-center gap-1"
-                      >
-                        <Plus className="h-3 w-3" />add all
-                      </button>
+                      <span className="text-xs text-muted-foreground">{searchResults.length} result{searchResults.length !== 1 ? 's' : ''}</span>
+                      <Button variant="ghost" size="sm" className="h-6 text-xs gap-1 px-2 text-primary" onClick={() => addMultipleToSelection(searchResults)}>
+                        <Plus className="h-3 w-3" /> Add all
+                      </Button>
                     </div>
                     {searchResults.map((entity) => {
                       const isSelected = selectedEntities.some(e => e.urn === entity.urn);
@@ -703,55 +693,53 @@ export function CampaignTargetingEditor({
                         <div
                           key={entity.urn}
                           onClick={() => !isSelected && addToSelection(entity)}
-                          className={`flex items-center gap-2 px-3 py-2 rounded-lg border font-mono text-xs transition-all cursor-pointer ${
+                          className={`flex items-center gap-2.5 px-3 py-2 rounded-lg border text-sm transition-colors ${
                             isSelected
-                              ? 'bg-slate-900 border-slate-700 text-slate-500 cursor-default'
-                              : entity.type === 'title'
-                                ? 'bg-slate-900/60 border-slate-800 hover:border-sky-700/60 hover:bg-sky-950/40 text-slate-300'
-                                : 'bg-slate-900/60 border-slate-800 hover:border-violet-700/60 hover:bg-violet-950/40 text-slate-300'
+                              ? 'bg-primary/5 border-primary/20 text-muted-foreground cursor-default'
+                              : 'bg-background border-border hover:bg-muted/50 hover:border-border cursor-pointer'
                           }`}
                         >
                           {entity.type === 'title'
-                            ? <Briefcase className="h-3 w-3 text-sky-500 shrink-0" />
-                            : <Sparkles className="h-3 w-3 text-violet-500 shrink-0" />
+                            ? <Briefcase className={`h-3.5 w-3.5 shrink-0 ${isSelected ? 'text-muted-foreground/50' : 'text-blue-500'}`} />
+                            : <Sparkles className={`h-3.5 w-3.5 shrink-0 ${isSelected ? 'text-muted-foreground/50' : 'text-purple-500'}`} />
                           }
                           <span className="flex-1 truncate">{entity.name}</span>
                           {isSelected
-                            ? <CheckCircle2 className="h-3.5 w-3.5 text-slate-600 shrink-0" />
-                            : <Plus className="h-3.5 w-3.5 text-slate-600 group-hover:text-cyan-400 shrink-0" />
+                            ? <CheckCircle2 className="h-4 w-4 text-primary/50 shrink-0" />
+                            : <Plus className="h-4 w-4 text-muted-foreground/40 shrink-0" />
                           }
                         </div>
                       );
                     })}
                   </div>
                 ) : (
-                  <div className="flex flex-col items-center justify-center h-full text-slate-700 py-8">
-                    <Search className="h-8 w-8 mb-2 opacity-30" />
-                    <p className="font-mono text-xs">type to search {searchType}</p>
+                  <div className="flex flex-col items-center justify-center h-full text-muted-foreground py-8">
+                    <Search className="h-8 w-8 mb-2 opacity-20" />
+                    <p className="text-sm">Search {searchType === 'titles' ? 'job titles' : 'skills'} above</p>
                   </div>
                 )}
               </ScrollArea>
 
-              {/* Suggestions — both types always visible */}
-              <div className="border-t border-slate-800/70 pt-3 space-y-3">
+              {/* Suggestions — both always visible */}
+              <div className="border-t border-border/60 pt-4 space-y-3">
 
                 {/* Skill suggestions */}
                 <div>
-                  <div className="flex items-center gap-1.5 mb-1.5">
-                    <Sparkles className="h-3 w-3 text-violet-500" />
-                    <span className={label}>{skillSuggestionLabel}</span>
-                    {isFetchingSuggestions && <Loader2 className="h-3 w-3 animate-spin text-slate-600" />}
+                  <div className="flex items-center gap-1.5 mb-2">
+                    <Sparkles className="h-3.5 w-3.5 text-purple-500" />
+                    <span className={sectionLabel}>{skillSuggestionLabel}</span>
+                    {isFetchingSuggestions && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground ml-1" />}
                   </div>
-                  <div className="flex flex-wrap gap-1.5 min-h-[22px]">
+                  <div className="flex flex-wrap gap-1.5 min-h-[26px]">
                     {!isFetchingSuggestions && skillSuggestions.filter(s => !selectedEntities.some(e => e.urn === s.urn)).length > 0
                       ? skillSuggestions.filter(s => !selectedEntities.some(e => e.urn === s.urn)).map(entity => (
                           <button key={entity.urn} onClick={() => addToSelection(entity)} className={skillChip}>
-                            <Plus className="h-2.5 w-2.5" />{entity.name}
+                            <Plus className="h-3 w-3" />{entity.name}
                           </button>
                         ))
                       : !isFetchingSuggestions && (
-                          <span className="font-mono text-[10px] text-slate-700 italic">
-                            {selectedEntities.length === 0 ? 'add titles or skills to see suggestions' : 'no suggestions'}
+                          <span className="text-xs text-muted-foreground italic">
+                            {selectedEntities.length === 0 ? 'Add titles or skills to see suggestions' : 'No suggestions available'}
                           </span>
                         )
                     }
@@ -760,81 +748,75 @@ export function CampaignTargetingEditor({
 
                 {/* Title suggestions */}
                 <div>
-                  <div className="flex items-center gap-1.5 mb-1.5">
-                    <Briefcase className="h-3 w-3 text-sky-500" />
-                    <span className={label}>{isFetchingTitleSuggestions ? 'fetching title suggestions…' : 'suggested titles'}</span>
-                    {isFetchingTitleSuggestions && <Loader2 className="h-3 w-3 animate-spin text-slate-600" />}
+                  <div className="flex items-center gap-1.5 mb-2">
+                    <Briefcase className="h-3.5 w-3.5 text-blue-500" />
+                    <span className={sectionLabel}>{isFetchingTitleSuggestions ? 'Fetching suggestions…' : 'Suggested Titles'}</span>
+                    {isFetchingTitleSuggestions && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground ml-1" />}
                   </div>
-                  <div className="flex flex-wrap gap-1.5 min-h-[22px]">
+                  <div className="flex flex-wrap gap-1.5 min-h-[26px]">
                     {!isFetchingTitleSuggestions && titleSuggestions.filter(t => !selectedEntities.some(e => e.urn === t.urn)).length > 0
                       ? titleSuggestions.filter(t => !selectedEntities.some(e => e.urn === t.urn)).map(entity => (
                           <button key={entity.urn} onClick={() => addToSelection(entity)} className={titleChip}>
-                            <Plus className="h-2.5 w-2.5" />{entity.name}
+                            <Plus className="h-3 w-3" />{entity.name}
                           </button>
                         ))
                       : !isFetchingTitleSuggestions && (
-                          <span className="font-mono text-[10px] text-slate-700 italic">
-                            {selectedEntities.filter(e => e.type === 'title').length === 0 ? 'add titles to see suggestions' : 'no suggestions'}
+                          <span className="text-xs text-muted-foreground italic">
+                            {selectedEntities.filter(e => e.type === 'title').length === 0 ? 'Add titles to see suggestions' : 'No suggestions available'}
                           </span>
                         )
                     }
                   </div>
                 </div>
               </div>
-            </div>
-          </div>
+            </CardContent>
+          </Card>
 
           {/* ── RIGHT COLUMN ── */}
-          <div className="space-y-3">
+          <div className="space-y-4">
 
-            {/* Selection */}
-            <div className={panel}>
-              <div className={`${panelHeader} flex items-center justify-between`}>
-                <div className="flex items-center gap-2">
-                  <p className={label}>targeting set</p>
-                  {selectedEntities.length > 0 && (
-                    <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-cyan-500/10 border border-cyan-500/30 text-cyan-400">
-                      {selectedEntities.length}
-                    </span>
-                  )}
+            {/* Targeting Set */}
+            <Card className="border-border shadow-sm">
+              <CardHeader className="px-4 pt-4 pb-3 border-b border-border/60">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+                    <ShoppingCart className="h-4 w-4 text-primary" />
+                    Targeting Set
+                    {selectedEntities.length > 0 && (
+                      <Badge variant="secondary" className="text-xs font-medium">{selectedEntities.length}</Badge>
+                    )}
+                  </CardTitle>
+                  <div className="flex items-center gap-1">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setShowSaveDialog(true)} disabled={selectedEntities.length === 0}>
+                          <Save className="h-3.5 w-3.5" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Save as audience</TooltipContent>
+                    </Tooltip>
+                    {selectedEntities.length > 0 && (
+                      <Button variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground hover:text-destructive px-2" onClick={clearSelection}>
+                        Clear
+                      </Button>
+                    )}
+                  </div>
                 </div>
-                <div className="flex items-center gap-1">
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        onClick={() => setShowSaveDialog(true)}
-                        disabled={selectedEntities.length === 0}
-                        className="p-1.5 rounded text-slate-600 hover:text-cyan-400 hover:bg-cyan-500/10 transition-all disabled:opacity-30"
-                      >
-                        <Save className="h-3.5 w-3.5" />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent className="bg-slate-900 border-slate-700 text-slate-200 font-mono text-xs">save audience</TooltipContent>
-                  </Tooltip>
-                  {selectedEntities.length > 0 && (
-                    <button
-                      onClick={clearSelection}
-                      className="px-2 py-1 rounded font-mono text-[10px] text-slate-600 hover:text-red-400 hover:bg-red-500/10 transition-all"
-                    >
-                      clear
-                    </button>
-                  )}
-                </div>
-              </div>
-              <div className="p-3">
-                <ScrollArea className="h-[210px] pr-1">
+              </CardHeader>
+              <CardContent className="p-4">
+                <ScrollArea className="h-[210px] pr-2">
                   {selectedEntities.length > 0 ? (
-                    <div className="space-y-2">
+                    <div className="space-y-3">
                       {titleCount > 0 && (
                         <div>
-                          <p className="font-mono text-[10px] text-sky-600 uppercase tracking-widest mb-1 flex items-center gap-1">
-                            <Briefcase className="h-2.5 w-2.5" /> titles / {titleCount}
+                          <p className={`${sectionLabel} flex items-center gap-1.5 mb-1.5`}>
+                            <Briefcase className="h-3 w-3 text-blue-500" /> Titles ({titleCount})
                           </p>
                           <div className="space-y-1">
                             {selectedEntities.filter(e => e.type === 'title').map(entity => (
-                              <div key={entity.urn} className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-sky-950/50 border border-sky-900/70 group hover:border-sky-700/60 transition-colors">
-                                <span className="flex-1 font-mono text-xs text-sky-200 truncate">{entity.name}</span>
-                                <button onClick={() => removeFromSelection(entity.urn)} className="opacity-0 group-hover:opacity-100 text-slate-600 hover:text-red-400 transition-all shrink-0">
+                              <div key={entity.urn} className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-blue-50 border border-blue-100 group hover:border-blue-200 transition-colors">
+                                <span className="flex-1 text-xs text-blue-800 truncate font-medium">{entity.name}</span>
+                                <button onClick={() => removeFromSelection(entity.urn)} className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all shrink-0">
                                   <X className="h-3 w-3" />
                                 </button>
                               </div>
@@ -844,14 +826,14 @@ export function CampaignTargetingEditor({
                       )}
                       {skillCount > 0 && (
                         <div>
-                          <p className="font-mono text-[10px] text-violet-600 uppercase tracking-widest mb-1 flex items-center gap-1">
-                            <Sparkles className="h-2.5 w-2.5" /> skills / {skillCount}
+                          <p className={`${sectionLabel} flex items-center gap-1.5 mb-1.5`}>
+                            <Sparkles className="h-3 w-3 text-purple-500" /> Skills ({skillCount})
                           </p>
                           <div className="space-y-1">
                             {selectedEntities.filter(e => e.type === 'skill').map(entity => (
-                              <div key={entity.urn} className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-violet-950/50 border border-violet-900/70 group hover:border-violet-700/60 transition-colors">
-                                <span className="flex-1 font-mono text-xs text-violet-200 truncate">{entity.name}</span>
-                                <button onClick={() => removeFromSelection(entity.urn)} className="opacity-0 group-hover:opacity-100 text-slate-600 hover:text-red-400 transition-all shrink-0">
+                              <div key={entity.urn} className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-purple-50 border border-purple-100 group hover:border-purple-200 transition-colors">
+                                <span className="flex-1 text-xs text-purple-800 truncate font-medium">{entity.name}</span>
+                                <button onClick={() => removeFromSelection(entity.urn)} className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all shrink-0">
                                   <X className="h-3 w-3" />
                                 </button>
                               </div>
@@ -861,52 +843,54 @@ export function CampaignTargetingEditor({
                       )}
                     </div>
                   ) : (
-                    <div className="flex flex-col items-center justify-center h-full text-slate-700 py-4">
+                    <div className="flex flex-col items-center justify-center h-full text-muted-foreground py-6">
                       <ShoppingCart className="h-8 w-8 mb-2 opacity-20" />
-                      <p className="font-mono text-xs">no entities selected</p>
-                      <p className="font-mono text-[10px] opacity-60 mt-0.5 text-center">search or import to add</p>
+                      <p className="text-sm font-medium">Empty selection</p>
+                      <p className="text-xs mt-0.5 text-center opacity-70">Search or import to add targeting</p>
                     </div>
                   )}
                 </ScrollArea>
-              </div>
-            </div>
+              </CardContent>
+            </Card>
 
             {/* Saved Audiences */}
-            <div className={panel}>
-              <div className={panelHeader}>
-                <p className={label}><FolderOpen className="inline h-3 w-3 mr-1" />saved audiences</p>
-              </div>
-              <div className="p-3">
+            <Card className="border-border shadow-sm">
+              <CardHeader className="px-4 pt-4 pb-3 border-b border-border/60">
+                <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+                  <FolderOpen className="h-4 w-4 text-primary" /> Saved Audiences
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-4">
                 {isLoadingAudiences ? (
-                  <div className="flex items-center gap-2 font-mono text-xs text-slate-600 py-2">
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />loading…
+                  <div className="flex items-center gap-2 text-muted-foreground text-xs py-2">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading…
                   </div>
                 ) : audiences.length === 0 ? (
-                  <p className="font-mono text-[10px] text-slate-700 italic py-1">
-                    no saved audiences — save your selection to reuse it
+                  <p className="text-xs text-muted-foreground italic py-1">
+                    No saved audiences yet. Save your selection to reuse it later.
                   </p>
                 ) : (
                   <div className="space-y-1.5">
                     {audiences.map(audience => (
                       <div
                         key={audience.id}
-                        className="flex items-center gap-2 px-2.5 py-2 rounded-lg bg-slate-900 border border-slate-800 hover:border-slate-600 transition-colors group cursor-pointer"
+                        className="flex items-center gap-2 px-3 py-2 rounded-lg bg-background border border-border hover:bg-muted/50 hover:border-border transition-colors group cursor-pointer"
                       >
                         <button className="flex-1 text-left min-w-0" onClick={() => handleLoadAudience(audience.entities)}>
-                          <span className="font-mono text-xs text-slate-200 truncate block">{audience.name}</span>
-                          <span className="font-mono text-[10px] text-slate-600">
-                            {audience.entities.filter((e: TargetingEntity) => e.type === 'title').length}t · {audience.entities.filter((e: TargetingEntity) => e.type === 'skill').length}s
+                          <span className="text-sm font-medium text-foreground truncate block">{audience.name}</span>
+                          <span className="text-xs text-muted-foreground">
+                            {audience.entities.filter((e: TargetingEntity) => e.type === 'title').length} titles · {audience.entities.filter((e: TargetingEntity) => e.type === 'skill').length} skills
                           </span>
                         </button>
-                        <button onClick={() => deleteAudience(audience.id)} className="opacity-0 group-hover:opacity-100 text-slate-600 hover:text-red-400 transition-all shrink-0">
+                        <button onClick={() => deleteAudience(audience.id)} className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all shrink-0">
                           <X className="h-3.5 w-3.5" />
                         </button>
                       </div>
                     ))}
                   </div>
                 )}
-              </div>
-            </div>
+              </CardContent>
+            </Card>
           </div>
         </div>
 
