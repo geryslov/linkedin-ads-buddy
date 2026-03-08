@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -81,6 +81,12 @@ export function CampaignTargetingEditor({
   
   // Bulk import
   const [showBulkImport, setShowBulkImport] = useState(false);
+  const [showBulkSkillsImport, setShowBulkSkillsImport] = useState(false);
+
+  // Skill suggestions
+  const [skillSuggestions, setSkillSuggestions] = useState<TargetingEntity[]>([]);
+  const [isFetchingSuggestions, setIsFetchingSuggestions] = useState(false);
+  const suggestionsDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
   // Fetch saved audiences when account changes
   useEffect(() => {
@@ -204,6 +210,70 @@ export function CampaignTargetingEditor({
     }
   };
   
+  // Bulk skills resolve handler
+  const handleBulkSkillsResolve = async (skills: string[]): Promise<{ results: TargetingEntity[]; notFound: string[] }> => {
+    if (!accessToken) return { results: [], notFound: skills };
+    try {
+      const { data, error } = await supabase.functions.invoke('linkedin-api', {
+        body: {
+          action: 'bulk_search_skills',
+          accessToken,
+          params: { skills }
+        }
+      });
+      if (error) throw error;
+      return { results: data.results || [], notFound: data.notFound || [] };
+    } catch (err) {
+      toast({ title: 'Bulk resolve failed', variant: 'destructive' });
+      return { results: [], notFound: skills };
+    }
+  };
+
+  // Fetch skill suggestions based on currently selected skills
+  const fetchSkillSuggestions = useCallback(async (selectedSkills: TargetingEntity[]) => {
+    if (!accessToken || selectedSkills.length === 0) {
+      setSkillSuggestions([]);
+      return;
+    }
+    setIsFetchingSuggestions(true);
+    try {
+      const skillNames = selectedSkills.map(s => s.name);
+      const excludeUrns = selectedSkills.map(s => s.urn);
+      const { data, error } = await supabase.functions.invoke('linkedin-api', {
+        body: {
+          action: 'get_skill_suggestions',
+          accessToken,
+          params: { skillNames, excludeUrns }
+        }
+      });
+      if (error) throw error;
+      const suggestions: TargetingEntity[] = (data.suggestions || []).map((s: any) => ({
+        id: s.id,
+        urn: s.urn,
+        name: s.name,
+        type: 'skill' as const,
+        targetable: s.targetable,
+      }));
+      setSkillSuggestions(suggestions);
+    } catch (err) {
+      // Silently ignore suggestion errors
+    } finally {
+      setIsFetchingSuggestions(false);
+    }
+  }, [accessToken]);
+
+  // Auto-refresh suggestions when selected skills change (debounced)
+  useEffect(() => {
+    const selectedSkills = selectedEntities.filter(e => e.type === 'skill');
+    if (suggestionsDebounceRef.current) clearTimeout(suggestionsDebounceRef.current);
+    suggestionsDebounceRef.current = setTimeout(() => {
+      fetchSkillSuggestions(selectedSkills);
+    }, 600);
+    return () => {
+      if (suggestionsDebounceRef.current) clearTimeout(suggestionsDebounceRef.current);
+    };
+  }, [selectedEntities, fetchSkillSuggestions]);
+
   // Save audience handler
   const handleSaveAudience = async (name: string, description: string) => {
     setIsSaving(true);
@@ -372,6 +442,11 @@ export function CampaignTargetingEditor({
               <Button onClick={handleSearch} disabled={isSearching || !searchQuery.trim()}>
                 {isSearching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
               </Button>
+              {searchType === 'skills' && (
+                <Button variant="outline" onClick={() => setShowBulkSkillsImport(true)} title="Bulk import skills">
+                  <Upload className="h-4 w-4" />
+                </Button>
+              )}
             </div>
             
             {/* Search Error */}
@@ -389,11 +464,11 @@ export function CampaignTargetingEditor({
                   {searchResults.map((entity) => {
                     const isSelected = selectedEntities.some(e => e.urn === entity.urn);
                     return (
-                      <div 
+                      <div
                         key={entity.urn}
                         className={`flex items-center justify-between p-3 rounded-lg border transition-colors ${
-                          isSelected 
-                            ? 'bg-primary/10 border-primary/30' 
+                          isSelected
+                            ? 'bg-primary/10 border-primary/30'
                             : 'bg-muted/30 border-border/50 hover:bg-muted/50'
                         }`}
                       >
@@ -425,6 +500,33 @@ export function CampaignTargetingEditor({
                 </div>
               )}
             </ScrollArea>
+
+            {/* Skill Suggestions */}
+            {searchType === 'skills' && (isFetchingSuggestions || skillSuggestions.length > 0) && (
+              <div className="space-y-2 pt-2 border-t border-border/50">
+                <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                  <Sparkles className="h-3 w-3 text-purple-500" />
+                  {isFetchingSuggestions ? 'Fetching suggestions...' : 'Suggested Skills'}
+                  {isFetchingSuggestions && <Loader2 className="h-3 w-3 animate-spin ml-auto" />}
+                </div>
+                {!isFetchingSuggestions && (
+                  <div className="flex flex-wrap gap-2">
+                    {skillSuggestions
+                      .filter(s => !selectedEntities.some(e => e.urn === s.urn))
+                      .map((skill) => (
+                        <button
+                          key={skill.urn}
+                          onClick={() => addToSelection(skill)}
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs bg-purple-500/10 border border-purple-500/30 text-purple-300 hover:bg-purple-500/20 transition-colors"
+                        >
+                          <Plus className="h-3 w-3" />
+                          {skill.name}
+                        </button>
+                      ))}
+                  </div>
+                )}
+              </div>
+            )}
           </CardContent>
         </Card>
         
@@ -659,6 +761,15 @@ export function CampaignTargetingEditor({
         onOpenChange={setShowBulkImport}
         onResolve={handleBulkResolve}
         onAddToSelection={addMultipleToSelection}
+        type="titles"
+      />
+
+      <BulkImportDialog
+        open={showBulkSkillsImport}
+        onOpenChange={setShowBulkSkillsImport}
+        onResolve={handleBulkSkillsResolve}
+        onAddToSelection={addMultipleToSelection}
+        type="skills"
       />
     </div>
   );

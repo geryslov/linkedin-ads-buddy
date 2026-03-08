@@ -6922,6 +6922,179 @@ serve(async (req) => {
         });
       }
 
+      case 'bulk_search_skills': {
+        const { skills } = params;
+
+        if (!skills || !Array.isArray(skills) || skills.length === 0) {
+          return new Response(JSON.stringify({
+            results: [],
+            notFound: [],
+            message: 'No skills provided'
+          }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        const limitedSkills = skills.slice(0, 50);
+        console.log(`[bulk_search_skills] Processing ${limitedSkills.length} skills`);
+
+        const results: any[] = [];
+        const notFound: string[] = [];
+
+        for (const skill of limitedSkills) {
+          const trimmedSkill = skill.trim();
+          if (!trimmedSkill || trimmedSkill.length < 2) {
+            notFound.push(skill);
+            continue;
+          }
+
+          try {
+            const searchParams = new URLSearchParams({
+              q: 'typeahead',
+              facet: 'urn:li:adTargetingFacet:skills',
+              query: trimmedSkill,
+              count: '5',
+            });
+
+            const searchUrl = `https://api.linkedin.com/rest/adTargetingEntities?${searchParams}`;
+            const response = await fetch(searchUrl, {
+              headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'X-Restli-Protocol-Version': '2.0.0',
+                'LinkedIn-Version': '202511',
+              },
+            });
+
+            if (response.ok) {
+              const data = await response.json();
+              const elements = data.elements || [];
+
+              const lowerSkill = trimmedSkill.toLowerCase();
+              let bestMatch = null;
+
+              for (const el of elements) {
+                const name = el.name?.localized?.en_US ||
+                             el.name?.localized?.[Object.keys(el.name?.localized || {})[0]] ||
+                             el.displayName || '';
+                if (typeof name === 'string' && name.toLowerCase() === lowerSkill) {
+                  bestMatch = el;
+                  break;
+                }
+              }
+
+              if (!bestMatch && elements.length > 0) bestMatch = elements[0];
+
+              if (bestMatch) {
+                const urn = bestMatch.urn || bestMatch.entity || '';
+                const name = bestMatch.name?.localized?.en_US ||
+                             bestMatch.name?.localized?.[Object.keys(bestMatch.name?.localized || {})[0]] ||
+                             bestMatch.displayName || trimmedSkill;
+                let id = '';
+                const skillMatch = urn.match(/urn:li:skill:(\d+)/);
+                if (skillMatch) id = skillMatch[1];
+
+                results.push({
+                  id,
+                  urn,
+                  name: typeof name === 'string' ? name : String(name),
+                  type: 'skill',
+                  targetable: true,
+                  originalQuery: trimmedSkill,
+                });
+              } else {
+                notFound.push(trimmedSkill);
+              }
+            } else {
+              console.log(`[bulk_search_skills] Failed for "${trimmedSkill}": ${response.status}`);
+              notFound.push(trimmedSkill);
+            }
+          } catch (err) {
+            console.log(`[bulk_search_skills] Error for "${trimmedSkill}":`, err);
+            notFound.push(trimmedSkill);
+          }
+
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+
+        console.log(`[bulk_search_skills] Done: ${results.length} matched, ${notFound.length} not found`);
+
+        return new Response(JSON.stringify({
+          results,
+          notFound,
+          count: results.length
+        }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      case 'get_skill_suggestions': {
+        const { skillNames, excludeUrns } = params || {};
+
+        if (!skillNames || !Array.isArray(skillNames) || skillNames.length === 0) {
+          return new Response(JSON.stringify({ suggestions: [] }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+
+        const excludeSet = new Set<string>(excludeUrns || []);
+        const suggestionMap = new Map<string, any>();
+
+        // Search using up to 3 selected skill names to find related skills
+        for (const skillName of skillNames.slice(0, 3)) {
+          const trimmed = skillName.trim();
+          if (!trimmed || trimmed.length < 2) continue;
+
+          try {
+            const searchParams = new URLSearchParams({
+              q: 'typeahead',
+              facet: 'urn:li:adTargetingFacet:skills',
+              query: trimmed,
+              count: '20',
+            });
+
+            const response = await fetch(
+              `https://api.linkedin.com/rest/adTargetingEntities?${searchParams}`,
+              {
+                headers: {
+                  'Authorization': `Bearer ${accessToken}`,
+                  'X-Restli-Protocol-Version': '2.0.0',
+                  'LinkedIn-Version': '202511',
+                },
+              }
+            );
+
+            if (response.ok) {
+              const data = await response.json();
+              for (const el of (data.elements || [])) {
+                const urn = el.urn || el.entity || '';
+                if (!urn || excludeSet.has(urn) || suggestionMap.has(urn)) continue;
+                const name = el.name?.localized?.en_US ||
+                             el.name?.localized?.[Object.keys(el.name?.localized || {})[0]] ||
+                             el.displayName || '';
+                if (!name) continue;
+                let id = '';
+                const skillMatch = urn.match(/urn:li:skill:(\d+)/);
+                if (skillMatch) id = skillMatch[1];
+                suggestionMap.set(urn, {
+                  id,
+                  urn,
+                  name: typeof name === 'string' ? name : String(name),
+                  type: 'skill',
+                  targetable: true,
+                });
+              }
+            }
+          } catch (err) {
+            console.log(`[get_skill_suggestions] Error for "${trimmed}":`, err);
+          }
+
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
+
+        const suggestions = Array.from(suggestionMap.values()).slice(0, 20);
+        console.log(`[get_skill_suggestions] Returning ${suggestions.length} suggestions for ${skillNames.length} seed skills`);
+
+        return new Response(JSON.stringify({ suggestions }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
       case 'update_campaign_targeting': {
         // Support both single campaignId and array of campaignIds
         // NOTE: accountId is no longer required - derived from campaign

@@ -25,8 +25,9 @@ interface TargetingEntity {
 interface BulkImportDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onResolve: (titles: string[]) => Promise<{ results: TargetingEntity[]; notFound: string[] }>;
+  onResolve: (names: string[]) => Promise<{ results: TargetingEntity[]; notFound: string[] }>;
   onAddToSelection: (entities: TargetingEntity[]) => void;
+  type?: 'titles' | 'skills';
 }
 
 export function BulkImportDialog({
@@ -34,7 +35,13 @@ export function BulkImportDialog({
   onOpenChange,
   onResolve,
   onAddToSelection,
+  type = 'titles',
 }: BulkImportDialogProps) {
+  const label = type === 'skills' ? 'Skill' : 'Job Title';
+  const labelPlural = type === 'skills' ? 'Skills' : 'Job Titles';
+  const placeholder = type === 'skills'
+    ? 'Python\nMachine Learning\nData Analysis\nProject Management'
+    : 'Chief Marketing Officer\nVP of Sales\nSoftware Engineer\nProduct Manager';
   const [inputText, setInputText] = useState('');
   const [isResolving, setIsResolving] = useState(false);
   const [resolvedEntities, setResolvedEntities] = useState<TargetingEntity[]>([]);
@@ -52,6 +59,7 @@ export function BulkImportDialog({
     setIsResolving(true);
     try {
       const { results, notFound } = await onResolve(titles);
+
       setResolvedEntities(results);
       setNotFoundTitles(notFound);
       setHasResolved(true);
@@ -84,26 +92,26 @@ export function BulkImportDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Upload className="h-5 w-5 text-primary" />
-            Bulk Import Job Titles
+            Bulk Import {labelPlural}
           </DialogTitle>
           <DialogDescription>
-            Paste job titles (one per line) to resolve them against LinkedIn's targeting database.
+            Paste {labelPlural.toLowerCase()} (one per line) to resolve them against LinkedIn's targeting database.
           </DialogDescription>
         </DialogHeader>
-        
+
         <div className="grid gap-4 py-4">
           {!hasResolved ? (
             <>
               <div className="grid gap-2">
                 <div className="flex items-center justify-between">
-                  <Label htmlFor="titles">Job Titles</Label>
+                  <Label htmlFor="names">{labelPlural}</Label>
                   {titleCount > 0 && (
-                    <Badge variant="secondary">{titleCount} titles</Badge>
+                    <Badge variant="secondary">{titleCount} {titleCount === 1 ? label.toLowerCase() : labelPlural.toLowerCase()}</Badge>
                   )}
                 </div>
                 <Textarea
-                  id="titles"
-                  placeholder="Chief Marketing Officer&#10;VP of Sales&#10;Software Engineer&#10;Product Manager"
+                  id="names"
+                  placeholder={placeholder}
                   value={inputText}
                   onChange={(e) => setInputText(e.target.value)}
                   disabled={isResolving}
@@ -111,7 +119,7 @@ export function BulkImportDialog({
                   className="font-mono text-sm"
                 />
                 <p className="text-xs text-muted-foreground">
-                  Enter one job title per line. Maximum 50 titles per import.
+                  Enter one {label.toLowerCase()} per line. Maximum 50 per import.
                 </p>
               </div>
             </>
@@ -189,7 +197,7 @@ export function BulkImportDialog({
               ) : (
                 <>
                   <Search className="mr-2 h-4 w-4" />
-                  Resolve Titles ({Math.min(titleCount, 50)})
+                  Resolve {labelPlural} ({Math.min(titleCount, 50)})
                 </>
               )}
             </Button>
