@@ -10580,13 +10580,14 @@ serve(async (req) => {
         }
 
         // Step 2: Parallel adAnalyticsV2 calls — one per conversion with MEMBER_COMPANY pivot
+        // LinkedIn adAnalyticsV2 uses List() notation for the conversions filter
         const analyticsResults = await Promise.all(allConvDefs.map(async (conv) => {
           const analyticsUrl = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
             `dateRange.start.day=${startDay}&dateRange.start.month=${startMonth}&dateRange.start.year=${startYear}&` +
             `dateRange.end.day=${endDay}&dateRange.end.month=${endMonth}&dateRange.end.year=${endYear}&` +
             `timeGranularity=ALL&pivot=MEMBER_COMPANY&` +
             `accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
-            `conversions[0]=${encodeURIComponent(conv.urn)}&` +
+            `conversions=List(${encodeURIComponent(conv.urn)})&` +
             `fields=externalWebsiteConversions,pivotValue&` +
             `count=10000`;
 
