@@ -161,6 +161,39 @@ export type Database = {
         }
         Relationships: []
       }
+      naming_conventions: {
+        Row: {
+          account_id: string
+          created_at: string | null
+          entity_type: string
+          id: string
+          segments: Json
+          separator: string
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          account_id: string
+          created_at?: string | null
+          entity_type?: string
+          id?: string
+          segments: Json
+          separator?: string
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          account_id?: string
+          created_at?: string | null
+          entity_type?: string
+          id?: string
+          segments?: Json
+          separator?: string
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           created_at: string
