@@ -10526,6 +10526,162 @@ serve(async (req) => {
         }
       }
 
+      case 'get_company_conversion_breakdown': {
+        const { accountId, dateRange, maxConversions } = params || {};
+        const startDate = dateRange?.start || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        const endDate = dateRange?.end || new Date().toISOString().split('T')[0];
+        const conversionCap = Math.min(typeof maxConversions === 'number' ? maxConversions : 20, 20);
+
+        const [startYear, startMonth, startDay] = startDate.split('-').map(Number);
+        const [endYear, endMonth, endDay] = endDate.split('-').map(Number);
+
+        console.log(`[get_company_conversion_breakdown] Account ${accountId}, ${startDate} to ${endDate}, cap ${conversionCap}`);
+
+        // Step 1: Fetch conversion definitions
+        const convDefsUrl = `https://api.linkedin.com/rest/conversions?q=account&account=urn:li:sponsoredAccount:${accountId}`;
+        const convDefsResponse = await fetch(convDefsUrl, {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'LinkedIn-Version': '202511',
+            'X-Restli-Protocol-Version': '2.0.0',
+          },
+        });
+
+        if (!convDefsResponse.ok) {
+          const errorText = await convDefsResponse.text();
+          console.error('[get_company_conversion_breakdown] Failed to fetch conversions:', convDefsResponse.status, errorText);
+          return new Response(JSON.stringify({ error: 'Failed to fetch conversion definitions', details: errorText, conversions: [], companies: [] }), {
+            status: 200,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+
+        const convDefsData = await convDefsResponse.json();
+        const allConvDefs: Array<{ id: string; urn: string; name: string; type: string; enabled: boolean }> =
+          (convDefsData.elements || [])
+            .filter((c: any) => c.enabled !== false)
+            .slice(0, conversionCap)
+            .map((c: any) => ({
+              id: String(c.id),
+              urn: c.id ? `urn:li:conversion:${c.id}` : (c.$URN || ''),
+              name: c.name || `Conversion ${c.id}`,
+              type: c.type || 'UNKNOWN',
+              enabled: c.enabled !== false,
+            }));
+
+        console.log(`[get_company_conversion_breakdown] Found ${allConvDefs.length} enabled conversions`);
+
+        if (allConvDefs.length === 0) {
+          return new Response(JSON.stringify({ conversions: [], companies: [] }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+
+        // Step 2: Parallel adAnalyticsV2 calls — one per conversion with MEMBER_COMPANY pivot
+        const analyticsResults = await Promise.all(allConvDefs.map(async (conv) => {
+          const analyticsUrl = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
+            `dateRange.start.day=${startDay}&dateRange.start.month=${startMonth}&dateRange.start.year=${startYear}&` +
+            `dateRange.end.day=${endDay}&dateRange.end.month=${endMonth}&dateRange.end.year=${endYear}&` +
+            `timeGranularity=ALL&pivot=MEMBER_COMPANY&` +
+            `accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
+            `conversions[0]=${encodeURIComponent(conv.urn)}&` +
+            `fields=externalWebsiteConversions,pivotValue&` +
+            `count=10000`;
+
+          try {
+            const resp = await fetch(analyticsUrl, {
+              headers: { 'Authorization': `Bearer ${accessToken}` },
+            });
+            if (!resp.ok) {
+              console.warn(`[get_company_conversion_breakdown] Analytics failed for conversion ${conv.id}: ${resp.status}`);
+              return { convId: conv.id, elements: [] };
+            }
+            const data = await resp.json();
+            return { convId: conv.id, elements: data.elements || [] };
+          } catch (e) {
+            console.warn(`[get_company_conversion_breakdown] Error for conversion ${conv.id}:`, e);
+            return { convId: conv.id, elements: [] };
+          }
+        }));
+
+        // Step 3: Aggregate into { companyUrn -> { convId -> count } }
+        const companyMap = new Map<string, Record<string, number>>();
+
+        for (const { convId, elements } of analyticsResults) {
+          for (const el of elements) {
+            const entityUrn = el.pivotValue || '';
+            if (!entityUrn) continue;
+            const count = el.externalWebsiteConversions || 0;
+            if (!companyMap.has(entityUrn)) companyMap.set(entityUrn, {});
+            const entry = companyMap.get(entityUrn)!;
+            entry[convId] = (entry[convId] || 0) + count;
+          }
+        }
+
+        console.log(`[get_company_conversion_breakdown] Aggregated ${companyMap.size} companies`);
+
+        // Step 4: Resolve company names via organizationsLookup
+        const companyUrns = Array.from(companyMap.keys());
+        const companyNames = new Map<string, string>();
+
+        if (companyUrns.length > 0) {
+          const orgIdToUrn = new Map<string, string>();
+          companyUrns.forEach(urn => {
+            const match = urn.match(/^urn:li:organization:(\d+)$/);
+            if (match) orgIdToUrn.set(match[1], urn);
+          });
+
+          const orgIds = Array.from(orgIdToUrn.keys());
+          const batchSize = 50;
+          for (let i = 0; i < orgIds.length; i += batchSize) {
+            const batch = orgIds.slice(i, i + batchSize);
+            const idsParam = batch.map((id, idx) => `ids[${idx}]=${id}`).join('&');
+            try {
+              const orgResponse = await fetch(
+                `https://api.linkedin.com/v2/organizationsLookup?${idsParam}&projection=(results*(id,localizedName))`,
+                { headers: { 'Authorization': `Bearer ${accessToken}` } }
+              );
+              if (orgResponse.ok) {
+                const orgData = await orgResponse.json();
+                const results = orgData.results || {};
+                Object.entries(results).forEach(([id, org]: [string, any]) => {
+                  const urn = orgIdToUrn.get(id);
+                  if (urn && org?.localizedName) companyNames.set(urn, org.localizedName);
+                });
+              }
+            } catch (e) {
+              console.warn('[get_company_conversion_breakdown] Organization lookup failed:', e);
+            }
+          }
+        }
+
+        console.log(`[get_company_conversion_breakdown] Resolved ${companyNames.size} company names`);
+
+        // Step 5: Build flat result array sorted by total conversions desc
+        const companies = Array.from(companyMap.entries()).map(([entityUrn, byConversion]) => {
+          const totalConversions = Object.values(byConversion).reduce((sum, v) => sum + v, 0);
+          return {
+            entityUrn,
+            entityName: companyNames.get(entityUrn) || extractNameFromUrn(entityUrn),
+            totalConversions,
+            byConversion,
+          };
+        });
+        companies.sort((a, b) => b.totalConversions - a.totalConversions);
+
+        return new Response(JSON.stringify({
+          conversions: allConvDefs,
+          companies,
+          metadata: {
+            accountId,
+            dateRange: { start: startDate, end: endDate },
+            cappedAt: conversionCap,
+          },
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
       default:
         return new Response(JSON.stringify({ error: 'Unknown action' }), {
           status: 400,

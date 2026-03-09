@@ -19,6 +19,7 @@ import {
   Crosshair,
   BookOpen,
   Tags,
+  Grid3x3,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -44,6 +45,7 @@ const navItems = [
   { id: "influence_matcher", label: "Influence Matcher", icon: Crosshair },
   { id: "standardized_titles", label: "Titles", icon: BookOpen },
   { id: "name_report", label: "Name Report", icon: Tags },
+  { id: "conv_breakdown", label: "Conv. Breakdown", icon: Grid3x3 },
 ];
 
 export function Sidebar({ activeTab, onTabChange, onLogout, profileName, isAdmin }: SidebarProps) {
