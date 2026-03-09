@@ -10538,7 +10538,9 @@ serve(async (req) => {
         console.log(`[get_company_conversion_breakdown] Account ${accountId}, ${startDate} to ${endDate}, cap ${conversionCap}`);
 
         // Step 1: Fetch conversion definitions
-        const convDefsUrl = `https://api.linkedin.com/rest/conversions?q=account&account=urn:li:sponsoredAccount:${accountId}`;
+        // URN must be URL-encoded in the query string (colons are special chars)
+        const accountUrn = encodeURIComponent(`urn:li:sponsoredAccount:${accountId}`);
+        const convDefsUrl = `https://api.linkedin.com/rest/conversions?q=account&account=${accountUrn}`;
         const convDefsResponse = await fetch(convDefsUrl, {
           headers: {
             'Authorization': `Bearer ${accessToken}`,
@@ -10550,7 +10552,7 @@ serve(async (req) => {
         if (!convDefsResponse.ok) {
           const errorText = await convDefsResponse.text();
           console.error('[get_company_conversion_breakdown] Failed to fetch conversions:', convDefsResponse.status, errorText);
-          return new Response(JSON.stringify({ error: 'Failed to fetch conversion definitions', details: errorText, conversions: [], companies: [] }), {
+          return new Response(JSON.stringify({ error: `Failed to fetch conversion definitions (HTTP ${convDefsResponse.status})`, details: errorText, conversions: [], companies: [] }), {
             status: 200,
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           });

@@ -118,7 +118,8 @@ export function useCompanyConversionBreakdown(accessToken: string | null) {
       if (apiError) throw apiError;
 
       if (responseData.error) {
-        setError(responseData.error);
+        const detail = responseData.details ? ` — ${responseData.details}` : '';
+        setError(responseData.error + detail);
         setData(null);
         return;
       }
