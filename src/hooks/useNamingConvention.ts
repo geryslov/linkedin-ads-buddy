@@ -116,7 +116,7 @@ export function useNamingConvention() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.user) return false;
 
-      const { error: dbError } = await supabase
+      const { error: dbError } = await (supabase as any)
         .from('naming_conventions')
         .delete()
         .eq('user_id', session.user.id)
