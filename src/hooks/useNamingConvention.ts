@@ -82,7 +82,7 @@ export function useNamingConvention() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.user) return false;
 
-      const { data, error: dbError } = await supabase
+      const { data, error: dbError } = await (supabase as any)
         .from('naming_conventions')
         .upsert(
           {
@@ -98,7 +98,7 @@ export function useNamingConvention() {
         .single();
 
       if (dbError) throw dbError;
-      setConvention(data ? { ...data, segments: data.segments as string[] } : null);
+      setConvention(data ? { ...data, segments: data.segments as string[] } as NamingConvention : null);
       toast({ title: 'Naming convention saved' });
       return true;
     } catch (err: any) {
