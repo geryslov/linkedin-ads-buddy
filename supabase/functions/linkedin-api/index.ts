@@ -5005,18 +5005,18 @@ serve(async (req) => {
           // Check reference field for lead gen form URN
           const reference = creative.reference || '';
           if (!leadFormUrn && typeof reference === 'string' && reference.includes('leadGenForm')) {
-            const formMatch = reference.match(/urn:li:leadGenForm:\d+/);
-            if (formMatch) leadFormUrn = formMatch[0];
+            const formMatch = reference.match(/urn:li:leadGenForm:\(?(\d+)(?:,\d+\))?/);
+            if (formMatch) leadFormUrn = `urn:li:leadGenForm:${formMatch[1]}`;
           }
           
           // Deep search fallback: search entire creative JSON for form URN pattern
           if (!leadFormUrn) {
             const creativeJson = JSON.stringify(creative);
-            // Match both adForm and leadGenForm patterns
-            const formMatch = creativeJson.match(/urn:li:(?:adForm|leadGenForm):(\d+)/);
+            // Match both plain and versioned adForm/leadGenForm URNs
+            const formMatch = creativeJson.match(/urn:li:(?:adForm|leadGenForm):\(?(\d+)(?:,\d+\))?/);
             if (formMatch) {
               const formId = formMatch[1];
-              // Normalize to leadGenForm URN format
+              // Normalize to plain leadGenForm URN for consistent key usage
               leadFormUrn = `urn:li:leadGenForm:${formId}`;
             }
           }
@@ -5144,11 +5144,17 @@ serve(async (req) => {
         // Store by form ID only (not full URN) to avoid format mismatches
         const lgfFormNames = new Map<string, string>();
 
-        // Helper to extract form ID from any URN format
+        // Helper to extract form ID from any URN format, including versioned URNs like
+        // urn:li:leadGenForm:(1003720013,1) as well as plain urn:li:leadGenForm:1003720013
         const extractFormId = (urn: string): string => {
           if (!urn) return '';
-          const match = urn.match(/(?:adForm|leadGenForm):(\d+)/);
-          return match ? match[1] : urn.split(':').pop() || '';
+          // Versioned: urn:li:leadGenForm:(1003720013,1) → "1003720013"
+          const versionedMatch = urn.match(/(?:adForm|leadGenForm):\((\d+),\d+\)/);
+          if (versionedMatch) return versionedMatch[1];
+          // Plain: urn:li:leadGenForm:1003720013 → "1003720013"
+          const plainMatch = urn.match(/(?:adForm|leadGenForm):(\d+)/);
+          if (plainMatch) return plainMatch[1];
+          return urn.split(':').pop() || '';
         };
 
         // Use the correct Lead Sync API endpoint: /rest/leadGenForms
@@ -5180,8 +5186,13 @@ serve(async (req) => {
             }
 
             for (const form of forms) {
-              // Extract form ID from id field or entityUrn
-              const formId = String(form.id ?? extractFormId(form.entityUrn || '') ?? '').trim();
+              // Extract form ID from id field or entityUrn.
+              // form.id may be a plain number (1003720013) or a versioned string "(1003720013,1)".
+              const rawId = String(form.id ?? '').trim();
+              const versionedIdMatch = rawId.match(/^\((\d+),\d+\)$/);
+              const formId = versionedIdMatch
+                ? versionedIdMatch[1]
+                : rawId || extractFormId(form.entityUrn || '');
               if (!formId) continue;
 
               // Extract name with localization support
