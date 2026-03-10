@@ -5128,10 +5128,16 @@ serve(async (req) => {
               if (resp.ok) {
                 const cd = await resp.json();
                 const resolvedName = cd.name || cd.creativeDscName;
-                if (resolvedName) {
-                  const existing = creativeMetadata.get(creativeUrn) || { name: '', campaignId: '' };
-                  creativeMetadata.set(creativeUrn, { ...existing, name: resolvedName });
-                }
+                const resolvedLeadFormUrn = extractLeadFormUrn(cd);
+
+                const existing = creativeMetadata.get(creativeUrn) || { name: '', campaignId: '' };
+                creativeMetadata.set(creativeUrn, {
+                  ...existing,
+                  name: resolvedName || existing.name,
+                  leadFormUrn: existing.leadFormUrn || resolvedLeadFormUrn,
+                });
+
+                if (resolvedLeadFormUrn) discoveredFormUrns.add(resolvedLeadFormUrn);
               }
             } catch (_) { /* non-fatal */ }
           }));
