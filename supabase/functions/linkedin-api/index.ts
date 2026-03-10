@@ -5212,11 +5212,9 @@ serve(async (req) => {
         if (missingFormIds.length > 0) {
           console.log(`[Step 3b] Fetching ${missingFormIds.length} missing form names individually...`);
 
-          for (const formId of missingFormIds.slice(0, 20)) { // Limit to 20 individual lookups
+          for (const formId of missingFormIds.slice(0, 20)) {
             try {
-              // Try the versioned API for individual form lookup
-              const formUrn = encodeURIComponent(`urn:li:adForm:${formId}`);
-              const formUrl = `https://api.linkedin.com/rest/adAccounts/${accountId}/adForms/${formUrn}`;
+              const formUrl = `https://api.linkedin.com/rest/leadForms/${formId}`;
 
               const formResponse = await fetch(formUrl, {
                 headers: {
@@ -5228,7 +5226,7 @@ serve(async (req) => {
 
               if (formResponse.ok) {
                 const formData = await formResponse.json();
-                const formName = formData.name || formData.headline || formData.localizedName;
+                const formName = typeof formData.name === 'string' ? formData.name : null;
                 if (formName) {
                   lgfFormNames.set(formId, formName);
                   console.log(`[Step 3b] Resolved form ${formId}: ${formName}`);
