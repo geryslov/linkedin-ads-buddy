@@ -10685,6 +10685,103 @@ serve(async (req) => {
         });
       }
 
+      case 'get_lead_form_responses': {
+        const { accountId, formUrn, dateRange: leadsDateRange, offset: leadsOffset = 0 } = params || {};
+
+        if (!accountId) {
+          return new Response(JSON.stringify({ error: 'accountId is required' }), {
+            status: 400,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+
+        const leadsStartDate = leadsDateRange?.start || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        const leadsEndDate = leadsDateRange?.end || new Date().toISOString().split('T')[0];
+
+        // Convert YYYY-MM-DD to epoch ms (start of day UTC / end of day UTC)
+        const leadsStartMs = new Date(leadsStartDate + 'T00:00:00Z').getTime();
+        const leadsEndMs = new Date(leadsEndDate + 'T23:59:59Z').getTime();
+
+        const ownerUrn = encodeURIComponent(`urn:li:sponsoredAccount:${accountId}`);
+
+        let leadsUrl = `https://api.linkedin.com/rest/leadFormResponses?q=owner` +
+          `&owner=${ownerUrn}` +
+          `&leadType=SPONSORED` +
+          `&submittedAtTimeRange.start=${leadsStartMs}` +
+          `&submittedAtTimeRange.end=${leadsEndMs}` +
+          `&count=100` +
+          `&start=${leadsOffset}`;
+
+        if (formUrn) {
+          leadsUrl += `&versionedLeadGenFormUrn=${encodeURIComponent(formUrn)}`;
+        }
+
+        console.log(`[get_lead_form_responses] Fetching leads for account ${accountId}, offset ${leadsOffset}, formUrn: ${formUrn || 'all'}`);
+
+        const leadsResp = await fetch(leadsUrl, {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'LinkedIn-Version': '202511',
+            'X-Restli-Protocol-Version': '2.0.0',
+          },
+        });
+
+        if (!leadsResp.ok) {
+          const errText = await leadsResp.text();
+          console.error(`[get_lead_form_responses] API error: ${leadsResp.status} - ${errText.substring(0, 300)}`);
+          return new Response(JSON.stringify({
+            error: `LinkedIn API error: ${leadsResp.status}`,
+            details: errText.substring(0, 300),
+          }), {
+            status: leadsResp.status,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+
+        const leadsData = await leadsResp.json();
+        const leadsElements = leadsData.elements || [];
+        const leadsPaging = leadsData.paging || {};
+        const leadsTotal = leadsPaging.total ?? leadsElements.length;
+        const leadsCount = leadsPaging.count ?? 100;
+        const leadsStart = leadsPaging.start ?? 0;
+        const leadsHasMore = leadsElements.length === leadsCount && (leadsStart + leadsCount) < leadsTotal;
+
+        const leads = leadsElements.map((el: any) => {
+          const fieldMap: Record<string, string> = {};
+          const customAnswers: Record<string, string> = {};
+
+          for (const field of (el.formResponse || [])) {
+            if (field.predefinedField) {
+              fieldMap[field.predefinedField] = (field.values || [])[0] || '';
+            }
+          }
+
+          for (const field of (el.customFieldAnswers || [])) {
+            const label = field.label || field.questionUrn || 'Unknown';
+            customAnswers[label] = (field.values || [])[0] || '';
+          }
+
+          return {
+            leadUrn: el.leadUrn || el.id || '',
+            formUrn: el.leadGenFormUrn || '',
+            campaignUrn: el.associatedEntity || '',
+            firstName: fieldMap['FIRST_NAME'] || '',
+            lastName: fieldMap['LAST_NAME'] || '',
+            email: fieldMap['EMAIL'] || '',
+            company: fieldMap['COMPANY'] || '',
+            submittedAt: el.submittedAt || 0,
+            testLead: el.testLead || false,
+            customAnswers,
+          };
+        });
+
+        console.log(`[get_lead_form_responses] Returning ${leads.length} leads, total: ${leadsTotal}, hasMore: ${leadsHasMore}`);
+
+        return new Response(JSON.stringify({ leads, total: leadsTotal, hasMore: leadsHasMore }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
       default:
         return new Response(JSON.stringify({ error: 'Unknown action' }), {
           status: 400,

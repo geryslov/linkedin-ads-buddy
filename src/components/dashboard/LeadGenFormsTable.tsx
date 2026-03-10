@@ -17,6 +17,8 @@ import { useToast } from '@/hooks/use-toast';
 interface LeadGenFormsTableProps {
   data: LeadGenFormData[];
   isLoading: boolean;
+  selectedFormUrn?: string;
+  onSelectForm?: (formUrn: string, formName: string) => void;
 }
 
 interface AggregatedCreative {
@@ -154,7 +156,17 @@ function CreativesSubTable({ creatives }: { creatives: LeadGenFormCreative[] }) 
   );
 }
 
-function FormRow({ form, colCount }: { form: LeadGenFormData; colCount: number }) {
+function FormRow({
+  form,
+  colCount,
+  isSelected,
+  onSelect,
+}: {
+  form: LeadGenFormData;
+  colCount: number;
+  isSelected?: boolean;
+  onSelect?: (formUrn: string, formName: string) => void;
+}) {
   const [isOpen, setIsOpen] = useState(false);
   const { toast } = useToast();
 
@@ -182,8 +194,11 @@ function FormRow({ form, colCount }: { form: LeadGenFormData; colCount: number }
   return (
     <>
       <TableRow
-        className={`hover:bg-muted/40 transition-colors ${hasCreatives ? 'cursor-pointer' : ''} ${isOpen ? 'bg-muted/20' : ''}`}
-        onClick={hasCreatives ? () => setIsOpen(!isOpen) : undefined}
+        className={`hover:bg-muted/40 transition-colors cursor-pointer ${isOpen ? 'bg-muted/20' : ''} ${isSelected ? 'bg-primary/10 border-l-2 border-primary' : ''}`}
+        onClick={() => {
+          if (hasCreatives) setIsOpen(!isOpen);
+          if (onSelect) onSelect(form.formUrn, form.formName);
+        }}
       >
         {/* Expand */}
         <TableCell className="w-8 p-2">
@@ -233,7 +248,7 @@ function FormRow({ form, colCount }: { form: LeadGenFormData; colCount: number }
   );
 }
 
-export function LeadGenFormsTable({ data, isLoading }: LeadGenFormsTableProps) {
+export function LeadGenFormsTable({ data, isLoading, selectedFormUrn, onSelectForm }: LeadGenFormsTableProps) {
   const { toast } = useToast();
   // 1 expand + 1 name + 9 metrics + 1 creatives count + 1 export = 13
   const COL_COUNT = 13;
@@ -320,7 +335,13 @@ export function LeadGenFormsTable({ data, isLoading }: LeadGenFormsTableProps) {
           </TableHeader>
           <TableBody>
             {data.map((form) => (
-              <FormRow key={form.formUrn} form={form} colCount={COL_COUNT} />
+              <FormRow
+                key={form.formUrn}
+                form={form}
+                colCount={COL_COUNT}
+                isSelected={selectedFormUrn === form.formUrn}
+                onSelect={onSelectForm}
+              />
             ))}
             {/* Summary row */}
             <TableRow className="bg-muted/50 font-semibold border-t-2 border-border">

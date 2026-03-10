@@ -20,6 +20,7 @@ import {
   BookOpen,
   Tags,
   Grid3x3,
+  ClipboardList,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -46,6 +47,7 @@ const navItems = [
   { id: "standardized_titles", label: "Titles", icon: BookOpen },
   { id: "name_report", label: "Name Report", icon: Tags },
   { id: "conv_breakdown", label: "Conv. Breakdown", icon: Grid3x3 },
+  { id: "forms_leads", label: "Forms & Leads", icon: ClipboardList },
 ];
 
 export function Sidebar({ activeTab, onTabChange, onLogout, profileName, isAdmin }: SidebarProps) {
