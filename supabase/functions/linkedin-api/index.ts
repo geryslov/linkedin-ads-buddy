@@ -5157,12 +5157,13 @@ serve(async (req) => {
           return urn.split(':').pop() || '';
         };
 
-        // Use the correct Lead Sync API endpoint: /rest/leadGenForms
+        // Use the correct Lead Sync API endpoint: /rest/leadForms
         try {
-          const leadGenFormsUrl = `https://api.linkedin.com/rest/leadGenForms?q=account&accounts=List(urn:li:sponsoredAccount:${accountId})&count=500`;
-          console.log(`[Step 3] Calling: ${leadGenFormsUrl}`);
+          const ownerParam = `(sponsoredAccount:urn%3Ali%3AsponsoredAccount%3A${accountId})`;
+          const leadFormsUrl = `https://api.linkedin.com/rest/leadForms?q=owner&owner=${ownerParam}&count=500`;
+          console.log(`[Step 3] Calling: ${leadFormsUrl}`);
 
-          const leadFormsResponse = await fetch(leadGenFormsUrl, {
+          const leadFormsResponse = await fetch(leadFormsUrl, {
             headers: {
               'Authorization': `Bearer ${accessToken}`,
               'X-Restli-Protocol-Version': '2.0.0',
@@ -5177,17 +5178,14 @@ serve(async (req) => {
             try { leadFormsData = JSON.parse(responseText); } catch {}
 
             const forms = leadFormsData?.elements || [];
-            console.log(`[Step 3] Lead Sync API returned ${forms.length} forms`);
+            console.log(`[Step 3] Lead Forms API returned ${forms.length} forms`);
 
-            // Log first form structure for debugging
             if (forms.length > 0) {
               console.log(`[Step 3] Sample form keys:`, Object.keys(forms[0]).join(', '));
               console.log(`[Step 3] Sample form:`, JSON.stringify(forms[0], null, 2).substring(0, 1500));
             }
 
             for (const form of forms) {
-              // Extract form ID from id field or entityUrn.
-              // form.id may be a plain number (1003720013) or a versioned string "(1003720013,1)".
               const rawId = String(form.id ?? '').trim();
               const versionedIdMatch = rawId.match(/^\((\d+),\d+\)$/);
               const formId = versionedIdMatch
@@ -5195,55 +5193,12 @@ serve(async (req) => {
                 : rawId || extractFormId(form.entityUrn || '');
               if (!formId) continue;
 
-              // Extract name with localization support
-              let formName: string | null = null;
-
-              // Try localized name first (LinkedIn's standard format)
-              if (form.name?.localized) {
-                formName = form.name.localized.en_US ||
-                           form.name.localized[Object.keys(form.name.localized)[0]] ||
-                           null;
-              }
-              // Direct name field
-              if (!formName && typeof form.name === 'string') {
-                formName = form.name;
-              }
-              // localizedName field
-              if (!formName && form.localizedName) {
-                formName = form.localizedName;
-              }
-              // headline field as fallback
-              if (!formName && form.headline) {
-                formName = form.headline;
-              }
-
-              // Store by ID only for consistent lookups
+              // Lead Forms API returns name as a plain string
+              const formName = typeof form.name === 'string' ? form.name : null;
               lgfFormNames.set(formId, formName || `Form ${formId}`);
             }
           } else {
-            console.log(`[Step 3] Lead Sync API returned ${leadFormsResponse.status}: ${responseText.substring(0, 300)}`);
-
-            // Fallback: try v2/adForms endpoint
-            console.log(`[Step 3] Trying fallback v2/adForms API...`);
-            const fallbackUrl = `https://api.linkedin.com/v2/adForms?q=account&account=urn:li:sponsoredAccount:${accountId}&count=500`;
-            const fallbackResponse = await fetch(fallbackUrl, {
-              headers: { 'Authorization': `Bearer ${accessToken}` },
-            });
-
-            if (fallbackResponse.ok) {
-              const fallbackData = await fallbackResponse.json();
-              const forms = fallbackData.elements || [];
-              console.log(`[Step 3] v2/adForms fallback returned ${forms.length} forms`);
-
-              for (const form of forms) {
-                const formId = form.id?.toString() || extractFormId(form.$URN || '');
-                if (!formId) continue;
-                const formName = form.name || form.headline || `Form ${formId}`;
-                lgfFormNames.set(formId, formName);
-              }
-            } else {
-              console.log(`[Step 3] v2/adForms fallback also failed: ${fallbackResponse.status}`);
-            }
+            console.log(`[Step 3] Lead Forms API returned ${leadFormsResponse.status}: ${responseText.substring(0, 300)}`);
           }
         } catch (err) {
           console.log(`[Step 3] Lead Forms API error:`, err);
