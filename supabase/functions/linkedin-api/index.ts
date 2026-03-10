@@ -5138,32 +5138,75 @@ serve(async (req) => {
         }
         console.log(`[Step 2b] Versioned name resolution done for ${lgfCreativeUrns.length} creatives`);
 
-        // Step 3: Resolve form names from Lead Sync API (leadGenForms)
-        console.log('[Step 3] Resolving lead form names via Lead Sync API...');
+        // Step 3: Resolve form names — multi-strategy approach
+        console.log('[Step 3] Resolving lead form names...');
+        console.log(`[Step 3] Discovered ${discoveredFormUrns.size} form URNs from creatives:`, Array.from(discoveredFormUrns).join(', '));
 
-        // Store by form ID only (not full URN) to avoid format mismatches
         const lgfFormNames = new Map<string, string>();
 
-        // Helper to extract form ID from any URN format, including versioned URNs like
-        // urn:li:leadGenForm:(1003720013,1) as well as plain urn:li:leadGenForm:1003720013
+        // Helper to extract numeric form ID from any URN format
         const extractFormId = (urn: string): string => {
           if (!urn) return '';
-          // Versioned: urn:li:leadGenForm:(1003720013,1) → "1003720013"
-          const versionedMatch = urn.match(/(?:adForm|leadGenForm):\((\d+),\d+\)/);
+          const versionedMatch = urn.match(/(?:adForm|leadGenForm|leadForm):\((\d+),\d+\)/);
           if (versionedMatch) return versionedMatch[1];
-          // Plain: urn:li:leadGenForm:1003720013 → "1003720013"
-          const plainMatch = urn.match(/(?:adForm|leadGenForm):(\d+)/);
+          const plainMatch = urn.match(/(?:adForm|leadGenForm|leadForm):(\d+)/);
           if (plainMatch) return plainMatch[1];
           return urn.split(':').pop() || '';
         };
 
-        // Use the correct Lead Sync API endpoint: /rest/leadForms
+        // Helper to extract name from a form object (handles plain string, multi-locale, localized variants)
+        const extractFormName = (form: any): string | null => {
+          if (!form) return null;
+          // Try direct 'name' field
+          const nameField = form.name;
+          if (typeof nameField === 'string' && nameField.trim()) return nameField.trim();
+          if (nameField && typeof nameField === 'object') {
+            // Multi-locale: { localized: { en_US: "Form Name" }, preferredLocale: {...} }
+            const localized = nameField.localized;
+            if (localized && typeof localized === 'object') {
+              const pref = nameField.preferredLocale;
+              const prefKey = pref ? `${pref.language}_${pref.country}` : null;
+              const fromPref = prefKey ? localized[prefKey] : null;
+              if (typeof fromPref === 'string') return fromPref;
+              for (const val of Object.values(localized)) {
+                if (typeof val === 'string' && val.trim()) return val.trim();
+              }
+            }
+            // Flat localized (no wrapper): { en_US: "Form Name" }
+            for (const val of Object.values(nameField)) {
+              if (typeof val === 'string' && val.trim()) return val.trim();
+            }
+          }
+          // Fallback: headline field
+          if (form.headline) {
+            const h = form.headline;
+            if (typeof h === 'string' && h.trim()) return h.trim();
+            if (h?.localized) {
+              for (const val of Object.values(h.localized)) {
+                if (typeof val === 'string' && val.trim()) return val.trim();
+              }
+            }
+          }
+          // Fallback: description
+          if (form.description) {
+            const d = form.description;
+            if (typeof d === 'string' && d.trim()) return d.trim();
+            if (d?.localized) {
+              for (const val of Object.values(d.localized)) {
+                if (typeof val === 'string' && val.trim()) return val.trim();
+              }
+            }
+          }
+          return null;
+        };
+
+        // Strategy A: Bulk fetch via /rest/leadForms?q=owner (Lead Sync API)
         try {
           const ownerParam = `(sponsoredAccount:urn%3Ali%3AsponsoredAccount%3A${accountId})`;
           const leadFormsUrl = `https://api.linkedin.com/rest/leadForms?q=owner&owner=${ownerParam}&count=500`;
-          console.log(`[Step 3] Calling: ${leadFormsUrl}`);
+          console.log(`[Step 3A] Bulk: ${leadFormsUrl}`);
 
-          const leadFormsResponse = await fetch(leadFormsUrl, {
+          const resp = await fetch(leadFormsUrl, {
             headers: {
               'Authorization': `Bearer ${accessToken}`,
               'X-Restli-Protocol-Version': '2.0.0',
@@ -5171,105 +5214,134 @@ serve(async (req) => {
             },
           });
 
-          const responseText = await leadFormsResponse.text();
+          const respText = await resp.text();
+          console.log(`[Step 3A] Status: ${resp.status}, body length: ${respText.length}`);
 
-          if (leadFormsResponse.ok) {
-            let leadFormsData: any = null;
-            try { leadFormsData = JSON.parse(responseText); } catch {}
+          if (resp.ok) {
+            let data: any;
+            try { data = JSON.parse(respText); } catch { data = null; }
+            const elements = data?.elements || [];
+            console.log(`[Step 3A] Got ${elements.length} forms`);
 
-            const forms = leadFormsData?.elements || [];
-            console.log(`[Step 3] Lead Forms API returned ${forms.length} forms`);
-
-            if (forms.length > 0) {
-              console.log(`[Step 3] Sample form keys:`, Object.keys(forms[0]).join(', '));
-              console.log(`[Step 3] Sample form:`, JSON.stringify(forms[0], null, 2).substring(0, 1500));
+            if (elements.length > 0) {
+              console.log(`[Step 3A] Sample form keys:`, Object.keys(elements[0]).join(', '));
+              console.log(`[Step 3A] Sample form (raw):`, JSON.stringify(elements[0]).substring(0, 2000));
             }
 
-            for (const form of forms) {
+            for (const form of elements) {
+              // Extract ID — could be plain number, versioned "(id,version)", or from entityUrn
               const rawId = String(form.id ?? '').trim();
-              const versionedIdMatch = rawId.match(/^\((\d+),\d+\)$/);
-              const formId = versionedIdMatch
-                ? versionedIdMatch[1]
-                : rawId || extractFormId(form.entityUrn || '');
+              const vMatch = rawId.match(/^\((\d+),\d+\)$/);
+              const formId = vMatch ? vMatch[1] : (rawId || extractFormId(form.entityUrn || form['$URN'] || ''));
               if (!formId) continue;
 
-              // Lead Forms API may return name as a plain string OR a multi-locale object
-              let formName: string | null = null;
-              if (typeof form.name === 'string') {
-                formName = form.name;
-              } else if (form.name && typeof form.name === 'object') {
-                // Multi-locale: { localized: { en_US: "Form Name" }, preferredLocale: { language: "en", country: "US" } }
-                const localized = form.name.localized || form.name;
-                if (typeof localized === 'object') {
-                  // Pick preferred locale or first available
-                  const pref = form.name.preferredLocale;
-                  const prefKey = pref ? `${pref.language}_${pref.country}` : null;
-                  formName = (prefKey && localized[prefKey]) || Object.values(localized).find((v: any) => typeof v === 'string') as string || null;
-                }
-              }
-              // Also try headline / description as fallback name sources
-              if (!formName && form.headline) {
-                formName = typeof form.headline === 'string' ? form.headline :
-                  (form.headline?.localized ? Object.values(form.headline.localized)[0] as string : null);
-              }
-              console.log(`[Step 3] Form ${formId}: name=${formName}, raw name type=${typeof form.name}, keys=${Object.keys(form).join(',')}`);
-              lgfFormNames.set(formId, formName || `Form ${formId}`);
+              const name = extractFormName(form);
+              console.log(`[Step 3A] Form id=${formId}, resolved name="${name}", raw name=${JSON.stringify(form.name)?.substring(0, 200)}`);
+              if (name) lgfFormNames.set(formId, name);
             }
           } else {
-            console.log(`[Step 3] Lead Forms API returned ${leadFormsResponse.status}: ${responseText.substring(0, 300)}`);
+            console.log(`[Step 3A] Failed: ${resp.status} - ${respText.substring(0, 500)}`);
           }
         } catch (err) {
-          console.log(`[Step 3] Lead Forms API error:`, err);
+          console.log(`[Step 3A] Error:`, (err as Error).message);
         }
 
-        // Step 3b: For any discovered forms not in the bulk response, fetch individually
-        const missingFormIds = Array.from(discoveredFormUrns)
+        // Strategy B: Individual lookups for any forms still unresolved
+        const unresolvedFormIds = Array.from(discoveredFormUrns)
           .map(urn => extractFormId(urn))
           .filter(id => id && !lgfFormNames.has(id));
 
-        if (missingFormIds.length > 0) {
-          console.log(`[Step 3b] Fetching ${missingFormIds.length} missing form names individually...`);
+        if (unresolvedFormIds.length > 0) {
+          console.log(`[Step 3B] ${unresolvedFormIds.length} forms still unresolved, trying individual lookups: ${unresolvedFormIds.join(', ')}`);
 
-          for (const formId of missingFormIds.slice(0, 20)) {
-            try {
-              const formUrl = `https://api.linkedin.com/rest/leadForms/${formId}`;
-
-              const formResponse = await fetch(formUrl, {
-                headers: {
-                  'Authorization': `Bearer ${accessToken}`,
-                  'X-Restli-Protocol-Version': '2.0.0',
-                  'LinkedIn-Version': '202511',
-                },
-              });
-
-              if (formResponse.ok) {
-                const formData = await formResponse.json();
-                let formName: string | null = null;
-                if (typeof formData.name === 'string') {
-                  formName = formData.name;
-                } else if (formData.name && typeof formData.name === 'object') {
-                  const localized = formData.name.localized || formData.name;
-                  if (typeof localized === 'object') {
-                    const pref = formData.name.preferredLocale;
-                    const prefKey = pref ? `${pref.language}_${pref.country}` : null;
-                    formName = (prefKey && localized[prefKey]) || Object.values(localized).find((v: any) => typeof v === 'string') as string || null;
-                  }
+          // Try /rest/leadForms/{id} individually (parallel, batched)
+          const BATCH = 5;
+          for (let i = 0; i < unresolvedFormIds.length && i < 30; i += BATCH) {
+            await Promise.all(unresolvedFormIds.slice(i, i + BATCH).map(async (formId) => {
+              try {
+                const resp = await fetch(`https://api.linkedin.com/rest/leadForms/${formId}`, {
+                  headers: {
+                    'Authorization': `Bearer ${accessToken}`,
+                    'X-Restli-Protocol-Version': '2.0.0',
+                    'LinkedIn-Version': '202511',
+                  },
+                });
+                if (resp.ok) {
+                  const formData = await resp.json();
+                  const name = extractFormName(formData);
+                  console.log(`[Step 3B] /rest/leadForms/${formId} → "${name}", keys: ${Object.keys(formData).join(',')}`);
+                  if (name) lgfFormNames.set(formId, name);
+                } else {
+                  const errText = await resp.text();
+                  console.log(`[Step 3B] /rest/leadForms/${formId} → ${resp.status}: ${errText.substring(0, 200)}`);
                 }
-                if (formName) {
-                  lgfFormNames.set(formId, formName);
-                  console.log(`[Step 3b] Resolved form ${formId}: ${formName}`);
-                }
-              }
-            } catch (err) {
-              // Silently continue on individual lookup failures
-            }
+              } catch (_) {}
+            }));
           }
         }
 
-        // Form names are now resolved entirely from the LinkedIn API (Steps 3, 3b above)
+        // Strategy C: Try old /v2/adForms endpoint for any still unresolved
+        const stillUnresolved = Array.from(discoveredFormUrns)
+          .map(urn => extractFormId(urn))
+          .filter(id => id && !lgfFormNames.has(id));
 
-        console.log(`[Step 3] Resolved ${lgfFormNames.size} form names:`,
-          Array.from(lgfFormNames.entries()).slice(0, 5).map(([id, name]) => `${id}=${name}`).join(', '));
+        if (stillUnresolved.length > 0) {
+          console.log(`[Step 3C] ${stillUnresolved.length} forms still unresolved, trying /v2/adForms...`);
+          try {
+            const v2Url = `https://api.linkedin.com/v2/adForms?q=account&account=urn:li:sponsoredAccount:${accountId}&count=500`;
+            const resp = await fetch(v2Url, {
+              headers: { 'Authorization': `Bearer ${accessToken}` },
+            });
+            if (resp.ok) {
+              const data = await resp.json();
+              const elements = data?.elements || [];
+              console.log(`[Step 3C] /v2/adForms returned ${elements.length} forms`);
+              if (elements.length > 0) {
+                console.log(`[Step 3C] Sample keys:`, Object.keys(elements[0]).join(', '));
+                console.log(`[Step 3C] Sample:`, JSON.stringify(elements[0]).substring(0, 1000));
+              }
+              for (const form of elements) {
+                const formId = extractFormId(form.id?.toString() || form.entityUrn || form['$URN'] || '');
+                if (!formId || lgfFormNames.has(formId)) continue;
+                const name = extractFormName(form);
+                if (name) lgfFormNames.set(formId, name);
+              }
+            } else {
+              const errText = await resp.text();
+              console.log(`[Step 3C] /v2/adForms failed: ${resp.status} - ${errText.substring(0, 300)}`);
+            }
+          } catch (err) {
+            console.log(`[Step 3C] Error:`, (err as Error).message);
+          }
+        }
+
+        // Strategy D: Try old /v2/adFormsV2 (another deprecated variant)
+        const finalUnresolved = Array.from(discoveredFormUrns)
+          .map(urn => extractFormId(urn))
+          .filter(id => id && !lgfFormNames.has(id));
+
+        if (finalUnresolved.length > 0) {
+          console.log(`[Step 3D] ${finalUnresolved.length} forms still unresolved. Trying individual /v2/adFormsV2...`);
+          for (const formId of finalUnresolved.slice(0, 10)) {
+            try {
+              // Try fetching by direct URN
+              const resp = await fetch(`https://api.linkedin.com/v2/adForms/urn:li:adForm:(${accountId},${formId})`, {
+                headers: { 'Authorization': `Bearer ${accessToken}` },
+              });
+              if (resp.ok) {
+                const formData = await resp.json();
+                const name = extractFormName(formData);
+                console.log(`[Step 3D] adForm ${formId} → "${name}"`);
+                if (name) lgfFormNames.set(formId, name);
+              } else {
+                console.log(`[Step 3D] adForm ${formId} → ${resp.status}`);
+              }
+            } catch (_) {}
+          }
+        }
+
+        console.log(`[Step 3] Final: resolved ${lgfFormNames.size}/${discoveredFormUrns.size} form names:`,
+          Array.from(lgfFormNames.entries()).map(([id, name]) => `${id}="${name}"`).join(', '));
         
         // Step 3d: Fetch campaign names for all campaigns referenced by creatives
         const lgfCampaignNames = new Map<string, string>();
