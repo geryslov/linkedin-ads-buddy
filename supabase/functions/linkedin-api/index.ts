@@ -5463,6 +5463,20 @@ serve(async (req) => {
           formData.formOpens += metrics.formOpens;
         };
         
+        const campaignToResolvedFormUrns = new Map<string, Set<string>>();
+        for (const meta of creativeMetadata.values()) {
+          if (!meta.campaignId || !meta.leadFormUrn) continue;
+          if (!campaignToResolvedFormUrns.has(meta.campaignId)) {
+            campaignToResolvedFormUrns.set(meta.campaignId, new Set<string>());
+          }
+          campaignToResolvedFormUrns.get(meta.campaignId)!.add(meta.leadFormUrn);
+        }
+
+        const globallyResolvedFormUrns = new Set<string>();
+        for (const meta of creativeMetadata.values()) {
+          if (meta.leadFormUrn) globallyResolvedFormUrns.add(meta.leadFormUrn);
+        }
+
         // Process each creative with analytics
         for (const [creativeUrn, metrics] of lgfCreativeAnalytics.entries()) {
           const meta = creativeMetadata.get(creativeUrn) || { name: `Creative ${creativeUrn.split(':').pop()}`, campaignId: '' };
@@ -5511,9 +5525,27 @@ serve(async (req) => {
               }
 
               inferredFormAssignments++;
-            } else {
-              lgfCreativesWithoutForm.push(creativeData);
+              continue;
             }
+
+            const campaignResolvedUrns = meta.campaignId ? Array.from(campaignToResolvedFormUrns.get(meta.campaignId) || []) : [];
+            if (campaignResolvedUrns.length === 1) {
+              const campaignFormUrn = campaignResolvedUrns[0];
+              const campaignFormId = extractFormId(campaignFormUrn);
+              addCreativeToFormAggregate(campaignFormUrn, lgfFormNames.get(campaignFormId) || `Form ${campaignFormId}`, metrics, creativeData);
+              inferredFormAssignments++;
+              continue;
+            }
+
+            if (globallyResolvedFormUrns.size === 1) {
+              const onlyFormUrn = Array.from(globallyResolvedFormUrns)[0];
+              const onlyFormId = extractFormId(onlyFormUrn);
+              addCreativeToFormAggregate(onlyFormUrn, lgfFormNames.get(onlyFormId) || `Form ${onlyFormId}`, metrics, creativeData);
+              inferredFormAssignments++;
+              continue;
+            }
+
+            lgfCreativesWithoutForm.push(creativeData);
           }
         }
 
