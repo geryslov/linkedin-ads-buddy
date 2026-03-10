@@ -1,25 +1,25 @@
 
 
-# Remove Hardcoded Form Name Overrides
+# Fix: Build Error Blocking Edge Function Deployment
 
-## Problem
-Lines 5288–5308 contain a hardcoded `knownFormNames` map that overrides API-resolved form names. The Lead Sync API (`/rest/leadGenForms`) already returns form names, so this override is unnecessary and prevents the real API names from showing.
+## Root Cause
+The TypeScript error `TS18046: 'err' is of type 'unknown'` at line 7218 prevents the edge function from compiling and deploying. This means all the image URN resolution code added previously has never actually run.
 
-## Plan
+## Fix
+One line change in `supabase/functions/linkedin-api/index.ts`:
 
-### Single change in `supabase/functions/linkedin-api/index.ts`
-
-**Delete lines 5288–5308** — the entire `knownFormNames` block and its application loop:
+**Line 7218** — change:
 ```typescript
-// Step 3c: Hardcoded canonical names for known form IDs — always override API-resolved names
-const knownFormNames: Record<string, string> = { ... };
-for (const [formId, formName] of Object.entries(knownFormNames)) {
-  lgfFormNames.set(formId, formName);
-}
+excludeResults.push({ campaignId, success: false, message: err.message || 'Unknown error' });
+```
+to:
+```typescript
+excludeResults.push({ campaignId, success: false, message: (err as Error).message || 'Unknown error' });
 ```
 
-The existing API resolution code (Steps 3, 3b) already populates `lgfFormNames` with names from the `/rest/leadGenForms` endpoint and individual fallback lookups. Removing the override lets those API-sourced names flow through.
+## After Fix
+Once this deploys successfully, the batch image URN resolution code will become active. The user should then open the **Creatives tab**, and the logs should show entries like "Batch image URN resolution" and "with images:" confirming the fix is live.
 
-### After
-Redeploy the `linkedin-api` edge function.
+## Files to Update
+- `supabase/functions/linkedin-api/index.ts` — line 7218 only
 

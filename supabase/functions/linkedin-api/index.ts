@@ -5285,27 +5285,7 @@ serve(async (req) => {
           }
         }
 
-        // Step 3c: Hardcoded canonical names for known form IDs — always override API-resolved names
-        const knownFormNames: Record<string, string> = {
-          '12758933': 'privacy-demo-banner',
-          '12759063': 'privacy-demo-message',
-          '12401253': '5_actionable_lessions_top_dpos',
-          '12401203': 'creating_managing_ropa',
-          '1003452086': 'easy-compliance-demo-banner',
-          '12743913': 'AI governance-demo-message',
-          '1002616045': 'ROPA 2026',
-          '13339823': 'security-demo-banner-calendly',
-          '1003553081': '2026 checklist doc',
-          '1002614051': 'DPAs 2026 2.0',
-          '1002617057': 'AI governance-demo-banner_EMEA2',
-          '1002615056': 'DSAR 2026',
-          '13512463': 'outbound_email_privacy',
-          '13104613': 'AI governance-demo-banner_NA',
-        };
-        // Always apply known names — overrides whatever the API returned
-        for (const [formId, formName] of Object.entries(knownFormNames)) {
-          lgfFormNames.set(formId, formName);
-        }
+        // Form names are now resolved entirely from the LinkedIn API (Steps 3, 3b above)
 
         console.log(`[Step 3] Resolved ${lgfFormNames.size} form names:`,
           Array.from(lgfFormNames.entries()).slice(0, 5).map(([id, name]) => `${id}=${name}`).join(', '));
