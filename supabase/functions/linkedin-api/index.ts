@@ -5400,6 +5400,62 @@ serve(async (req) => {
         }>();
         
         const lgfCreativesWithoutForm: any[] = [];
+        let inferredFormAssignments = 0;
+
+        const normalizeFormName = (value: string) => value.trim().toLowerCase().replace(/\s+/g, ' ');
+
+        const inferFormNameFromCreativeName = (creativeName: string): string | null => {
+          if (!creativeName) return null;
+
+          const bracketMatch = creativeName.match(/^\[([^\]]+)\]/);
+          if (bracketMatch?.[1]?.trim()) return bracketMatch[1].trim();
+
+          const pipeIdx = creativeName.indexOf(' | ');
+          if (pipeIdx > 0) return creativeName.slice(0, pipeIdx).trim() || null;
+
+          const dashIdx = creativeName.indexOf(' - ');
+          if (dashIdx > 0) {
+            const candidate = creativeName.slice(0, dashIdx).trim();
+            if (candidate && candidate.length <= 80 && !candidate.toLowerCase().includes('campaign')) return candidate;
+          }
+
+          const colonIdx = creativeName.indexOf(': ');
+          if (colonIdx > 0) {
+            const candidate = creativeName.slice(0, colonIdx).trim();
+            if (candidate && candidate.length <= 80) return candidate;
+          }
+
+          return null;
+        };
+
+        const formIdByNormalizedName = new Map<string, string>();
+        for (const [formId, formName] of lgfFormNames.entries()) {
+          formIdByNormalizedName.set(normalizeFormName(formName), formId);
+        }
+
+        const addCreativeToFormAggregate = (targetFormUrn: string, targetFormName: string, metrics: any, creativeData: any) => {
+          let formData = formAggregates.get(targetFormUrn);
+          if (!formData) {
+            formData = {
+              formUrn: targetFormUrn,
+              formName: targetFormName,
+              impressions: 0,
+              clicks: 0,
+              spent: 0,
+              leads: 0,
+              formOpens: 0,
+              creatives: [],
+            };
+            formAggregates.set(targetFormUrn, formData);
+          }
+
+          formData.creatives.push(creativeData);
+          formData.impressions += metrics.impressions;
+          formData.clicks += metrics.clicks;
+          formData.spent += metrics.spent;
+          formData.leads += metrics.leads;
+          formData.formOpens += metrics.formOpens;
+        };
         
         // Process each creative with analytics
         for (const [creativeUrn, metrics] of lgfCreativeAnalytics.entries()) {
@@ -5430,37 +5486,32 @@ serve(async (req) => {
           const formUrn = meta.leadFormUrn;
 
           if (formUrn) {
-            // Extract form ID for consistent lookups
             const formId = extractFormId(formUrn);
+            addCreativeToFormAggregate(formUrn, lgfFormNames.get(formId) || `Form ${formId}`, metrics, creativeData);
+            continue;
+          }
 
-            // Add creative to its form aggregate
-            let formData = formAggregates.get(formUrn);
-            if (!formData) {
-              formData = {
-                formUrn,
-                formName: lgfFormNames.get(formId) || `Form ${formId}`,
-                impressions: 0,
-                clicks: 0,
-                spent: 0,
-                leads: 0,
-                formOpens: 0,
-                creatives: [],
-              };
-              formAggregates.set(formUrn, formData);
+          if (metrics.leads > 0 || metrics.formOpens > 0) {
+            const inferredFormName = inferFormNameFromCreativeName(meta.name);
+
+            if (inferredFormName) {
+              const normalized = normalizeFormName(inferredFormName);
+              const matchedFormId = formIdByNormalizedName.get(normalized);
+
+              if (matchedFormId) {
+                addCreativeToFormAggregate(`urn:li:leadGenForm:${matchedFormId}`, lgfFormNames.get(matchedFormId) || inferredFormName, metrics, creativeData);
+              } else {
+                addCreativeToFormAggregate(`inferred:${normalized}`, inferredFormName, metrics, creativeData);
+              }
+
+              inferredFormAssignments++;
+            } else {
+              lgfCreativesWithoutForm.push(creativeData);
             }
-            formData.creatives.push(creativeData);
-            
-            // Aggregate metrics from creatives
-            formData.impressions += metrics.impressions;
-            formData.clicks += metrics.clicks;
-            formData.spent += metrics.spent;
-            formData.leads += metrics.leads;
-            formData.formOpens += metrics.formOpens;
-          } else if (metrics.leads > 0 || metrics.formOpens > 0) {
-            // Creative has lead activity but no form association
-            lgfCreativesWithoutForm.push(creativeData);
           }
         }
+
+        console.log(`[Step 4] Fallback inferred form assignments: ${inferredFormAssignments}`);
         
         // If we have creatives with leads but no form associations, create an "Unknown Form" bucket
         if (lgfCreativesWithoutForm.length > 0) {
