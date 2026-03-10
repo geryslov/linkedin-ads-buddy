@@ -8,10 +8,23 @@ interface LinkedInProfile {
   localizedLastName: string;
 }
 
+const ACCESS_TOKEN_KEY = 'linkedin_access_token';
+const OAUTH_STATE_KEY = 'linkedin_oauth_state';
+const TOKEN_SCOPE_VERSION_KEY = 'linkedin_token_scope_version';
+const REQUIRED_SCOPE_VERSION = '2026-03-10-leadgen-scope-v2';
+
 export function useLinkedInAuth() {
-  const [accessToken, setAccessToken] = useState<string | null>(() => 
-    localStorage.getItem('linkedin_access_token')
-  );
+  const [accessToken, setAccessToken] = useState<string | null>(() => {
+    const storedToken = localStorage.getItem(ACCESS_TOKEN_KEY);
+    const storedScopeVersion = localStorage.getItem(TOKEN_SCOPE_VERSION_KEY);
+
+    if (storedScopeVersion !== REQUIRED_SCOPE_VERSION) {
+      localStorage.removeItem(ACCESS_TOKEN_KEY);
+      return null;
+    }
+
+    return storedToken;
+  });
   const [profile, setProfile] = useState<LinkedInProfile | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
@@ -26,7 +39,7 @@ export function useLinkedInAuth() {
 
       if (error) throw error;
       
-      localStorage.setItem('linkedin_oauth_state', data.state);
+      localStorage.setItem(OAUTH_STATE_KEY, data.state);
 
       // Detect if running inside an iframe (e.g. Lovable preview) — use popup flow
       const isInIframe = window.self !== window.top;
@@ -48,7 +61,8 @@ export function useLinkedInAuth() {
             const token = event.data.token;
             if (token) {
               setAccessToken(token);
-              localStorage.setItem('linkedin_access_token', token);
+              localStorage.setItem(ACCESS_TOKEN_KEY, token);
+              localStorage.setItem(TOKEN_SCOPE_VERSION_KEY, REQUIRED_SCOPE_VERSION);
               toast({
                 title: 'Connected!',
                 description: 'Successfully connected to LinkedIn Ads',
@@ -90,7 +104,8 @@ export function useLinkedInAuth() {
 
       const token = data.access_token;
       setAccessToken(token);
-      localStorage.setItem('linkedin_access_token', token);
+      localStorage.setItem(ACCESS_TOKEN_KEY, token);
+      localStorage.setItem(TOKEN_SCOPE_VERSION_KEY, REQUIRED_SCOPE_VERSION);
       
       toast({
         title: 'Connected!',
@@ -143,8 +158,9 @@ export function useLinkedInAuth() {
   const logout = useCallback(() => {
     setAccessToken(null);
     setProfile(null);
-    localStorage.removeItem('linkedin_access_token');
-    localStorage.removeItem('linkedin_oauth_state');
+    localStorage.removeItem(ACCESS_TOKEN_KEY);
+    localStorage.removeItem(OAUTH_STATE_KEY);
+    localStorage.removeItem(TOKEN_SCOPE_VERSION_KEY);
     toast({
       title: 'Disconnected',
       description: 'Successfully disconnected from LinkedIn',
@@ -167,3 +183,4 @@ export function useLinkedInAuth() {
     logout,
   };
 }
+
