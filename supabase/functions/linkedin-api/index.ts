@@ -5193,8 +5193,26 @@ serve(async (req) => {
                 : rawId || extractFormId(form.entityUrn || '');
               if (!formId) continue;
 
-              // Lead Forms API returns name as a plain string
-              const formName = typeof form.name === 'string' ? form.name : null;
+              // Lead Forms API may return name as a plain string OR a multi-locale object
+              let formName: string | null = null;
+              if (typeof form.name === 'string') {
+                formName = form.name;
+              } else if (form.name && typeof form.name === 'object') {
+                // Multi-locale: { localized: { en_US: "Form Name" }, preferredLocale: { language: "en", country: "US" } }
+                const localized = form.name.localized || form.name;
+                if (typeof localized === 'object') {
+                  // Pick preferred locale or first available
+                  const pref = form.name.preferredLocale;
+                  const prefKey = pref ? `${pref.language}_${pref.country}` : null;
+                  formName = (prefKey && localized[prefKey]) || Object.values(localized).find((v: any) => typeof v === 'string') as string || null;
+                }
+              }
+              // Also try headline / description as fallback name sources
+              if (!formName && form.headline) {
+                formName = typeof form.headline === 'string' ? form.headline :
+                  (form.headline?.localized ? Object.values(form.headline.localized)[0] as string : null);
+              }
+              console.log(`[Step 3] Form ${formId}: name=${formName}, raw name type=${typeof form.name}, keys=${Object.keys(form).join(',')}`);
               lgfFormNames.set(formId, formName || `Form ${formId}`);
             }
           } else {
