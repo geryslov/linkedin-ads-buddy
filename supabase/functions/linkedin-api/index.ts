@@ -5244,7 +5244,17 @@ serve(async (req) => {
 
               if (formResponse.ok) {
                 const formData = await formResponse.json();
-                const formName = typeof formData.name === 'string' ? formData.name : null;
+                let formName: string | null = null;
+                if (typeof formData.name === 'string') {
+                  formName = formData.name;
+                } else if (formData.name && typeof formData.name === 'object') {
+                  const localized = formData.name.localized || formData.name;
+                  if (typeof localized === 'object') {
+                    const pref = formData.name.preferredLocale;
+                    const prefKey = pref ? `${pref.language}_${pref.country}` : null;
+                    formName = (prefKey && localized[prefKey]) || Object.values(localized).find((v: any) => typeof v === 'string') as string || null;
+                  }
+                }
                 if (formName) {
                   lgfFormNames.set(formId, formName);
                   console.log(`[Step 3b] Resolved form ${formId}: ${formName}`);
