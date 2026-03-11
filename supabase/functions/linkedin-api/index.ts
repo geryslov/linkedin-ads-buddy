@@ -11065,13 +11065,20 @@ serve(async (req) => {
         const leadsStartMs = new Date(leadsStartDate + 'T00:00:00Z').getTime();
         const leadsEndMs = new Date(leadsEndDate + 'T23:59:59Z').getTime();
 
-        const ownerUrn = encodeURIComponent(`urn:li:sponsoredAccount:${accountId}`);
+        const encodedAccountUrn = encodeURIComponent(`urn:li:sponsoredAccount:${accountId}`);
+
+        // Include form schema inline so we can map questionId → predefinedField
+        const leadsFields = encodeURIComponent(
+          'id,submittedAt,testLead,versionedLeadGenFormUrn,associatedEntity,leadMetadata,formResponse,form:(content:(questions))'
+        );
 
         let leadsUrl = `https://api.linkedin.com/rest/leadFormResponses?q=owner` +
-          `&owner=${ownerUrn}` +
-          `&leadType=SPONSORED` +
+          `&owner=(sponsoredAccount:${encodedAccountUrn})` +
+          `&leadType=(leadType:SPONSORED)` +
+          `&submittedAtTimeRange=(start:${leadsStartMs},end:${leadsEndMs})` +
           `&count=100` +
-          `&start=${leadsOffset}`;
+          `&start=${leadsOffset}` +
+          `&fields=${leadsFields}`;
 
         if (formUrn) {
           leadsUrl += `&versionedLeadGenFormUrn=${encodeURIComponent(formUrn)}`;
@@ -11111,21 +11118,41 @@ serve(async (req) => {
           const fieldMap: Record<string, string> = {};
           const customAnswers: Record<string, string> = {};
 
-          for (const field of (el.formResponse || [])) {
-            if (field.predefinedField) {
-              fieldMap[field.predefinedField] = (field.values || [])[0] || '';
+          // Build questionId → predefinedField map from inline form schema
+          const questionPredefined: Record<number, string> = {};
+          const questionLabel: Record<number, string> = {};
+          for (const q of (el.form?.content?.questions || [])) {
+            if (q.questionId !== undefined) {
+              if (q.predefinedField) {
+                questionPredefined[q.questionId] = q.predefinedField;
+              } else {
+                // Custom question — pick first localized string as label
+                const localized = q.question?.localized || {};
+                const label = (Object.values(localized)[0] as string) || `q${q.questionId}`;
+                questionLabel[q.questionId] = label;
+              }
             }
           }
 
-          for (const field of (el.customFieldAnswers || [])) {
-            const label = field.label || field.questionUrn || 'Unknown';
-            customAnswers[label] = (field.values || [])[0] || '';
+          // Parse new-format answers: {questionId, answerDetails}
+          for (const answer of (el.formResponse?.answers || [])) {
+            const value =
+              answer.answerDetails?.textQuestionAnswer?.answer ||
+              (answer.answerDetails?.multipleChoiceAnswer?.options || []).join(', ') ||
+              '';
+            const predefined = questionPredefined[answer.questionId];
+            if (predefined) {
+              fieldMap[predefined] = value;
+            } else {
+              const label = questionLabel[answer.questionId] || `q${answer.questionId}`;
+              customAnswers[label] = value;
+            }
           }
 
           return {
-            leadUrn: el.leadUrn || el.id || '',
-            formUrn: el.leadGenFormUrn || '',
-            campaignUrn: el.associatedEntity || '',
+            leadUrn: el.id || '',
+            formUrn: el.versionedLeadGenFormUrn || '',
+            campaignUrn: el.associatedEntity?.associatedCreative || el.associatedEntity || '',
             firstName: fieldMap['FIRST_NAME'] || '',
             lastName: fieldMap['LAST_NAME'] || '',
             email: fieldMap['EMAIL'] || '',
