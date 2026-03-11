@@ -11070,7 +11070,6 @@ serve(async (req) => {
         let leadsUrl = `https://api.linkedin.com/rest/leadFormResponses?q=owner` +
           `&owner=${ownerUrn}` +
           `&leadType=SPONSORED` +
-          `&submittedAtTimeRange.start=${leadsStartMs}` +
           `&count=100` +
           `&start=${leadsOffset}`;
 
