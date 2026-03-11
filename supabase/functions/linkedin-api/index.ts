@@ -10820,6 +10820,234 @@ serve(async (req) => {
         });
       }
 
+      case 'get_lead_company_journey': {
+        const { accountId, orgName, submittedAtMs, lookbackDays = 90 } = params || {};
+
+        if (!accountId || !orgName) {
+          return new Response(JSON.stringify({ error: 'accountId and orgName are required' }), {
+            status: 400,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+
+        console.log(`[get_lead_company_journey] account=${accountId} org="${orgName}" submittedAt=${submittedAtMs} lookback=${lookbackDays}d`);
+
+        // --- Step A: Resolve company name → org URN ---
+        let resolvedOrgId: string | null = null;
+        let resolvedOrgName: string = orgName;
+
+        // A1: Check linkedin_company_cache by name (case-insensitive)
+        try {
+          const { data: cached } = await supabaseClient
+            .from('linkedin_company_cache')
+            .select('org_id, name')
+            .ilike('name', orgName)
+            .limit(1);
+          if (cached && cached.length > 0) {
+            resolvedOrgId = cached[0].org_id;
+            resolvedOrgName = cached[0].name || orgName;
+            console.log(`[get_lead_company_journey] Cache hit for "${orgName}" → org_id=${resolvedOrgId}`);
+          }
+        } catch (e) {
+          console.error('[get_lead_company_journey] Cache lookup error:', e);
+        }
+
+        // A2: If not in cache, search LinkedIn org API
+        if (!resolvedOrgId) {
+          try {
+            const searchUrl = `https://api.linkedin.com/v2/organizationsLookup?q=vanityName&vanityName=${encodeURIComponent(orgName.toLowerCase().replace(/\s+/g, '-'))}&projection=(results*(id,localizedName))`;
+            const searchResp = await fetch(searchUrl, {
+              headers: { 'Authorization': `Bearer ${accessToken}` },
+            });
+            if (searchResp.ok) {
+              const searchData = await searchResp.json();
+              const results = searchData.results || [];
+              if (results.length > 0) {
+                resolvedOrgId = String(results[0].id);
+                resolvedOrgName = results[0].localizedName || orgName;
+                console.log(`[get_lead_company_journey] vanityName search hit for "${orgName}" → ${resolvedOrgId}`);
+              }
+            }
+          } catch (e) {
+            console.error('[get_lead_company_journey] org vanityName search error:', e);
+          }
+        }
+
+        // A3: Try keyword search if still not resolved
+        if (!resolvedOrgId) {
+          try {
+            const kwUrl = `https://api.linkedin.com/rest/organizations?q=search&keywords=${encodeURIComponent(orgName)}&count=3`;
+            const kwResp = await fetch(kwUrl, {
+              headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'LinkedIn-Version': '202511',
+                'X-Restli-Protocol-Version': '2.0.0',
+              },
+            });
+            if (kwResp.ok) {
+              const kwData = await kwResp.json();
+              const elements = kwData.elements || [];
+              if (elements.length > 0) {
+                const first = elements[0];
+                const rawId = first.id ? String(first.id) : (first.entityUrn || '').split(':').pop();
+                if (rawId) {
+                  resolvedOrgId = rawId;
+                  resolvedOrgName = first.localizedName || first.name || orgName;
+                  console.log(`[get_lead_company_journey] keyword search hit for "${orgName}" → ${resolvedOrgId}`);
+                  // Cache it
+                  try {
+                    await supabaseClient.from('linkedin_company_cache').upsert({
+                      org_id: resolvedOrgId,
+                      name: resolvedOrgName,
+                      vanity_name: first.vanityName || null,
+                      source: 'keyword_search',
+                      last_seen_at: new Date().toISOString(),
+                    }, { onConflict: 'org_id' });
+                  } catch (_) {}
+                }
+              }
+            }
+          } catch (e) {
+            console.error('[get_lead_company_journey] org keyword search error:', e);
+          }
+        }
+
+        if (!resolvedOrgId) {
+          console.log(`[get_lead_company_journey] Could not resolve org for "${orgName}"`);
+          return new Response(JSON.stringify({
+            orgResolved: false,
+            orgName,
+            window: null,
+            total: { impressions: 0, clicks: 0, spend: 0 },
+            campaigns: [],
+          }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+
+        // --- Build date window ---
+        const endMs = submittedAtMs ? Number(submittedAtMs) : Date.now();
+        const startMs = endMs - lookbackDays * 24 * 60 * 60 * 1000;
+        const toDate = (ms: number) => new Date(ms).toISOString().split('T')[0];
+        const windowStart = toDate(startMs);
+        const windowEnd = toDate(endMs);
+        const [ws_y, ws_m, ws_d] = windowStart.split('-').map(Number);
+        const [we_y, we_m, we_d] = windowEnd.split('-').map(Number);
+
+        // --- Step B: Company-level analytics in the window ---
+        let totalImpressions = 0, totalClicks = 0, totalSpend = 0;
+        try {
+          const companyAnalyticsUrl = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics` +
+            `&pivot=MEMBER_COMPANY` +
+            `&memberCompanies[0]=urn:li:organization:${resolvedOrgId}` +
+            `&accounts[0]=urn:li:sponsoredAccount:${accountId}` +
+            `&dateRange.start.day=${ws_d}&dateRange.start.month=${ws_m}&dateRange.start.year=${ws_y}` +
+            `&dateRange.end.day=${we_d}&dateRange.end.month=${we_m}&dateRange.end.year=${we_y}` +
+            `&timeGranularity=ALL` +
+            `&fields=impressions,clicks,costInLocalCurrency,pivotValue`;
+
+          const compResp = await fetch(companyAnalyticsUrl, {
+            headers: { 'Authorization': `Bearer ${accessToken}` },
+          });
+          if (compResp.ok) {
+            const compData = await compResp.json();
+            for (const el of (compData.elements || [])) {
+              totalImpressions += el.impressions || 0;
+              totalClicks += el.clicks || 0;
+              totalSpend += parseFloat(el.costInLocalCurrency || '0');
+            }
+            console.log(`[get_lead_company_journey] Company totals: impr=${totalImpressions} clicks=${totalClicks} spend=${totalSpend}`);
+          } else {
+            const t = await compResp.text();
+            console.error(`[get_lead_company_journey] Company analytics error: ${compResp.status}`, t.slice(0, 200));
+          }
+        } catch (e) {
+          console.error('[get_lead_company_journey] Company analytics error:', e);
+        }
+
+        // --- Step C: Campaign-level analytics in the window ---
+        const campaignMetrics = new Map<string, { impressions: number; clicks: number; spend: number }>();
+        try {
+          const campAnalyticsUrl = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics` +
+            `&pivot=CAMPAIGN` +
+            `&accounts[0]=urn:li:sponsoredAccount:${accountId}` +
+            `&dateRange.start.day=${ws_d}&dateRange.start.month=${ws_m}&dateRange.start.year=${ws_y}` +
+            `&dateRange.end.day=${we_d}&dateRange.end.month=${we_m}&dateRange.end.year=${we_y}` +
+            `&timeGranularity=ALL` +
+            `&fields=impressions,clicks,costInLocalCurrency,pivotValue` +
+            `&count=500`;
+
+          const campAnalyticsResp = await fetch(campAnalyticsUrl, {
+            headers: { 'Authorization': `Bearer ${accessToken}` },
+          });
+          if (campAnalyticsResp.ok) {
+            const campData = await campAnalyticsResp.json();
+            for (const el of (campData.elements || [])) {
+              const impr = el.impressions || 0;
+              if (impr === 0) continue;
+              const campUrn = el.pivotValue || '';
+              const campId = campUrn.split(':').pop() || '';
+              if (campId) {
+                campaignMetrics.set(campId, {
+                  impressions: impr,
+                  clicks: el.clicks || 0,
+                  spend: parseFloat(el.costInLocalCurrency || '0'),
+                });
+              }
+            }
+            console.log(`[get_lead_company_journey] ${campaignMetrics.size} campaigns with impressions`);
+          }
+        } catch (e) {
+          console.error('[get_lead_company_journey] Campaign analytics error:', e);
+        }
+
+        // --- Step D: Fetch campaign metadata (name + objectiveType) ---
+        const campaigns: Array<{ id: string; name: string; objectiveType: string; impressions: number; clicks: number; spend: number }> = [];
+
+        if (campaignMetrics.size > 0) {
+          try {
+            const campMetaResp = await fetch(
+              `https://api.linkedin.com/v2/adCampaignsV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=500&fields=id,name,objectiveType,status`,
+              { headers: { 'Authorization': `Bearer ${accessToken}` } }
+            );
+            if (campMetaResp.ok) {
+              const campMeta = await campMetaResp.json();
+              for (const c of (campMeta.elements || [])) {
+                const id = String(c.id || '');
+                if (!id || !campaignMetrics.has(id)) continue;
+                const m = campaignMetrics.get(id)!;
+                campaigns.push({
+                  id,
+                  name: c.name || `Campaign ${id}`,
+                  objectiveType: c.objectiveType || '',
+                  impressions: m.impressions,
+                  clicks: m.clicks,
+                  spend: m.spend,
+                });
+              }
+            }
+          } catch (e) {
+            console.error('[get_lead_company_journey] Campaign metadata error:', e);
+          }
+        }
+
+        // Sort by impressions desc
+        campaigns.sort((a, b) => b.impressions - a.impressions);
+
+        console.log(`[get_lead_company_journey] Done: org=${resolvedOrgName}(${resolvedOrgId}), ${totalImpressions} impr, ${campaigns.length} campaigns`);
+
+        return new Response(JSON.stringify({
+          orgResolved: true,
+          orgUrn: `urn:li:organization:${resolvedOrgId}`,
+          orgName: resolvedOrgName,
+          window: { start: windowStart, end: windowEnd, days: lookbackDays },
+          total: { impressions: totalImpressions, clicks: totalClicks, spend: totalSpend },
+          campaigns,
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
       case 'get_lead_form_responses': {
         const { accountId, formUrn, dateRange: leadsDateRange, offset: leadsOffset = 0 } = params || {};
 

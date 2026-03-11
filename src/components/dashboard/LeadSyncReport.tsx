@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import {
   Select,
   SelectContent,
@@ -17,9 +17,10 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { RefreshCw, Download, ClipboardList, User, Calendar, X } from 'lucide-react';
+import { RefreshCw, Download, ClipboardList, User, Calendar, X, ChevronDown, ChevronRight, TrendingUp } from 'lucide-react';
 import { useLeadGenFormsReport } from '@/hooks/useLeadGenFormsReport';
-import { useLeadFormResponses } from '@/hooks/useLeadFormResponses';
+import { useLeadFormResponses, LeadFormResponse } from '@/hooks/useLeadFormResponses';
+import { useLeadJourney, JourneyData } from '@/hooks/useLeadJourney';
 import { LeadGenFormsTable } from './LeadGenFormsTable';
 import { exportToCSV } from '@/lib/exportUtils';
 import { useToast } from '@/hooks/use-toast';
@@ -27,6 +28,191 @@ import { useToast } from '@/hooks/use-toast';
 interface LeadSyncReportProps {
   accessToken: string | null;
   selectedAccount: string | null;
+}
+
+const OBJECTIVE_LABELS: Record<string, string> = {
+  BRAND_AWARENESS: 'Brand Awareness',
+  WEBSITE_VISITS: 'Website Visits',
+  ENGAGEMENT: 'Engagement',
+  VIDEO_VIEWS: 'Video Views',
+  LEAD_GENERATION: 'Lead Generation',
+  WEBSITE_CONVERSIONS: 'Website Conversions',
+  JOB_APPLICANTS: 'Job Applicants',
+  TALENT_LEADS: 'Talent Leads',
+  EVENT_REGISTRATION: 'Event Registration',
+  DOCUMENT_DOWNLOADS: 'Document Downloads',
+};
+
+function JourneyPanel({
+  journey,
+  orgName,
+}: {
+  journey: JourneyData;
+  orgName: string;
+}) {
+  if (!journey.orgResolved) {
+    return (
+      <div className="px-6 py-3 text-xs text-muted-foreground italic">
+        Could not match &ldquo;{orgName}&rdquo; to a LinkedIn organization.
+      </div>
+    );
+  }
+
+  const { total, campaigns, window: win } = journey;
+
+  return (
+    <div className="px-6 py-4 bg-muted/20 border-t border-border/30">
+      {/* Summary row */}
+      <div className="flex items-center gap-4 mb-3 flex-wrap">
+        <div className="flex items-center gap-1.5 text-xs font-medium">
+          <TrendingUp className="h-3.5 w-3.5 text-primary" />
+          <span className="text-foreground">{journey.orgName}</span>
+        </div>
+        <div className="flex items-center gap-3 text-xs text-muted-foreground">
+          <span><span className="font-semibold text-foreground tabular-nums">{total.impressions.toLocaleString()}</span> impr</span>
+          <span><span className="font-semibold text-foreground tabular-nums">{total.clicks.toLocaleString()}</span> clicks</span>
+          <span><span className="font-semibold text-foreground tabular-nums">${total.spend.toFixed(2)}</span> spend</span>
+          {win && (
+            <span className="text-muted-foreground/60">in {win.days}d before submission ({win.start} → {win.end})</span>
+          )}
+        </div>
+      </div>
+
+      {campaigns.length === 0 ? (
+        <p className="text-xs text-muted-foreground">No campaign activity found for this company in the window.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs border-separate border-spacing-0 min-w-[560px]">
+            <thead>
+              <tr className="bg-muted/40">
+                <th className="text-left px-3 py-1.5 font-semibold text-muted-foreground border-b border-border/40 min-w-[200px]">Campaign</th>
+                <th className="text-left px-3 py-1.5 font-semibold text-muted-foreground border-b border-border/40">Objective</th>
+                <th className="text-right px-3 py-1.5 font-semibold text-muted-foreground border-b border-border/40">Impressions</th>
+                <th className="text-right px-3 py-1.5 font-semibold text-muted-foreground border-b border-border/40">Clicks</th>
+                <th className="text-right px-3 py-1.5 font-semibold text-muted-foreground border-b border-border/40">Spend</th>
+              </tr>
+            </thead>
+            <tbody>
+              {campaigns.map((c) => (
+                <tr key={c.id} className="hover:bg-muted/30 border-b border-border/20">
+                  <td className="px-3 py-1.5 font-medium truncate max-w-[220px]">{c.name}</td>
+                  <td className="px-3 py-1.5">
+                    {c.objectiveType ? (
+                      <span className="inline-flex items-center rounded-md bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary ring-1 ring-inset ring-primary/20">
+                        {OBJECTIVE_LABELS[c.objectiveType] || c.objectiveType}
+                      </span>
+                    ) : '—'}
+                  </td>
+                  <td className="px-3 py-1.5 text-right tabular-nums">{c.impressions.toLocaleString()}</td>
+                  <td className="px-3 py-1.5 text-right tabular-nums">{c.clicks.toLocaleString()}</td>
+                  <td className="px-3 py-1.5 text-right tabular-nums">${c.spend.toFixed(2)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LeadRow({
+  lead,
+  index,
+  accountId,
+  fetchJourney,
+  getJourney,
+  isLoadingJourney,
+}: {
+  lead: LeadFormResponse;
+  index: number;
+  accountId: string;
+  fetchJourney: (accountId: string, orgName: string, submittedAtMs: number) => void;
+  getJourney: (accountId: string, orgName: string) => JourneyData | undefined;
+  isLoadingJourney: (accountId: string, orgName: string) => boolean;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const company = lead.company;
+  const journey = company ? getJourney(accountId, company) : undefined;
+  const loading = company ? isLoadingJourney(accountId, company) : false;
+
+  const handleToggle = useCallback(() => {
+    if (!company) return;
+    if (!journey && !loading) {
+      fetchJourney(accountId, company, lead.submittedAt);
+    }
+    setExpanded(v => !v);
+  }, [company, journey, loading, fetchJourney, accountId, lead.submittedAt]);
+
+  const journeyBadge = () => {
+    if (!company) return <span className="text-muted-foreground/40">—</span>;
+    if (loading) return <RefreshCw className="h-3 w-3 animate-spin text-muted-foreground" />;
+    if (!journey) return (
+      <button
+        className="text-[10px] text-primary underline-offset-2 hover:underline"
+        onClick={handleToggle}
+      >
+        Load
+      </button>
+    );
+    if (!journey.orgResolved) return <span className="text-muted-foreground/40 text-[10px]">unresolved</span>;
+    return (
+      <span className="text-[10px] tabular-nums text-muted-foreground">
+        {journey.total.impressions.toLocaleString()} impr · {journey.campaigns.length} camp.
+      </span>
+    );
+  };
+
+  return (
+    <>
+      <TableRow
+        className={`${lead.testLead ? 'opacity-50' : ''} hover:bg-muted/20 ${expanded ? 'bg-muted/10' : ''}`}
+      >
+        <TableCell className="w-8 p-2">
+          {company && (
+            <button
+              onClick={handleToggle}
+              className="text-muted-foreground hover:text-foreground transition-colors"
+            >
+              {expanded
+                ? <ChevronDown className="h-4 w-4" />
+                : <ChevronRight className="h-4 w-4" />}
+            </button>
+          )}
+        </TableCell>
+        <TableCell className="font-medium text-sm">
+          {[lead.firstName, lead.lastName].filter(Boolean).join(' ') || '—'}
+        </TableCell>
+        <TableCell className="text-sm text-muted-foreground">{lead.company || '—'}</TableCell>
+        <TableCell className="text-sm text-muted-foreground">{lead.email || '—'}</TableCell>
+        <TableCell className="text-sm tabular-nums text-muted-foreground">
+          {lead.submittedAt
+            ? new Date(lead.submittedAt).toLocaleDateString(undefined, {
+                year: 'numeric', month: 'short', day: 'numeric',
+              })
+            : '—'}
+        </TableCell>
+        <TableCell className="text-xs text-muted-foreground font-mono max-w-[160px] truncate">
+          {lead.campaignUrn ? lead.campaignUrn.split(':').pop() : '—'}
+        </TableCell>
+        <TableCell className="text-center">
+          {lead.testLead && (
+            <span className="inline-flex items-center rounded-md bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 ring-1 ring-inset ring-amber-500/20">test</span>
+          )}
+        </TableCell>
+        <TableCell className="text-xs min-w-[100px]">
+          {journeyBadge()}
+        </TableCell>
+      </TableRow>
+      {expanded && journey && (
+        <tr>
+          <td colSpan={8} className="p-0">
+            <JourneyPanel journey={journey} orgName={company || ''} />
+          </td>
+        </tr>
+      )}
+    </>
+  );
 }
 
 export function LeadSyncReport({ accessToken, selectedAccount }: LeadSyncReportProps) {
@@ -53,6 +239,8 @@ export function LeadSyncReport({ accessToken, selectedAccount }: LeadSyncReportP
     clearLeads,
   } = useLeadFormResponses(accessToken, dateRange);
 
+  const { fetchJourney, getJourney, isLoadingJourney, clearCache } = useLeadJourney(accessToken);
+
   const [selectedFormUrn, setSelectedFormUrn] = useState<string | null>(null);
   const [selectedFormName, setSelectedFormName] = useState<string | null>(null);
   const [includeTestLeads, setIncludeTestLeads] = useState(false);
@@ -71,6 +259,24 @@ export function LeadSyncReport({ accessToken, selectedAccount }: LeadSyncReportP
       clearLeads();
     }
   }, [selectedFormUrn, selectedAccount, fetchLeads, clearLeads]);
+
+  // Auto-fetch journeys for all visible leads once they load
+  useEffect(() => {
+    if (!selectedAccount || leads.length === 0) return;
+    const unique = [...new Set(leads.map(l => l.company).filter(Boolean))] as string[];
+    // Stagger requests slightly to avoid hammering the edge function
+    unique.forEach((company, i) => {
+      const lead = leads.find(l => l.company === company)!;
+      setTimeout(() => {
+        fetchJourney(selectedAccount, company, lead.submittedAt);
+      }, i * 150);
+    });
+  }, [leads, selectedAccount, fetchJourney]);
+
+  // Clear journey cache when account or date range changes
+  useEffect(() => {
+    clearCache();
+  }, [selectedAccount, dateRange, clearCache]);
 
   const handleFormSelect = (formUrn: string, formName: string) => {
     if (selectedFormUrn === formUrn) {
@@ -259,41 +465,30 @@ export function LeadSyncReport({ accessToken, selectedAccount }: LeadSyncReportP
 
           {filteredLeads.length > 0 && (
             <div className="rounded-lg border border-border/40 overflow-x-auto">
-              <Table className="min-w-[800px]">
+              <Table className="min-w-[900px]">
                 <TableHeader>
                   <TableRow className="bg-muted/30 hover:bg-muted/30">
+                    <TableHead className="w-8" />
                     <TableHead className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Name</TableHead>
                     <TableHead className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Company</TableHead>
                     <TableHead className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Email</TableHead>
                     <TableHead className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Submitted</TableHead>
                     <TableHead className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Campaign</TableHead>
                     <TableHead className="text-center text-xs font-semibold uppercase tracking-wider text-muted-foreground">Test</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Ad Journey</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {filteredLeads.map((lead, i) => (
-                    <TableRow key={lead.leadUrn || i} className={`${lead.testLead ? 'opacity-50' : ''} hover:bg-muted/20`}>
-                      <TableCell className="font-medium text-sm">
-                        {[lead.firstName, lead.lastName].filter(Boolean).join(' ') || '—'}
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">{lead.company || '—'}</TableCell>
-                      <TableCell className="text-sm text-muted-foreground">{lead.email || '—'}</TableCell>
-                      <TableCell className="text-sm tabular-nums text-muted-foreground">
-                        {lead.submittedAt
-                          ? new Date(lead.submittedAt).toLocaleDateString(undefined, {
-                              year: 'numeric', month: 'short', day: 'numeric',
-                            })
-                          : '—'}
-                      </TableCell>
-                      <TableCell className="text-xs text-muted-foreground font-mono max-w-[180px] truncate">
-                        {lead.campaignUrn ? lead.campaignUrn.split(':').pop() : '—'}
-                      </TableCell>
-                      <TableCell className="text-center">
-                        {lead.testLead && (
-                          <span className="inline-flex items-center rounded-md bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 ring-1 ring-inset ring-amber-500/20">test</span>
-                        )}
-                      </TableCell>
-                    </TableRow>
+                    <LeadRow
+                      key={lead.leadUrn || i}
+                      lead={lead}
+                      index={i}
+                      accountId={selectedAccount}
+                      fetchJourney={fetchJourney}
+                      getJourney={getJourney}
+                      isLoadingJourney={isLoadingJourney}
+                    />
                   ))}
                 </TableBody>
               </Table>
