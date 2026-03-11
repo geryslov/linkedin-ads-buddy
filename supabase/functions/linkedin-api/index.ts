@@ -4971,7 +4971,7 @@ serve(async (req) => {
         
         // Step 2: Fetch creative metadata from V2 API (with pagination)
         console.log('[Step 2] Fetching creative metadata from V2 adCreativesV2 API...');
-        const creativeMetadata = new Map<string, { name: string; campaignId: string; leadFormUrn?: string }>();
+        const creativeMetadata = new Map<string, { name: string; campaignId: string; leadFormUrn?: string; status?: string }>();
         const discoveredFormUrns = new Set<string>();
         
         // Helper function to extract lead form URN from V2 creative
@@ -5086,7 +5086,8 @@ serve(async (req) => {
                 const creativeName = extractCreativeName(creative, creativeId);
                 const leadFormUrn = extractLeadFormUrn(creative);
                 
-                creativeMetadata.set(creativeUrn, { name: creativeName, campaignId, leadFormUrn });
+                const creativeStatus = creative.status || 'UNKNOWN';
+                creativeMetadata.set(creativeUrn, { name: creativeName, campaignId, leadFormUrn, status: creativeStatus });
                 if (leadFormUrn) discoveredFormUrns.add(leadFormUrn);
               }
               
@@ -5501,6 +5502,7 @@ serve(async (req) => {
             cpc,
             cpl,
             lgfRate,
+            status: meta.status || 'UNKNOWN',
           };
           
           const formUrn = meta.leadFormUrn;

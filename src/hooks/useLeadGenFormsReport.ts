@@ -15,6 +15,7 @@ export interface LeadGenFormCreative {
   cpc: number;
   cpl: number;
   lgfRate: number;
+  status?: string;
 }
 
 export interface LeadGenFormData {
