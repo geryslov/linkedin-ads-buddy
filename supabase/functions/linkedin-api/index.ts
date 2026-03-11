@@ -11096,7 +11096,7 @@ serve(async (req) => {
             error: `LinkedIn API error: ${leadsResp.status}`,
             details: errText.substring(0, 300),
           }), {
-            status: leadsResp.status,
+            status: 200,
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           });
         }
