@@ -11071,7 +11071,6 @@ serve(async (req) => {
           `&owner=${ownerUrn}` +
           `&leadType=SPONSORED` +
           `&submittedAtTimeRange.start=${leadsStartMs}` +
-          `&submittedAtTimeRange.end=${leadsEndMs}` +
           `&count=100` +
           `&start=${leadsOffset}`;
 
