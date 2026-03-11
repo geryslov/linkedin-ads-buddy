@@ -1,25 +1,40 @@
 
 
-# Fix: Build Error Blocking Edge Function Deployment
+## Problem
 
-## Root Cause
-The TypeScript error `TS18046: 'err' is of type 'unknown'` at line 7218 prevents the edge function from compiling and deploying. This means all the image URN resolution code added previously has never actually run.
+The `get_lead_form_responses` handler in the edge function returns LinkedIn API errors with their original HTTP status code (e.g., 403, 401). The Supabase client intercepts any non-2xx response and throws a generic "Edge Function returned a non-2xx status code" error, hiding the actual error details from the frontend.
+
+This is the same pattern already documented and fixed for other actions in this edge function -- errors should be returned as HTTP 200 JSON with an `error` field.
 
 ## Fix
-One line change in `supabase/functions/linkedin-api/index.ts`:
 
-**Line 7218** — change:
+**File: `supabase/functions/linkedin-api/index.ts`** (line ~11095-11101)
+
+Change the error response from:
 ```typescript
-excludeResults.push({ campaignId, success: false, message: err.message || 'Unknown error' });
+return new Response(JSON.stringify({
+  error: `LinkedIn API error: ${leadsResp.status}`,
+  details: errText.substring(0, 300),
+}), {
+  status: leadsResp.status,  // <-- THIS causes the problem
+  headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+});
 ```
-to:
+
+To:
 ```typescript
-excludeResults.push({ campaignId, success: false, message: (err as Error).message || 'Unknown error' });
+return new Response(JSON.stringify({
+  error: `LinkedIn API error: ${leadsResp.status}`,
+  details: errText.substring(0, 300),
+}), {
+  status: 200,  // Return 200 so Supabase client doesn't swallow the details
+  headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+});
 ```
 
-## After Fix
-Once this deploys successfully, the batch image URN resolution code will become active. The user should then open the **Creatives tab**, and the logs should show entries like "Batch image URN resolution" and "with images:" confirming the fix is live.
+Then redeploy the edge function.
 
-## Files to Update
-- `supabase/functions/linkedin-api/index.ts` — line 7218 only
+## Impact
+- Single line change (`status: leadsResp.status` to `status: 200`)
+- The frontend `useLeadFormResponses` hook already handles `data?.error` correctly, so error messages will now surface properly instead of the generic non-2xx message
 
