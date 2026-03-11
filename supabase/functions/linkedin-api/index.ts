@@ -4971,7 +4971,7 @@ serve(async (req) => {
         
         // Step 2: Fetch creative metadata from V2 API (with pagination)
         console.log('[Step 2] Fetching creative metadata from V2 adCreativesV2 API...');
-        const creativeMetadata = new Map<string, { name: string; campaignId: string; leadFormUrn?: string }>();
+        const creativeMetadata = new Map<string, { name: string; campaignId: string; leadFormUrn?: string; status?: string }>();
         const discoveredFormUrns = new Set<string>();
         
         // Helper function to extract lead form URN from V2 creative
