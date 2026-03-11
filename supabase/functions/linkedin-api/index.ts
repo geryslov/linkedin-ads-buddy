@@ -5502,6 +5502,7 @@ serve(async (req) => {
             cpc,
             cpl,
             lgfRate,
+            status: meta.status || 'UNKNOWN',
           };
           
           const formUrn = meta.leadFormUrn;
