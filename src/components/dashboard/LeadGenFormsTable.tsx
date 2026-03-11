@@ -10,9 +10,11 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Badge } from '@/components/ui/badge';
 import { LeadGenFormData, LeadGenFormCreative } from '@/hooks/useLeadGenFormsReport';
 import { exportToCSV } from '@/lib/exportUtils';
 import { useToast } from '@/hooks/use-toast';
+import { formatNumber, formatCurrency } from '@/lib/utils';
 
 interface LeadGenFormsTableProps {
   data: LeadGenFormData[];
@@ -32,10 +34,18 @@ interface AggregatedCreative {
   cpc: number;
   cpl: number;
   lgfRate: number;
-  instances: LeadGenFormCreative[]; // individual creatives with same name
+  status?: string;
+  instances: LeadGenFormCreative[];
 }
 
-/** Row for an aggregated creative name, drills down to IDs + campaigns */
+function StatusBadge({ status }: { status?: string }) {
+  if (!status || status === 'UNKNOWN') return <Badge variant="outline" className="text-[10px] px-1.5 py-0">Unknown</Badge>;
+  if (status === 'ACTIVE') return <Badge className="bg-green-500/15 text-green-700 border-green-500/30 text-[10px] px-1.5 py-0">Active</Badge>;
+  if (status === 'PAUSED') return <Badge className="bg-yellow-500/15 text-yellow-700 border-yellow-500/30 text-[10px] px-1.5 py-0">Paused</Badge>;
+  if (status === 'ARCHIVED' || status === 'COMPLETED') return <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{status.charAt(0) + status.slice(1).toLowerCase()}</Badge>;
+  return <Badge variant="outline" className="text-[10px] px-1.5 py-0">{status}</Badge>;
+}
+
 function AggregatedCreativeRow({ agg }: { agg: AggregatedCreative }) {
   const [isOpen, setIsOpen] = useState(false);
 
@@ -50,14 +60,19 @@ function AggregatedCreativeRow({ agg }: { agg: AggregatedCreative }) {
             ? <ChevronDown className="h-3 w-3 text-muted-foreground" />
             : <ChevronRight className="h-3 w-3 text-muted-foreground" />}
         </td>
-        <td className="p-2 font-medium text-xs">{agg.creativeName}</td>
-        <td className="p-2 text-right tabular-nums text-xs">{agg.impressions.toLocaleString()}</td>
-        <td className="p-2 text-right tabular-nums text-xs">{agg.clicks.toLocaleString()}</td>
-        <td className="p-2 text-right tabular-nums text-xs">${agg.spent.toFixed(2)}</td>
-        <td className="p-2 text-right tabular-nums text-xs font-medium">{agg.leads}</td>
+        <td className="p-2 font-medium text-xs">
+          <div className="flex items-center gap-2">
+            <span>{agg.creativeName}</span>
+            <StatusBadge status={agg.status} />
+          </div>
+        </td>
+        <td className="p-2 text-right tabular-nums text-xs">{formatNumber(agg.impressions)}</td>
+        <td className="p-2 text-right tabular-nums text-xs">{formatNumber(agg.clicks)}</td>
+        <td className="p-2 text-right tabular-nums text-xs">{formatCurrency(agg.spent)}</td>
+        <td className="p-2 text-right tabular-nums text-xs font-medium">{formatNumber(agg.leads)}</td>
         <td className="p-2 text-right tabular-nums text-xs">{agg.ctr.toFixed(2)}%</td>
-        <td className="p-2 text-right tabular-nums text-xs">${agg.cpc.toFixed(2)}</td>
-        <td className="p-2 text-right tabular-nums text-xs">${agg.cpl.toFixed(2)}</td>
+        <td className="p-2 text-right tabular-nums text-xs">{formatCurrency(agg.cpc)}</td>
+        <td className="p-2 text-right tabular-nums text-xs">{formatCurrency(agg.cpl)}</td>
         <td className="p-2 text-right tabular-nums text-xs">
           {agg.formOpens > 0 ? `${agg.lgfRate.toFixed(1)}%` : '—'}
         </td>
@@ -70,18 +85,21 @@ function AggregatedCreativeRow({ agg }: { agg: AggregatedCreative }) {
               <span className="text-muted-foreground font-mono">
                 ID: <span className="text-foreground select-all">{c.creativeId}</span>
               </span>
-              <span className="text-muted-foreground text-[11px]">
-                Campaign: <span className="text-foreground">{c.campaignName || c.campaignId || '—'}</span>
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="text-muted-foreground text-[11px]">
+                  Campaign: <span className="text-foreground">{c.campaignName || c.campaignId || '—'}</span>
+                </span>
+                <StatusBadge status={c.status} />
+              </div>
             </div>
           </td>
-          <td className="p-2 text-right tabular-nums text-xs">{c.impressions.toLocaleString()}</td>
-          <td className="p-2 text-right tabular-nums text-xs">{c.clicks.toLocaleString()}</td>
-          <td className="p-2 text-right tabular-nums text-xs">${c.spent.toFixed(2)}</td>
-          <td className="p-2 text-right tabular-nums text-xs font-medium">{c.leads}</td>
+          <td className="p-2 text-right tabular-nums text-xs">{formatNumber(c.impressions)}</td>
+          <td className="p-2 text-right tabular-nums text-xs">{formatNumber(c.clicks)}</td>
+          <td className="p-2 text-right tabular-nums text-xs">{formatCurrency(c.spent)}</td>
+          <td className="p-2 text-right tabular-nums text-xs font-medium">{formatNumber(c.leads)}</td>
           <td className="p-2 text-right tabular-nums text-xs">{c.ctr.toFixed(2)}%</td>
-          <td className="p-2 text-right tabular-nums text-xs">${c.cpc.toFixed(2)}</td>
-          <td className="p-2 text-right tabular-nums text-xs">${c.cpl.toFixed(2)}</td>
+          <td className="p-2 text-right tabular-nums text-xs">{formatCurrency(c.cpc)}</td>
+          <td className="p-2 text-right tabular-nums text-xs">{formatCurrency(c.cpl)}</td>
           <td className="p-2 text-right tabular-nums text-xs">
             {c.formOpens > 0 ? `${c.lgfRate.toFixed(1)}%` : '—'}
           </td>
@@ -91,9 +109,7 @@ function AggregatedCreativeRow({ agg }: { agg: AggregatedCreative }) {
   );
 }
 
-/** Creatives sub-table shown when a form row is expanded — aggregated by creative name */
 function CreativesSubTable({ creatives }: { creatives: LeadGenFormCreative[] }) {
-  // Aggregate by creative name
   const aggregated = useMemo<AggregatedCreative[]>(() => {
     const map = new Map<string, AggregatedCreative>();
     for (const c of creatives) {
@@ -103,6 +119,7 @@ function CreativesSubTable({ creatives }: { creatives: LeadGenFormCreative[] }) 
           creativeName: c.creativeName || c.creativeId,
           impressions: 0, clicks: 0, spent: 0, leads: 0, formOpens: 0,
           ctr: 0, cpc: 0, cpl: 0, lgfRate: 0,
+          status: c.status,
           instances: [],
         });
       }
@@ -112,9 +129,10 @@ function CreativesSubTable({ creatives }: { creatives: LeadGenFormCreative[] }) 
       agg.spent += c.spent;
       agg.leads += c.leads;
       agg.formOpens += c.formOpens;
+      // Use ACTIVE status if any instance is active
+      if (c.status === 'ACTIVE') agg.status = 'ACTIVE';
       agg.instances.push(c);
     }
-    // Compute derived metrics
     for (const agg of map.values()) {
       agg.ctr = agg.impressions > 0 ? (agg.clicks / agg.impressions) * 100 : 0;
       agg.cpc = agg.clicks > 0 ? agg.spent / agg.clicks : 0;
@@ -176,6 +194,7 @@ function FormRow({
       { key: 'creativeName', label: 'Creative Name' },
       { key: 'creativeId', label: 'Creative ID' },
       { key: 'campaignName', label: 'Campaign Name' },
+      { key: 'status', label: 'Status' },
       { key: 'impressions', label: 'Impressions' },
       { key: 'clicks', label: 'Clicks' },
       { key: 'spent', label: 'Spent' },
@@ -200,7 +219,6 @@ function FormRow({
           if (onSelect) onSelect(form.formUrn, form.formName);
         }}
       >
-        {/* Expand */}
         <TableCell className="w-8 p-2">
           {hasCreatives && (
             isOpen
@@ -208,22 +226,19 @@ function FormRow({
               : <ChevronRight className="h-4 w-4 text-muted-foreground" />
           )}
         </TableCell>
-        {/* Form Name */}
         <TableCell className="font-medium text-sm min-w-[160px]">{form.formName}</TableCell>
-        {/* Metrics */}
-        <TableCell className="text-right tabular-nums">{form.impressions.toLocaleString()}</TableCell>
-        <TableCell className="text-right tabular-nums">{form.clicks.toLocaleString()}</TableCell>
-        <TableCell className="text-right tabular-nums">${form.spent.toFixed(2)}</TableCell>
-        <TableCell className="text-right tabular-nums font-semibold text-primary">{form.leads}</TableCell>
-        <TableCell className="text-right tabular-nums">{form.formOpens}</TableCell>
+        <TableCell className="text-right tabular-nums">{formatNumber(form.impressions)}</TableCell>
+        <TableCell className="text-right tabular-nums">{formatNumber(form.clicks)}</TableCell>
+        <TableCell className="text-right tabular-nums">{formatCurrency(form.spent)}</TableCell>
+        <TableCell className="text-right tabular-nums font-semibold text-primary">{formatNumber(form.leads)}</TableCell>
+        <TableCell className="text-right tabular-nums">{formatNumber(form.formOpens)}</TableCell>
         <TableCell className="text-right tabular-nums">{form.ctr.toFixed(2)}%</TableCell>
-        <TableCell className="text-right tabular-nums">${form.cpc.toFixed(2)}</TableCell>
-        <TableCell className="text-right tabular-nums">${form.cpl.toFixed(2)}</TableCell>
+        <TableCell className="text-right tabular-nums">{formatCurrency(form.cpc)}</TableCell>
+        <TableCell className="text-right tabular-nums">{formatCurrency(form.cpl)}</TableCell>
         <TableCell className="text-right tabular-nums">
           {form.formOpens > 0 ? `${form.lgfRate.toFixed(1)}%` : '—'}
         </TableCell>
         <TableCell className="text-right tabular-nums text-muted-foreground">{form.creatives.length}</TableCell>
-        {/* Export */}
         <TableCell className="w-10 p-2" onClick={(e) => e.stopPropagation()}>
           <Button
             variant="ghost"
@@ -236,7 +251,6 @@ function FormRow({
           </Button>
         </TableCell>
       </TableRow>
-      {/* Sub-table row */}
       {isOpen && (
         <tr>
           <td colSpan={colCount} className="p-0 border-b border-border/40">
@@ -250,7 +264,6 @@ function FormRow({
 
 export function LeadGenFormsTable({ data, isLoading, selectedFormUrn, onSelectForm }: LeadGenFormsTableProps) {
   const { toast } = useToast();
-  // 1 expand + 1 name + 9 metrics + 1 creatives count + 1 export = 13
   const COL_COUNT = 13;
 
   const handleExportAll = () => {
@@ -290,7 +303,6 @@ export function LeadGenFormsTable({ data, isLoading, selectedFormUrn, onSelectFo
     );
   }
 
-  // Summary totals
   const summary = data.reduce((acc, form) => ({
     impressions: acc.impressions + form.impressions,
     clicks: acc.clicks + form.clicks,
@@ -322,7 +334,7 @@ export function LeadGenFormsTable({ data, isLoading, selectedFormUrn, onSelectFo
               <TableHead className="min-w-[160px]">Form Name</TableHead>
               <TableHead className="text-right">Impressions</TableHead>
               <TableHead className="text-right">Clicks</TableHead>
-              <TableHead className="text-right">Spent</TableHead>
+              <TableHead className="text-right">Spent (USD)</TableHead>
               <TableHead className="text-right">Leads</TableHead>
               <TableHead className="text-right">Form Opens</TableHead>
               <TableHead className="text-right">CTR</TableHead>
@@ -343,18 +355,17 @@ export function LeadGenFormsTable({ data, isLoading, selectedFormUrn, onSelectFo
                 onSelect={onSelectForm}
               />
             ))}
-            {/* Summary row */}
             <TableRow className="bg-muted/50 font-semibold border-t-2 border-border">
               <TableCell />
               <TableCell>Summary ({data.length} forms)</TableCell>
-              <TableCell className="text-right tabular-nums">{summary.impressions.toLocaleString()}</TableCell>
-              <TableCell className="text-right tabular-nums">{summary.clicks.toLocaleString()}</TableCell>
-              <TableCell className="text-right tabular-nums">${summary.spent.toFixed(2)}</TableCell>
-              <TableCell className="text-right tabular-nums text-primary">{summary.leads}</TableCell>
-              <TableCell className="text-right tabular-nums">{summary.formOpens}</TableCell>
+              <TableCell className="text-right tabular-nums">{formatNumber(summary.impressions)}</TableCell>
+              <TableCell className="text-right tabular-nums">{formatNumber(summary.clicks)}</TableCell>
+              <TableCell className="text-right tabular-nums">{formatCurrency(summary.spent)}</TableCell>
+              <TableCell className="text-right tabular-nums text-primary">{formatNumber(summary.leads)}</TableCell>
+              <TableCell className="text-right tabular-nums">{formatNumber(summary.formOpens)}</TableCell>
               <TableCell className="text-right tabular-nums">{summaryCtr.toFixed(2)}%</TableCell>
-              <TableCell className="text-right tabular-nums">${summaryCpc.toFixed(2)}</TableCell>
-              <TableCell className="text-right tabular-nums">${summaryCpl.toFixed(2)}</TableCell>
+              <TableCell className="text-right tabular-nums">{formatCurrency(summaryCpc)}</TableCell>
+              <TableCell className="text-right tabular-nums">{formatCurrency(summaryCpl)}</TableCell>
               <TableCell className="text-right tabular-nums">
                 {summary.formOpens > 0 ? `${summaryLgfRate.toFixed(1)}%` : '—'}
               </TableCell>
