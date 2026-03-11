@@ -5086,7 +5086,8 @@ serve(async (req) => {
                 const creativeName = extractCreativeName(creative, creativeId);
                 const leadFormUrn = extractLeadFormUrn(creative);
                 
-                creativeMetadata.set(creativeUrn, { name: creativeName, campaignId, leadFormUrn });
+                const creativeStatus = creative.status || 'UNKNOWN';
+                creativeMetadata.set(creativeUrn, { name: creativeName, campaignId, leadFormUrn, status: creativeStatus });
                 if (leadFormUrn) discoveredFormUrns.add(leadFormUrn);
               }
               
