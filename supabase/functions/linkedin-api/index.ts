@@ -11067,18 +11067,13 @@ serve(async (req) => {
 
         const encodedAccountUrn = encodeURIComponent(`urn:li:sponsoredAccount:${accountId}`);
 
-        // Include form schema inline so we can map questionId → predefinedField
-        const leadsFields = encodeURIComponent(
-          'id,submittedAt,testLead,versionedLeadGenFormUrn,associatedEntity,leadMetadata,formResponse,form:(content:(questions))'
-        );
-
+        // Note: leadFormResponses endpoint does NOT support submittedAtTimeRange or fields projection
+        // We fetch all and filter client-side by date
         let leadsUrl = `https://api.linkedin.com/rest/leadFormResponses?q=owner` +
           `&owner=(sponsoredAccount:${encodedAccountUrn})` +
           `&leadType=(leadType:SPONSORED)` +
-          `&submittedAtTimeRange=(start:${leadsStartMs},end:${leadsEndMs})` +
           `&count=100` +
-          `&start=${leadsOffset}` +
-          `&fields=${leadsFields}`;
+          `&start=${leadsOffset}`;
 
         if (formUrn) {
           leadsUrl += `&versionedLeadGenFormUrn=${encodeURIComponent(formUrn)}`;
@@ -11114,40 +11109,35 @@ serve(async (req) => {
         const leadsStart = leadsPaging.start ?? 0;
         const leadsHasMore = leadsElements.length === leadsCount && (leadsStart + leadsCount) < leadsTotal;
 
-        const leads = leadsElements.map((el: any) => {
+        // Client-side date filtering
+        const filteredElements = leadsElements.filter((el: any) => {
+          if (!el.submittedAt) return true;
+          return el.submittedAt >= leadsStartMs && el.submittedAt <= leadsEndMs;
+        });
+
+        const leads = filteredElements.map((el: any) => {
           const fieldMap: Record<string, string> = {};
           const customAnswers: Record<string, string> = {};
 
-          // Build questionId → predefinedField map from inline form schema
-          const questionPredefined: Record<number, string> = {};
-          const questionLabel: Record<number, string> = {};
-          for (const q of (el.form?.content?.questions || [])) {
-            if (q.questionId !== undefined) {
-              if (q.predefinedField) {
-                questionPredefined[q.questionId] = q.predefinedField;
-              } else {
-                // Custom question — pick first localized string as label
-                const localized = q.question?.localized || {};
-                const label = (Object.values(localized)[0] as string) || `q${q.questionId}`;
-                questionLabel[q.questionId] = label;
-              }
-            }
-          }
-
-          // Parse new-format answers: {questionId, answerDetails}
+          // Parse answers — each answer may have predefinedField or be custom
           for (const answer of (el.formResponse?.answers || [])) {
             const value =
               answer.answerDetails?.textQuestionAnswer?.answer ||
               (answer.answerDetails?.multipleChoiceAnswer?.options || []).join(', ') ||
               '';
-            const predefined = questionPredefined[answer.questionId];
-            if (predefined) {
-              fieldMap[predefined] = value;
+            if (answer.predefinedField) {
+              fieldMap[answer.predefinedField] = value;
             } else {
-              const label = questionLabel[answer.questionId] || `q${answer.questionId}`;
+              const label = `q${answer.questionId ?? 'unknown'}`;
               customAnswers[label] = value;
             }
           }
+
+          // Also try leadMetadata fields as fallback
+          if (!fieldMap['FIRST_NAME'] && el.leadMetadata?.firstName) fieldMap['FIRST_NAME'] = el.leadMetadata.firstName;
+          if (!fieldMap['LAST_NAME'] && el.leadMetadata?.lastName) fieldMap['LAST_NAME'] = el.leadMetadata.lastName;
+          if (!fieldMap['EMAIL'] && el.leadMetadata?.email) fieldMap['EMAIL'] = el.leadMetadata.email;
+          if (!fieldMap['COMPANY'] && el.leadMetadata?.companyName) fieldMap['COMPANY'] = el.leadMetadata.companyName;
 
           return {
             leadUrn: el.id || '',
@@ -11163,7 +11153,7 @@ serve(async (req) => {
           };
         });
 
-        console.log(`[get_lead_form_responses] Returning ${leads.length} leads, total: ${leadsTotal}, hasMore: ${leadsHasMore}`);
+        console.log(`[get_lead_form_responses] Returning ${leads.length} leads (filtered from ${leadsElements.length}), total: ${leadsTotal}, hasMore: ${leadsHasMore}`);
 
         return new Response(JSON.stringify({ leads, total: leadsTotal, hasMore: leadsHasMore }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
