@@ -11068,15 +11068,12 @@ serve(async (req) => {
         const accountUrn = `urn:li:sponsoredAccount:${accountId}`;
 
         // Note: leadFormResponses endpoint does NOT support submittedAtTimeRange or fields projection
-        // Use URLSearchParams for proper single-pass encoding
-        const leadsParams = new URLSearchParams();
-        leadsParams.set('q', 'owner');
-        leadsParams.set('owner', `(sponsoredAccount:${accountUrn})`);
-        leadsParams.set('leadType', '(leadType:SPONSORED)');
-        leadsParams.set('count', '100');
-        leadsParams.set('start', String(leadsOffset));
-
-        let leadsUrl = `https://api.linkedin.com/rest/leadFormResponses?${leadsParams.toString()}`;
+        // IMPORTANT: Do NOT use URLSearchParams — it percent-encodes parentheses/colons which breaks Rest.li object syntax
+        let leadsUrl = `https://api.linkedin.com/rest/leadFormResponses?q=owner`
+          + `&owner=(sponsoredAccount:${accountUrn})`
+          + `&leadType=(leadType:SPONSORED)`
+          + `&count=100`
+          + `&start=${leadsOffset}`;
 
         if (formUrn) {
           leadsUrl += `&versionedLeadGenFormUrn=${encodeURIComponent(formUrn)}`;
