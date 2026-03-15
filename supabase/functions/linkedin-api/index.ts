@@ -11254,6 +11254,19 @@ serve(async (req) => {
         console.log(`[get_weekly_report] Creative this week: ${wrEls(r_creativeThis).length}, last week: ${wrEls(r_creativeLast).length}`);
         console.log(`[get_weekly_report] Campaign this week: ${wrEls(r_campaignThis).length}, last week: ${wrEls(r_campaignLast).length}`);
 
+        // ── Build analytics maps first ───────────────────────────────────────
+        const creativeThisMap = new Map<string, { impressions: number; clicks: number; spent: number; leads: number }>();
+        const creativeLastMap = new Map<string, { impressions: number; clicks: number; spent: number; leads: number }>();
+
+        for (const el of wrEls(r_creativeThis)) {
+          const p = wrParseEl(el);
+          creativeThisMap.set(p.urn, { impressions: p.impressions, clicks: p.clicks, spent: p.spent, leads: p.leads });
+        }
+        for (const el of wrEls(r_creativeLast)) {
+          const p = wrParseEl(el);
+          creativeLastMap.set(p.urn, { impressions: p.impressions, clicks: p.clicks, spent: p.spent, leads: p.leads });
+        }
+
         // ── Creative metadata (names, images, form URNs) ─────────────────────
         const creativeMetaMap = new Map<string, { name: string; imageUrl: string; type: string; status: string; formUrn: string; campaignId: string }>();
 
