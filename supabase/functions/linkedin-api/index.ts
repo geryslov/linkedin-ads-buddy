@@ -11067,18 +11067,13 @@ serve(async (req) => {
 
         const encodedAccountUrn = encodeURIComponent(`urn:li:sponsoredAccount:${accountId}`);
 
-        // Include form schema inline so we can map questionId → predefinedField
-        const leadsFields = encodeURIComponent(
-          'id,submittedAt,testLead,versionedLeadGenFormUrn,associatedEntity,leadMetadata,formResponse,form:(content:(questions))'
-        );
-
+        // Note: leadFormResponses endpoint does NOT support submittedAtTimeRange or fields projection
+        // We fetch all and filter client-side by date
         let leadsUrl = `https://api.linkedin.com/rest/leadFormResponses?q=owner` +
           `&owner=(sponsoredAccount:${encodedAccountUrn})` +
           `&leadType=(leadType:SPONSORED)` +
-          `&submittedAtTimeRange=(start:${leadsStartMs},end:${leadsEndMs})` +
           `&count=100` +
-          `&start=${leadsOffset}` +
-          `&fields=${leadsFields}`;
+          `&start=${leadsOffset}`;
 
         if (formUrn) {
           leadsUrl += `&versionedLeadGenFormUrn=${encodeURIComponent(formUrn)}`;
