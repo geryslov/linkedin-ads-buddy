@@ -21,6 +21,7 @@ import { StandardizedTitlesPage } from "@/components/dashboard/StandardizedTitle
 import { NamingConventionReport } from "@/components/dashboard/NamingConventionReport";
 import { CompanyConversionBreakdown } from "@/components/dashboard/CompanyConversionBreakdown";
 import { LeadSyncReport } from "@/components/dashboard/LeadSyncReport";
+import { WeeklyReport } from "@/components/dashboard/WeeklyReport";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -44,6 +45,7 @@ const tabMeta: Record<string, { group: string; title: string; subtitle: string }
   campaign_reports:    { group: "Analytics",  title: "Campaign Reports",            subtitle: "Detailed campaign performance breakdown" },
   creative_reports:    { group: "Analytics",  title: "Creative Reports",            subtitle: "Creative-level performance analysis" },
   reports:             { group: "Analytics",  title: "Reports",                     subtitle: "Comprehensive ad performance reports" },
+  weekly_report:       { group: "Analytics",  title: "Weekly Report",               subtitle: "Week-over-week performance by creative, campaign, and lead form" },
   conv_breakdown:      { group: "Analytics",  title: "Conv. Breakdown",             subtitle: "Company × conversion cross-tab analysis" },
   audiences:           { group: "Audience",   title: "Audience Insights",           subtitle: "Understand and manage your target audiences" },
   company_timeline:    { group: "Audience",   title: "Company Timeline",            subtitle: "Track company engagement over time" },
@@ -418,6 +420,13 @@ export default function Dashboard() {
 
         {activeTab === "name_report" && (
           <NamingConventionReport
+            accessToken={accessToken}
+            selectedAccount={selectedAccount}
+          />
+        )}
+
+        {activeTab === "weekly_report" && (
+          <WeeklyReport
             accessToken={accessToken}
             selectedAccount={selectedAccount}
           />

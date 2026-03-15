@@ -11170,6 +11170,391 @@ serve(async (req) => {
         });
       }
 
+      case 'get_weekly_report': {
+        const { accountId } = params || {};
+        if (!accountId) {
+          return new Response(JSON.stringify({ error: 'accountId required' }), {
+            status: 400,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+
+        // ── Date ranges (calendar weeks, Mon–Sun) ───────────────────────────
+        const now = new Date();
+        const dayOfWeek = now.getDay(); // 0=Sun
+        const daysFromMon = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+        const thisMonday = new Date(now);
+        thisMonday.setDate(now.getDate() - daysFromMon);
+        thisMonday.setHours(0, 0, 0, 0);
+
+        const lastMonday = new Date(thisMonday);
+        lastMonday.setDate(thisMonday.getDate() - 7);
+        const lastSunday = new Date(thisMonday);
+        lastSunday.setDate(thisMonday.getDate() - 1);
+
+        const fmtD = (d: Date) =>
+          `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+        const thisWeekRange = { start: fmtD(thisMonday), end: fmtD(now) };
+        const lastWeekRange = { start: fmtD(lastMonday), end: fmtD(lastSunday) };
+
+        console.log(`[get_weekly_report] thisWeek: ${thisWeekRange.start} → ${thisWeekRange.end}`);
+        console.log(`[get_weekly_report] lastWeek: ${lastWeekRange.start} → ${lastWeekRange.end}`);
+
+        // ── URL builder ─────────────────────────────────────────────────────
+        function wrBuildUrl(start: string, end: string, pivot: string, gran: string, extraFields = '') {
+          const [sy, sm, sd] = start.split('-').map(Number);
+          const [ey, em, ed] = end.split('-').map(Number);
+          const baseFields = 'impressions,clicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions,pivotValue';
+          return `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics` +
+            `&dateRange.start.day=${sd}&dateRange.start.month=${sm}&dateRange.start.year=${sy}` +
+            `&dateRange.end.day=${ed}&dateRange.end.month=${em}&dateRange.end.year=${ey}` +
+            `&timeGranularity=${gran}&pivot=${pivot}` +
+            `&accounts[0]=urn:li:sponsoredAccount:${accountId}` +
+            `&fields=${baseFields}${extraFields ? ',' + extraFields : ''}&count=10000`;
+        }
+
+        const authHdr = { 'Authorization': `Bearer ${accessToken}` };
+
+        // Build daily URL with dateRange field
+        const [dsy, dsm, dsd] = thisWeekRange.start.split('-').map(Number);
+        const [dey, dem, ded] = thisWeekRange.end.split('-').map(Number);
+        const dailyUrl = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics` +
+          `&dateRange.start.day=${dsd}&dateRange.start.month=${dsm}&dateRange.start.year=${dsy}` +
+          `&dateRange.end.day=${ded}&dateRange.end.month=${dem}&dateRange.end.year=${dey}` +
+          `&timeGranularity=DAILY&pivot=CREATIVE` +
+          `&accounts[0]=urn:li:sponsoredAccount:${accountId}` +
+          `&fields=impressions,clicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions,pivotValue,dateRange&count=10000`;
+
+        // ── Parallel analytics + campaign fetch ──────────────────────────────
+        console.log('[get_weekly_report] Fetching analytics in parallel...');
+        const [
+          r_creativeThis, r_creativeLast,
+          r_campaignThis, r_campaignLast,
+          r_dailyThis,
+          r_jobTitle, r_seniority, r_industry, r_companySize,
+          r_campaigns,
+        ] = await Promise.allSettled([
+          fetch(wrBuildUrl(thisWeekRange.start, thisWeekRange.end, 'CREATIVE', 'ALL'), { headers: authHdr }).then(r => r.json()),
+          fetch(wrBuildUrl(lastWeekRange.start, lastWeekRange.end, 'CREATIVE', 'ALL'), { headers: authHdr }).then(r => r.json()),
+          fetch(wrBuildUrl(thisWeekRange.start, thisWeekRange.end, 'CAMPAIGN', 'ALL'), { headers: authHdr }).then(r => r.json()),
+          fetch(wrBuildUrl(lastWeekRange.start, lastWeekRange.end, 'CAMPAIGN', 'ALL'), { headers: authHdr }).then(r => r.json()),
+          fetch(dailyUrl, { headers: authHdr }).then(r => r.json()),
+          fetch(wrBuildUrl(thisWeekRange.start, thisWeekRange.end, 'MEMBER_JOB_TITLE', 'ALL'), { headers: authHdr }).then(r => r.json()),
+          fetch(wrBuildUrl(thisWeekRange.start, thisWeekRange.end, 'MEMBER_SENIORITY', 'ALL'), { headers: authHdr }).then(r => r.json()),
+          fetch(wrBuildUrl(thisWeekRange.start, thisWeekRange.end, 'MEMBER_INDUSTRY', 'ALL'), { headers: authHdr }).then(r => r.json()),
+          fetch(wrBuildUrl(thisWeekRange.start, thisWeekRange.end, 'MEMBER_COMPANY_SIZE', 'ALL'), { headers: authHdr }).then(r => r.json()),
+          fetch(`https://api.linkedin.com/v2/adCampaignsV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=500`, { headers: authHdr }).then(r => r.json()),
+        ]);
+
+        function wrEls(r: PromiseSettledResult<any>): any[] {
+          return r.status === 'fulfilled' ? (r.value?.elements || []) : [];
+        }
+
+        console.log(`[get_weekly_report] Creative this week: ${wrEls(r_creativeThis).length}, last week: ${wrEls(r_creativeLast).length}`);
+        console.log(`[get_weekly_report] Campaign this week: ${wrEls(r_campaignThis).length}, last week: ${wrEls(r_campaignLast).length}`);
+
+        // ── Creative metadata (names, images, form URNs) ─────────────────────
+        const creativeMetaMap = new Map<string, { name: string; imageUrl: string; type: string; status: string; formUrn: string; campaignId: string }>();
+
+        // Step A: versioned /rest/adAccounts/{id}/creatives for images + form URNs
+        try {
+          let creativeStart = 0;
+          let hasMoreCreatives = true;
+          while (hasMoreCreatives && creativeStart < 2000) {
+            const resp = await fetch(
+              `https://api.linkedin.com/rest/adAccounts/${accountId}/creatives?q=criteria&fields=id,content,status,campaign&count=100&start=${creativeStart}`,
+              { headers: { ...authHdr, 'LinkedIn-Version': '202501', 'X-Restli-Protocol-Version': '2.0.0' } }
+            );
+            if (!resp.ok) { hasMoreCreatives = false; break; }
+            const data = await resp.json();
+            const items = data.elements || [];
+            for (const creative of items) {
+              const id = creative.id?.toString() || '';
+              const content = creative.content || {};
+              let imageUrl = content.media?.downloadUrl || '';
+              if (!imageUrl && content.landingPage?.landingPageMedia?.thumbnail) imageUrl = content.landingPage.landingPageMedia.thumbnail;
+              if (!imageUrl && content.spotlight?.logo?.downloadUrl) imageUrl = content.spotlight.logo.downloadUrl;
+              const formUrn = content.leadGenerationForm || '';
+              const campUrn = creative.campaign || '';
+              const campId = campUrn.split(':').pop() || '';
+              creativeMetaMap.set(id, { name: '', imageUrl, type: Object.keys(content)[0] || 'UNKNOWN', status: creative.status || 'UNKNOWN', formUrn, campaignId: campId });
+            }
+            if (items.length < 100) hasMoreCreatives = false;
+            else creativeStart += 100;
+          }
+        } catch (err) { console.error('[get_weekly_report] Versioned creative fetch error:', err); }
+
+        // Step B: legacy adCreativesV2 for names
+        try {
+          const resp = await fetch(
+            `https://api.linkedin.com/v2/adCreativesV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=500`,
+            { headers: authHdr }
+          );
+          if (resp.ok) {
+            const data = await resp.json();
+            for (const c of (data.elements || [])) {
+              const id = c.id?.toString() || '';
+              const name = c.creativeDscName || c.name || `Creative ${id}`;
+              const existing = creativeMetaMap.get(id);
+              if (existing) existing.name = name;
+              else creativeMetaMap.set(id, { name, imageUrl: '', type: c.type || 'UNKNOWN', status: c.status || 'UNKNOWN', formUrn: '', campaignId: '' });
+            }
+          }
+        } catch (err) { console.error('[get_weekly_report] Legacy creative names error:', err); }
+
+        console.log(`[get_weekly_report] Creative metadata: ${creativeMetaMap.size} creatives`);
+
+        // ── Campaign names ───────────────────────────────────────────────────
+        const campaignNameMap = new Map<string, { name: string; status: string }>();
+        for (const camp of wrEls(r_campaigns)) {
+          campaignNameMap.set(camp.id?.toString() || '', {
+            name: camp.name || `Campaign ${camp.id}`,
+            status: camp.status || 'UNKNOWN',
+          });
+        }
+
+        // ── Lead form names ──────────────────────────────────────────────────
+        const formNameMap = new Map<string, string>();
+        try {
+          const ownerParam = encodeURIComponent(`urn:li:sponsoredAccount:${accountId}`);
+          const resp = await fetch(
+            `https://api.linkedin.com/rest/leadForms?q=owner&owner=${ownerParam}&count=500`,
+            { headers: { ...authHdr, 'LinkedIn-Version': '202501', 'X-Restli-Protocol-Version': '2.0.0' } }
+          );
+          if (resp.ok) {
+            const data = await resp.json();
+            for (const form of (data.elements || [])) {
+              const id = (form.id || '').toString().split(':').pop() || '';
+              const localized = form.name?.localized || form.name || {};
+              const name = typeof localized === 'string' ? localized : ((Object.values(localized)[0] as string) || `Form ${id}`);
+              if (id) formNameMap.set(id, name);
+              if (form.id) formNameMap.set(form.id.toString(), name);
+              if (form.leadGenerationFormUrn) formNameMap.set(form.leadGenerationFormUrn, name);
+            }
+          }
+        } catch (err) { console.error('[get_weekly_report] Lead form names error:', err); }
+
+        // ── Analytics parse helpers ──────────────────────────────────────────
+        function wrParseEl(el: any) {
+          return {
+            urn: el.pivotValue || '',
+            impressions: el.impressions || 0,
+            clicks: el.clicks || 0,
+            spent: parseFloat(el.costInLocalCurrency || '0'),
+            leads: (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0),
+          };
+        }
+
+        function wrPct(current: number, previous: number): number | null {
+          if (previous === 0) return null;
+          return ((current - previous) / previous) * 100;
+        }
+
+        function wrMetrics(m: { impressions: number; clicks: number; spent: number; leads: number }) {
+          return {
+            ...m,
+            ctr: m.impressions > 0 ? (m.clicks / m.impressions) * 100 : 0,
+            cpl: m.leads > 0 ? m.spent / m.leads : 0,
+          };
+        }
+
+        // ── By creative ──────────────────────────────────────────────────────
+        const creativeThisMap = new Map<string, { impressions: number; clicks: number; spent: number; leads: number }>();
+        const creativeLastMap = new Map<string, { impressions: number; clicks: number; spent: number; leads: number }>();
+
+        for (const el of wrEls(r_creativeThis)) {
+          const p = wrParseEl(el);
+          creativeThisMap.set(p.urn, { impressions: p.impressions, clicks: p.clicks, spent: p.spent, leads: p.leads });
+        }
+        for (const el of wrEls(r_creativeLast)) {
+          const p = wrParseEl(el);
+          creativeLastMap.set(p.urn, { impressions: p.impressions, clicks: p.clicks, spent: p.spent, leads: p.leads });
+        }
+
+        // Daily trend per creative
+        const creativeTrendMap = new Map<string, { date: string; spent: number; clicks: number; leads: number; impressions: number }[]>();
+        for (const el of wrEls(r_dailyThis)) {
+          const urn = el.pivotValue || '';
+          const dr = el.dateRange?.start;
+          if (!dr) continue;
+          const date = `${dr.year}-${String(dr.month).padStart(2, '0')}-${String(dr.day).padStart(2, '0')}`;
+          if (!creativeTrendMap.has(urn)) creativeTrendMap.set(urn, []);
+          creativeTrendMap.get(urn)!.push({
+            date,
+            spent: parseFloat(el.costInLocalCurrency || '0'),
+            clicks: el.clicks || 0,
+            leads: (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0),
+            impressions: el.impressions || 0,
+          });
+        }
+
+        const allCreativeUrns = new Set([...creativeThisMap.keys(), ...creativeLastMap.keys()]);
+        const byCreative = [...allCreativeUrns].map(urn => {
+          const id = urn.split(':').pop() || urn;
+          const meta = creativeMetaMap.get(id) || { name: `Creative ${id}`, imageUrl: '', type: 'UNKNOWN', status: 'UNKNOWN', formUrn: '', campaignId: '' };
+          const thisW = creativeThisMap.get(urn) || { impressions: 0, clicks: 0, spent: 0, leads: 0 };
+          const lastW = creativeLastMap.get(urn) || { impressions: 0, clicks: 0, spent: 0, leads: 0 };
+          const trend = (creativeTrendMap.get(urn) || []).sort((a, b) => a.date.localeCompare(b.date));
+          return {
+            creativeId: id,
+            creativeName: meta.name || `Creative ${id}`,
+            imageUrl: meta.imageUrl || '',
+            type: meta.type,
+            status: meta.status,
+            formUrn: meta.formUrn,
+            campaignId: meta.campaignId,
+            thisWeek: wrMetrics(thisW),
+            lastWeek: wrMetrics(lastW),
+            pctSpentChange: wrPct(thisW.spent, lastW.spent),
+            pctCplChange: wrPct(
+              thisW.leads > 0 ? thisW.spent / thisW.leads : 0,
+              lastW.leads > 0 ? lastW.spent / lastW.leads : 0
+            ),
+            trend,
+          };
+        }).sort((a, b) => b.thisWeek.spent - a.thisWeek.spent);
+
+        // ── By campaign ──────────────────────────────────────────────────────
+        const campThisMap = new Map<string, { impressions: number; clicks: number; spent: number; leads: number }>();
+        const campLastMap = new Map<string, { impressions: number; clicks: number; spent: number; leads: number }>();
+
+        for (const el of wrEls(r_campaignThis)) {
+          const p = wrParseEl(el);
+          campThisMap.set(p.urn, { impressions: p.impressions, clicks: p.clicks, spent: p.spent, leads: p.leads });
+        }
+        for (const el of wrEls(r_campaignLast)) {
+          const p = wrParseEl(el);
+          campLastMap.set(p.urn, { impressions: p.impressions, clicks: p.clicks, spent: p.spent, leads: p.leads });
+        }
+
+        const allCampUrns = new Set([...campThisMap.keys(), ...campLastMap.keys()]);
+        const byCampaign = [...allCampUrns].map(urn => {
+          const id = urn.split(':').pop() || urn;
+          const meta = campaignNameMap.get(id) || { name: `Campaign ${id}`, status: 'UNKNOWN' };
+          const thisW = campThisMap.get(urn) || { impressions: 0, clicks: 0, spent: 0, leads: 0 };
+          const lastW = campLastMap.get(urn) || { impressions: 0, clicks: 0, spent: 0, leads: 0 };
+          return {
+            campaignId: id,
+            campaignName: meta.name,
+            status: meta.status,
+            thisWeek: wrMetrics(thisW),
+            lastWeek: wrMetrics(lastW),
+            pctSpentChange: wrPct(thisW.spent, lastW.spent),
+            pctCplChange: wrPct(
+              thisW.leads > 0 ? thisW.spent / thisW.leads : 0,
+              lastW.leads > 0 ? lastW.spent / lastW.leads : 0
+            ),
+          };
+        }).sort((a, b) => b.thisWeek.spent - a.thisWeek.spent);
+
+        // ── By lead form (group creative analytics by form URN) ───────────────
+        const formThisMap = new Map<string, { impressions: number; clicks: number; spent: number; leads: number }>();
+        const formLastMap = new Map<string, { impressions: number; clicks: number; spent: number; leads: number }>();
+
+        for (const [urn, thisW] of creativeThisMap) {
+          const id = urn.split(':').pop() || urn;
+          const meta = creativeMetaMap.get(id);
+          if (!meta?.formUrn) continue;
+          const existing = formThisMap.get(meta.formUrn) || { impressions: 0, clicks: 0, spent: 0, leads: 0 };
+          existing.impressions += thisW.impressions;
+          existing.clicks += thisW.clicks;
+          existing.spent += thisW.spent;
+          existing.leads += thisW.leads;
+          formThisMap.set(meta.formUrn, existing);
+        }
+        for (const [urn, lastW] of creativeLastMap) {
+          const id = urn.split(':').pop() || urn;
+          const meta = creativeMetaMap.get(id);
+          if (!meta?.formUrn) continue;
+          const existing = formLastMap.get(meta.formUrn) || { impressions: 0, clicks: 0, spent: 0, leads: 0 };
+          existing.impressions += lastW.impressions;
+          existing.clicks += lastW.clicks;
+          existing.spent += lastW.spent;
+          existing.leads += lastW.leads;
+          formLastMap.set(meta.formUrn, existing);
+        }
+
+        const allFormUrns = new Set([...formThisMap.keys(), ...formLastMap.keys()]);
+        const byLeadForm = [...allFormUrns].map(formUrn => {
+          const id = formUrn.split(':').pop() || formUrn;
+          const formName = formNameMap.get(formUrn) || formNameMap.get(id) || `Form ${id}`;
+          const thisW = formThisMap.get(formUrn) || { impressions: 0, clicks: 0, spent: 0, leads: 0 };
+          const lastW = formLastMap.get(formUrn) || { impressions: 0, clicks: 0, spent: 0, leads: 0 };
+          return {
+            formId: id,
+            formName,
+            thisWeek: wrMetrics(thisW),
+            lastWeek: wrMetrics(lastW),
+            pctSpentChange: wrPct(thisW.spent, lastW.spent),
+            pctCplChange: wrPct(
+              thisW.leads > 0 ? thisW.spent / thisW.leads : 0,
+              lastW.leads > 0 ? lastW.spent / lastW.leads : 0
+            ),
+          };
+        }).sort((a, b) => b.thisWeek.spent - a.thisWeek.spent);
+
+        // ── Demographics ─────────────────────────────────────────────────────
+        function wrParseDemos(items: any[]) {
+          return items.map(el => ({
+            name: el.pivotValue || 'Unknown',
+            impressions: el.impressions || 0,
+            clicks: el.clicks || 0,
+            spent: parseFloat(el.costInLocalCurrency || '0'),
+            leads: (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0),
+          })).sort((a, b) => b.impressions - a.impressions).slice(0, 20);
+        }
+
+        const demographics = {
+          jobTitle: wrParseDemos(wrEls(r_jobTitle)),
+          seniority: wrParseDemos(wrEls(r_seniority)),
+          industry: wrParseDemos(wrEls(r_industry)),
+          companySize: wrParseDemos(wrEls(r_companySize)),
+        };
+
+        // ── Account summary ───────────────────────────────────────────────────
+        const sumReduce = (arr: typeof byCreative, period: 'thisWeek' | 'lastWeek') =>
+          arr.reduce((acc, c) => ({
+            spent: acc.spent + c[period].spent,
+            impressions: acc.impressions + c[period].impressions,
+            clicks: acc.clicks + c[period].clicks,
+            leads: acc.leads + c[period].leads,
+          }), { spent: 0, impressions: 0, clicks: 0, leads: 0 });
+
+        const summaryThis = sumReduce(byCreative, 'thisWeek');
+        const summaryLast = sumReduce(byCreative, 'lastWeek');
+
+        const summary = {
+          thisWeek: wrMetrics(summaryThis),
+          lastWeek: wrMetrics(summaryLast),
+          pctSpentChange: wrPct(summaryThis.spent, summaryLast.spent),
+          pctImpressionsChange: wrPct(summaryThis.impressions, summaryLast.impressions),
+          pctClicksChange: wrPct(summaryThis.clicks, summaryLast.clicks),
+          pctLeadsChange: wrPct(summaryThis.leads, summaryLast.leads),
+          pctCtrChange: wrPct(
+            summaryThis.impressions > 0 ? (summaryThis.clicks / summaryThis.impressions) * 100 : 0,
+            summaryLast.impressions > 0 ? (summaryLast.clicks / summaryLast.impressions) * 100 : 0
+          ),
+          pctCplChange: wrPct(
+            summaryThis.leads > 0 ? summaryThis.spent / summaryThis.leads : 0,
+            summaryLast.leads > 0 ? summaryLast.spent / summaryLast.leads : 0
+          ),
+        };
+
+        console.log(`[get_weekly_report] Done. Creatives: ${byCreative.length}, Campaigns: ${byCampaign.length}, Forms: ${byLeadForm.length}`);
+
+        return new Response(JSON.stringify({
+          weekRange: { thisWeek: thisWeekRange, lastWeek: lastWeekRange },
+          summary,
+          byCreative,
+          byCampaign,
+          byLeadForm,
+          demographics,
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
       default:
         return new Response(JSON.stringify({ error: 'Unknown action' }), {
           status: 400,
