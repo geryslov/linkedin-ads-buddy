@@ -28,7 +28,6 @@ import {
   Building2,
   Calendar,
   ChevronDown,
-  ChevronRight,
   Copy,
   Check,
   X,
@@ -95,115 +94,78 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
-// ── Individual lead row with expandable custom fields ─────────────────────────
+// ── Individual lead row ────────────────────────────────────────────────────────
 function LeadRow({
   lead,
-  hasExpandable,
+  customKeys,
 }: {
   lead: LeadFormResponse;
-  hasExpandable: boolean;
+  customKeys: string[];
 }) {
-  const [expanded, setExpanded] = useState(false);
-  const customEntries = Object.entries(lead.customAnswers).filter(([, v]) => !!v);
-  const canExpand = customEntries.length > 0;
-
   return (
-    <>
-      <TableRow
-        className={cn(
-          'group transition-colors duration-150',
-          lead.testLead && 'opacity-60',
-          expanded ? 'bg-muted/10' : 'hover:bg-muted/20',
-        )}
-      >
-        {/* Expand chevron */}
-        {hasExpandable && (
-          <TableCell className="w-8 p-2 pr-0">
-            {canExpand && (
-              <button
-                onClick={() => setExpanded(v => !v)}
-                className="flex items-center justify-center text-muted-foreground/40 hover:text-foreground transition-colors duration-150 focus:outline-none"
-                aria-label={expanded ? 'Collapse custom fields' : 'Expand custom fields'}
-              >
-                {expanded
-                  ? <ChevronDown className="h-3.5 w-3.5" />
-                  : <ChevronRight className="h-3.5 w-3.5" />}
-              </button>
-            )}
-          </TableCell>
-        )}
-
-        {/* Name */}
-        <TableCell className="py-2.5 font-medium text-sm whitespace-nowrap">
-          {[lead.firstName, lead.lastName].filter(Boolean).join(' ') || '—'}
-        </TableCell>
-
-        {/* Company */}
-        <TableCell className="py-2.5">
-          <div className="group/cell flex items-center min-w-0">
-            <span className="text-sm text-foreground/80 truncate max-w-[180px]">
-              {lead.company || '—'}
-            </span>
-            {lead.company && <CopyButton text={lead.company} />}
-          </div>
-        </TableCell>
-
-        {/* Email */}
-        <TableCell className="py-2.5">
-          <div className="group/cell flex items-center gap-0.5">
-            <span className="text-sm text-muted-foreground font-mono whitespace-nowrap truncate max-w-[220px]">
-              {lead.email || '—'}
-            </span>
-            {lead.email && <CopyButton text={lead.email} />}
-          </div>
-        </TableCell>
-
-        {/* Submitted date */}
-        <TableCell className="py-2.5 text-xs text-muted-foreground tabular-nums whitespace-nowrap">
-          {lead.submittedAt
-            ? new Date(lead.submittedAt).toLocaleDateString('en-US', {
-                month: 'short',
-                day: 'numeric',
-                year: 'numeric',
-              })
-            : '—'}
-        </TableCell>
-
-        {/* Status badge */}
-        <TableCell className="py-2.5 w-[64px] text-center">
-          {lead.testLead ? (
-            <span className="inline-flex items-center rounded-md bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 ring-1 ring-inset ring-amber-500/20">
-              test
-            </span>
-          ) : (
-            <span className="inline-flex items-center rounded-md bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600 ring-1 ring-inset ring-emerald-500/20">
-              real
-            </span>
-          )}
-        </TableCell>
-      </TableRow>
-
-      {/* Custom fields expansion panel */}
-      {expanded && canExpand && (
-        <tr>
-          <td colSpan={hasExpandable ? 6 : 5} className="p-0">
-            <div className="px-8 py-3 bg-muted/20 border-t border-b border-border/20 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-8 gap-y-3">
-              {customEntries.map(([key, value]) => (
-                <div key={key} className="flex flex-col gap-0.5 min-w-0">
-                  <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 truncate">
-                    {key}
-                  </span>
-                  <div className="group/cell flex items-center gap-0.5">
-                    <span className="text-sm text-foreground truncate">{value}</span>
-                    <CopyButton text={value} />
-                  </div>
-                </div>
-              ))}
-            </div>
-          </td>
-        </tr>
+    <TableRow
+      className={cn(
+        'group transition-colors duration-150',
+        lead.testLead && 'opacity-60',
+        'hover:bg-muted/20',
       )}
-    </>
+    >
+      {/* Name */}
+      <TableCell className="py-2.5 font-medium text-sm whitespace-nowrap">
+        {[lead.firstName, lead.lastName].filter(Boolean).join(' ') || '—'}
+      </TableCell>
+
+      {/* Company */}
+      <TableCell className="py-2.5">
+        <div className="group/cell flex items-center min-w-0">
+          <span className="text-sm text-foreground/80 truncate max-w-[180px]">
+            {lead.company || '—'}
+          </span>
+          {lead.company && <CopyButton text={lead.company} />}
+        </div>
+      </TableCell>
+
+      {/* Email */}
+      <TableCell className="py-2.5">
+        <div className="group/cell flex items-center gap-0.5">
+          <span className="text-sm text-muted-foreground font-mono whitespace-nowrap truncate max-w-[220px]">
+            {lead.email || '—'}
+          </span>
+          {lead.email && <CopyButton text={lead.email} />}
+        </div>
+      </TableCell>
+
+      {/* Submitted date */}
+      <TableCell className="py-2.5 text-xs text-muted-foreground tabular-nums whitespace-nowrap">
+        {lead.submittedAt
+          ? new Date(lead.submittedAt).toLocaleDateString('en-US', {
+              month: 'short',
+              day: 'numeric',
+              year: 'numeric',
+            })
+          : '—'}
+      </TableCell>
+
+      {/* Custom field columns */}
+      {customKeys.map((key) => (
+        <TableCell key={key} className="py-2.5 text-sm text-foreground/80 max-w-[200px] truncate">
+          {lead.customAnswers[key] || '—'}
+        </TableCell>
+      ))}
+
+      {/* Status badge */}
+      <TableCell className="py-2.5 w-[64px] text-center">
+        {lead.testLead ? (
+          <span className="inline-flex items-center rounded-md bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 ring-1 ring-inset ring-amber-500/20">
+            test
+          </span>
+        ) : (
+          <span className="inline-flex items-center rounded-md bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600 ring-1 ring-inset ring-emerald-500/20">
+            real
+          </span>
+        )}
+      </TableCell>
+    </TableRow>
   );
 }
 
@@ -281,9 +243,12 @@ export function LeadRecordsViewer({ accessToken, selectedAccount }: LeadRecordsV
     return result;
   }, [leads, showTestLeads, searchQuery]);
 
-  const hasCustomFields = useMemo(() => {
-    return filteredLeads.some(l => Object.keys(l.customAnswers).length > 0);
-  }, [filteredLeads]);
+  // Collect unique custom field keys from all loaded leads (stable order)
+  const customKeys = useMemo(() => {
+    const keys = new Set<string>();
+    leads.forEach(l => Object.keys(l.customAnswers).forEach(k => keys.add(k)));
+    return Array.from(keys);
+  }, [leads]);
 
   const handleExport = useCallback(() => {
     if (!filteredLeads.length) return;
@@ -400,12 +365,6 @@ export function LeadRecordsViewer({ accessToken, selectedAccount }: LeadRecordsV
               · {total.toLocaleString()} available on server
             </span>
           )}
-          {hasCustomFields && (
-            <Badge variant="outline" className="text-[10px] font-medium gap-1">
-              <ChevronRight className="h-2.5 w-2.5" />
-              Custom fields available — click row to expand
-            </Badge>
-          )}
         </div>
       )}
 
@@ -478,9 +437,6 @@ export function LeadRecordsViewer({ accessToken, selectedAccount }: LeadRecordsV
             <Table className="min-w-[680px]">
               <TableHeader>
                 <TableRow className="bg-muted/30 hover:bg-muted/30">
-                  {hasCustomFields && (
-                    <TableHead className="w-8 p-2" />
-                  )}
                   <TableHead className="text-xs font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap py-2.5">
                     Name
                   </TableHead>
@@ -499,6 +455,14 @@ export function LeadRecordsViewer({ accessToken, selectedAccount }: LeadRecordsV
                   <TableHead className="text-xs font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap py-2.5">
                     Submitted
                   </TableHead>
+                  {customKeys.map((_, i) => (
+                    <TableHead
+                      key={i}
+                      className="text-xs font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap py-2.5"
+                    >
+                      Custom {i + 1}
+                    </TableHead>
+                  ))}
                   <TableHead className="text-center text-xs font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap py-2.5 w-[64px]">
                     Status
                   </TableHead>
@@ -509,7 +473,7 @@ export function LeadRecordsViewer({ accessToken, selectedAccount }: LeadRecordsV
                   <LeadRow
                     key={lead.leadUrn || idx}
                     lead={lead}
-                    hasExpandable={hasCustomFields}
+                    customKeys={customKeys}
                   />
                 ))}
               </TableBody>
