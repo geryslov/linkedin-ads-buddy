@@ -933,15 +933,15 @@ export function ReportingSection({ accessToken, selectedAccount, canWrite = fals
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge variant="secondary" className="bg-green-500/10 text-green-600 gap-1">
                       <CheckCircle className="h-3 w-3" />
-                      {enrichmentCounts.resolved} Resolved
+                      {enrichmentCounts.resolved} Resolved ({Math.round((enrichmentCounts.resolved / enrichmentCounts.total) * 100)}%)
                     </Badge>
                     <Badge variant="secondary" className="bg-yellow-500/10 text-yellow-600 gap-1">
-                      <Globe className="h-3 w-3" />
-                      {enrichmentCounts.fallback} Fallback
+                      <AlertTriangle className="h-3 w-3" />
+                      {enrichmentCounts.fallback} Fallback ({Math.round((enrichmentCounts.fallback / enrichmentCounts.total) * 100)}%)
                     </Badge>
                     <Badge variant="secondary" className="bg-muted text-muted-foreground gap-1">
-                      <AlertCircle className="h-3 w-3" />
-                      {enrichmentCounts.unresolved} Unresolved
+                      <XCircle className="h-3 w-3" />
+                      {enrichmentCounts.unresolved} Unresolved ({Math.round((enrichmentCounts.unresolved / enrichmentCounts.total) * 100)}%)
                     </Badge>
                   </div>
                 </div>

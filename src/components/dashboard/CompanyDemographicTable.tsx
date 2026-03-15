@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Checkbox } from '@/components/ui/checkbox';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
-import { ArrowUpDown, Search, Building2, ExternalLink, Globe, AlertCircle, CheckCircle, ChevronRight, ChevronDown, ChevronLeft, Target, Megaphone, Loader2, Heart, MessageCircle, Sparkles, Share2, Settings2 } from 'lucide-react';
+import { ArrowUpDown, ArrowUp, ArrowDown, Search, Building2, ExternalLink, Globe, AlertCircle, CheckCircle, ChevronRight, ChevronDown, ChevronLeft, Target, Megaphone, Loader2, Heart, MessageCircle, Sparkles, Share2, Settings2 } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { CompanyDemographicItem, ObjectiveBreakdownItem, CampaignBreakdownItem } from '@/hooks/useCompanyDemographic';
@@ -260,7 +260,13 @@ export function CompanyDemographicTable({ data, isLoading, isLoadingMore, totalC
   const SortButton = ({ field, children }: { field: SortField; children: React.ReactNode }) => (
     <Button variant="ghost" size="sm" className="h-8 px-2 hover:bg-muted/50" onClick={() => handleSort(field)}>
       {children}
-      <ArrowUpDown className="ml-1 h-3 w-3" />
+      {sortField === field ? (
+        sortDirection === 'asc'
+          ? <ArrowUp className="ml-1 h-3 w-3 text-primary" />
+          : <ArrowDown className="ml-1 h-3 w-3 text-primary" />
+      ) : (
+        <ArrowUpDown className="ml-1 h-3 w-3 opacity-40" />
+      )}
     </Button>
   );
 
@@ -441,10 +447,20 @@ export function CompanyDemographicTable({ data, isLoading, isLoadingMore, totalC
                       {isColumnVisible('website') && (
                         <TableCell className="max-w-[200px]">
                           {item.website ? (
-                            <a href={item.website.startsWith('http') ? item.website : `https://${item.website}`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-primary hover:underline text-sm" onClick={(e) => e.stopPropagation()}>
-                              <Globe className="h-3 w-3 flex-shrink-0" />
-                              <span className="truncate">{item.website.replace(/^https?:\/\//, '')}</span>
-                            </a>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <a href={item.website.startsWith('http') ? item.website : `https://${item.website}`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 hover:underline text-sm" onClick={(e) => e.stopPropagation()}>
+                                  <Globe className={cn(
+                                    "h-3 w-3 flex-shrink-0",
+                                    item.enrichmentStatus === 'resolved' ? "text-green-500" : "text-amber-500"
+                                  )} />
+                                  <span className="truncate text-primary">{item.website.replace(/^https?:\/\//, '')}</span>
+                                </a>
+                              </TooltipTrigger>
+                              <TooltipContent side="top" className="text-xs">
+                                {item.enrichmentStatus === 'resolved' ? '✓ Verified website' : '~ Partial match'}
+                              </TooltipContent>
+                            </Tooltip>
                           ) : (
                             getStatusBadge(item.enrichmentStatus)
                           )}

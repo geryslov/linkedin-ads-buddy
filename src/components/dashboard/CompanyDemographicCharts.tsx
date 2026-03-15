@@ -149,9 +149,23 @@ export function CompanyDemographicCharts({ data }: CompanyDemographicChartsProps
       {/* Enrichment: stacked 100% bar (AA accessibility, better than donut B grade) */}
       <TabsContent value="enrichment">
         <div className="space-y-6">
-          <p className="text-xs text-muted-foreground">
-            Company enrichment status — {data.length} total companies
-          </p>
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-muted-foreground">
+              Company enrichment status — {data.length} total companies
+            </p>
+            {(() => {
+              const coveragePct = Math.round(((enrichmentBarData[0].resolved + enrichmentBarData[0].fallback) / data.length) * 100);
+              return (
+                <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                  coveragePct >= 80 ? 'bg-green-500/10 text-green-600' :
+                  coveragePct >= 50 ? 'bg-amber-500/10 text-amber-600' :
+                  'bg-muted text-muted-foreground'
+                }`}>
+                  {coveragePct}% website coverage
+                </span>
+              );
+            })()}
+          </div>
 
           {/* Stacked 100% bar */}
           <ResponsiveContainer width="100%" height={72}>
