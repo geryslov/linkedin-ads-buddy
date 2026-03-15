@@ -149,22 +149,20 @@ export default function Dashboard() {
         onCollapsedChange={setSidebarCollapsed}
       />
 
-      <main className={cn("transition-all duration-300 p-8", sidebarCollapsed ? "ml-16" : "ml-64")}>
-        {/* U5 + U8 — Header with breadcrumb and contextual subtitle */}
-        <header className="flex items-start justify-between mb-8">
-          <div>
+      <main className={cn("transition-all duration-300 min-h-screen", sidebarCollapsed ? "ml-16" : "ml-64")}>
+        {/* ── Sticky top header bar ───────────────────────────── */}
+        <header className="sticky top-0 z-20 bg-background/95 backdrop-blur-sm border-b border-border/60 px-6 h-14 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-2 min-w-0">
             {/* Breadcrumb */}
             {meta.group && (
-              <div className="flex items-center gap-1 text-xs text-muted-foreground mb-1">
-                <span>{meta.group}</span>
+              <div className="flex items-center gap-1 text-xs text-muted-foreground shrink-0">
+                <span className="font-medium">{meta.group}</span>
                 <ChevronRight className="h-3 w-3" />
-                <span>{meta.title}</span>
               </div>
             )}
-            <h1 className="text-2xl font-bold">{meta.title}</h1>
-            <p className="text-sm text-muted-foreground mt-0.5">{meta.subtitle}</p>
+            <h1 className="text-sm font-semibold truncate">{meta.title}</h1>
           </div>
-          <div className="flex items-center gap-3 pt-1">
+          <div className="flex items-center gap-2 shrink-0">
             <AccountSelector
               accounts={adAccounts}
               selectedAccount={selectedAccount}
@@ -177,14 +175,25 @@ export default function Dashboard() {
             <Button
               variant="outline"
               size="icon"
+              className="h-8 w-8"
               onClick={handleRefresh}
               disabled={isLoading}
               title="Refresh data"
             >
-              <RefreshCw className={cn("h-4 w-4", isLoading && "animate-spin")} />
+              <RefreshCw className={cn("h-3.5 w-3.5", isLoading && "animate-spin")} />
             </Button>
           </div>
         </header>
+
+        {/* ── Page content ────────────────────────────────────── */}
+        <div className="p-6">
+          {/* Page title + subtitle (below header bar) */}
+          <div className="mb-6">
+            <h2 className="text-xl font-bold text-foreground">{meta.title}</h2>
+            {meta.subtitle && (
+              <p className="text-sm text-muted-foreground mt-0.5">{meta.subtitle}</p>
+            )}
+          </div>
 
         {activeTab === "overview" && (
           <div className="space-y-8">
@@ -232,7 +241,7 @@ export default function Dashboard() {
             </div>
 
             <div>
-              <h2 className="text-xl font-semibold mb-4">Recent Campaigns</h2>
+              <h3 className="text-base font-semibold mb-3 text-foreground">Recent Campaigns</h3>
               {isLoading ? (
                 <Skeleton className="h-64 rounded-xl bg-secondary" />
               ) : (
@@ -427,6 +436,7 @@ export default function Dashboard() {
             selectedAccount={selectedAccount}
           />
         )}
+        </div>{/* end p-6 content wrapper */}
       </main>
     </div>
   );
