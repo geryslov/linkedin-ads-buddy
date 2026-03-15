@@ -11257,53 +11257,101 @@ serve(async (req) => {
         // ── Creative metadata (names, images, form URNs) ─────────────────────
         const creativeMetaMap = new Map<string, { name: string; imageUrl: string; type: string; status: string; formUrn: string; campaignId: string }>();
 
-        // Step A: versioned /rest/adAccounts/{id}/creatives for images + form URNs
-        try {
-          let creativeStart = 0;
-          let hasMoreCreatives = true;
-          while (hasMoreCreatives && creativeStart < 2000) {
-            const resp = await fetch(
-              `https://api.linkedin.com/rest/adAccounts/${accountId}/creatives?q=criteria&fields=id,content,status,campaign&count=100&start=${creativeStart}`,
-              { headers: { ...authHdr, 'LinkedIn-Version': '202501', 'X-Restli-Protocol-Version': '2.0.0' } }
-            );
-            if (!resp.ok) { hasMoreCreatives = false; break; }
-            const data = await resp.json();
-            const items = data.elements || [];
-            for (const creative of items) {
-              const id = creative.id?.toString() || '';
-              const content = creative.content || {};
+        // Step A: Fetch individual creative details (name + image + reference) for every creative
+        // that appears in the analytics — same approach as get_creative_performance_report
+        const wrAllCreativeIds = new Set<string>();
+        for (const urn of [...creativeThisMap.keys(), ...creativeLastMap.keys()]) {
+          const id = urn.split(':').pop();
+          if (id) wrAllCreativeIds.add(id);
+        }
+        const wrCreativeIdArr = [...wrAllCreativeIds];
+        const wrRefMap = new Map<string, string>(); // creativeId → reference URN
+
+        const wrDetailBatch = 50;
+        for (let i = 0; i < wrCreativeIdArr.length; i += wrDetailBatch) {
+          const batch = wrCreativeIdArr.slice(i, i + wrDetailBatch);
+          await Promise.all(batch.map(async (creativeId) => {
+            try {
+              const urn = encodeURIComponent(`urn:li:sponsoredCreative:${creativeId}`);
+              const resp = await fetch(
+                `https://api.linkedin.com/rest/adAccounts/${accountId}/creatives/${urn}`,
+                { headers: { ...authHdr, 'LinkedIn-Version': '202511', 'X-Restli-Protocol-Version': '2.0.0' } }
+              );
+              if (!resp.ok) { await resp.text(); return; }
+              const d = await resp.json();
+              const content = d.content || {};
+              const ref = content.reference || '';
+              if (ref) wrRefMap.set(creativeId, ref);
               let imageUrl = content.media?.downloadUrl || '';
               if (!imageUrl && content.landingPage?.landingPageMedia?.thumbnail) imageUrl = content.landingPage.landingPageMedia.thumbnail;
               if (!imageUrl && content.spotlight?.logo?.downloadUrl) imageUrl = content.spotlight.logo.downloadUrl;
+              if (!imageUrl && content.followCompany?.logo?.downloadUrl) imageUrl = content.followCompany.logo.downloadUrl;
+              if (!imageUrl && Array.isArray(content.mediaContent) && content.mediaContent[0]) {
+                imageUrl = content.mediaContent[0]?.media?.downloadUrl || content.mediaContent[0]?.downloadUrl || '';
+              }
               const formUrn = content.leadGenerationForm || '';
-              const campUrn = creative.campaign || '';
-              const campId = campUrn.split(':').pop() || '';
-              creativeMetaMap.set(id, { name: '', imageUrl, type: Object.keys(content)[0] || 'UNKNOWN', status: creative.status || 'UNKNOWN', formUrn, campaignId: campId });
-            }
-            if (items.length < 100) hasMoreCreatives = false;
-            else creativeStart += 100;
-          }
-        } catch (err) { console.error('[get_weekly_report] Versioned creative fetch error:', err); }
+              const campId = (d.campaign || '').split(':').pop() || '';
+              creativeMetaMap.set(creativeId, {
+                name: d.name || '',
+                imageUrl,
+                type: Object.keys(content)[0] || 'UNKNOWN',
+                status: d.status || 'UNKNOWN',
+                formUrn,
+                campaignId: campId,
+              });
+            } catch (e) { /* ignore */ }
+          }));
+        }
 
-        // Step B: legacy adCreativesV2 for names
-        try {
-          const resp = await fetch(
-            `https://api.linkedin.com/v2/adCreativesV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=500`,
-            { headers: authHdr }
-          );
-          if (resp.ok) {
-            const data = await resp.json();
-            for (const c of (data.elements || [])) {
-              const id = c.id?.toString() || '';
-              const name = c.creativeDscName || c.name || `Creative ${id}`;
-              const existing = creativeMetaMap.get(id);
-              if (existing) existing.name = name;
-              else creativeMetaMap.set(id, { name, imageUrl: '', type: c.type || 'UNKNOWN', status: c.status || 'UNKNOWN', formUrn: '', campaignId: '' });
-            }
-          }
-        } catch (err) { console.error('[get_weekly_report] Legacy creative names error:', err); }
+        // Step B: Resolve UGC post / share text for creatives still missing a name
+        const wrNeedRef = wrCreativeIdArr.filter(id => !creativeMetaMap.get(id)?.name && wrRefMap.has(id));
+        const wrUniqueRefs = [...new Set(wrNeedRef.map(id => wrRefMap.get(id)!))];
+        const wrRefNameCache = new Map<string, string>();
+        const wrRefImageCache = new Map<string, string>();
 
-        console.log(`[get_weekly_report] Creative metadata: ${creativeMetaMap.size} creatives`);
+        const wrRefBatch = 30;
+        for (let i = 0; i < wrUniqueRefs.length; i += wrRefBatch) {
+          await Promise.all(wrUniqueRefs.slice(i, i + wrRefBatch).map(async (reference) => {
+            try {
+              if (reference.includes('ugcPost')) {
+                const pid = reference.split(':').pop();
+                const resp = await fetch(`https://api.linkedin.com/v2/ugcPosts/${pid}`, { headers: authHdr });
+                if (resp.ok) {
+                  const post = await resp.json();
+                  const sc = post.specificContent?.['com.linkedin.ugc.ShareContent'];
+                  const txt = sc?.shareCommentary?.text || '';
+                  if (txt.trim()) wrRefNameCache.set(reference, txt.replace(/\s+/g, ' ').trim().slice(0, 80));
+                  const media = sc?.media?.[0];
+                  const img = media?.thumbnails?.[0]?.url || media?.originalUrl || '';
+                  if (img) wrRefImageCache.set(reference, img);
+                } else { await resp.text(); }
+              } else if (reference.includes('share')) {
+                const sid = reference.split(':').pop();
+                const resp = await fetch(`https://api.linkedin.com/v2/shares/${sid}`, { headers: authHdr });
+                if (resp.ok) {
+                  const share = await resp.json();
+                  const txt = share.text?.text || '';
+                  if (txt.trim()) wrRefNameCache.set(reference, txt.replace(/\s+/g, ' ').trim().slice(0, 80));
+                  const ce = share.content?.contentEntities?.[0];
+                  const img = ce?.thumbnails?.[0]?.resolvedUrl || ce?.thumbnails?.[0]?.url || '';
+                  if (img) wrRefImageCache.set(reference, img);
+                } else { await resp.text(); }
+              }
+            } catch (e) { /* ignore */ }
+          }));
+        }
+
+        // Apply resolved names/images from share content
+        for (const creativeId of wrCreativeIdArr) {
+          const meta = creativeMetaMap.get(creativeId);
+          const ref = wrRefMap.get(creativeId);
+          if (meta && ref) {
+            if (!meta.name) meta.name = wrRefNameCache.get(ref) || '';
+            if (!meta.imageUrl) meta.imageUrl = wrRefImageCache.get(ref) || '';
+          }
+        }
+
+        console.log(`[get_weekly_report] Creative metadata: ${creativeMetaMap.size} resolved, refs fetched: ${wrUniqueRefs.length}`);
 
         // ── Campaign names ───────────────────────────────────────────────────
         const campaignNameMap = new Map<string, { name: string; status: string }>();
@@ -11403,7 +11451,7 @@ serve(async (req) => {
         for (const urn of allCreativeUrns) {
           const id = urn.split(':').pop() || urn;
           const meta = creativeMetaMap.get(id) || { name: '', imageUrl: '', type: 'UNKNOWN', status: 'UNKNOWN', formUrn: '', campaignId: '' };
-          const creativeName = meta.name && !meta.name.startsWith('Creative ') ? meta.name : (meta.name || `ID:${id}`);
+          const creativeName = meta.name || `Creative ${id}`;
           const thisW = creativeThisMap.get(urn) || { impressions: 0, clicks: 0, spent: 0, leads: 0 };
           const lastW = creativeLastMap.get(urn) || { impressions: 0, clicks: 0, spent: 0, leads: 0 };
           const trendPoints = (creativeTrendMap.get(urn) || []).sort((a, b) => a.date.localeCompare(b.date));
