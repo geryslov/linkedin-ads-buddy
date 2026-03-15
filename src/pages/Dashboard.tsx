@@ -55,6 +55,7 @@ const tabMeta: Record<string, { group: string; title: string; subtitle: string }
   standardized_titles: { group: "Tools",      title: "Standardized Titles",         subtitle: "Normalize job title variations" },
   name_report:         { group: "Tools",      title: "Name Report",                 subtitle: "Analyze campaign naming conventions" },
   forms_leads:         { group: "Leads",      title: "Forms & Leads",               subtitle: "Lead generation form submissions and responses" },
+  lead_records:        { group: "Leads",      title: "Lead Records",                subtitle: "Browse all registered leads across your forms" },
 };
 
 export default function Dashboard() {
