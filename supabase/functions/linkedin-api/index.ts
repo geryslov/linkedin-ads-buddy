@@ -11066,11 +11066,13 @@ serve(async (req) => {
         const leadsEndMs = new Date(leadsEndDate + 'T23:59:59Z').getTime();
 
         const accountUrn = `urn:li:sponsoredAccount:${accountId}`;
+        // Per official docs, the URN inside the owner param must be percent-encoded
+        // but the Rest.li object wrapper (parentheses, key:) must NOT be encoded.
+        // Example from docs: owner=(sponsoredAccount:urn%3Ali%3AsponsoredAccount%3A522529623)
+        const encodedAccountUrn = encodeURIComponent(accountUrn);
 
-        // Note: leadFormResponses endpoint does NOT support submittedAtTimeRange or fields projection
-        // IMPORTANT: Do NOT use URLSearchParams — it percent-encodes parentheses/colons which breaks Rest.li object syntax
         let leadsUrl = `https://api.linkedin.com/rest/leadFormResponses?q=owner`
-          + `&owner=(sponsoredAccount:${accountUrn})`
+          + `&owner=(sponsoredAccount:${encodedAccountUrn})`
           + `&leadType=(leadType:SPONSORED)`
           + `&count=100`
           + `&start=${leadsOffset}`;
