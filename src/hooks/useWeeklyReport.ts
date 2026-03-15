@@ -19,7 +19,6 @@ export interface TrendPoint {
 }
 
 export interface WeeklyCreativeRow {
-  creativeId: string;
   creativeName: string;
   imageUrl: string;
   type: string;

@@ -11389,31 +11389,72 @@ serve(async (req) => {
           });
         }
 
+        // Build per-URN rows then aggregate by creative name
         const allCreativeUrns = new Set([...creativeThisMap.keys(), ...creativeLastMap.keys()]);
-        const byCreative = [...allCreativeUrns].map(urn => {
+
+        type NameAgg = {
+          creativeName: string; imageUrl: string; type: string; status: string; formUrn: string;
+          thisW: { impressions: number; clicks: number; spent: number; leads: number };
+          lastW: { impressions: number; clicks: number; spent: number; leads: number };
+          trendByDate: Map<string, { spent: number; clicks: number; leads: number; impressions: number }>;
+        };
+        const byNameAgg = new Map<string, NameAgg>();
+
+        for (const urn of allCreativeUrns) {
           const id = urn.split(':').pop() || urn;
-          const meta = creativeMetaMap.get(id) || { name: `Creative ${id}`, imageUrl: '', type: 'UNKNOWN', status: 'UNKNOWN', formUrn: '', campaignId: '' };
+          const meta = creativeMetaMap.get(id) || { name: '', imageUrl: '', type: 'UNKNOWN', status: 'UNKNOWN', formUrn: '', campaignId: '' };
+          const creativeName = meta.name && !meta.name.startsWith('Creative ') ? meta.name : (meta.name || `ID:${id}`);
           const thisW = creativeThisMap.get(urn) || { impressions: 0, clicks: 0, spent: 0, leads: 0 };
           const lastW = creativeLastMap.get(urn) || { impressions: 0, clicks: 0, spent: 0, leads: 0 };
-          const trend = (creativeTrendMap.get(urn) || []).sort((a, b) => a.date.localeCompare(b.date));
-          return {
-            creativeId: id,
-            creativeName: meta.name || `Creative ${id}`,
-            imageUrl: meta.imageUrl || '',
-            type: meta.type,
-            status: meta.status,
-            formUrn: meta.formUrn,
-            campaignId: meta.campaignId,
-            thisWeek: wrMetrics(thisW),
-            lastWeek: wrMetrics(lastW),
-            pctSpentChange: wrPct(thisW.spent, lastW.spent),
-            pctCplChange: wrPct(
-              thisW.leads > 0 ? thisW.spent / thisW.leads : 0,
-              lastW.leads > 0 ? lastW.spent / lastW.leads : 0
-            ),
-            trend,
-          };
-        }).sort((a, b) => b.thisWeek.spent - a.thisWeek.spent);
+          const trendPoints = (creativeTrendMap.get(urn) || []).sort((a, b) => a.date.localeCompare(b.date));
+
+          if (!byNameAgg.has(creativeName)) {
+            byNameAgg.set(creativeName, {
+              creativeName,
+              imageUrl: meta.imageUrl || '',
+              type: meta.type,
+              status: meta.status,
+              formUrn: meta.formUrn,
+              thisW: { ...thisW },
+              lastW: { ...lastW },
+              trendByDate: new Map(trendPoints.map(t => [t.date, { spent: t.spent, clicks: t.clicks, leads: t.leads, impressions: t.impressions }])),
+            });
+          } else {
+            const agg = byNameAgg.get(creativeName)!;
+            if (!agg.imageUrl && meta.imageUrl) agg.imageUrl = meta.imageUrl;
+            agg.thisW.spent += thisW.spent;
+            agg.thisW.impressions += thisW.impressions;
+            agg.thisW.clicks += thisW.clicks;
+            agg.thisW.leads += thisW.leads;
+            agg.lastW.spent += lastW.spent;
+            agg.lastW.impressions += lastW.impressions;
+            agg.lastW.clicks += lastW.clicks;
+            agg.lastW.leads += lastW.leads;
+            for (const pt of trendPoints) {
+              const ex = agg.trendByDate.get(pt.date);
+              if (ex) { ex.spent += pt.spent; ex.clicks += pt.clicks; ex.leads += pt.leads; ex.impressions += pt.impressions; }
+              else agg.trendByDate.set(pt.date, { spent: pt.spent, clicks: pt.clicks, leads: pt.leads, impressions: pt.impressions });
+            }
+          }
+        }
+
+        const byCreative = [...byNameAgg.values()].map(agg => ({
+          creativeName: agg.creativeName,
+          imageUrl: agg.imageUrl,
+          type: agg.type,
+          status: agg.status,
+          formUrn: agg.formUrn,
+          thisWeek: wrMetrics(agg.thisW),
+          lastWeek: wrMetrics(agg.lastW),
+          pctSpentChange: wrPct(agg.thisW.spent, agg.lastW.spent),
+          pctCplChange: wrPct(
+            agg.thisW.leads > 0 ? agg.thisW.spent / agg.thisW.leads : 0,
+            agg.lastW.leads > 0 ? agg.lastW.spent / agg.lastW.leads : 0
+          ),
+          trend: [...agg.trendByDate.entries()]
+            .map(([date, pt]) => ({ date, ...pt }))
+            .sort((a, b) => a.date.localeCompare(b.date)),
+        })).sort((a, b) => b.thisWeek.spent - a.thisWeek.spent);
 
         // ── By campaign ──────────────────────────────────────────────────────
         const campThisMap = new Map<string, { impressions: number; clicks: number; spent: number; leads: number }>();

@@ -269,7 +269,7 @@ function CreativeTable({ rows }: { rows: WeeklyCreativeRow[] }) {
           </thead>
           <tbody className="divide-y divide-border/50">
             {sorted.map(row => (
-              <tr key={row.creativeId} className="hover:bg-muted/30 transition-colors duration-150">
+              <tr key={row.creativeName} className="hover:bg-muted/30 transition-colors duration-150">
                 <td className="p-2">
                   <div className="h-8 w-14 rounded bg-muted overflow-hidden flex items-center justify-center shrink-0">
                     {row.imageUrl ? (
