@@ -4,14 +4,6 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import {
   Select,
   SelectContent,
   SelectItem,
@@ -217,36 +209,36 @@ export function LeadRecordsViewer({ accessToken, selectedAccount }: LeadRecordsV
       {filteredLeads.length > 0 && (
         <div className="rounded-xl border border-border/60 overflow-hidden">
           <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-muted/30">
-                  <TableHead className="text-xs font-semibold w-[180px]">Name</TableHead>
-                  <TableHead className="text-xs font-semibold">
+            <table className="w-full caption-bottom text-sm">
+              <thead>
+                <tr className="border-b bg-muted/30">
+                  <th className="h-10 px-3 text-left align-middle text-xs font-semibold text-muted-foreground whitespace-nowrap">Name</th>
+                  <th className="h-10 px-3 text-left align-middle text-xs font-semibold text-muted-foreground whitespace-nowrap">
                     <Mail className="h-3 w-3 inline mr-1" />
                     Email
-                  </TableHead>
-                  <TableHead className="text-xs font-semibold">
+                  </th>
+                  <th className="h-10 px-3 text-left align-middle text-xs font-semibold text-muted-foreground whitespace-nowrap">
                     <Building2 className="h-3 w-3 inline mr-1" />
                     Company
-                  </TableHead>
-                  <TableHead className="text-xs font-semibold w-[160px]">Submitted</TableHead>
+                  </th>
+                  <th className="h-10 px-3 text-left align-middle text-xs font-semibold text-muted-foreground whitespace-nowrap">Submitted</th>
                   {customKeys.map((k) => (
-                    <TableHead key={k} className="text-xs font-semibold">
+                    <th key={k} className="h-10 px-3 text-left align-middle text-xs font-semibold text-muted-foreground whitespace-nowrap">
                       {k}
-                    </TableHead>
+                    </th>
                   ))}
-                  <TableHead className="text-xs font-semibold w-[60px]">Test</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
+                  <th className="h-10 px-3 text-left align-middle text-xs font-semibold text-muted-foreground whitespace-nowrap w-[60px]">Test</th>
+                </tr>
+              </thead>
+              <tbody>
                 {filteredLeads.map((lead, idx) => (
-                  <TableRow key={lead.leadUrn || idx} className="hover:bg-muted/20">
-                    <TableCell className="text-sm font-medium">
+                  <tr key={lead.leadUrn || idx} className="border-b transition-colors hover:bg-muted/20">
+                    <td className="px-3 py-2.5 align-middle text-sm font-medium whitespace-nowrap">
                       {lead.firstName} {lead.lastName}
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">{lead.email}</TableCell>
-                    <TableCell className="text-sm">{lead.company}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground tabular-nums">
+                    </td>
+                    <td className="px-3 py-2.5 align-middle text-sm text-muted-foreground whitespace-nowrap">{lead.email}</td>
+                    <td className="px-3 py-2.5 align-middle text-sm whitespace-nowrap">{lead.company}</td>
+                    <td className="px-3 py-2.5 align-middle text-xs text-muted-foreground tabular-nums whitespace-nowrap">
                       {lead.submittedAt
                         ? new Date(lead.submittedAt).toLocaleDateString('en-US', {
                             month: 'short',
@@ -256,23 +248,23 @@ export function LeadRecordsViewer({ accessToken, selectedAccount }: LeadRecordsV
                             minute: '2-digit',
                           })
                         : '—'}
-                    </TableCell>
+                    </td>
                     {customKeys.map((k) => (
-                      <TableCell key={k} className="text-sm">
+                      <td key={k} className="px-3 py-2.5 align-middle text-sm max-w-[200px] truncate">
                         {lead.customAnswers[k] || '—'}
-                      </TableCell>
+                      </td>
                     ))}
-                    <TableCell>
+                    <td className="px-3 py-2.5 align-middle">
                       {lead.testLead && (
                         <Badge variant="outline" className="text-[10px] px-1.5 py-0">
                           Test
                         </Badge>
                       )}
-                    </TableCell>
-                  </TableRow>
+                    </td>
+                  </tr>
                 ))}
-              </TableBody>
-            </Table>
+              </tbody>
+            </table>
           </div>
 
           {/* Load more */}
