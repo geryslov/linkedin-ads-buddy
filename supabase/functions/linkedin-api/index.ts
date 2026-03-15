@@ -11420,18 +11420,7 @@ serve(async (req) => {
           };
         }
 
-        // ── By creative ──────────────────────────────────────────────────────
-        const creativeThisMap = new Map<string, { impressions: number; clicks: number; spent: number; leads: number }>();
-        const creativeLastMap = new Map<string, { impressions: number; clicks: number; spent: number; leads: number }>();
-
-        for (const el of wrEls(r_creativeThis)) {
-          const p = wrParseEl(el);
-          creativeThisMap.set(p.urn, { impressions: p.impressions, clicks: p.clicks, spent: p.spent, leads: p.leads });
-        }
-        for (const el of wrEls(r_creativeLast)) {
-          const p = wrParseEl(el);
-          creativeLastMap.set(p.urn, { impressions: p.impressions, clicks: p.clicks, spent: p.spent, leads: p.leads });
-        }
+        // ── By creative (maps already built above) ──────────────────────────
 
         // Daily trend per creative
         const creativeTrendMap = new Map<string, { date: string; spent: number; clicks: number; leads: number; impressions: number }[]>();
