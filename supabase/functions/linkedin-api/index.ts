@@ -11153,7 +11153,7 @@ serve(async (req) => {
           };
         });
 
-        console.log(`[get_lead_form_responses] Returning ${leads.length} leads, total: ${leadsTotal}, hasMore: ${leadsHasMore}`);
+        console.log(`[get_lead_form_responses] Returning ${leads.length} leads (filtered from ${leadsElements.length}), total: ${leadsTotal}, hasMore: ${leadsHasMore}`);
 
         return new Response(JSON.stringify({ leads, total: leadsTotal, hasMore: leadsHasMore }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
