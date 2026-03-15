@@ -11065,15 +11065,18 @@ serve(async (req) => {
         const leadsStartMs = new Date(leadsStartDate + 'T00:00:00Z').getTime();
         const leadsEndMs = new Date(leadsEndDate + 'T23:59:59Z').getTime();
 
-        const encodedAccountUrn = encodeURIComponent(`urn:li:sponsoredAccount:${accountId}`);
+        const accountUrn = `urn:li:sponsoredAccount:${accountId}`;
 
         // Note: leadFormResponses endpoint does NOT support submittedAtTimeRange or fields projection
-        // We fetch all and filter client-side by date
-        let leadsUrl = `https://api.linkedin.com/rest/leadFormResponses?q=owner` +
-          `&owner=(sponsoredAccount:${encodedAccountUrn})` +
-          `&leadType=(leadType:SPONSORED)` +
-          `&count=100` +
-          `&start=${leadsOffset}`;
+        // Use URLSearchParams for proper single-pass encoding
+        const leadsParams = new URLSearchParams();
+        leadsParams.set('q', 'owner');
+        leadsParams.set('owner', `(sponsoredAccount:${accountUrn})`);
+        leadsParams.set('leadType', '(leadType:SPONSORED)');
+        leadsParams.set('count', '100');
+        leadsParams.set('start', String(leadsOffset));
+
+        let leadsUrl = `https://api.linkedin.com/rest/leadFormResponses?${leadsParams.toString()}`;
 
         if (formUrn) {
           leadsUrl += `&versionedLeadGenFormUrn=${encodeURIComponent(formUrn)}`;
