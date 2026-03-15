@@ -36,13 +36,20 @@ const PERIOD_OPTIONS = [
   { value: '365', label: 'Last 12 months' },
 ];
 
+function formatLocalDate(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 function getDateRange(days: number) {
   const end = new Date();
   const start = new Date();
   start.setDate(start.getDate() - days);
   return {
-    start: start.toISOString().split('T')[0],
-    end: end.toISOString().split('T')[0],
+    start: formatLocalDate(start),
+    end: formatLocalDate(end),
   };
 }
 
