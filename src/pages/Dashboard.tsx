@@ -21,6 +21,7 @@ import { StandardizedTitlesPage } from "@/components/dashboard/StandardizedTitle
 import { NamingConventionReport } from "@/components/dashboard/NamingConventionReport";
 import { CompanyConversionBreakdown } from "@/components/dashboard/CompanyConversionBreakdown";
 import { LeadSyncReport } from "@/components/dashboard/LeadSyncReport";
+import { LeadRecordsViewer } from "@/components/dashboard/LeadRecordsViewer";
 import { WeeklyReport } from "@/components/dashboard/WeeklyReport";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -54,6 +55,7 @@ const tabMeta: Record<string, { group: string; title: string; subtitle: string }
   standardized_titles: { group: "Tools",      title: "Standardized Titles",         subtitle: "Normalize job title variations" },
   name_report:         { group: "Tools",      title: "Name Report",                 subtitle: "Analyze campaign naming conventions" },
   forms_leads:         { group: "Leads",      title: "Forms & Leads",               subtitle: "Lead generation form submissions and responses" },
+  lead_records:        { group: "Leads",      title: "Lead Records",                subtitle: "Browse all registered leads across your forms" },
 };
 
 export default function Dashboard() {
@@ -441,6 +443,13 @@ export default function Dashboard() {
 
         {activeTab === "forms_leads" && (
           <LeadSyncReport
+            accessToken={accessToken}
+            selectedAccount={selectedAccount}
+          />
+        )}
+
+        {activeTab === "lead_records" && (
+          <LeadRecordsViewer
             accessToken={accessToken}
             selectedAccount={selectedAccount}
           />
