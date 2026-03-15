@@ -3,6 +3,7 @@ import { useLinkedInAuth } from "@/hooks/useLinkedInAuth";
 import { useLinkedInAds } from "@/hooks/useLinkedInAds";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
+import { cn } from "@/lib/utils";
 import { Sidebar } from "@/components/dashboard/Sidebar";
 import { AccountSelector } from "@/components/dashboard/AccountSelector";
 import { MetricCard } from "@/components/dashboard/MetricCard";
@@ -22,15 +23,36 @@ import { CompanyConversionBreakdown } from "@/components/dashboard/CompanyConver
 import { LeadSyncReport } from "@/components/dashboard/LeadSyncReport";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { 
-  Eye, 
-  MousePointerClick, 
-  DollarSign, 
+import {
+  Eye,
+  MousePointerClick,
+  DollarSign,
   Target,
   RefreshCw,
   TrendingUp,
   Percent,
+  ChevronRight,
 } from "lucide-react";
+
+// U8 — Page metadata: group label, title, and contextual subtitle
+const tabMeta: Record<string, { group: string; title: string; subtitle: string }> = {
+  overview:            { group: "",           title: "Dashboard Overview",          subtitle: "Your LinkedIn Ads performance at a glance" },
+  campaigns:           { group: "Campaigns",  title: "Campaign Management",         subtitle: "Manage and monitor your active campaigns" },
+  budget_pacing:       { group: "Campaigns",  title: "Budget Pacing",               subtitle: "Track budget distribution across campaigns" },
+  creatives:           { group: "Campaigns",  title: "Ad Creatives",                subtitle: "Browse and analyze your creative assets" },
+  analytics:           { group: "Analytics",  title: "Analytics",                   subtitle: "Performance metrics and key insights" },
+  campaign_reports:    { group: "Analytics",  title: "Campaign Reports",            subtitle: "Detailed campaign performance breakdown" },
+  creative_reports:    { group: "Analytics",  title: "Creative Reports",            subtitle: "Creative-level performance analysis" },
+  reports:             { group: "Analytics",  title: "Reports",                     subtitle: "Comprehensive ad performance reports" },
+  conv_breakdown:      { group: "Analytics",  title: "Conv. Breakdown",             subtitle: "Company × conversion cross-tab analysis" },
+  audiences:           { group: "Audience",   title: "Audience Insights",           subtitle: "Understand and manage your target audiences" },
+  company_timeline:    { group: "Audience",   title: "Company Timeline",            subtitle: "Track company engagement over time" },
+  influence_matcher:   { group: "Audience",   title: "Influence Matcher",           subtitle: "Match companies to influential contacts" },
+  title_checker:       { group: "Tools",      title: "Title Checker",               subtitle: "Validate and explore job titles" },
+  standardized_titles: { group: "Tools",      title: "Standardized Titles",         subtitle: "Normalize job title variations" },
+  name_report:         { group: "Tools",      title: "Name Report",                 subtitle: "Analyze campaign naming conventions" },
+  forms_leads:         { group: "Leads",      title: "Forms & Leads",               subtitle: "Lead generation form submissions and responses" },
+};
 
 export default function Dashboard() {
   const { accessToken, profile, logout } = useLinkedInAuth();
@@ -56,6 +78,7 @@ export default function Dashboard() {
   } = useLinkedInAds(accessToken);
 
   const [activeTab, setActiveTab] = useState("overview");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   useEffect(() => {
     if (accessToken) {
@@ -112,43 +135,37 @@ export default function Dashboard() {
     ? `${profile.localizedFirstName} ${profile.localizedLastName}` 
     : undefined;
 
+  const meta = tabMeta[activeTab] ?? { group: "", title: "Dashboard", subtitle: "" };
+
   return (
     <div className="min-h-screen bg-background">
-      <Sidebar 
-        activeTab={activeTab} 
-        onTabChange={setActiveTab} 
+      <Sidebar
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
         onLogout={logout}
         profileName={profileName}
         isAdmin={isAdmin}
+        collapsed={sidebarCollapsed}
+        onCollapsedChange={setSidebarCollapsed}
       />
-      
-      <main className="ml-64 p-8">
-        <header className="flex items-center justify-between mb-8">
+
+      <main className={cn("transition-all duration-300 p-8", sidebarCollapsed ? "ml-16" : "ml-64")}>
+        {/* U5 + U8 — Header with breadcrumb and contextual subtitle */}
+        <header className="flex items-start justify-between mb-8">
           <div>
-            <h1 className="text-3xl font-bold mb-1">
-              {activeTab === "overview" && "Dashboard Overview"}
-              {activeTab === "campaigns" && "Campaign Management"}
-              {activeTab === "audiences" && "Audience Insights"}
-              {activeTab === "analytics" && "Analytics & Reports"}
-              {activeTab === "budget_pacing" && "Budget Pacing"}
-              {activeTab === "company_timeline" && "Company Engagement Timeline"}
-              {activeTab === "creatives" && "Ad Creatives"}
-              {activeTab === "creative_reports" && "Creative Reports"}
-              {activeTab === "campaign_reports" && "Campaign Reports"}
-              {activeTab === "reports" && "Reports"}
-              {activeTab === "title_checker" && "Title Checker"}
-              {activeTab === "influence_matcher" && "Influence Matcher"}
-              {activeTab === "standardized_titles" && "Standardized Titles"}
-              {activeTab === "name_report" && "Name Report"}
-              {activeTab === "conv_breakdown" && "Conv. Breakdown"}
-              {activeTab === "forms_leads" && "Forms & Leads"}
-            </h1>
-            <p className="text-muted-foreground">
-              Manage your LinkedIn advertising campaigns
-            </p>
+            {/* Breadcrumb */}
+            {meta.group && (
+              <div className="flex items-center gap-1 text-xs text-muted-foreground mb-1">
+                <span>{meta.group}</span>
+                <ChevronRight className="h-3 w-3" />
+                <span>{meta.title}</span>
+              </div>
+            )}
+            <h1 className="text-2xl font-bold">{meta.title}</h1>
+            <p className="text-sm text-muted-foreground mt-0.5">{meta.subtitle}</p>
           </div>
-          <div className="flex items-center gap-4">
-            <AccountSelector 
+          <div className="flex items-center gap-3 pt-1">
+            <AccountSelector
               accounts={adAccounts}
               selectedAccount={selectedAccount}
               onSelect={handleAccountChange}
@@ -157,13 +174,14 @@ export default function Dashboard() {
               isRefreshing={isSyncing}
               lastSyncedAt={lastSyncedAt}
             />
-            <Button 
-              variant="outline" 
+            <Button
+              variant="outline"
               size="icon"
               onClick={handleRefresh}
               disabled={isLoading}
+              title="Refresh data"
             >
-              <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+              <RefreshCw className={cn("h-4 w-4", isLoading && "animate-spin")} />
             </Button>
           </div>
         </header>

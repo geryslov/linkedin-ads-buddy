@@ -88,6 +88,12 @@
 }
 
 @layer utilities {
+  /* U1 — Tabular numbers: prevents layout shift in data tables & metric values */
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+  }
+
   .glass {
     @apply bg-card/80 backdrop-blur-xl border border-border/50;
   }

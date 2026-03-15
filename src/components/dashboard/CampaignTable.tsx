@@ -23,7 +23,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { MoreHorizontal, Play, Pause, Archive, Filter } from "lucide-react";
+import { MoreHorizontal, Play, Pause, Archive, Filter, Megaphone, AlignJustify, AlignCenter } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 interface CampaignTableProps {
   campaigns: Campaign[];
@@ -31,9 +32,12 @@ interface CampaignTableProps {
   isLoading?: boolean;
 }
 
+type Density = "compact" | "default";
+
 export function CampaignTable({ campaigns, onStatusChange, isLoading }: CampaignTableProps) {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [typeFilter, setTypeFilter] = useState<string>("all");
+  const [density, setDensity] = useState<Density>("default");
 
   const uniqueTypes = useMemo(() => {
     const types = new Set(campaigns.map((c) => c.type));
@@ -48,21 +52,20 @@ export function CampaignTable({ campaigns, onStatusChange, isLoading }: Campaign
     });
   }, [campaigns, statusFilter, typeFilter]);
 
+  // U3 — Color-coded status badges with dot indicator
   const getStatusBadge = (status: string) => {
-    const variants: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
-      ACTIVE: "default",
-      PAUSED: "secondary",
-      ARCHIVED: "outline",
-      DRAFT: "outline",
+    const config: Record<string, { dot: string; label: string; className: string }> = {
+      ACTIVE:   { dot: "bg-success",          label: "Active",   className: "bg-success/10 text-success border-success/20" },
+      PAUSED:   { dot: "bg-warning",           label: "Paused",   className: "bg-warning/10 text-warning border-warning/20" },
+      ARCHIVED: { dot: "bg-muted-foreground",  label: "Archived", className: "bg-muted text-muted-foreground border-border" },
+      DRAFT:    { dot: "bg-blue-400",          label: "Draft",    className: "bg-blue-50 text-blue-600 border-blue-200" },
     };
-    
+    const s = config[status] ?? config.ARCHIVED;
     return (
-      <Badge 
-        variant={variants[status] || "secondary"}
-        className={status === "ACTIVE" ? "bg-success text-success-foreground" : ""}
-      >
-        {status}
-      </Badge>
+      <span className={cn("inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium border", s.className)}>
+        <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", s.dot)} />
+        {s.label}
+      </span>
     );
   };
 
@@ -71,17 +74,24 @@ export function CampaignTable({ campaigns, onStatusChange, isLoading }: Campaign
     return `${budget.currencyCode} ${parseFloat(budget.amount).toLocaleString()}`;
   };
 
+  // U4 — Proper empty state with icon + guidance
   if (campaigns.length === 0) {
     return (
-      <div className="glass rounded-xl p-12 text-center animate-fade-in">
-        <p className="text-muted-foreground">No campaigns found</p>
+      <div className="glass rounded-xl p-16 text-center animate-fade-in">
+        <div className="mx-auto h-12 w-12 rounded-full bg-muted flex items-center justify-center mb-4">
+          <Megaphone className="h-6 w-6 text-muted-foreground" />
+        </div>
+        <h3 className="font-semibold text-foreground mb-1">No campaigns yet</h3>
+        <p className="text-sm text-muted-foreground max-w-xs mx-auto">
+          Create your first campaign in LinkedIn Campaign Manager and it will appear here automatically.
+        </p>
       </div>
     );
   }
 
   return (
     <div className="space-y-4 animate-slide-up" style={{ animationDelay: '200ms' }}>
-      {/* Filters */}
+      {/* Filters + density toggle */}
       <div className="flex items-center gap-4 flex-wrap">
         <div className="flex items-center gap-2 text-muted-foreground">
           <Filter className="h-4 w-4" />
@@ -125,6 +135,30 @@ export function CampaignTable({ campaigns, onStatusChange, isLoading }: Campaign
             Clear filters
           </Button>
         )}
+
+        {/* U7 — Row density toggle */}
+        <div className="ml-auto flex items-center gap-1 rounded-lg border border-border p-0.5">
+          <button
+            onClick={() => setDensity("compact")}
+            title="Compact"
+            className={cn(
+              "p-1.5 rounded-md transition-colors",
+              density === "compact" ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <AlignJustify className="h-3.5 w-3.5" />
+          </button>
+          <button
+            onClick={() => setDensity("default")}
+            title="Default"
+            className={cn(
+              "p-1.5 rounded-md transition-colors",
+              density === "default" ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <AlignCenter className="h-3.5 w-3.5" />
+          </button>
+        </div>
       </div>
 
       {/* Table */}
@@ -149,12 +183,18 @@ export function CampaignTable({ campaigns, onStatusChange, isLoading }: Campaign
               </TableRow>
             ) : (
               filteredCampaigns.map((campaign) => (
-                <TableRow key={campaign.id} className="border-border hover:bg-secondary/30">
+                <TableRow
+                  key={campaign.id}
+                  className={cn(
+                    "border-border hover:bg-secondary/30 cursor-pointer",
+                    density === "compact" ? "[&>td]:py-1.5" : "[&>td]:py-3"
+                  )}
+                >
                   <TableCell className="font-medium">{campaign.name}</TableCell>
                   <TableCell>{getStatusBadge(campaign.status)}</TableCell>
                   <TableCell className="text-muted-foreground">{campaign.type}</TableCell>
-                  <TableCell>{formatBudget(campaign.dailyBudget)}</TableCell>
-                  <TableCell>{formatBudget(campaign.totalBudget)}</TableCell>
+                  <TableCell className="tabular-nums">{formatBudget(campaign.dailyBudget)}</TableCell>
+                  <TableCell className="tabular-nums">{formatBudget(campaign.totalBudget)}</TableCell>
                   <TableCell className="text-right">
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>

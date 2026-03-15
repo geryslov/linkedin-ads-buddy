@@ -23,6 +23,8 @@ import {
   Grid3x3,
   ClipboardList,
   ChevronDown,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -31,6 +33,8 @@ interface SidebarProps {
   onLogout: () => void;
   profileName?: string;
   isAdmin?: boolean;
+  collapsed?: boolean;
+  onCollapsedChange?: (collapsed: boolean) => void;
 }
 
 interface NavItem {
@@ -108,9 +112,16 @@ function getActiveGroupId(activeTab: string): string {
   return "main";
 }
 
-export function Sidebar({ activeTab, onTabChange, onLogout, profileName, isAdmin }: SidebarProps) {
+export function Sidebar({
+  activeTab,
+  onTabChange,
+  onLogout,
+  profileName,
+  isAdmin,
+  collapsed = false,
+  onCollapsedChange,
+}: SidebarProps) {
   const navigate = useNavigate();
-
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
 
   // Auto-expand the group containing the active tab
@@ -124,30 +135,41 @@ export function Sidebar({ activeTab, onTabChange, onLogout, profileName, isAdmin
   };
 
   return (
-    <aside className="fixed left-0 top-0 h-screen w-64 bg-sidebar border-r border-sidebar-border flex flex-col">
+    <aside
+      className={cn(
+        "fixed left-0 top-0 h-screen bg-sidebar border-r border-sidebar-border flex flex-col transition-all duration-300",
+        collapsed ? "w-16" : "w-64"
+      )}
+    >
       {/* Logo */}
-      <div className="p-6 border-b border-sidebar-border">
-        <div className="flex items-center gap-3">
+      <div className={cn("border-b border-sidebar-border flex items-center", collapsed ? "p-3 justify-center" : "p-6")}>
+        {collapsed ? (
           <div className="p-2 rounded-lg gradient-primary">
-            <Linkedin className="h-6 w-6 text-primary-foreground" />
+            <Linkedin className="h-5 w-5 text-primary-foreground" />
           </div>
-          <div>
-            <h1 className="font-bold text-lg">LinkedIn Ads</h1>
-            <p className="text-xs text-muted-foreground">Manager</p>
+        ) : (
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-lg gradient-primary">
+              <Linkedin className="h-6 w-6 text-primary-foreground" />
+            </div>
+            <div>
+              <h1 className="font-bold text-lg">LinkedIn Ads</h1>
+              <p className="text-xs text-muted-foreground">Manager</p>
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 p-3 overflow-y-auto space-y-1">
+      <nav className={cn("flex-1 overflow-y-auto space-y-1", collapsed ? "p-2" : "p-3")}>
         {navGroups.map((group) => {
-          const isCollapsed = collapsedGroups[group.id] ?? false;
+          const isGroupCollapsed = collapsedGroups[group.id] ?? false;
           const hasLabel = !!group.label;
 
           return (
             <div key={group.id}>
-              {/* Group header (only for labeled groups) */}
-              {hasLabel && (
+              {/* Group header — hidden in icon-only mode */}
+              {hasLabel && !collapsed && (
                 <button
                   onClick={() => toggleGroup(group.id)}
                   className="w-full flex items-center justify-between px-3 py-1.5 mb-0.5 rounded-md text-xs font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/50 transition-colors cursor-pointer"
@@ -156,22 +178,24 @@ export function Sidebar({ activeTab, onTabChange, onLogout, profileName, isAdmin
                   <ChevronDown
                     className={cn(
                       "h-3.5 w-3.5 transition-transform duration-200",
-                      isCollapsed && "-rotate-90"
+                      isGroupCollapsed && "-rotate-90"
                     )}
                   />
                 </button>
               )}
 
-              {/* Group items */}
-              {!isCollapsed && (
+              {/* Group items — always show in collapsed mode (icons only) */}
+              {(!isGroupCollapsed || collapsed) && (
                 <div className="space-y-0.5">
                   {group.items.map((item) => (
                     <Button
                       key={item.id}
                       variant="ghost"
+                      title={collapsed ? item.label : undefined}
                       className={cn(
-                        "w-full justify-start gap-3 h-9 text-sm font-normal",
-                        hasLabel && "pl-4",
+                        "w-full h-9 text-sm font-normal",
+                        collapsed ? "justify-center px-0" : "justify-start gap-3",
+                        !collapsed && hasLabel && "pl-4",
                         activeTab === item.id
                           ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
                           : "text-muted-foreground hover:text-foreground"
@@ -179,7 +203,7 @@ export function Sidebar({ activeTab, onTabChange, onLogout, profileName, isAdmin
                       onClick={() => onTabChange(item.id)}
                     >
                       <item.icon className="h-4 w-4 shrink-0" />
-                      {item.label}
+                      {!collapsed && item.label}
                     </Button>
                   ))}
                 </div>
@@ -194,19 +218,45 @@ export function Sidebar({ activeTab, onTabChange, onLogout, profileName, isAdmin
             <div className="border-t border-sidebar-border mb-2" />
             <Button
               variant="ghost"
-              className="w-full justify-start gap-3 h-9 text-sm font-normal text-primary hover:text-primary"
+              title={collapsed ? "Admin Panel" : undefined}
+              className={cn(
+                "w-full h-9 text-sm font-normal text-primary hover:text-primary",
+                collapsed ? "justify-center px-0" : "justify-start gap-3"
+              )}
               onClick={() => navigate("/admin")}
             >
               <Shield className="h-4 w-4 shrink-0" />
-              Admin Panel
+              {!collapsed && "Admin Panel"}
             </Button>
           </div>
         )}
       </nav>
 
       {/* Footer */}
-      <div className="p-4 border-t border-sidebar-border space-y-2">
-        {profileName && (
+      <div className={cn("border-t border-sidebar-border space-y-1", collapsed ? "p-2" : "p-4")}>
+        {/* Collapse toggle */}
+        {onCollapsedChange && (
+          <Button
+            variant="ghost"
+            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            className={cn(
+              "w-full h-9 text-sm text-muted-foreground hover:text-foreground",
+              collapsed ? "justify-center px-0" : "justify-start gap-3"
+            )}
+            onClick={() => onCollapsedChange(!collapsed)}
+          >
+            {collapsed ? (
+              <PanelLeftOpen className="h-4 w-4 shrink-0" />
+            ) : (
+              <>
+                <PanelLeftClose className="h-4 w-4 shrink-0" />
+                Collapse
+              </>
+            )}
+          </Button>
+        )}
+
+        {!collapsed && profileName && (
           <div className="px-3 py-2 text-sm">
             <p className="text-muted-foreground text-xs">Connected as</p>
             <p className="font-medium truncate">{profileName}</p>
@@ -214,11 +264,15 @@ export function Sidebar({ activeTab, onTabChange, onLogout, profileName, isAdmin
         )}
         <Button
           variant="ghost"
-          className="w-full justify-start gap-3 text-sm text-muted-foreground hover:text-destructive"
+          title={collapsed ? "Disconnect" : undefined}
+          className={cn(
+            "w-full text-sm text-muted-foreground hover:text-destructive",
+            collapsed ? "justify-center px-0 h-9" : "justify-start gap-3"
+          )}
           onClick={onLogout}
         >
           <LogOut className="h-4 w-4 shrink-0" />
-          Disconnect
+          {!collapsed && "Disconnect"}
         </Button>
       </div>
     </aside>
