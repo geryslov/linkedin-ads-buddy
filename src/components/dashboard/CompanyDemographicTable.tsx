@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { cn } from '@/lib/utils';
 import { ArrowUpDown, Search, Building2, ExternalLink, Globe, AlertCircle, CheckCircle, ChevronRight, ChevronDown, ChevronLeft, Target, Megaphone, Loader2, Heart, MessageCircle, Sparkles, Share2, Settings2 } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -264,24 +265,44 @@ export function CompanyDemographicTable({ data, isLoading, isLoadingMore, totalC
   );
 
   const getStatusBadge = (status: string) => {
-    switch (status) {
-      case 'resolved':
-        return <Badge variant="secondary" className="bg-green-500/10 text-green-600 gap-1"><CheckCircle className="h-3 w-3" />Resolved</Badge>;
-      case 'fallback':
-        return <Badge variant="secondary" className="bg-yellow-500/10 text-yellow-600 gap-1"><Globe className="h-3 w-3" />Fallback</Badge>;
-      default:
-        return <Badge variant="secondary" className="bg-muted text-muted-foreground gap-1"><AlertCircle className="h-3 w-3" />Unresolved</Badge>;
-    }
+    const config: Record<string, { dot: string; label: string; className: string }> = {
+      resolved:   { dot: 'bg-green-500',          label: 'Resolved',   className: 'bg-green-500/10 text-green-700 border-green-200' },
+      fallback:   { dot: 'bg-amber-400',           label: 'Fallback',   className: 'bg-amber-500/10 text-amber-700 border-amber-200' },
+      unresolved: { dot: 'bg-muted-foreground',    label: 'Unresolved', className: 'bg-muted text-muted-foreground border-border' },
+    };
+    const s = config[status] ?? config.unresolved;
+    return (
+      <span className={cn('inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium border', s.className)}>
+        <span className={cn('h-1.5 w-1.5 rounded-full shrink-0', s.dot)} />
+        {s.label}
+      </span>
+    );
   };
 
   if (isLoading) {
     return (
-      <div className="space-y-3">
-        <Skeleton className="h-10 w-full" />
-        <Skeleton className="h-10 w-full" />
-        <Skeleton className="h-10 w-full" />
-        <Skeleton className="h-10 w-full" />
-        <Skeleton className="h-10 w-full" />
+      <div className="rounded-lg border border-border/50 overflow-hidden">
+        {/* Fake header */}
+        <div className="bg-muted/40 px-4 py-2.5 flex gap-4 border-b border-border/50">
+          <Skeleton className="h-4 w-36" />
+          <Skeleton className="h-4 w-24 ml-auto" />
+          <Skeleton className="h-4 w-20" />
+          <Skeleton className="h-4 w-20" />
+          <Skeleton className="h-4 w-16" />
+          <Skeleton className="h-4 w-16" />
+        </div>
+        {/* Fake rows */}
+        {Array.from({ length: 8 }).map((_, i) => (
+          <div key={i} className="flex items-center gap-4 px-4 py-3 border-b border-border/30 last:border-0">
+            <Skeleton className="h-4 w-40" />
+            <Skeleton className="h-4 w-28" />
+            <Skeleton className="h-4 w-20 ml-auto" />
+            <Skeleton className="h-4 w-16" />
+            <Skeleton className="h-4 w-16" />
+            <Skeleton className="h-4 w-14" />
+            <Skeleton className="h-4 w-14" />
+          </div>
+        ))}
       </div>
     );
   }
@@ -352,7 +373,7 @@ export function CompanyDemographicTable({ data, isLoading, isLoadingMore, totalC
       <div className="rounded-lg border border-border/50 overflow-x-auto">
         <Table className="w-full">
           <TableHeader>
-            <TableRow className="bg-muted/30 hover:bg-muted/30">
+            <TableRow className="bg-muted/50 hover:bg-muted/50 border-b-2 border-border">
               <TableHead className="min-w-[200px] max-w-[280px]"><SortButton field="entityName">Company</SortButton></TableHead>
               {isColumnVisible('website') && <TableHead className="max-w-[200px]"><SortButton field="enrichmentStatus">Website</SortButton></TableHead>}
               {isColumnVisible('impressions') && <TableHead className="text-right"><SortButton field="impressions">Impressions</SortButton></TableHead>}
@@ -392,7 +413,7 @@ export function CompanyDemographicTable({ data, isLoading, isLoadingMore, totalC
                   <>
                     <TableRow
                       key={item.entityUrn || index}
-                      className={`transition-colors duration-150 hover:bg-muted/20 cursor-pointer ${isCompanyExpanded ? 'bg-primary/[0.03]' : ''}`}
+                      className={cn('transition-colors duration-150 cursor-pointer', isCompanyExpanded ? 'bg-primary/[0.05] hover:bg-primary/[0.07]' : 'hover:bg-muted/30')}
                       onClick={() => toggleCompany(item.entityUrn)}
                     >
                       <TableCell className="font-medium min-w-[200px] max-w-[280px]">
@@ -488,7 +509,7 @@ export function CompanyDemographicTable({ data, isLoading, isLoadingMore, totalC
                         <>
                           <TableRow
                             key={`${item.entityUrn}-obj-${bIdx}`}
-                            className={`transition-colors duration-150 bg-primary/[0.04] hover:bg-primary/[0.07] border-l-2 border-l-primary/30 ${hasCampaignIds ? 'cursor-pointer' : ''} ${isObjExpanded ? 'bg-primary/[0.06]' : ''}`}
+                            className={cn('transition-colors duration-150 border-l-2 border-l-primary/40', hasCampaignIds ? 'cursor-pointer' : '', isObjExpanded ? 'bg-primary/[0.07] hover:bg-primary/[0.09]' : 'bg-primary/[0.03] hover:bg-primary/[0.06]')}
                             onClick={(e) => {
                               e.stopPropagation();
                               if (hasCampaignIds) toggleObjective(item.entityUrn, breakdown.objective, breakdown);
@@ -551,7 +572,7 @@ export function CompanyDemographicTable({ data, isLoading, isLoadingMore, totalC
                           {isObjExpanded && hasCachedCampaigns && cachedCampaigns!.map((camp, cIdx) => (
                             <TableRow
                               key={`${objKey}-camp-${cIdx}`}
-                              className="transition-colors duration-150 bg-muted/[0.03] hover:bg-muted/10 border-l-4 border-l-primary/15"
+                              className="transition-colors duration-150 bg-muted/20 hover:bg-muted/30 border-l-4 border-l-border"
                               onClick={(e) => e.stopPropagation()}
                             >
                               <TableCell colSpan={labelColSpan} className="pl-16">
@@ -600,7 +621,7 @@ export function CompanyDemographicTable({ data, isLoading, isLoadingMore, totalC
           </TableBody>
           {filteredAndSortedData.length > 0 && (
             <TableFooter>
-              <TableRow className="bg-muted/50 font-semibold">
+              <TableRow className="bg-muted/60 font-semibold border-t-2 border-border">
                 <TableCell>Total ({filteredAndSortedData.length} companies)</TableCell>
                 {isColumnVisible('website') && <TableCell></TableCell>}
                 {isColumnVisible('impressions') && <TableCell className="text-right tabular-nums">{totals.impressions.toLocaleString()}</TableCell>}
