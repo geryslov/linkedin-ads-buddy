@@ -101,6 +101,7 @@ const navGroups: NavGroup[] = [
     label: "Leads",
     items: [
       { id: "forms_leads", label: "Forms & Leads", icon: ClipboardList },
+      { id: "lead_records", label: "Lead Records", icon: Users },
     ],
   },
 ];

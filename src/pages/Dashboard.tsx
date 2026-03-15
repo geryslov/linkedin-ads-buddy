@@ -447,6 +447,13 @@ export default function Dashboard() {
             selectedAccount={selectedAccount}
           />
         )}
+
+        {activeTab === "lead_records" && (
+          <LeadRecordsViewer
+            accessToken={accessToken}
+            selectedAccount={selectedAccount}
+          />
+        )}
         </div>{/* end p-6 content wrapper */}
       </main>
     </div>
