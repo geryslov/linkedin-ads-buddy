@@ -21,6 +21,7 @@ import { StandardizedTitlesPage } from "@/components/dashboard/StandardizedTitle
 import { NamingConventionReport } from "@/components/dashboard/NamingConventionReport";
 import { CompanyConversionBreakdown } from "@/components/dashboard/CompanyConversionBreakdown";
 import { LeadSyncReport } from "@/components/dashboard/LeadSyncReport";
+import { LeadRecordsViewer } from "@/components/dashboard/LeadRecordsViewer";
 import { WeeklyReport } from "@/components/dashboard/WeeklyReport";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
