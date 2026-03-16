@@ -8,7 +8,7 @@ import { Sidebar } from "@/components/dashboard/Sidebar";
 import { AccountSelector } from "@/components/dashboard/AccountSelector";
 import { MetricCard } from "@/components/dashboard/MetricCard";
 import { CampaignTable } from "@/components/dashboard/CampaignTable";
-import { AudienceCard } from "@/components/dashboard/AudienceCard";
+import { AudienceInsightsHub } from "@/components/dashboard/AudienceInsightsHub";
 import { ReportingSection } from "@/components/dashboard/ReportingSection";
 import { TitleCheckerPage } from "@/components/dashboard/TitleCheckerPage";
 import { CompanyEngagementTimeline } from "@/components/dashboard/CompanyEngagementTimeline";
