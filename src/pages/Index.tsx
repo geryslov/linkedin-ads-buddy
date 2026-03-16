@@ -92,7 +92,7 @@ export default function Index() {
 
           {/* Features */}
           <div className="grid md:grid-cols-3 gap-6 mt-24 max-w-5xl mx-auto">
-            {features.map((feature, i) => (
+            {features.map((feature) => (
               <div 
                 key={feature.title}
                 className="glass rounded-2xl p-8 hover:border-primary/30 transition-colors"
