@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import { Audience } from "@/hooks/useLinkedInAds";
 import { AudienceCard } from "./AudienceCard";
 import { AudienceExpansionSuggester } from "./AudienceExpansionSuggester";
@@ -6,6 +7,9 @@ import { JobSeniorityMatrix } from "./JobSeniorityMatrix";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Users, BarChart3, Lightbulb, Grid3X3 } from "lucide-react";
+import { useDemographicReporting, DemographicPivot, DEMOGRAPHIC_PIVOT_OPTIONS } from "@/hooks/useDemographicReporting";
+import { useJobSeniorityMatrix } from "@/hooks/useJobSeniorityMatrix";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 interface AudienceInsightsHubProps {
   audiences: Audience[];
@@ -20,6 +24,24 @@ export function AudienceInsightsHub({
   accessToken,
   selectedAccount,
 }: AudienceInsightsHubProps) {
+  const [activeInsight, setActiveInsight] = useState("demographics");
+  const demographicReporting = useDemographicReporting(accessToken);
+  const jobSeniorityMatrix = useJobSeniorityMatrix(accessToken);
+
+  // Fetch demographics when that tab is active
+  useEffect(() => {
+    if (selectedAccount && activeInsight === "demographics") {
+      demographicReporting.fetchDemographicReport(selectedAccount);
+    }
+  }, [selectedAccount, activeInsight, demographicReporting.pivot, demographicReporting.dateRange]);
+
+  // Fetch matrix when that tab is active
+  useEffect(() => {
+    if (selectedAccount && activeInsight === "matrix") {
+      jobSeniorityMatrix.fetchMatrix(selectedAccount);
+    }
+  }, [selectedAccount, activeInsight, jobSeniorityMatrix.dateRange]);
+
   return (
     <div className="space-y-6">
       {/* Segment Cards */}
@@ -51,7 +73,7 @@ export function AudienceInsightsHub({
 
       {/* Insights Tabs */}
       {selectedAccount && (
-        <Tabs defaultValue="demographics" className="space-y-4">
+        <Tabs value={activeInsight} onValueChange={setActiveInsight} className="space-y-4">
           <TabsList className="bg-muted/50">
             <TabsTrigger value="demographics" className="gap-1.5">
               <BarChart3 className="h-3.5 w-3.5" />
@@ -68,10 +90,31 @@ export function AudienceInsightsHub({
           </TabsList>
 
           <TabsContent value="demographics">
-            <DemographicTable
-              accessToken={accessToken}
-              selectedAccount={selectedAccount}
-            />
+            <div className="space-y-4">
+              <div className="flex items-center gap-3">
+                <span className="text-sm text-muted-foreground">Pivot by:</span>
+                <Select
+                  value={demographicReporting.pivot}
+                  onValueChange={(v) => demographicReporting.setPivot(v as DemographicPivot)}
+                >
+                  <SelectTrigger className="w-[180px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {DEMOGRAPHIC_PIVOT_OPTIONS.map((opt) => (
+                      <SelectItem key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <DemographicTable
+                data={demographicReporting.data}
+                isLoading={demographicReporting.isLoading}
+                pivot={demographicReporting.pivot}
+              />
+            </div>
           </TabsContent>
 
           <TabsContent value="expansion">
@@ -83,8 +126,10 @@ export function AudienceInsightsHub({
 
           <TabsContent value="matrix">
             <JobSeniorityMatrix
-              accessToken={accessToken}
-              selectedAccount={selectedAccount}
+              matrixData={jobSeniorityMatrix.matrixData}
+              isLoading={jobSeniorityMatrix.isLoading}
+              selectedMetric={jobSeniorityMatrix.selectedMetric}
+              onMetricChange={jobSeniorityMatrix.setSelectedMetric}
             />
           </TabsContent>
         </Tabs>
