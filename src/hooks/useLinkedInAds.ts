@@ -39,6 +39,10 @@ export interface Audience {
   name: string;
   matchedCount: number;
   status: string;
+  type?: string;
+  sourcePlatform?: string;
+  createdAt?: string;
+  lastModifiedAt?: string;
 }
 
 export function useLinkedInAds(accessToken: string | null) {
@@ -375,6 +379,10 @@ export function useLinkedInAds(accessToken: string | null) {
         name: el.name,
         matchedCount: el.matchedCount || 0,
         status: el.status,
+        type: el.type || undefined,
+        sourcePlatform: el.sourcePlatform || undefined,
+        createdAt: el.createdAt ? new Date(el.createdAt).toISOString() : undefined,
+        lastModifiedAt: el.lastModifiedAt ? new Date(el.lastModifiedAt).toISOString() : undefined,
       }));
       
       setAudiences(audienceList);

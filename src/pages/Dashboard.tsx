@@ -8,7 +8,7 @@ import { Sidebar } from "@/components/dashboard/Sidebar";
 import { AccountSelector } from "@/components/dashboard/AccountSelector";
 import { MetricCard } from "@/components/dashboard/MetricCard";
 import { CampaignTable } from "@/components/dashboard/CampaignTable";
-import { AudienceCard } from "@/components/dashboard/AudienceCard";
+import { AudienceInsightsHub } from "@/components/dashboard/AudienceInsightsHub";
 import { ReportingSection } from "@/components/dashboard/ReportingSection";
 import { TitleCheckerPage } from "@/components/dashboard/TitleCheckerPage";
 import { CompanyEngagementTimeline } from "@/components/dashboard/CompanyEngagementTimeline";
@@ -291,27 +291,12 @@ export default function Dashboard() {
         )}
 
         {activeTab === "audiences" && (
-          <div className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {isLoading ? (
-                [...Array(6)].map((_, i) => (
-                  <Skeleton key={i} className="h-40 rounded-xl bg-secondary" />
-                ))
-              ) : audiences.length > 0 ? (
-                audiences.map((audience, i) => (
-                  <AudienceCard 
-                    key={audience.id} 
-                    audience={audience} 
-                    delay={i * 50}
-                  />
-                ))
-              ) : (
-                <div className="col-span-full glass rounded-xl p-12 text-center">
-                  <p className="text-muted-foreground">No audiences found for this account</p>
-                </div>
-              )}
-            </div>
-          </div>
+          <AudienceInsightsHub
+            audiences={audiences}
+            isLoading={isLoading}
+            accessToken={accessToken}
+            selectedAccount={selectedAccount}
+          />
         )}
 
         {activeTab === "analytics" && (
