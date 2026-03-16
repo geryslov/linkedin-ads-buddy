@@ -110,7 +110,7 @@ export function AudienceInsightsHub({
                 </Select>
               </div>
               <DemographicTable
-                data={demographicReporting.data}
+                data={demographicReporting.demographicData}
                 isLoading={demographicReporting.isLoading}
                 pivot={demographicReporting.pivot}
               />
