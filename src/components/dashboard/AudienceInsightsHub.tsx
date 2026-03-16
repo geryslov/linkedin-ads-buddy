@@ -31,7 +31,7 @@ export function AudienceInsightsHub({
   // Fetch demographics when that tab is active
   useEffect(() => {
     if (selectedAccount && activeInsight === "demographics") {
-      demographicReporting.fetchDemographicReport(selectedAccount);
+      demographicReporting.fetchDemographicAnalytics(selectedAccount);
     }
   }, [selectedAccount, activeInsight, demographicReporting.pivot, demographicReporting.dateRange]);
 
