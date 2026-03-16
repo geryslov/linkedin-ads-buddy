@@ -39,6 +39,10 @@ export interface Audience {
   name: string;
   matchedCount: number;
   status: string;
+  type?: string;
+  sourcePlatform?: string;
+  createdAt?: string;
+  lastModifiedAt?: string;
 }
 
 export function useLinkedInAds(accessToken: string | null) {
