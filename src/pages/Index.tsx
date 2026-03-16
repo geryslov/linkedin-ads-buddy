@@ -55,9 +55,9 @@ export default function Index() {
 
         {/* Hero */}
         <main className="container mx-auto px-6 py-20">
-          <div className="max-w-4xl mx-auto text-center space-y-8 animate-fade-in">
+          <div className="max-w-4xl mx-auto text-center space-y-8">
             <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full glass text-sm">
-              <span className="h-2 w-2 rounded-full bg-success animate-pulse-subtle" />
+              <span className="h-2 w-2 rounded-full bg-success" />
               Connected to LinkedIn Marketing API
             </div>
             
@@ -92,11 +92,10 @@ export default function Index() {
 
           {/* Features */}
           <div className="grid md:grid-cols-3 gap-6 mt-24 max-w-5xl mx-auto">
-            {features.map((feature, i) => (
+            {features.map((feature) => (
               <div 
                 key={feature.title}
-                className="glass rounded-2xl p-8 animate-slide-up hover:border-primary/30 transition-colors"
-                style={{ animationDelay: `${300 + i * 100}ms` }}
+                className="glass rounded-2xl p-8 hover:border-primary/30 transition-colors"
               >
                 <div className="p-3 rounded-xl bg-primary/10 w-fit mb-4">
                   <feature.icon className="h-6 w-6 text-primary" />
