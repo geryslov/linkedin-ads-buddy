@@ -95,8 +95,7 @@ export default function Index() {
             {features.map((feature, i) => (
               <div 
                 key={feature.title}
-                className="glass rounded-2xl p-8 animate-slide-up hover:border-primary/30 transition-colors"
-                style={{ animationDelay: `${300 + i * 100}ms` }}
+                className="glass rounded-2xl p-8 hover:border-primary/30 transition-colors"
               >
                 <div className="p-3 rounded-xl bg-primary/10 w-fit mb-4">
                   <feature.icon className="h-6 w-6 text-primary" />
