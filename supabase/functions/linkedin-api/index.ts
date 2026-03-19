@@ -2645,8 +2645,9 @@ serve(async (req) => {
       }
 
       case 'get_objective_breakdowns': {
-        // Lazy-load objective breakdowns for all companies in an account
-        const { accountId, dateRange, campaignIds: filterCampaignIds } = params || {};
+        // Lazy-load objective breakdowns; optionally scoped to specific company URNs
+        const { accountId, dateRange, campaignIds: filterCampaignIds, companyUrns: filterCompanyUrns } = params || {};
+        const companyUrnSet: Set<string> | null = filterCompanyUrns && filterCompanyUrns.length > 0 ? new Set(filterCompanyUrns) : null;
         const startDate = dateRange?.start || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
         const endDate = dateRange?.end || new Date().toISOString().split('T')[0];
         const [startYear, startMonth, startDay] = startDate.split('-').map(Number);
@@ -2787,9 +2788,12 @@ serve(async (req) => {
             });
           }
 
-          console.log(`[get_objective_breakdowns] Complete. Breakdowns for ${Object.keys(finalResult).length} companies`);
+          const filteredResult = companyUrnSet
+            ? Object.fromEntries(Object.entries(finalResult).filter(([urn]) => companyUrnSet.has(urn)))
+            : finalResult;
+          console.log(`[get_objective_breakdowns] Complete. ${Object.keys(finalResult).length} companies in data, returning ${Object.keys(filteredResult).length}`);
 
-          return new Response(JSON.stringify({ breakdowns: finalResult }), {
+          return new Response(JSON.stringify({ breakdowns: filteredResult }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           });
         } catch (e: any) {

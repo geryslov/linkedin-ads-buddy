@@ -154,42 +154,47 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
     return map;
   }, [creativeData]);
 
-  // Auto-fetch LinkedIn + creative data on mount
+  // Auto-fetch LinkedIn + creative data on mount (skip objectives — loaded after CSV match)
   const [hasFetched, setHasFetched] = useState(false);
   useEffect(() => {
     if (selectedAccount && accessToken && !hasFetched) {
       setHasFetched(true);
-      fetchCompanyDemographic(selectedAccount);
+      fetchCompanyDemographic(selectedAccount, undefined, true);
       setCreativeDateRange(dateRange);
       fetchCreativeAnalytics(selectedAccount);
     }
   }, [selectedAccount, accessToken, hasFetched, fetchCompanyDemographic, fetchCreativeAnalytics, setCreativeDateRange, dateRange]);
 
-  // Explicitly fetch objective breakdowns once company data is loaded
-  useEffect(() => {
-    if (selectedAccount && companyData.length > 0 && !isLoadingLinkedIn && !isLoadingMore && !isLoadingObjectiveBreakdowns) {
-      fetchObjectiveBreakdowns(selectedAccount);
-    }
-  }, [selectedAccount, companyData.length, isLoadingLinkedIn, isLoadingMore, isLoadingObjectiveBreakdowns, fetchObjectiveBreakdowns]);
-
   // Re-fetch when date range changes (after initial load)
   const prevDateRangeRef = useRef<{ start: string; end: string } | null>(null);
+  const prevMatchedUrnsRef = useRef('');
   useEffect(() => {
     if (!hasFetched || !selectedAccount) return;
     if (
       prevDateRangeRef.current &&
       (prevDateRangeRef.current.start !== dateRange.start || prevDateRangeRef.current.end !== dateRange.end)
     ) {
-      fetchCompanyDemographic(selectedAccount);
+      prevMatchedUrnsRef.current = ''; // force objectives re-fetch after reload
+      fetchCompanyDemographic(selectedAccount, undefined, true);
       setCreativeDateRange(dateRange);
       fetchCreativeAnalytics(selectedAccount);
     }
     prevDateRangeRef.current = dateRange;
   }, [dateRange, hasFetched, selectedAccount, fetchCompanyDemographic, fetchCreativeAnalytics, setCreativeDateRange]);
 
+  // Fetch objectives only for matched companies, triggered when CSV match results change
+  useEffect(() => {
+    if (!selectedAccount || matched.length === 0) return;
+    const urnsKey = matched.map(m => m.linkedin.entityUrn).sort().join(',');
+    if (urnsKey === prevMatchedUrnsRef.current) return;
+    prevMatchedUrnsRef.current = urnsKey;
+    fetchObjectiveBreakdowns(selectedAccount, matched.map(m => m.linkedin.entityUrn), true);
+  }, [selectedAccount, matched, fetchObjectiveBreakdowns]);
+
   const handleFetch = useCallback(() => {
     if (selectedAccount) {
-      fetchCompanyDemographic(selectedAccount);
+      prevMatchedUrnsRef.current = ''; // force objectives re-fetch
+      fetchCompanyDemographic(selectedAccount, undefined, true);
       setCreativeDateRange(dateRange);
       fetchCreativeAnalytics(selectedAccount);
     }

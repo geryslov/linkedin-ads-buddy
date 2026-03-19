@@ -137,7 +137,7 @@ export function useCompanyDemographic(accessToken: string | null) {
     ];
   }, []);
 
-  const fetchCompanyDemographic = useCallback(async (accountId: string, campaignIds?: string[]) => {
+  const fetchCompanyDemographic = useCallback(async (accountId: string, campaignIds?: string[], skipObjectives = false) => {
     if (!accessToken || !accountId) return;
     
     // Abort any in-progress progressive loading
@@ -244,6 +244,8 @@ export function useCompanyDemographic(accessToken: string | null) {
         setIsLoadingMore(false);
       }
       
+      if (skipObjectives) return;
+
       // Auto-fetch objective breakdowns after all companies are loaded
       console.log('All company batches loaded, auto-fetching objective breakdowns...');
       setIsLoadingObjectiveBreakdowns(true);
@@ -363,18 +365,18 @@ export function useCompanyDemographic(accessToken: string | null) {
     }
   }, [accessToken, dateRange, campaignBreakdownCache, loadingObjectives]);
 
-  // Lazy-load objective breakdowns for all companies
-  const fetchObjectiveBreakdowns = useCallback(async (accountId: string) => {
-    // Allow re-fetch if previous attempt failed (cache is empty but flag was set)
+  // Lazy-load objective breakdowns — optionally scoped to specific company URNs
+  const fetchObjectiveBreakdowns = useCallback(async (accountId: string, companyUrns?: string[], force = false) => {
     const hasData = objectiveBreakdownCache.size > 0;
-    if (!accessToken || !accountId || isLoadingObjectiveBreakdowns || (objectiveBreakdownsFetched && hasData)) return;
-    
+    if (!accessToken || !accountId || isLoadingObjectiveBreakdowns) return;
+    if (!force && objectiveBreakdownsFetched && hasData) return;
+
     setIsLoadingObjectiveBreakdowns(true);
-    
+
     try {
-      console.log('Fetching objective breakdowns lazily...');
+      console.log(`Fetching objective breakdowns for ${companyUrns ? companyUrns.length + ' companies' : 'all'}...`);
       const campaignsToFilter = selectedCampaignIds;
-      
+
       const { data, error: fetchError } = await supabase.functions.invoke('linkedin-api', {
         body: {
           action: 'get_objective_breakdowns',
@@ -383,6 +385,7 @@ export function useCompanyDemographic(accessToken: string | null) {
             accountId,
             dateRange,
             campaignIds: campaignsToFilter.length > 0 ? campaignsToFilter : undefined,
+            companyUrns: companyUrns && companyUrns.length > 0 ? companyUrns : undefined,
           }
         }
       });
