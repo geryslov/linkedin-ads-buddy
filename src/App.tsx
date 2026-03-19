@@ -8,6 +8,7 @@ import Dashboard from "./pages/Dashboard";
 import Callback from "./pages/Callback";
 import Auth from "./pages/Auth";
 import Admin from "./pages/Admin";
+import SocialListener from "./pages/SocialListener";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -24,6 +25,7 @@ const App = () => (
           <Route path="/callback" element={<Callback />} />
           <Route path="/auth" element={<Auth />} />
           <Route path="/admin" element={<Admin />} />
+          <Route path="/social-listener" element={<SocialListener />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>

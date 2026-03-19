@@ -2672,7 +2672,40 @@ serve(async (req) => {
           }
           console.log(`[get_objective_breakdowns] Fetched ${allCampaigns.length} campaigns`);
 
-          // Step 2: Group campaigns by objective
+          // Step 1.5: Find campaigns that actually delivered in the date range
+          const campaignsActiveInRange = new Set<string>();
+          try {
+            const actQp = new URLSearchParams();
+            actQp.set('q', 'analytics');
+            actQp.set('dateRange.start.day', String(startDay));
+            actQp.set('dateRange.start.month', String(startMonth));
+            actQp.set('dateRange.start.year', String(startYear));
+            actQp.set('dateRange.end.day', String(endDay));
+            actQp.set('dateRange.end.month', String(endMonth));
+            actQp.set('dateRange.end.year', String(endYear));
+            actQp.set('timeGranularity', 'ALL');
+            actQp.set('pivot', 'CAMPAIGN');
+            actQp.set('accounts[0]', `urn:li:sponsoredAccount:${accountId}`);
+            actQp.set('fields', 'pivotValue,impressions');
+            actQp.set('count', '10000');
+            const actResp = await fetch(`https://api.linkedin.com/v2/adAnalyticsV2?${actQp.toString()}`, {
+              headers: { 'Authorization': `Bearer ${accessToken}` },
+            });
+            if (actResp.ok) {
+              const actData = await actResp.json();
+              for (const el of (actData.elements || [])) {
+                if ((el.impressions || 0) > 0 && el.pivotValue) {
+                  const m = el.pivotValue.match(/:(\d+)$/);
+                  if (m) campaignsActiveInRange.add(m[1]);
+                }
+              }
+              console.log(`[get_objective_breakdowns] ${campaignsActiveInRange.size} campaigns active in range`);
+            }
+          } catch (e) {
+            console.log('[get_objective_breakdowns] Campaign activity query failed, using all campaigns');
+          }
+
+          // Step 2: Group campaigns by objective (only those active in the date range)
           const objectiveToCampaigns = new Map<string, string[]>();
           const campaignNameMap = new Map<string, string>();
           const filteredCampaignSet = filterCampaignIds && filterCampaignIds.length > 0 ? new Set(filterCampaignIds.map(String)) : null;
@@ -2683,6 +2716,8 @@ serve(async (req) => {
             const campaignName = campaign.name || `Campaign ${campaignId}`;
             if (!campaignId || objective === 'UNKNOWN') continue;
             if (filteredCampaignSet && !filteredCampaignSet.has(campaignId)) continue;
+            // Skip campaigns with no deliveries in the selected time frame
+            if (campaignsActiveInRange.size > 0 && !campaignsActiveInRange.has(campaignId)) continue;
             campaignNameMap.set(campaignId, campaignName);
             const existing = objectiveToCampaigns.get(objective) || [];
             existing.push(campaignId);

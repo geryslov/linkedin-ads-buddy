@@ -428,28 +428,49 @@ export function useCompanyInfluenceMatcher(linkedInData: CompanyDemographicItem[
     }
   }, [uploadedCompanies, nameColumn, urlColumn, dateColumn]);
 
-  const getExportData = useCallback((linkedInDateRange?: { start: string; end: string }) => {
-    return matched.map(m => ({
-      companyName: m.uploaded.name,
-      companyUrl: m.uploaded.url,
-      companyDate: m.uploadedEntries.map(e => e.date).filter(Boolean).join('; '),
-      matchType: m.matchType,
-      linkedInName: m.linkedin.entityName,
-      linkedInWebsite: m.linkedin.website || '',
-      objectives: m.objectives.map(o => o.objective).join('; '),
-      campaignNames: m.allCampaignNames.join('; '),
-      impactPeriod: linkedInDateRange ? `${linkedInDateRange.start} to ${linkedInDateRange.end}` : '',
-      impressions: m.linkedin.impressions,
-      clicks: m.linkedin.clicks,
-      landingPageClicks: m.linkedin.landingPageClicks,
-      spent: m.linkedin.spent.toFixed(2),
-      leads: m.linkedin.leads,
-      engagements: m.linkedin.engagements,
-      costPerLead: m.costPerLead > 0 ? m.costPerLead.toFixed(2) : '',
-      ctr: m.linkedin.ctr.toFixed(2),
-      cpc: m.linkedin.cpc.toFixed(2),
-      cpm: m.linkedin.cpm.toFixed(2),
-    }));
+  const getExportData = useCallback((linkedInDateRange?: { start: string; end: string }, campaignBreakdownCache?: Map<string, any[]>) => {
+    return matched.map(m => {
+      // Build campaign list: prefer per-company breakdown cache (most accurate),
+      // fall back to objective-level campaign names (time-frame filtered by edge fn)
+      const campaignNamesForExport = new Set<string>();
+      for (const obj of m.objectives) {
+        const cacheKey = `${m.linkedin.entityUrn}::${obj.objective}`;
+        const perCompanyCampaigns = campaignBreakdownCache?.get(cacheKey);
+        if (perCompanyCampaigns && perCompanyCampaigns.length > 0) {
+          for (const cb of perCompanyCampaigns) {
+            if ((cb.impressions || 0) > 0 && cb.campaignName) {
+              campaignNamesForExport.add(cb.campaignName);
+            }
+          }
+        } else {
+          for (const name of obj.campaignNames) {
+            campaignNamesForExport.add(name);
+          }
+        }
+      }
+
+      return {
+        companyName: m.uploaded.name,
+        companyUrl: m.uploaded.url,
+        companyDate: m.uploadedEntries.map(e => e.date).filter(Boolean).join('; '),
+        matchType: m.matchType,
+        linkedInName: m.linkedin.entityName,
+        linkedInWebsite: m.linkedin.website || '',
+        objectives: m.objectives.map(o => o.objective).join('; '),
+        campaignNames: Array.from(campaignNamesForExport).join('; '),
+        impactPeriod: linkedInDateRange ? `${linkedInDateRange.start} to ${linkedInDateRange.end}` : '',
+        impressions: m.linkedin.impressions,
+        clicks: m.linkedin.clicks,
+        landingPageClicks: m.linkedin.landingPageClicks,
+        spent: m.linkedin.spent.toFixed(2),
+        leads: m.linkedin.leads,
+        engagements: m.linkedin.engagements,
+        costPerLead: m.costPerLead > 0 ? m.costPerLead.toFixed(2) : '',
+        ctr: m.linkedin.ctr.toFixed(2),
+        cpc: m.linkedin.cpc.toFixed(2),
+        cpm: m.linkedin.cpm.toFixed(2),
+      };
+    });
   }, [matched]);
 
   return {

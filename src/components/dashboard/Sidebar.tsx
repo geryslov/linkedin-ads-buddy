@@ -26,6 +26,7 @@ import {
   ChevronDown,
   PanelLeftClose,
   PanelLeftOpen,
+  Radio,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -231,6 +232,22 @@ export function Sidebar({
             </div>
           );
         })}
+
+        {/* Social Listener */}
+        <div className="mt-2 pt-2 border-t border-sidebar-border">
+          <Button
+            variant="ghost"
+            title={collapsed ? "Social Listener" : undefined}
+            className={cn(
+              "w-full h-8 text-sm font-normal text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-900/20",
+              collapsed ? "justify-center px-0" : "justify-start gap-2.5"
+            )}
+            onClick={() => navigate("/social-listener")}
+          >
+            <Radio className="h-4 w-4 shrink-0" />
+            {!collapsed && "Social Listener"}
+          </Button>
+        </div>
 
         {/* Admin */}
         {isAdmin && (

@@ -233,8 +233,8 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
   }, [handleFileSelect]);
 
   const handleExport = useCallback(() => {
-    exportToCSV(getExportData(dateRange), 'influence_match_results', companyInfluenceColumns);
-  }, [getExportData, dateRange]);
+    exportToCSV(getExportData(dateRange, campaignBreakdownCache), 'influence_match_results', companyInfluenceColumns);
+  }, [getExportData, dateRange, campaignBreakdownCache]);
 
   const toggleCompany = useCallback((key: string) => {
     setExpandedCompanies(prev => {
