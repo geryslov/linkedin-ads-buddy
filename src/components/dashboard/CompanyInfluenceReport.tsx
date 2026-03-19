@@ -481,15 +481,25 @@ export function CompanyInfluenceReport({ accessToken, selectedAccount }: Company
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
               {data.objectiveBreakdown.map(obj => (
-                <div key={obj.objective} className="p-3 border rounded-lg">
+                <div key={obj.objective} className="p-3 border rounded-lg space-y-2">
                   <ObjectiveBadge objective={obj.objective} />
-                  <div className="mt-2 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Companies:</span>
-                      <span className="font-medium">{obj.companies}</span>
-                    </div>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs mt-1">
+                    <span className="text-muted-foreground">Companies</span>
+                    <span className="font-medium text-right tabular-nums">{obj.companies.toLocaleString()}</span>
+                    <span className="text-muted-foreground">Impressions</span>
+                    <span className="font-medium text-right tabular-nums">{(obj.impressions || 0).toLocaleString()}</span>
+                    <span className="text-muted-foreground">Clicks</span>
+                    <span className="font-medium text-right tabular-nums">{(obj.clicks || 0).toLocaleString()}</span>
+                    {(obj.spend || 0) > 0 && <>
+                      <span className="text-muted-foreground">Spend</span>
+                      <span className="font-medium text-right tabular-nums">${(obj.spend || 0).toFixed(2)}</span>
+                    </>}
+                    {(obj.leads || 0) > 0 && <>
+                      <span className="text-muted-foreground">Leads</span>
+                      <span className="font-medium text-right tabular-nums text-primary">{obj.leads.toLocaleString()}</span>
+                    </>}
                   </div>
                 </div>
               ))}

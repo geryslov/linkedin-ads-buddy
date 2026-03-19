@@ -9577,13 +9577,28 @@ serve(async (req) => {
           totalLeads: companies.reduce((sum, c) => sum + c.totalLeads, 0),
         };
 
-        // Objective breakdown
-        const objectiveStats = new Map<string, { companies: number; impressions: number; clicks: number; leads: number }>();
+        // Objective breakdown — aggregate metrics from per-company campaign breakdowns
+        const objectiveStats = new Map<string, { companies: number; impressions: number; clicks: number; spend: number; leads: number }>();
         for (const company of companies) {
-          for (const obj of company.objectiveTypes) {
-            const stats = objectiveStats.get(obj) || { companies: 0, impressions: 0, clicks: 0, leads: 0 };
-            stats.companies++;
+          const seenObjectives = new Set<string>();
+          for (const cb of company.campaignBreakdown) {
+            const obj = cb.objective;
+            if (!obj) continue;
+            const stats = objectiveStats.get(obj) || { companies: 0, impressions: 0, clicks: 0, spend: 0, leads: 0 };
+            if (!seenObjectives.has(obj)) { stats.companies++; seenObjectives.add(obj); }
+            stats.impressions += cb.impressions || 0;
+            stats.clicks += cb.clicks || 0;
+            stats.spend += cb.spend || 0;
+            stats.leads += cb.leads || 0;
             objectiveStats.set(obj, stats);
+          }
+          // Fallback: if no campaign breakdown, just count company per objective
+          if (company.campaignBreakdown.length === 0) {
+            for (const obj of company.objectiveTypes) {
+              const stats = objectiveStats.get(obj) || { companies: 0, impressions: 0, clicks: 0, spend: 0, leads: 0 };
+              stats.companies++;
+              objectiveStats.set(obj, stats);
+            }
           }
         }
 

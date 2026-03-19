@@ -51,6 +51,7 @@ export interface ObjectiveBreakdown {
   companies: number;
   impressions: number;
   clicks: number;
+  spend: number;
   leads: number;
 }
 

@@ -172,6 +172,21 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
     }
   }, [selectedAccount, companyData.length, isLoadingLinkedIn, isLoadingMore, isLoadingObjectiveBreakdowns, fetchObjectiveBreakdowns]);
 
+  // Re-fetch when date range changes (after initial load)
+  const prevDateRangeRef = useRef<{ start: string; end: string } | null>(null);
+  useEffect(() => {
+    if (!hasFetched || !selectedAccount) return;
+    if (
+      prevDateRangeRef.current &&
+      (prevDateRangeRef.current.start !== dateRange.start || prevDateRangeRef.current.end !== dateRange.end)
+    ) {
+      fetchCompanyDemographic(selectedAccount);
+      setCreativeDateRange(dateRange);
+      fetchCreativeAnalytics(selectedAccount);
+    }
+    prevDateRangeRef.current = dateRange;
+  }, [dateRange, hasFetched, selectedAccount, fetchCompanyDemographic, fetchCreativeAnalytics, setCreativeDateRange]);
+
   const handleFetch = useCallback(() => {
     if (selectedAccount) {
       fetchCompanyDemographic(selectedAccount);
