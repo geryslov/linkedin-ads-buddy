@@ -236,7 +236,7 @@ export function MacroView({ stats }: MacroViewProps) {
                     <YAxis
                       type="category"
                       dataKey="platform"
-                      tick={{ fontSize: 11, fill: '#64748B', textTransform: 'capitalize' }}
+                      tick={{ fontSize: 11, fill: '#64748B' }}
                       tickLine={false}
                       axisLine={false}
                       width={70}
