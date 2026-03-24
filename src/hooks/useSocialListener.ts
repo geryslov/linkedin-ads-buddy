@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo, useEffect } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { scrapeProfiles } from '@/services/apifyService';
+import { scrapeProfiles, recoverLatestLinkedInRun } from '@/services/apifyService';
 import type {
   TrackedProfile,
   SocialPost,
@@ -188,6 +188,51 @@ export function useSocialListener() {
   useEffect(() => { saveJSON(POSTS_KEY, posts); }, [posts]);
   useEffect(() => { saveJSON(RUNS_KEY, runs); }, [runs]);
 
+  // Auto-recovery: if profile exists but posts are empty, pull latest successful run data
+  useEffect(() => {
+    let cancelled = false;
+
+    const recoverData = async () => {
+      if (isRunning || profiles.length === 0 || posts.length > 0) return;
+
+      try {
+        const recoveredPosts = await recoverLatestLinkedInRun(profiles);
+        if (cancelled || recoveredPosts.length === 0) return;
+
+        setPosts((prev) => {
+          if (prev.length > 0) return prev;
+          const byId = new Map(recoveredPosts.map((post) => [post.id, post]));
+          return [...byId.values()].sort(
+            (a, b) => new Date(b.postedAt).getTime() - new Date(a.postedAt).getTime(),
+          );
+        });
+
+        const now = new Date().toISOString();
+        setRuns((prev) => [
+          {
+            id: `recover_${Date.now()}`,
+            profileIds: profiles.map((p) => p.id),
+            platform: 'linkedin',
+            actorId: 'recovery',
+            status: 'succeeded',
+            startedAt: now,
+            finishedAt: now,
+            itemCount: recoveredPosts.length,
+          },
+          ...prev.slice(0, 19),
+        ]);
+      } catch (err) {
+        console.warn('Could not recover previous run data', err);
+      }
+    };
+
+    void recoverData();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [profiles, posts.length, isRunning]);
+
   // ── Profile management ────────────────────────────────────────────────────
 
   const addProfile = useCallback(
@@ -247,12 +292,19 @@ export function useSocialListener() {
       setRuns((prev) => [runRecord, ...prev.slice(0, 19)]);
 
       try {
-        const newPosts = await scrapeProfiles(
+        let newPosts = await scrapeProfiles(
           profiles,
           options,
           (platform, status, items) =>
             setRunProgress({ platform, status, items }),
         );
+
+        if (newPosts.length === 0) {
+          const recoveredPosts = await recoverLatestLinkedInRun(profiles);
+          if (recoveredPosts.length > 0) {
+            newPosts = recoveredPosts;
+          }
+        }
 
         // Merge: deduplicate by post ID, keep new data fresh
         setPosts((prev) => {
