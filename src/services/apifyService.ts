@@ -556,6 +556,103 @@ export async function scrapeProfiles(
   return results;
 }
 
+interface ApifyActorRun {
+  id: string;
+  status: string;
+  defaultDatasetId?: string;
+  input?: Record<string, unknown>;
+}
+
+function normalizeProfileUrl(url: string): string {
+  return url.trim().toLowerCase().replace(/\/+$/, '');
+}
+
+function extractInputUrls(input?: Record<string, unknown>): string[] {
+  if (!input) return [];
+
+  const i = input as {
+    targetUrls?: unknown;
+    directUrls?: unknown;
+    startUrls?: unknown;
+  };
+
+  const targetUrls = Array.isArray(i.targetUrls)
+    ? i.targetUrls.filter((u): u is string => typeof u === 'string')
+    : [];
+
+  const directUrls = Array.isArray(i.directUrls)
+    ? i.directUrls.filter((u): u is string => typeof u === 'string')
+    : [];
+
+  const startUrls = Array.isArray(i.startUrls)
+    ? i.startUrls
+        .map((entry) => {
+          if (!entry || typeof entry !== 'object') return null;
+          const url = (entry as { url?: unknown }).url;
+          return typeof url === 'string' ? url : null;
+        })
+        .filter((u): u is string => Boolean(u))
+    : [];
+
+  return [...new Set([...targetUrls, ...directUrls, ...startUrls])];
+}
+
+function runUrlMatchesProfile(url: string, profile: TrackedProfile): boolean {
+  const normalizedRunUrl = normalizeProfileUrl(url);
+  const normalizedProfileUrl = normalizeProfileUrl(profile.url);
+  const handle = profile.handle.replace('@', '').toLowerCase();
+
+  return (
+    normalizedRunUrl === normalizedProfileUrl ||
+    normalizedRunUrl.includes(`/${handle}`) ||
+    normalizedRunUrl.includes(handle)
+  );
+}
+
+export async function recoverLatestLinkedInRun(
+  profiles: TrackedProfile[],
+): Promise<SocialPost[]> {
+  const linkedinProfiles = profiles.filter((p) => p.platform === 'linkedin');
+  if (linkedinProfiles.length === 0) return [];
+
+  const runData = await apifyFetch<{ data: { items: ApifyActorRun[] } }>(
+    `/acts/${APIFY_ACTORS.linkedin_profile_posts}/runs?status=SUCCEEDED&desc=1&limit=20`,
+  );
+
+  const runs = runData.data?.items ?? [];
+
+  for (const run of runs) {
+    if (!run.defaultDatasetId) continue;
+
+    const runUrls = extractInputUrls(run.input);
+    if (runUrls.length > 0) {
+      const hasProfileMatch = linkedinProfiles.some((profile) =>
+        runUrls.some((url) => runUrlMatchesProfile(url, profile)),
+      );
+      if (!hasProfileMatch) continue;
+    }
+
+    const rawItems = await fetchDataset<LinkedInPostRaw>(run.defaultDatasetId, 5000);
+    if (rawItems.length === 0) continue;
+
+    return rawItems.map((raw) => {
+      const authorUrl =
+        raw.author?.profileUrl ?? raw.author?.linkedinUrl ?? raw.authorProfileUrl ?? '';
+      const postUrl = raw.postUrl ?? raw.url ?? raw.linkedinUrl ?? '';
+
+      const matched =
+        linkedinProfiles.find(
+          (profile) =>
+            runUrlMatchesProfile(authorUrl, profile) || runUrlMatchesProfile(postUrl, profile),
+        ) ?? linkedinProfiles[0];
+
+      return normalizeLinkedInPost(raw, matched);
+    });
+  }
+
+  return [];
+}
+
 // ─── Apify store search ───────────────────────────────────────────────────────
 
 export interface ApifyStoreActor {
