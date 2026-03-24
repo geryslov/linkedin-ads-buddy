@@ -807,10 +807,11 @@ export async function recoverLatestLinkedInRun(
       const postUrl = raw.postUrl ?? raw.url ?? raw.linkedinUrl ?? '';
       const targetUrl = raw.query?.targetUrl ?? raw.query?.post ?? '';
 
-      return (
-        runUrlMatchesProfile(authorUrl, linkedinProfiles[0]) ||
-        runUrlMatchesProfile(postUrl, linkedinProfiles[0]) ||
-        runUrlMatchesProfile(targetUrl, linkedinProfiles[0])
+      return linkedinProfiles.some(
+        (profile) =>
+          runUrlMatchesProfile(authorUrl, profile) ||
+          runUrlMatchesProfile(postUrl, profile) ||
+          runUrlMatchesProfile(targetUrl, profile),
       );
     });
 
