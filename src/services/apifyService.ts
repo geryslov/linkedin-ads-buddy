@@ -7,20 +7,23 @@ import type {
 } from '@/types/socialListener';
 import { APIFY_ACTORS } from '@/types/socialListener';
 
-const BASE = 'https://api.apify.com/v2';
-const TOKEN = import.meta.env.VITE_APIFY_TOKEN ?? '';
-const auth = `token=${TOKEN}`;
+import { supabase } from '@/integrations/supabase/client';
 
 // ─── Low-level helpers ────────────────────────────────────────────────────────
 
 async function apifyFetch<T>(path: string, options?: RequestInit): Promise<T> {
-  const sep = path.includes('?') ? '&' : '?';
-  const res = await fetch(`${BASE}${path}${sep}${auth}`, options);
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`Apify API error ${res.status}: ${body}`);
+  const method = options?.method ?? 'GET';
+  const body = options?.body ? JSON.parse(options.body as string) : undefined;
+
+  const { data, error } = await supabase.functions.invoke('apify-proxy', {
+    body: { path, method, body },
+  });
+
+  if (error) {
+    throw new Error(`Apify proxy error: ${error.message}`);
   }
-  return res.json() as Promise<T>;
+
+  return data as T;
 }
 
 // ─── Run an actor and return its run ID ───────────────────────────────────────
