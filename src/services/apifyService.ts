@@ -304,11 +304,47 @@ export async function scrapeLinkedInProfiles(
   onProgress?.('RUNNING', 0);
 
   const { datasetId, itemCount } = await waitForRun(runId, onProgress);
-  const rawItems = await fetchDataset<LinkedInPostRaw>(datasetId, 5000);
 
-  // Map each item to a profile by matching URL/handle
-  const posts: SocialPost[] = rawItems.map((raw) => {
-    // Try to match author URL to a profile
+  interface DatasetItem extends LinkedInPostRaw {
+    type?: string;
+    actor?: {
+      id?: string;
+      name?: string;
+      linkedinUrl?: string;
+      position?: string;
+      pictureUrl?: string;
+      picture?: { url?: string };
+    };
+    reactionType?: string;
+    postId?: string;
+  }
+
+  const allItems = await fetchDataset<DatasetItem>(datasetId, 5000);
+
+  // Separate posts from reactions
+  const rawPosts = allItems.filter((item) => item.type !== 'reaction');
+  const rawReactions = allItems.filter((item) => item.type === 'reaction');
+
+  // Build reactor profiles grouped by postId
+  const reactorsByPostId = new Map<string, ReactorProfile[]>();
+  for (const r of rawReactions) {
+    if (!r.postId || !r.actor) continue;
+    const reactor: ReactorProfile = {
+      id: r.actor.id ?? '',
+      name: r.actor.name ?? 'Unknown',
+      linkedinUrl: r.actor.linkedinUrl,
+      position: r.actor.position,
+      pictureUrl: r.actor.pictureUrl ?? r.actor.picture?.url,
+      reactionType: r.reactionType ?? 'LIKE',
+      postId: r.postId,
+    };
+    const existing = reactorsByPostId.get(r.postId) ?? [];
+    existing.push(reactor);
+    reactorsByPostId.set(r.postId, existing);
+  }
+
+  // Map each post item to a profile by matching URL/handle
+  const posts: SocialPost[] = rawPosts.map((raw) => {
     const authorUrl =
       raw.author?.profileUrl ?? raw.author?.linkedinUrl ?? raw.authorProfileUrl ?? '';
     const postUrl = raw.postUrl ?? raw.url ?? raw.linkedinUrl ?? '';
@@ -316,7 +352,20 @@ export async function scrapeLinkedInProfiles(
       profiles.find(
         (p) => authorUrl.includes(p.handle) || postUrl.includes(p.handle),
       ) ?? profiles[0];
-    return normalizeLinkedInPost(raw, matched);
+    const post = normalizeLinkedInPost(raw, matched);
+
+    // Attach reactor profiles using entityId or shareUrn
+    const entityId = (raw as Record<string, unknown>).entityId as string | undefined;
+    const shareUrn = (raw as Record<string, unknown>).shareUrn as string | undefined;
+    const reactors =
+      reactorsByPostId.get(entityId ?? '') ??
+      reactorsByPostId.get(shareUrn ?? '') ??
+      [];
+    if (reactors.length > 0) {
+      post.reactors = reactors;
+    }
+
+    return post;
   });
 
   return {
