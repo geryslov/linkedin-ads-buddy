@@ -68,10 +68,12 @@ export async function fetchDataset<T>(
   datasetId: string,
   limit = 1000,
 ): Promise<T[]> {
-  const data = await apifyFetch<{ items: T[] }>(
+  const data = await apifyFetch<T[] | { items: T[] }>(
     `/datasets/${datasetId}/items?limit=${limit}&clean=true`,
   );
-  return data.items ?? [];
+  // Apify returns a plain array; handle both formats defensively
+  if (Array.isArray(data)) return data;
+  return (data as { items: T[] }).items ?? [];
 }
 
 // ─── Poll until done (max 10 min) ─────────────────────────────────────────────
