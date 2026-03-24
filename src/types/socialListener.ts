@@ -46,6 +46,16 @@ export interface PostAuthor {
   avatarUrl?: string;
 }
 
+export interface ReactorProfile {
+  id: string;
+  name: string;
+  linkedinUrl?: string;
+  position?: string;
+  pictureUrl?: string;
+  reactionType: string;
+  postId: string;
+}
+
 export interface SocialPost {
   id: string;
   platform: SocialPlatform;
@@ -64,6 +74,7 @@ export interface SocialPost {
   hasMedia: boolean;
   mediaType?: 'image' | 'video' | 'document' | 'link';
   author: PostAuthor;
+  reactors?: ReactorProfile[];
   // Raw for drill-down
   raw?: Record<string, unknown>;
 }

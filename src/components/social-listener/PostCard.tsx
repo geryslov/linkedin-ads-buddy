@@ -1,6 +1,8 @@
-import { ExternalLink, MessageSquare, Repeat2, ThumbsUp, Image, Video, FileText, Link2 } from 'lucide-react';
+import { useState } from 'react';
+import { ExternalLink, MessageSquare, Repeat2, ThumbsUp, Image, Video, FileText, Link2, ChevronDown, ChevronUp, Users } from 'lucide-react';
 import { formatDistanceToNow, parseISO } from 'date-fns';
 import { Badge } from '@/components/ui/badge';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import type { SocialPost } from '@/types/socialListener';
 
 const REACTION_EMOJIS: Record<string, string> = {
@@ -26,6 +28,8 @@ interface PostCardProps {
 
 export function PostCard({ post, compact }: PostCardProps) {
   const MediaIcon = post.mediaType ? MEDIA_ICONS[post.mediaType] : null;
+  const [showReactors, setShowReactors] = useState(false);
+  const reactors = post.reactors ?? [];
 
   return (
     <div className="p-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:border-blue-300 dark:hover:border-blue-600 transition-colors group">
@@ -116,7 +120,74 @@ export function PostCard({ post, compact }: PostCardProps) {
               ))}
           </div>
         )}
+
+        {/* Reactor profiles toggle */}
+        {reactors.length > 0 && (
+          <button
+            onClick={() => setShowReactors(!showReactors)}
+            className="ml-auto flex items-center gap-1 text-[10px] text-blue-500 hover:text-blue-600 transition-colors"
+          >
+            <Users className="w-3 h-3" />
+            {reactors.length} reactor{reactors.length !== 1 ? 's' : ''}
+            {showReactors ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+          </button>
+        )}
       </div>
+
+      {/* Reactor profiles panel */}
+      {showReactors && reactors.length > 0 && (
+        <div className="mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+          <p className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-2">
+            People who reacted
+          </p>
+          <ScrollArea className={reactors.length > 6 ? 'h-48' : ''}>
+            <div className="space-y-1.5">
+              {reactors.map((reactor) => (
+                <div
+                  key={reactor.id + reactor.reactionType}
+                  className="flex items-center gap-2 px-2 py-1.5 rounded-md bg-slate-50 dark:bg-slate-800/50 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                >
+                  {reactor.pictureUrl ? (
+                    <img
+                      src={reactor.pictureUrl}
+                      alt={reactor.name}
+                      className="w-6 h-6 rounded-full object-cover shrink-0"
+                    />
+                  ) : (
+                    <div className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900 flex items-center justify-center text-[9px] font-bold text-blue-700 dark:text-blue-300 shrink-0">
+                      {reactor.name.charAt(0).toUpperCase()}
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    {reactor.linkedinUrl ? (
+                      <a
+                        href={reactor.linkedinUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[11px] font-medium text-slate-700 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 truncate block"
+                      >
+                        {reactor.name}
+                      </a>
+                    ) : (
+                      <p className="text-[11px] font-medium text-slate-700 dark:text-slate-200 truncate">
+                        {reactor.name}
+                      </p>
+                    )}
+                    {reactor.position && (
+                      <p className="text-[10px] text-slate-400 dark:text-slate-500 truncate">
+                        {reactor.position}
+                      </p>
+                    )}
+                  </div>
+                  <span className="text-sm shrink-0" title={reactor.reactionType}>
+                    {REACTION_EMOJIS[reactor.reactionType] ?? '👍'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </ScrollArea>
+        </div>
+      )}
     </div>
   );
 }
