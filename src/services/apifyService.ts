@@ -103,6 +103,7 @@ export async function waitForRun(
 
 interface LinkedInPostRaw {
   id?: string;
+  postId?: string;
   postUrl?: string;
   url?: string;
   linkedinUrl?: string;
@@ -129,9 +130,26 @@ interface LinkedInPostRaw {
   comments?: number;
   repostsCount?: number;
   reposts?: number;
-  reactions?: ReactionBreakdown | Array<{ type?: string; count?: number }>;
+  reactions?:
+    | ReactionBreakdown
+    | Array<{
+        id?: string;
+        postId?: string;
+        reactionType?: string;
+        type?: string;
+        count?: number;
+        actor?: {
+          id?: string;
+          name?: string;
+          linkedinUrl?: string;
+          position?: string;
+          pictureUrl?: string;
+          picture?: { url?: string };
+        };
+      }>;
   reactionTypeCounts?: ReactionBreakdown;
   engagement?: {
+    id?: string;
     likes?: number;
     comments?: number;
     shares?: number;
@@ -157,6 +175,133 @@ interface LinkedInPostRaw {
   };
   authorName?: string;
   authorProfileUrl?: string;
+  query?: {
+    targetUrl?: string;
+    post?: string;
+  };
+}
+
+interface LinkedInActorRaw {
+  id?: string;
+  name?: string;
+  linkedinUrl?: string;
+  position?: string;
+  pictureUrl?: string;
+  picture?: { url?: string };
+}
+
+interface LinkedInReactionRaw {
+  id?: string;
+  postId?: string;
+  reactionType?: string;
+  type?: string;
+  actor?: LinkedInActorRaw;
+}
+
+interface LinkedInDatasetItem extends LinkedInPostRaw {
+  type?: string;
+  actor?: LinkedInActorRaw;
+  reactionType?: string;
+  postId?: string;
+}
+
+function uniqueStrings(values: Array<string | undefined>): string[] {
+  return [...new Set(values.filter((value): value is string => Boolean(value)))];
+}
+
+function getPostKeys(raw: LinkedInPostRaw): string[] {
+  const dynamic = raw as Record<string, unknown>;
+  const entityId = typeof dynamic.entityId === 'string' ? dynamic.entityId : undefined;
+  const shareUrn = typeof dynamic.shareUrn === 'string' ? dynamic.shareUrn : undefined;
+
+  return uniqueStrings([
+    raw.id,
+    raw.postId,
+    entityId,
+    shareUrn,
+    raw.engagement?.id,
+  ]);
+}
+
+function buildReactorProfile(
+  reaction: LinkedInReactionRaw,
+  fallbackPostId?: string,
+): ReactorProfile | null {
+  const actor = reaction.actor;
+  const postId = reaction.postId ?? fallbackPostId;
+  if (!actor || !postId) return null;
+
+  return {
+    id: actor.id ?? actor.linkedinUrl ?? `${postId}_${actor.name ?? 'reactor'}`,
+    name: actor.name ?? 'Unknown',
+    linkedinUrl: actor.linkedinUrl,
+    position: actor.position,
+    pictureUrl: actor.pictureUrl ?? actor.picture?.url,
+    reactionType: reaction.reactionType ?? 'LIKE',
+    postId,
+  };
+}
+
+function addReactor(
+  reactorsByPostId: Map<string, ReactorProfile[]>,
+  reactor: ReactorProfile,
+) {
+  const existing = reactorsByPostId.get(reactor.postId) ?? [];
+  const dedupeKey = `${reactor.id}_${reactor.reactionType}`;
+
+  if (existing.some((entry) => `${entry.id}_${entry.reactionType}` === dedupeKey)) {
+    return;
+  }
+
+  existing.push(reactor);
+  reactorsByPostId.set(reactor.postId, existing);
+}
+
+function buildReactorsByPostId(
+  rawPosts: LinkedInPostRaw[],
+  rawReactions: LinkedInReactionRaw[],
+): Map<string, ReactorProfile[]> {
+  const reactorsByPostId = new Map<string, ReactorProfile[]>();
+
+  for (const reaction of rawReactions) {
+    const reactor = buildReactorProfile(reaction);
+    if (reactor) addReactor(reactorsByPostId, reactor);
+  }
+
+  for (const post of rawPosts) {
+    if (!Array.isArray(post.reactions)) continue;
+
+    const fallbackPostId = getPostKeys(post)[0];
+    for (const item of post.reactions) {
+      if (!item || typeof item !== 'object') continue;
+
+      const reaction = item as LinkedInReactionRaw;
+      const reactor = buildReactorProfile(reaction, fallbackPostId);
+      if (reactor) addReactor(reactorsByPostId, reactor);
+    }
+  }
+
+  return reactorsByPostId;
+}
+
+function getReactorsForPost(
+  raw: LinkedInPostRaw,
+  reactorsByPostId: Map<string, ReactorProfile[]>,
+): ReactorProfile[] {
+  const reactors: ReactorProfile[] = [];
+  const seen = new Set<string>();
+
+  for (const key of getPostKeys(raw)) {
+    const candidates = reactorsByPostId.get(key) ?? [];
+    for (const candidate of candidates) {
+      const dedupeKey = `${candidate.id}_${candidate.reactionType}`;
+      if (seen.has(dedupeKey)) continue;
+      seen.add(dedupeKey);
+      reactors.push(candidate);
+    }
+  }
+
+  return reactors;
 }
 
 function toIsoDate(value: unknown): string {
@@ -305,43 +450,14 @@ export async function scrapeLinkedInProfiles(
 
   const { datasetId, itemCount } = await waitForRun(runId, onProgress);
 
-  interface DatasetItem extends LinkedInPostRaw {
-    type?: string;
-    actor?: {
-      id?: string;
-      name?: string;
-      linkedinUrl?: string;
-      position?: string;
-      pictureUrl?: string;
-      picture?: { url?: string };
-    };
-    reactionType?: string;
-    postId?: string;
-  }
-
-  const allItems = await fetchDataset<DatasetItem>(datasetId, 5000);
+  const allItems = await fetchDataset<LinkedInDatasetItem>(datasetId, 5000);
 
   // Separate posts from reactions
-  const rawPosts = allItems.filter((item) => item.type !== 'reaction');
-  const rawReactions = allItems.filter((item) => item.type === 'reaction');
-
-  // Build reactor profiles grouped by postId
-  const reactorsByPostId = new Map<string, ReactorProfile[]>();
-  for (const r of rawReactions) {
-    if (!r.postId || !r.actor) continue;
-    const reactor: ReactorProfile = {
-      id: r.actor.id ?? '',
-      name: r.actor.name ?? 'Unknown',
-      linkedinUrl: r.actor.linkedinUrl,
-      position: r.actor.position,
-      pictureUrl: r.actor.pictureUrl ?? r.actor.picture?.url,
-      reactionType: r.reactionType ?? 'LIKE',
-      postId: r.postId,
-    };
-    const existing = reactorsByPostId.get(r.postId) ?? [];
-    existing.push(reactor);
-    reactorsByPostId.set(r.postId, existing);
-  }
+  const rawPosts = allItems.filter((item) => item.type !== 'reaction') as LinkedInPostRaw[];
+  const rawReactions = allItems.filter(
+    (item) => item.type === 'reaction',
+  ) as LinkedInReactionRaw[];
+  const reactorsByPostId = buildReactorsByPostId(rawPosts, rawReactions);
 
   // Map each post item to a profile by matching URL/handle
   const posts: SocialPost[] = rawPosts.map((raw) => {
@@ -354,13 +470,7 @@ export async function scrapeLinkedInProfiles(
       ) ?? profiles[0];
     const post = normalizeLinkedInPost(raw, matched);
 
-    // Attach reactor profiles using entityId or shareUrn
-    const entityId = (raw as Record<string, unknown>).entityId as string | undefined;
-    const shareUrn = (raw as Record<string, unknown>).shareUrn as string | undefined;
-    const reactors =
-      reactorsByPostId.get(entityId ?? '') ??
-      reactorsByPostId.get(shareUrn ?? '') ??
-      [];
+    const reactors = getReactorsForPost(raw, reactorsByPostId);
     if (reactors.length > 0) {
       post.reactors = reactors;
     }
@@ -682,21 +792,54 @@ export async function recoverLatestLinkedInRun(
       if (!hasProfileMatch) continue;
     }
 
-    const rawItems = await fetchDataset<LinkedInPostRaw>(run.defaultDatasetId, 5000);
-    if (rawItems.length === 0) continue;
+    const allItems = await fetchDataset<LinkedInDatasetItem>(run.defaultDatasetId, 5000);
+    if (allItems.length === 0) continue;
 
-    return rawItems.map((raw) => {
+    const rawPosts = allItems.filter((item) => item.type !== 'reaction') as LinkedInPostRaw[];
+    const rawReactions = allItems.filter(
+      (item) => item.type === 'reaction',
+    ) as LinkedInReactionRaw[];
+    if (rawPosts.length === 0) continue;
+
+    const hasProfileMatch = rawPosts.some((raw) => {
       const authorUrl =
         raw.author?.profileUrl ?? raw.author?.linkedinUrl ?? raw.authorProfileUrl ?? '';
       const postUrl = raw.postUrl ?? raw.url ?? raw.linkedinUrl ?? '';
+      const targetUrl = raw.query?.targetUrl ?? raw.query?.post ?? '';
+
+      return linkedinProfiles.some(
+        (profile) =>
+          runUrlMatchesProfile(authorUrl, profile) ||
+          runUrlMatchesProfile(postUrl, profile) ||
+          runUrlMatchesProfile(targetUrl, profile),
+      );
+    });
+
+    if (!hasProfileMatch) continue;
+
+    const reactorsByPostId = buildReactorsByPostId(rawPosts, rawReactions);
+
+    return rawPosts.map((raw) => {
+      const authorUrl =
+        raw.author?.profileUrl ?? raw.author?.linkedinUrl ?? raw.authorProfileUrl ?? '';
+      const postUrl = raw.postUrl ?? raw.url ?? raw.linkedinUrl ?? '';
+      const targetUrl = raw.query?.targetUrl ?? raw.query?.post ?? '';
 
       const matched =
         linkedinProfiles.find(
           (profile) =>
-            runUrlMatchesProfile(authorUrl, profile) || runUrlMatchesProfile(postUrl, profile),
+            runUrlMatchesProfile(authorUrl, profile) ||
+            runUrlMatchesProfile(postUrl, profile) ||
+            runUrlMatchesProfile(targetUrl, profile),
         ) ?? linkedinProfiles[0];
 
-      return normalizeLinkedInPost(raw, matched);
+      const post = normalizeLinkedInPost(raw, matched);
+      const reactors = getReactorsForPost(raw, reactorsByPostId);
+      if (reactors.length > 0) {
+        post.reactors = reactors;
+      }
+
+      return post;
     });
   }
 
