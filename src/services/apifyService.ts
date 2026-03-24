@@ -101,14 +101,24 @@ export async function waitForRun(
 // ─── LinkedIn Profile Posts ────────────────────────────────────────────────────
 
 interface LinkedInPostRaw {
+  id?: string;
   postUrl?: string;
   url?: string;
+  linkedinUrl?: string;
   text?: string;
   postContent?: string;
   content?: string;
-  postedAt?: string;
+  postedAt?:
+    | string
+    | {
+        timestamp?: number;
+        date?: string;
+        postedAgoShort?: string;
+        postedAgoText?: string;
+      }
+    | null;
   publishedAt?: string;
-  timestamp?: string;
+  timestamp?: string | number;
   date?: string;
   reactionsCount?: number;
   totalReactionCount?: number;
@@ -118,20 +128,76 @@ interface LinkedInPostRaw {
   comments?: number;
   repostsCount?: number;
   reposts?: number;
-  reactions?: ReactionBreakdown;
+  reactions?: ReactionBreakdown | Array<{ type?: string; count?: number }>;
   reactionTypeCounts?: ReactionBreakdown;
+  engagement?: {
+    likes?: number;
+    comments?: number;
+    shares?: number;
+    reactions?: Array<{ type?: string; count?: number }>;
+  };
   isRepost?: boolean;
   isQuotePost?: boolean;
   media?: unknown[];
+  postImages?: unknown[];
+  postVideo?: unknown;
+  document?: unknown;
   mediaType?: string;
   author?: {
     name?: string;
     profileUrl?: string;
+    linkedinUrl?: string;
     headline?: string;
+    info?: string;
     pictureUrl?: string;
+    avatar?: {
+      url?: string;
+    };
   };
   authorName?: string;
   authorProfileUrl?: string;
+}
+
+function toIsoDate(value: unknown): string {
+  const fallback = new Date().toISOString();
+
+  if (!value) return fallback;
+
+  if (typeof value === 'string' || typeof value === 'number') {
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? fallback : d.toISOString();
+  }
+
+  if (typeof value === 'object') {
+    const obj = value as { date?: string; timestamp?: number };
+    if (obj.date) {
+      const d = new Date(obj.date);
+      if (!Number.isNaN(d.getTime())) return d.toISOString();
+    }
+    if (typeof obj.timestamp === 'number') {
+      const d = new Date(obj.timestamp);
+      if (!Number.isNaN(d.getTime())) return d.toISOString();
+    }
+  }
+
+  return fallback;
+}
+
+function normalizeReactionBreakdown(raw: LinkedInPostRaw): ReactionBreakdown {
+  if (raw.reactionTypeCounts) return raw.reactionTypeCounts;
+
+  if (raw.reactions && !Array.isArray(raw.reactions)) {
+    return raw.reactions;
+  }
+
+  const list =
+    raw.engagement?.reactions ?? (Array.isArray(raw.reactions) ? raw.reactions : []);
+
+  return list.reduce((acc, item) => {
+    if (!item?.type) return acc;
+    acc[item.type] = (acc[item.type] ?? 0) + (item.count ?? 0);
+    return acc;
+  }, {} as ReactionBreakdown);
 }
 
 function normalizeLinkedInPost(
@@ -139,31 +205,58 @@ function normalizeLinkedInPost(
   profile: TrackedProfile,
 ): SocialPost {
   const text = raw.text ?? raw.postContent ?? raw.content ?? '';
-  const postedAt =
-    raw.postedAt ?? raw.publishedAt ?? raw.timestamp ?? raw.date ?? new Date().toISOString();
+  const postedAt = toIsoDate(
+    raw.postedAt ?? raw.publishedAt ?? raw.timestamp ?? raw.date,
+  );
+
+  const reactionBreakdown = normalizeReactionBreakdown(raw);
+  const reactionsFromBreakdown = Object.values(reactionBreakdown).reduce(
+    (sum, count) => sum + (count ?? 0),
+    0,
+  );
+
   const reactions =
-    raw.reactionsCount ?? raw.totalReactionCount ?? raw.likesCount ?? raw.likes ?? 0;
-  const comments = raw.commentsCount ?? raw.comments ?? 0;
-  const reposts = raw.repostsCount ?? raw.reposts ?? 0;
-  const reactionBreakdown: ReactionBreakdown =
-    raw.reactions ?? raw.reactionTypeCounts ?? {};
+    raw.reactionsCount ??
+    raw.totalReactionCount ??
+    raw.likesCount ??
+    raw.likes ??
+    raw.engagement?.likes ??
+    reactionsFromBreakdown;
+  const comments = raw.commentsCount ?? raw.comments ?? raw.engagement?.comments ?? 0;
+  const reposts = raw.repostsCount ?? raw.reposts ?? raw.engagement?.shares ?? 0;
 
   const authorRaw = raw.author ?? {};
   const author = {
     name: authorRaw.name ?? raw.authorName ?? profile.displayName ?? profile.handle,
-    profileUrl: authorRaw.profileUrl ?? raw.authorProfileUrl ?? profile.url,
-    headline: authorRaw.headline,
-    avatarUrl: authorRaw.pictureUrl ?? profile.avatarUrl,
+    profileUrl:
+      authorRaw.profileUrl ??
+      authorRaw.linkedinUrl ??
+      raw.authorProfileUrl ??
+      profile.url,
+    headline: authorRaw.headline ?? authorRaw.info,
+    avatarUrl: authorRaw.pictureUrl ?? authorRaw.avatar?.url ?? profile.avatarUrl,
   };
 
-  const hasMedia = Array.isArray(raw.media) ? raw.media.length > 0 : false;
+  const hasMedia =
+    (Array.isArray(raw.media) && raw.media.length > 0) ||
+    (Array.isArray(raw.postImages) && raw.postImages.length > 0) ||
+    Boolean(raw.postVideo) ||
+    Boolean(raw.document);
+
+  const mediaType =
+    raw.mediaType ??
+    (raw.postVideo ? 'video' : undefined) ??
+    (Array.isArray(raw.postImages) && raw.postImages.length > 0 ? 'image' : undefined) ??
+    (raw.document ? 'document' : undefined);
+
+  const postUrl = raw.postUrl ?? raw.url ?? raw.linkedinUrl ?? profile.url;
 
   return {
-    id: `li_${profile.id}_${raw.postUrl ?? raw.url ?? Math.random().toString(36).slice(2)}`,
+    id: `li_${profile.id}_${raw.id ?? postUrl ?? Math.random().toString(36).slice(2)}`,
     platform: 'linkedin',
     profileHandle: profile.handle,
     profileId: profile.id,
-    url: raw.postUrl ?? raw.url ?? profile.url,
+    url: postUrl,
     text,
     postedAt,
     likes: reactions,
@@ -174,7 +267,7 @@ function normalizeLinkedInPost(
     isRepost: raw.isRepost ?? false,
     isQuotePost: raw.isQuotePost ?? false,
     hasMedia,
-    mediaType: raw.mediaType as SocialPost['mediaType'],
+    mediaType: mediaType as SocialPost['mediaType'],
     author,
     raw: raw as Record<string, unknown>,
   };
@@ -215,12 +308,12 @@ export async function scrapeLinkedInProfiles(
   // Map each item to a profile by matching URL/handle
   const posts: SocialPost[] = rawItems.map((raw) => {
     // Try to match author URL to a profile
-    const authorUrl = raw.author?.profileUrl ?? raw.authorProfileUrl ?? '';
+    const authorUrl =
+      raw.author?.profileUrl ?? raw.author?.linkedinUrl ?? raw.authorProfileUrl ?? '';
+    const postUrl = raw.postUrl ?? raw.url ?? raw.linkedinUrl ?? '';
     const matched =
       profiles.find(
-        (p) =>
-          authorUrl.includes(p.handle) ||
-          (raw.postUrl ?? raw.url ?? '').includes(p.handle),
+        (p) => authorUrl.includes(p.handle) || postUrl.includes(p.handle),
       ) ?? profiles[0];
     return normalizeLinkedInPost(raw, matched);
   });
