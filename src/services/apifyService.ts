@@ -4,6 +4,7 @@ import type {
   TrackedProfile,
   ScrapeRun,
   ReactionBreakdown,
+  ReactorProfile,
 } from '@/types/socialListener';
 import { APIFY_ACTORS } from '@/types/socialListener';
 
