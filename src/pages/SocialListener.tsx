@@ -176,7 +176,7 @@ export default function SocialListener() {
     postedLimit: 'month',
     includeReposts: true,
     includeQuotePosts: true,
-    scrapeReactions: false,
+    scrapeReactions: true,
     scrapeComments: false,
   });
 
