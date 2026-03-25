@@ -438,7 +438,7 @@ export async function scrapeLinkedInProfiles(
     targetUrls,
     maxPosts: options.maxPosts ?? 20,
     postedLimit: options.postedLimit ?? 'month',
-    scrapeReactions: options.scrapeReactions ?? false,
+    scrapeReactions: options.scrapeReactions ?? true,
     scrapeComments: options.scrapeComments ?? false,
     maxComments: options.maxComments ?? 5,
     includeReposts: options.includeReposts ?? true,
