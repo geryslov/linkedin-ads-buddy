@@ -57,6 +57,7 @@ const tabMeta: Record<string, { group: string; title: string; subtitle: string }
   name_report:         { group: "Tools",      title: "Name Report",                 subtitle: "Analyze campaign naming conventions" },
   forms_leads:         { group: "Leads",      title: "Forms & Leads",               subtitle: "Lead generation form submissions and responses" },
   lead_records:        { group: "Leads",      title: "Lead Records",                subtitle: "Browse all registered leads across your forms" },
+  activity_report:     { group: "Analytics",  title: "Activity Report",              subtitle: "Track performance of grouped campaign activities" },
 };
 
 export default function Dashboard() {
