@@ -66,12 +66,14 @@ export function ActivityReport({ accessToken, selectedAccount }: Props) {
 
   const handleSave = async () => {
     if (!activityName.trim() || selectedCampaigns.length === 0) return;
+    let success = false;
     if (editingActivity) {
       await updateActivity(editingActivity.id, activityName.trim(), selectedCampaigns);
+      success = true;
     } else {
-      await createActivity(activityName.trim(), selectedCampaigns);
+      success = await createActivity(activityName.trim(), selectedCampaigns);
     }
-    setDialogOpen(false);
+    if (success) setDialogOpen(false);
   };
 
   const toggleCampaign = (id: string) => {
