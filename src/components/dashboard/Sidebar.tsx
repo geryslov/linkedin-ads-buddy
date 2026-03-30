@@ -77,6 +77,7 @@ const navGroups: NavGroup[] = [
       { id: "reports", label: "Reports", icon: FileBarChart },
       { id: "weekly_report", label: "Weekly Report", icon: CalendarRange },
       { id: "conv_breakdown", label: "Conv. Breakdown", icon: Grid3x3 },
+      { id: "activity_report", label: "Activity Report", icon: ClipboardList },
     ],
   },
   {

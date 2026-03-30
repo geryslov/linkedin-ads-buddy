@@ -47,6 +47,36 @@ export type Database = {
         }
         Relationships: []
       }
+      activities: {
+        Row: {
+          account_id: string
+          campaign_ids: Json
+          created_at: string
+          id: string
+          name: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          account_id: string
+          campaign_ids?: Json
+          created_at?: string
+          id?: string
+          name: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          account_id?: string
+          campaign_ids?: Json
+          created_at?: string
+          id?: string
+          name?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       custom_fields: {
         Row: {
           account_id: string
