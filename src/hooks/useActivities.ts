@@ -41,11 +41,17 @@ export function useActivities(selectedAccount: string | null) {
     }
   }, [selectedAccount]);
 
-  const createActivity = useCallback(async (name: string, campaignIds: string[]) => {
-    if (!selectedAccount) return;
+  const createActivity = useCallback(async (name: string, campaignIds: string[]): Promise<boolean> => {
+    if (!selectedAccount) {
+      toast.error('No account selected');
+      return false;
+    }
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.user) return;
+      if (!session?.user) {
+        toast.error('You must be logged in to create an activity');
+        return false;
+      }
 
       const { error } = await supabase.from('activities').insert({
         user_id: session.user.id,
@@ -57,9 +63,11 @@ export function useActivities(selectedAccount: string | null) {
       if (error) throw error;
       toast.success('Activity created');
       await fetchActivities();
-    } catch (err) {
+      return true;
+    } catch (err: any) {
       console.error('Failed to create activity:', err);
-      toast.error('Failed to create activity');
+      toast.error(`Failed to create activity: ${err.message || 'Unknown error'}`);
+      return false;
     }
   }, [selectedAccount, fetchActivities]);
 
