@@ -23,6 +23,7 @@ import { CompanyConversionBreakdown } from "@/components/dashboard/CompanyConver
 import { LeadSyncReport } from "@/components/dashboard/LeadSyncReport";
 import { LeadRecordsViewer } from "@/components/dashboard/LeadRecordsViewer";
 import { WeeklyReport } from "@/components/dashboard/WeeklyReport";
+import { ActivityReport } from "@/components/dashboard/ActivityReport";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
