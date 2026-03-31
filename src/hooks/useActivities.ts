@@ -78,7 +78,7 @@ export function useActivities(selectedAccount: string | null) {
       toast.error(`Failed to create activity: ${err.message || 'Unknown error'}`);
       return false;
     }
-  }, [selectedAccount, fetchActivities]);
+  }, [selectedAccount, fetchActivities, getUserId]);
 
   const updateActivity = useCallback(async (id: string, name: string, campaignIds: string[]) => {
     try {
