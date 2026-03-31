@@ -15,18 +15,27 @@ export function useActivities(selectedAccount: string | null) {
   const [activities, setActivities] = useState<Activity[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
+  const getUserId = useCallback(async (): Promise<string | null> => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.user?.id) return session.user.id;
+    // Fallback: wait briefly for session restoration
+    await new Promise(resolve => setTimeout(resolve, 500));
+    const { data: { session: retrySession } } = await supabase.auth.getSession();
+    return retrySession?.user?.id ?? null;
+  }, []);
+
   const fetchActivities = useCallback(async () => {
     if (!selectedAccount) return;
     setIsLoading(true);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.user) return;
+      const userId = await getUserId();
+      if (!userId) return;
 
       const { data, error } = await supabase
         .from('activities')
         .select('*')
         .eq('account_id', selectedAccount)
-        .eq('user_id', session.user.id)
+        .eq('user_id', userId)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
@@ -39,7 +48,7 @@ export function useActivities(selectedAccount: string | null) {
     } finally {
       setIsLoading(false);
     }
-  }, [selectedAccount]);
+  }, [selectedAccount, getUserId]);
 
   const createActivity = useCallback(async (name: string, campaignIds: string[]): Promise<boolean> => {
     if (!selectedAccount) {
@@ -47,14 +56,14 @@ export function useActivities(selectedAccount: string | null) {
       return false;
     }
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.user) {
+      const userId = await getUserId();
+      if (!userId) {
         toast.error('You must be logged in to create an activity');
         return false;
       }
 
       const { error } = await supabase.from('activities').insert({
-        user_id: session.user.id,
+        user_id: userId,
         account_id: selectedAccount,
         name,
         campaign_ids: campaignIds as any,
@@ -69,7 +78,7 @@ export function useActivities(selectedAccount: string | null) {
       toast.error(`Failed to create activity: ${err.message || 'Unknown error'}`);
       return false;
     }
-  }, [selectedAccount, fetchActivities]);
+  }, [selectedAccount, fetchActivities, getUserId]);
 
   const updateActivity = useCallback(async (id: string, name: string, campaignIds: string[]) => {
     try {
