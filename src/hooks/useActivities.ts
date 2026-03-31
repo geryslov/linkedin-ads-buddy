@@ -15,18 +15,27 @@ export function useActivities(selectedAccount: string | null) {
   const [activities, setActivities] = useState<Activity[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
+  const getUserId = useCallback(async (): Promise<string | null> => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.user?.id) return session.user.id;
+    // Fallback: wait briefly for session restoration
+    await new Promise(resolve => setTimeout(resolve, 500));
+    const { data: { session: retrySession } } = await supabase.auth.getSession();
+    return retrySession?.user?.id ?? null;
+  }, []);
+
   const fetchActivities = useCallback(async () => {
     if (!selectedAccount) return;
     setIsLoading(true);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.user) return;
+      const userId = await getUserId();
+      if (!userId) return;
 
       const { data, error } = await supabase
         .from('activities')
         .select('*')
         .eq('account_id', selectedAccount)
-        .eq('user_id', session.user.id)
+        .eq('user_id', userId)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
