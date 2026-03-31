@@ -11,26 +11,18 @@ export interface Activity {
   updated_at: string;
 }
 
-export function useActivities(selectedAccount: string | null) {
+export function useActivities(selectedAccount: string | null, userId: string | null) {
   const [activities, setActivities] = useState<Activity[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
-  const getUserId = useCallback(async (): Promise<string | null> => {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (session?.user?.id) return session.user.id;
-    // Fallback: wait briefly for session restoration
-    await new Promise(resolve => setTimeout(resolve, 500));
-    const { data: { session: retrySession } } = await supabase.auth.getSession();
-    return retrySession?.user?.id ?? null;
-  }, []);
-
   const fetchActivities = useCallback(async () => {
-    if (!selectedAccount) return;
+    if (!selectedAccount || !userId) {
+      setActivities([]);
+      return;
+    }
+
     setIsLoading(true);
     try {
-      const userId = await getUserId();
-      if (!userId) return;
-
       const { data, error } = await supabase
         .from('activities')
         .select('*')
@@ -48,20 +40,20 @@ export function useActivities(selectedAccount: string | null) {
     } finally {
       setIsLoading(false);
     }
-  }, [selectedAccount, getUserId]);
+  }, [selectedAccount, userId]);
 
   const createActivity = useCallback(async (name: string, campaignIds: string[]): Promise<boolean> => {
     if (!selectedAccount) {
       toast.error('No account selected');
       return false;
     }
-    try {
-      const userId = await getUserId();
-      if (!userId) {
-        toast.error('You must be logged in to create an activity');
-        return false;
-      }
 
+    if (!userId) {
+      toast.error('Please sign in to save activities');
+      return false;
+    }
+
+    try {
       const { error } = await supabase.from('activities').insert({
         user_id: userId,
         account_id: selectedAccount,
@@ -78,35 +70,55 @@ export function useActivities(selectedAccount: string | null) {
       toast.error(`Failed to create activity: ${err.message || 'Unknown error'}`);
       return false;
     }
-  }, [selectedAccount, fetchActivities, getUserId]);
+  }, [selectedAccount, userId, fetchActivities]);
 
-  const updateActivity = useCallback(async (id: string, name: string, campaignIds: string[]) => {
+  const updateActivity = useCallback(async (id: string, name: string, campaignIds: string[]): Promise<boolean> => {
+    if (!userId) {
+      toast.error('Please sign in to update activities');
+      return false;
+    }
+
     try {
       const { error } = await supabase
         .from('activities')
         .update({ name, campaign_ids: campaignIds as any, updated_at: new Date().toISOString() })
-        .eq('id', id);
+        .eq('id', id)
+        .eq('user_id', userId);
 
       if (error) throw error;
       toast.success('Activity updated');
       await fetchActivities();
-    } catch (err) {
+      return true;
+    } catch (err: any) {
       console.error('Failed to update activity:', err);
-      toast.error('Failed to update activity');
+      toast.error(`Failed to update activity: ${err.message || 'Unknown error'}`);
+      return false;
     }
-  }, [fetchActivities]);
+  }, [userId, fetchActivities]);
 
   const deleteActivity = useCallback(async (id: string) => {
+    if (!userId) {
+      toast.error('Please sign in to delete activities');
+      return false;
+    }
+
     try {
-      const { error } = await supabase.from('activities').delete().eq('id', id);
+      const { error } = await supabase
+        .from('activities')
+        .delete()
+        .eq('id', id)
+        .eq('user_id', userId);
+
       if (error) throw error;
       toast.success('Activity deleted');
       await fetchActivities();
-    } catch (err) {
+      return true;
+    } catch (err: any) {
       console.error('Failed to delete activity:', err);
-      toast.error('Failed to delete activity');
+      toast.error(`Failed to delete activity: ${err.message || 'Unknown error'}`);
+      return false;
     }
-  }, [fetchActivities]);
+  }, [userId, fetchActivities]);
 
   return { activities, isLoading, fetchActivities, createActivity, updateActivity, deleteActivity };
 }

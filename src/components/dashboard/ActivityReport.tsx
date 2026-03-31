@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import { useActivities, Activity } from '@/hooks/useActivities';
-import { useCampaignPerformanceReport, CampaignPerformanceRow, PeriodMetrics } from '@/hooks/useCampaignPerformanceReport';
+import { useCampaignPerformanceReport, PeriodMetrics } from '@/hooks/useCampaignPerformanceReport';
+import { useAuth } from '@/hooks/useAuth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -22,7 +23,11 @@ interface Props {
 }
 
 export function ActivityReport({ accessToken, selectedAccount }: Props) {
-  const { activities, isLoading: activitiesLoading, fetchActivities, createActivity, updateActivity, deleteActivity } = useActivities(selectedAccount);
+  const { user, isLoading: authLoading, isAuthenticated } = useAuth();
+  const { activities, isLoading: activitiesLoading, fetchActivities, createActivity, updateActivity, deleteActivity } = useActivities(
+    selectedAccount,
+    user?.id ?? null,
+  );
   const { data: allCampaigns, isLoading: campaignsLoading, fetchReport } = useCampaignPerformanceReport(accessToken);
 
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -49,6 +54,7 @@ export function ActivityReport({ accessToken, selectedAccount }: Props) {
   }, [allCampaigns, campaignSearch]);
 
   const openCreateDialog = () => {
+    if (!isAuthenticated || authLoading) return;
     setEditingActivity(null);
     setActivityName('');
     setSelectedCampaigns([]);
@@ -65,14 +71,12 @@ export function ActivityReport({ accessToken, selectedAccount }: Props) {
   };
 
   const handleSave = async () => {
-    if (!activityName.trim() || selectedCampaigns.length === 0) return;
-    let success = false;
-    if (editingActivity) {
-      await updateActivity(editingActivity.id, activityName.trim(), selectedCampaigns);
-      success = true;
-    } else {
-      success = await createActivity(activityName.trim(), selectedCampaigns);
-    }
+    if (authLoading || !isAuthenticated || !activityName.trim() || selectedCampaigns.length === 0) return;
+
+    const success = editingActivity
+      ? await updateActivity(editingActivity.id, activityName.trim(), selectedCampaigns)
+      : await createActivity(activityName.trim(), selectedCampaigns);
+
     if (success) setDialogOpen(false);
   };
 
@@ -108,17 +112,22 @@ export function ActivityReport({ accessToken, selectedAccount }: Props) {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">
-          Group campaigns into activities to track their combined performance.
-        </p>
-        <Button onClick={openCreateDialog} className="gap-2">
+      <div className="flex items-center justify-between gap-4">
+        <div className="space-y-1">
+          <p className="text-sm text-muted-foreground">
+            Group campaigns into activities to track their combined performance.
+          </p>
+          {!authLoading && !isAuthenticated && (
+            <p className="text-sm text-primary">
+              Sign in with your app account at <a href="/auth?mode=email" className="font-medium underline underline-offset-4">/auth</a> to save activities permanently.
+            </p>
+          )}
+        </div>
+        <Button onClick={openCreateDialog} className="gap-2" disabled={authLoading || !isAuthenticated}>
           <Plus className="h-4 w-4" /> Add Activity
         </Button>
       </div>
 
-      {/* Activities list */}
       {activities.length === 0 ? (
         <Card>
           <CardContent className="py-12 text-center">
@@ -157,7 +166,6 @@ export function ActivityReport({ accessToken, selectedAccount }: Props) {
                 </CardHeader>
 
                 <CardContent className="pt-0">
-                  {/* Aggregated metrics (last 7d) */}
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
                     <MetricCard title="Impressions" value={metrics.impressions.toLocaleString()} icon={Eye} delay={0} />
                     <MetricCard title="Clicks" value={metrics.clicks.toLocaleString()} icon={MousePointerClick} delay={50} />
@@ -165,7 +173,6 @@ export function ActivityReport({ accessToken, selectedAccount }: Props) {
                     <MetricCard title="Leads" value={metrics.leads.toLocaleString()} icon={Target} delay={150} />
                   </div>
 
-                  {/* Expanded: campaign breakdown */}
                   {isExpanded && (
                     <div className="mt-4 border rounded-lg overflow-hidden">
                       <table className="w-full text-sm">
@@ -211,7 +218,6 @@ export function ActivityReport({ accessToken, selectedAccount }: Props) {
         </div>
       )}
 
-      {/* Create/Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
@@ -251,8 +257,8 @@ export function ActivityReport({ accessToken, selectedAccount }: Props) {
                       <label
                         key={c.campaignId}
                         className={cn(
-                          "flex items-center gap-3 px-3 py-2 rounded-md cursor-pointer hover:bg-muted/50 transition-colors",
-                          selectedCampaigns.includes(c.campaignId) && "bg-primary/5"
+                          'flex items-center gap-3 px-3 py-2 rounded-md cursor-pointer hover:bg-muted/50 transition-colors',
+                          selectedCampaigns.includes(c.campaignId) && 'bg-primary/5'
                         )}
                       >
                         <Checkbox
@@ -276,7 +282,7 @@ export function ActivityReport({ accessToken, selectedAccount }: Props) {
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
-            <Button onClick={handleSave} disabled={!activityName.trim() || selectedCampaigns.length === 0}>
+            <Button onClick={handleSave} disabled={authLoading || !isAuthenticated || !activityName.trim() || selectedCampaigns.length === 0}>
               {editingActivity ? 'Update' : 'Create'}
             </Button>
           </DialogFooter>
