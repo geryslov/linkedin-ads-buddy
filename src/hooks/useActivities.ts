@@ -48,7 +48,7 @@ export function useActivities(selectedAccount: string | null) {
     } finally {
       setIsLoading(false);
     }
-  }, [selectedAccount]);
+  }, [selectedAccount, getUserId]);
 
   const createActivity = useCallback(async (name: string, campaignIds: string[]): Promise<boolean> => {
     if (!selectedAccount) {
