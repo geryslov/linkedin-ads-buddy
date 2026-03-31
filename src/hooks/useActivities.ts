@@ -56,14 +56,14 @@ export function useActivities(selectedAccount: string | null) {
       return false;
     }
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.user) {
+      const userId = await getUserId();
+      if (!userId) {
         toast.error('You must be logged in to create an activity');
         return false;
       }
 
       const { error } = await supabase.from('activities').insert({
-        user_id: session.user.id,
+        user_id: userId,
         account_id: selectedAccount,
         name,
         campaign_ids: campaignIds as any,
