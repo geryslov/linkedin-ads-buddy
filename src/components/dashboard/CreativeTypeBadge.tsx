@@ -28,6 +28,31 @@ const TYPE_CONFIG: Record<string, {
     label: 'Sponsored Content',
     colors: 'bg-blue-500/10 text-blue-600 border-blue-500/20 dark:bg-blue-500/20 dark:text-blue-400',
   },
+  IMAGE_ENG: {
+    icon: Image,
+    label: 'Image Engagement',
+    colors: 'bg-blue-500/10 text-blue-600 border-blue-500/20 dark:bg-blue-500/20 dark:text-blue-400',
+  },
+  IMAGE_GATED: {
+    icon: Image,
+    label: 'Image Gated',
+    colors: 'bg-indigo-500/10 text-indigo-600 border-indigo-500/20 dark:bg-indigo-500/20 dark:text-indigo-400',
+  },
+  DOC_GATED: {
+    icon: FileSpreadsheet,
+    label: 'Doc Gated',
+    colors: 'bg-teal-500/10 text-teal-600 border-teal-500/20 dark:bg-teal-500/20 dark:text-teal-400',
+  },
+  VIDEO_GATED: {
+    icon: Video,
+    label: 'Video Gated',
+    colors: 'bg-rose-500/10 text-rose-600 border-rose-500/20 dark:bg-rose-500/20 dark:text-rose-400',
+  },
+  CAROUSEL_GATED: {
+    icon: LayoutGrid,
+    label: 'Carousel Gated',
+    colors: 'bg-orange-500/10 text-orange-600 border-orange-500/20 dark:bg-orange-500/20 dark:text-orange-400',
+  },
   SPONSORED_UPDATE: {
     icon: FileText,
     label: 'Sponsored Update',

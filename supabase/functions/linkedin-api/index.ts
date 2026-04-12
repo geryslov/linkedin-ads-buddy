@@ -11297,7 +11297,7 @@ serve(async (req) => {
           fetch(wrBuildUrl(thisWeekRange.start, thisWeekRange.end, 'MEMBER_SENIORITY', 'ALL'), { headers: authHdr }).then(r => r.json()),
           fetch(wrBuildUrl(thisWeekRange.start, thisWeekRange.end, 'MEMBER_INDUSTRY', 'ALL'), { headers: authHdr }).then(r => r.json()),
           fetch(wrBuildUrl(thisWeekRange.start, thisWeekRange.end, 'MEMBER_COMPANY_SIZE', 'ALL'), { headers: authHdr }).then(r => r.json()),
-          fetch(`https://api.linkedin.com/v2/adCampaignsV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=500&fields=id,name,status,objectiveType,campaignGroup`, { headers: authHdr }).then(r => r.json()),
+          fetch(`https://api.linkedin.com/v2/adCampaignsV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=500&fields=id,name,status,objectiveType,campaignGroup,type`, { headers: authHdr }).then(r => r.json()),
           fetch(wrBuildUrl(thisWeekRange.start, thisWeekRange.end, 'CAMPAIGN_GROUP', 'ALL'), { headers: authHdr }).then(r => r.json()),
           fetch(wrBuildUrl(lastWeekRange.start, lastWeekRange.end, 'CAMPAIGN_GROUP', 'ALL'), { headers: authHdr }).then(r => r.json()),
         ]);
@@ -11359,10 +11359,22 @@ serve(async (req) => {
               }
               const formUrn = content.leadGenerationForm || '';
               const campId = (d.campaign || '').split(':').pop() || '';
+
+              // Determine creative type from content structure
+              let resolvedType = 'SPONSORED_CONTENT';
+              if (content.spotlight) resolvedType = 'SPOTLIGHT_AD';
+              else if (content.followCompany) resolvedType = 'FOLLOWER_AD';
+              else if (content.jobs) resolvedType = 'JOBS_AD';
+              else if (content.textAd) resolvedType = 'TEXT_AD';
+              else if (Array.isArray(content.mediaContent) && content.mediaContent.length > 1) resolvedType = 'CAROUSEL';
+              else if (ref && (ref.includes('video') || ref.includes('ugcVideo'))) resolvedType = 'VIDEO';
+              else if (ref && ref.includes('document')) resolvedType = 'DOCUMENT_AD';
+              // else stays SPONSORED_CONTENT (single image)
+
               creativeMetaMap.set(creativeId, {
                 name: d.name || '',
                 imageUrl,
-                type: Object.keys(content)[0] || 'UNKNOWN',
+                type: resolvedType,
                 status: d.status || 'UNKNOWN',
                 formUrn,
                 campaignId: campId,
@@ -11422,7 +11434,7 @@ serve(async (req) => {
         console.log(`[get_weekly_report] Creative metadata: ${creativeMetaMap.size} resolved, refs fetched: ${wrUniqueRefs.length}`);
 
         // ── Campaign names + objective + group ────────────────────────────
-        const campaignNameMap = new Map<string, { name: string; status: string; objectiveType: string; campaignGroupId: string }>();
+        const campaignNameMap = new Map<string, { name: string; status: string; objectiveType: string; campaignGroupId: string; type: string }>();
         for (const camp of wrEls(r_campaigns)) {
           const cgUrn = camp.campaignGroup || '';
           const cgId = cgUrn.split(':').pop() || '';
@@ -11431,6 +11443,7 @@ serve(async (req) => {
             status: camp.status || 'UNKNOWN',
             objectiveType: camp.objectiveType || 'UNKNOWN',
             campaignGroupId: cgId,
+            type: camp.type || 'SPONSORED_UPDATES',
           });
         }
 
@@ -11517,11 +11530,32 @@ serve(async (req) => {
           const lastW = creativeLastMap.get(urn) || { impressions: 0, clicks: 0, spent: 0, leads: 0 };
           const trendPoints = (creativeTrendMap.get(urn) || []).sort((a, b) => a.date.localeCompare(b.date));
 
+          // Refine type using campaign info
+          let finalType = meta.type;
+          const campInfo = campaignNameMap.get(meta.campaignId);
+          if (campInfo) {
+            if (campInfo.type === 'SPONSORED_INMAILS') finalType = 'MESSAGE_AD';
+            else if (campInfo.type === 'TEXT_AD') finalType = 'TEXT_AD';
+            else if (campInfo.type === 'DYNAMIC') {
+              if (finalType === 'SPONSORED_CONTENT') finalType = 'SPOTLIGHT_AD'; // fallback for dynamic
+            }
+          }
+          // Further refine: if it has a lead form, mark as gated
+          const hasForm = !!(meta.formUrn);
+          if (hasForm && (finalType === 'SPONSORED_CONTENT' || finalType === 'VIDEO' || finalType === 'DOCUMENT_AD' || finalType === 'CAROUSEL')) {
+            if (finalType === 'VIDEO') finalType = 'VIDEO_GATED';
+            else if (finalType === 'DOCUMENT_AD') finalType = 'DOC_GATED';
+            else if (finalType === 'CAROUSEL') finalType = 'CAROUSEL_GATED';
+            else finalType = 'IMAGE_GATED';
+          } else if (!hasForm && finalType === 'SPONSORED_CONTENT') {
+            finalType = 'IMAGE_ENG';
+          }
+
           if (!byNameAgg.has(creativeName)) {
             byNameAgg.set(creativeName, {
               creativeName,
               imageUrl: meta.imageUrl || '',
-              type: meta.type,
+              type: finalType,
               status: meta.status,
               formUrn: meta.formUrn,
               campaignId: meta.campaignId,
