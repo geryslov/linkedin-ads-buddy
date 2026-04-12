@@ -11414,12 +11414,16 @@ serve(async (req) => {
 
         console.log(`[get_weekly_report] Creative metadata: ${creativeMetaMap.size} resolved, refs fetched: ${wrUniqueRefs.length}`);
 
-        // ── Campaign names ───────────────────────────────────────────────────
-        const campaignNameMap = new Map<string, { name: string; status: string }>();
+        // ── Campaign names + objective + group ────────────────────────────
+        const campaignNameMap = new Map<string, { name: string; status: string; objectiveType: string; campaignGroupId: string }>();
         for (const camp of wrEls(r_campaigns)) {
+          const cgUrn = camp.campaignGroup || '';
+          const cgId = cgUrn.split(':').pop() || '';
           campaignNameMap.set(camp.id?.toString() || '', {
             name: camp.name || `Campaign ${camp.id}`,
             status: camp.status || 'UNKNOWN',
+            objectiveType: camp.objectiveType || 'UNKNOWN',
+            campaignGroupId: cgId,
           });
         }
 
