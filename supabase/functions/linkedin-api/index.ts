@@ -11359,10 +11359,22 @@ serve(async (req) => {
               }
               const formUrn = content.leadGenerationForm || '';
               const campId = (d.campaign || '').split(':').pop() || '';
+
+              // Determine creative type from content structure
+              let resolvedType = 'SPONSORED_CONTENT';
+              if (content.spotlight) resolvedType = 'SPOTLIGHT_AD';
+              else if (content.followCompany) resolvedType = 'FOLLOWER_AD';
+              else if (content.jobs) resolvedType = 'JOBS_AD';
+              else if (content.textAd) resolvedType = 'TEXT_AD';
+              else if (Array.isArray(content.mediaContent) && content.mediaContent.length > 1) resolvedType = 'CAROUSEL';
+              else if (ref && (ref.includes('video') || ref.includes('ugcVideo'))) resolvedType = 'VIDEO';
+              else if (ref && ref.includes('document')) resolvedType = 'DOCUMENT_AD';
+              // else stays SPONSORED_CONTENT (single image)
+
               creativeMetaMap.set(creativeId, {
                 name: d.name || '',
                 imageUrl,
-                type: Object.keys(content)[0] || 'UNKNOWN',
+                type: resolvedType,
                 status: d.status || 'UNKNOWN',
                 formUrn,
                 campaignId: campId,
