@@ -530,6 +530,18 @@ function formatPivotValue(urn: string, pivot: string): string {
     '141': 'International Trade and Development',
   };
   
+  const companySizeMap: Record<string, string> = {
+    'SIZE_1': '1',
+    'SIZE_2_TO_10': '2-10',
+    'SIZE_11_TO_50': '11-50',
+    'SIZE_51_TO_200': '51-200',
+    'SIZE_201_TO_500': '201-500',
+    'SIZE_501_TO_1000': '501-1,000',
+    'SIZE_1001_TO_5000': '1,001-5,000',
+    'SIZE_5001_TO_10000': '5,001-10,000',
+    'SIZE_10001_OR_MORE': '10,001+',
+  };
+
   switch (pivot) {
     case 'MEMBER_JOB_FUNCTION':
       return jobFunctionMap[value] || `Job Function ${value}`;
@@ -537,11 +549,11 @@ function formatPivotValue(urn: string, pivot: string): string {
       return seniorityMap[value] || `Seniority ${value}`;
     case 'MEMBER_INDUSTRY':
       return industryMap[value] || `Industry ${value}`;
+    case 'MEMBER_COMPANY_SIZE':
+      return companySizeMap[value] || value.replace(/^SIZE_/i, '').replace(/_/g, ' ') || 'Unknown';
     case 'MEMBER_COUNTRY':
-      // Country codes are usually ISO 2-letter codes
       return value.toUpperCase();
     case 'MEMBER_JOB_TITLE':
-      // Job titles come as-is from LinkedIn
       return value || 'Unknown Job Title';
     default:
       return value || 'Unknown';
@@ -11537,17 +11549,19 @@ serve(async (req) => {
             if (campInfo.type === 'SPONSORED_INMAILS') finalType = 'MESSAGE_AD';
             else if (campInfo.type === 'TEXT_AD') finalType = 'TEXT_AD';
             else if (campInfo.type === 'DYNAMIC') {
-              if (finalType === 'SPONSORED_CONTENT') finalType = 'SPOTLIGHT_AD'; // fallback for dynamic
+              if (finalType === 'SPONSORED_CONTENT') finalType = 'SPOTLIGHT_AD';
             }
           }
-          // Further refine: if it has a lead form, mark as gated
+          // Determine gated vs engagement using formUrn OR campaign objective
           const hasForm = !!(meta.formUrn);
-          if (hasForm && (finalType === 'SPONSORED_CONTENT' || finalType === 'VIDEO' || finalType === 'DOCUMENT_AD' || finalType === 'CAROUSEL')) {
+          const isLeadGenCampaign = campInfo?.objectiveType === 'LEAD_GENERATION';
+          const isGated = hasForm || isLeadGenCampaign;
+          if (isGated && (finalType === 'SPONSORED_CONTENT' || finalType === 'VIDEO' || finalType === 'DOCUMENT_AD' || finalType === 'CAROUSEL')) {
             if (finalType === 'VIDEO') finalType = 'VIDEO_GATED';
             else if (finalType === 'DOCUMENT_AD') finalType = 'DOC_GATED';
             else if (finalType === 'CAROUSEL') finalType = 'CAROUSEL_GATED';
             else finalType = 'IMAGE_GATED';
-          } else if (!hasForm && finalType === 'SPONSORED_CONTENT') {
+          } else if (!isGated && finalType === 'SPONSORED_CONTENT') {
             finalType = 'IMAGE_ENG';
           }
 
@@ -11727,21 +11741,75 @@ serve(async (req) => {
         }).sort((a, b) => b.thisWeek.spent - a.thisWeek.spent);
 
         // ── Demographics ─────────────────────────────────────────────────────
-        function wrParseDemos(items: any[]) {
-          return items.map(el => ({
-            name: el.pivotValue || 'Unknown',
-            impressions: el.impressions || 0,
-            clicks: el.clicks || 0,
-            spent: parseFloat(el.costInLocalCurrency || '0'),
-            leads: (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0),
-          })).sort((a, b) => b.impressions - a.impressions).slice(0, 20);
+        // Resolve job title IDs to names
+        const jobTitleElements = wrEls(r_jobTitle);
+        const titleIds = jobTitleElements.map(el => {
+          const raw = el.pivotValue || '';
+          return raw.includes(':') ? raw.split(':').pop() || raw : raw;
+        }).filter(Boolean);
+
+        const titleNameMap = new Map<string, string>();
+        if (titleIds.length > 0) {
+          // Try title_metadata_cache first
+          try {
+            const { data: cachedTitles } = await supabaseClient
+              .from('title_metadata_cache')
+              .select('title_id, name')
+              .in('title_id', titleIds);
+            for (const t of (cachedTitles || [])) {
+              titleNameMap.set(t.title_id, t.name);
+            }
+          } catch (e) { /* ignore cache errors */ }
+
+          // Resolve remaining via LinkedIn API
+          const unresolvedIds = titleIds.filter(id => !titleNameMap.has(id));
+          if (unresolvedIds.length > 0) {
+            const batchSize = 20;
+            for (let i = 0; i < Math.min(unresolvedIds.length, 40); i += batchSize) {
+              await Promise.all(unresolvedIds.slice(i, i + batchSize).map(async (titleId) => {
+                try {
+                  const resp = await fetch(
+                    `https://api.linkedin.com/v2/standardizedTitles/${titleId}`,
+                    { headers: authHdr }
+                  );
+                  if (resp.ok) {
+                    const d = await resp.json();
+                    const name = d.name?.localized?.en_US || d.name?.preferredLocale?.language
+                      ? (d.name?.localized?.[Object.keys(d.name.localized)[0]] || `Title ${titleId}`)
+                      : (d.name || `Title ${titleId}`);
+                    titleNameMap.set(titleId, typeof name === 'string' ? name : `Title ${titleId}`);
+                  }
+                } catch (e) { /* ignore */ }
+              }));
+            }
+          }
+        }
+
+        function wrParseDemos(items: any[], pivotType: string) {
+          return items.map(el => {
+            const rawValue = el.pivotValue || '';
+            const idPart = rawValue.includes(':') ? rawValue.split(':').pop() || rawValue : rawValue;
+            let resolvedName: string;
+            if (pivotType === 'MEMBER_JOB_TITLE') {
+              resolvedName = titleNameMap.get(idPart) || `Title ${idPart}`;
+            } else {
+              resolvedName = formatPivotValue(idPart, pivotType);
+            }
+            return {
+              name: resolvedName,
+              impressions: el.impressions || 0,
+              clicks: el.clicks || 0,
+              spent: parseFloat(el.costInLocalCurrency || '0'),
+              leads: (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0),
+            };
+          }).sort((a, b) => b.impressions - a.impressions).slice(0, 20);
         }
 
         const demographics = {
-          jobTitle: wrParseDemos(wrEls(r_jobTitle)),
-          seniority: wrParseDemos(wrEls(r_seniority)),
-          industry: wrParseDemos(wrEls(r_industry)),
-          companySize: wrParseDemos(wrEls(r_companySize)),
+          jobTitle: wrParseDemos(jobTitleElements, 'MEMBER_JOB_TITLE'),
+          seniority: wrParseDemos(wrEls(r_seniority), 'MEMBER_SENIORITY'),
+          industry: wrParseDemos(wrEls(r_industry), 'MEMBER_INDUSTRY'),
+          companySize: wrParseDemos(wrEls(r_companySize), 'MEMBER_COMPANY_SIZE'),
         };
 
         // ── Account summary ───────────────────────────────────────────────────
