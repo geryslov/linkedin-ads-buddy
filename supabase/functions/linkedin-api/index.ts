@@ -11225,23 +11225,30 @@ serve(async (req) => {
           });
         }
 
-        // ── Date ranges (calendar weeks, Sun–Sat) ───────────────────────────
+        // ── Date ranges (last full Sun–Sat week + the week before) ────────
         const now = new Date();
         const dayOfWeek = now.getDay(); // 0=Sun
-        const thisSunday = new Date(now);
-        thisSunday.setDate(now.getDate() - dayOfWeek);
-        thisSunday.setHours(0, 0, 0, 0);
+        // Find the most recent Saturday (end of last full week)
+        const daysToLastSat = dayOfWeek === 6 ? 0 : dayOfWeek + 1; // if today is Sat(6) it's 0, Sun(0)->1, Mon(1)->2 …
+        const lastSaturday = new Date(now);
+        lastSaturday.setDate(now.getDate() - daysToLastSat);
+        lastSaturday.setHours(0, 0, 0, 0);
 
-        const lastSunday = new Date(thisSunday);
-        lastSunday.setDate(thisSunday.getDate() - 7);
-        const lastSaturday = new Date(thisSunday);
-        lastSaturday.setDate(thisSunday.getDate() - 1);
+        // Sunday of the last full week = lastSaturday - 6
+        const reportSunday = new Date(lastSaturday);
+        reportSunday.setDate(lastSaturday.getDate() - 6);
+
+        // Previous week for comparison
+        const prevSaturday = new Date(reportSunday);
+        prevSaturday.setDate(reportSunday.getDate() - 1);
+        const prevSunday = new Date(prevSaturday);
+        prevSunday.setDate(prevSaturday.getDate() - 6);
 
         const fmtD = (d: Date) =>
           `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
-        const thisWeekRange = { start: fmtD(thisSunday), end: fmtD(now) };
-        const lastWeekRange = { start: fmtD(lastSunday), end: fmtD(lastSaturday) };
+        const thisWeekRange = { start: fmtD(reportSunday), end: fmtD(lastSaturday) };
+        const lastWeekRange = { start: fmtD(prevSunday), end: fmtD(prevSaturday) };
 
         console.log(`[get_weekly_report] thisWeek: ${thisWeekRange.start} → ${thisWeekRange.end}`);
         console.log(`[get_weekly_report] lastWeek: ${lastWeekRange.start} → ${lastWeekRange.end}`);
