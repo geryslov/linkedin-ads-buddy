@@ -11297,7 +11297,7 @@ serve(async (req) => {
           fetch(wrBuildUrl(thisWeekRange.start, thisWeekRange.end, 'MEMBER_SENIORITY', 'ALL'), { headers: authHdr }).then(r => r.json()),
           fetch(wrBuildUrl(thisWeekRange.start, thisWeekRange.end, 'MEMBER_INDUSTRY', 'ALL'), { headers: authHdr }).then(r => r.json()),
           fetch(wrBuildUrl(thisWeekRange.start, thisWeekRange.end, 'MEMBER_COMPANY_SIZE', 'ALL'), { headers: authHdr }).then(r => r.json()),
-          fetch(`https://api.linkedin.com/v2/adCampaignsV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=500&fields=id,name,status,objectiveType,campaignGroup`, { headers: authHdr }).then(r => r.json()),
+          fetch(`https://api.linkedin.com/v2/adCampaignsV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=500&fields=id,name,status,objectiveType,campaignGroup,type`, { headers: authHdr }).then(r => r.json()),
           fetch(wrBuildUrl(thisWeekRange.start, thisWeekRange.end, 'CAMPAIGN_GROUP', 'ALL'), { headers: authHdr }).then(r => r.json()),
           fetch(wrBuildUrl(lastWeekRange.start, lastWeekRange.end, 'CAMPAIGN_GROUP', 'ALL'), { headers: authHdr }).then(r => r.json()),
         ]);
