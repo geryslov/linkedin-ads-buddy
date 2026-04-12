@@ -11741,12 +11741,60 @@ serve(async (req) => {
         }).sort((a, b) => b.thisWeek.spent - a.thisWeek.spent);
 
         // ── Demographics ─────────────────────────────────────────────────────
+        // Resolve job title IDs to names
+        const jobTitleElements = wrEls(r_jobTitle);
+        const titleIds = jobTitleElements.map(el => {
+          const raw = el.pivotValue || '';
+          return raw.includes(':') ? raw.split(':').pop() || raw : raw;
+        }).filter(Boolean);
+
+        const titleNameMap = new Map<string, string>();
+        if (titleIds.length > 0) {
+          // Try title_metadata_cache first
+          try {
+            const { data: cachedTitles } = await supabaseClient
+              .from('title_metadata_cache')
+              .select('title_id, name')
+              .in('title_id', titleIds);
+            for (const t of (cachedTitles || [])) {
+              titleNameMap.set(t.title_id, t.name);
+            }
+          } catch (e) { /* ignore cache errors */ }
+
+          // Resolve remaining via LinkedIn API
+          const unresolvedIds = titleIds.filter(id => !titleNameMap.has(id));
+          if (unresolvedIds.length > 0) {
+            const batchSize = 20;
+            for (let i = 0; i < Math.min(unresolvedIds.length, 40); i += batchSize) {
+              await Promise.all(unresolvedIds.slice(i, i + batchSize).map(async (titleId) => {
+                try {
+                  const resp = await fetch(
+                    `https://api.linkedin.com/v2/standardizedTitles/${titleId}`,
+                    { headers: authHdr }
+                  );
+                  if (resp.ok) {
+                    const d = await resp.json();
+                    const name = d.name?.localized?.en_US || d.name?.preferredLocale?.language
+                      ? (d.name?.localized?.[Object.keys(d.name.localized)[0]] || `Title ${titleId}`)
+                      : (d.name || `Title ${titleId}`);
+                    titleNameMap.set(titleId, typeof name === 'string' ? name : `Title ${titleId}`);
+                  }
+                } catch (e) { /* ignore */ }
+              }));
+            }
+          }
+        }
+
         function wrParseDemos(items: any[], pivotType: string) {
           return items.map(el => {
             const rawValue = el.pivotValue || '';
-            // Extract the ID from URN format (e.g. "urn:li:title:152" → "152", "urn:li:seniority:6" → "6")
             const idPart = rawValue.includes(':') ? rawValue.split(':').pop() || rawValue : rawValue;
-            const resolvedName = formatPivotValue(idPart, pivotType);
+            let resolvedName: string;
+            if (pivotType === 'MEMBER_JOB_TITLE') {
+              resolvedName = titleNameMap.get(idPart) || `Title ${idPart}`;
+            } else {
+              resolvedName = formatPivotValue(idPart, pivotType);
+            }
             return {
               name: resolvedName,
               impressions: el.impressions || 0,
@@ -11758,7 +11806,7 @@ serve(async (req) => {
         }
 
         const demographics = {
-          jobTitle: wrParseDemos(wrEls(r_jobTitle), 'MEMBER_JOB_TITLE'),
+          jobTitle: wrParseDemos(jobTitleElements, 'MEMBER_JOB_TITLE'),
           seniority: wrParseDemos(wrEls(r_seniority), 'MEMBER_SENIORITY'),
           industry: wrParseDemos(wrEls(r_industry), 'MEMBER_INDUSTRY'),
           companySize: wrParseDemos(wrEls(r_companySize), 'MEMBER_COMPANY_SIZE'),
