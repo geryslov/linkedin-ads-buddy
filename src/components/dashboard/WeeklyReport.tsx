@@ -3,6 +3,7 @@ import {
   useWeeklyReport,
   WeeklyCreativeRow,
   WeeklyCampaignRow,
+  WeeklyCampaignGroupRow,
   WeeklyFormRow,
   DemoEntry,
   WeekMetrics,
@@ -11,6 +12,13 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import {
   RefreshCw,
@@ -26,6 +34,10 @@ import {
   Users,
   BarChart2,
   ClipboardList,
+  Filter,
+  FolderOpen,
+  Palette,
+  Tag,
 } from 'lucide-react';
 import { LineChart, Line, ResponsiveContainer } from 'recharts';
 
@@ -69,6 +81,33 @@ function formatWeekRange(start: string, end: string): string {
   return `${months[s.getMonth()]} ${s.getDate()} – ${months[e.getMonth()]} ${e.getDate()}, ${s.getFullYear()}`;
 }
 
+// ── Theme extraction from creative name ────────────────────────────────────────
+// Pattern: img_theme_... or doc_theme_... or message_theme_...
+function extractTheme(creativeName: string): string {
+  const lower = creativeName.toLowerCase();
+  const match = lower.match(/^(?:img|doc|message)_([^_]+(?:_[^_]+)*?)_/);
+  if (match) {
+    // Take everything between the first _ and the next segment boundary
+    // But only the first word/phrase chunk
+    const parts = creativeName.split('_');
+    if (parts.length >= 3) {
+      const prefix = parts[0].toLowerCase();
+      if (['img', 'doc', 'message'].includes(prefix)) {
+        return parts[1];
+      }
+    }
+  }
+  // Fallback: try simple split
+  const parts = creativeName.split('_');
+  if (parts.length >= 3) {
+    const prefix = parts[0].toLowerCase();
+    if (['img', 'doc', 'message'].includes(prefix)) {
+      return parts[1];
+    }
+  }
+  return 'Other';
+}
+
 // ── WoW change indicator ───────────────────────────────────────────────────────
 function ChangeIndicator({ pct, lowerIsBetter = false }: { pct: number | null; lowerIsBetter?: boolean }) {
   if (pct === null || pct === undefined) return <span className="text-muted-foreground text-xs">—</span>;
@@ -95,7 +134,7 @@ function ChangeIndicator({ pct, lowerIsBetter = false }: { pct: number | null; l
   );
 }
 
-// ── Inline sparkline (80×28px, no axes) ───────────────────────────────────────
+// ── Inline sparkline ──────────────────────────────────────────────────────────
 function Sparkline({ data }: { data: { date: string; spent: number }[] }) {
   if (!data || data.length < 2) {
     return <div className="w-[80px] h-[28px] rounded bg-muted/40" />;
@@ -161,7 +200,7 @@ function useSortableTable<T extends Record<string, any>>(rows: T[], defaultKey: 
   return { sorted, handleSort, SortIcon };
 }
 
-// ── Demographic bar chart (inline progress bars) ───────────────────────────────
+// ── Demographic bar chart ──────────────────────────────────────────────────────
 function DemoChart({ title, data, icon: Icon }: { title: string; data: DemoEntry[]; icon: React.ElementType }) {
   const top10 = data.slice(0, 10);
   const maxImpr = Math.max(...top10.map(d => d.impressions), 1);
@@ -205,7 +244,7 @@ function DemoChart({ title, data, icon: Icon }: { title: string; data: DemoEntry
   );
 }
 
-// ── Metrics row helper (shared by all 3 tables) ───────────────────────────────
+// ── Metrics row helper ─────────────────────────────────────────────────────────
 const METRIC_COLS = [
   { key: '_spent', label: 'Spent', format: (v: number) => fmt$0(v) },
   { key: '_impr', label: 'Impr.', format: (v: number) => fmtNum(v) },
@@ -226,7 +265,90 @@ function flattenMetrics(m: WeekMetrics) {
   };
 }
 
-// ── Creative table ─────────────────────────────────────────────────────────────
+// ── Generic metrics table ─────────────────────────────────────────────────────
+function GenericMetricsTable<T extends Record<string, any>>({
+  rows, nameKey, nameLabel, emptyMessage, renderName, defaultSort = '_spent', showWoW = true,
+}: {
+  rows: T[];
+  nameKey: string;
+  nameLabel: string;
+  emptyMessage: string;
+  renderName?: (row: T) => React.ReactNode;
+  defaultSort?: string;
+  showWoW?: boolean;
+}) {
+  const { sorted, handleSort, SortIcon } = useSortableTable(rows, defaultSort);
+
+  if (rows.length === 0) {
+    return (
+      <div className="flex items-center justify-center py-12 text-muted-foreground text-sm">
+        {emptyMessage}
+      </div>
+    );
+  }
+
+  return (
+    <div className="border border-border rounded-lg overflow-hidden">
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-border bg-muted/40">
+              <th
+                className="text-left p-2 font-semibold text-xs min-w-[200px] cursor-pointer hover:bg-muted/60 transition-colors"
+                onClick={() => handleSort(nameKey)}
+              >
+                <div className="flex items-center gap-1">{nameLabel} <SortIcon col={nameKey} /></div>
+              </th>
+              {METRIC_COLS.map(col => (
+                <th
+                  key={col.key}
+                  className="text-right p-2 font-semibold text-xs cursor-pointer hover:bg-muted/60 transition-colors whitespace-nowrap"
+                  onClick={() => handleSort(col.key)}
+                >
+                  <div className="flex items-center justify-end gap-1">{col.label}<SortIcon col={col.key} /></div>
+                </th>
+              ))}
+              {showWoW && (
+                <>
+                  <th className="text-right p-2 font-semibold text-xs whitespace-nowrap">%Spent WoW</th>
+                  <th className="text-right p-2 font-semibold text-xs whitespace-nowrap">%CPL WoW</th>
+                </>
+              )}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border/50">
+            {sorted.map((row, idx) => (
+              <tr key={row[nameKey] || idx} className="hover:bg-muted/30 transition-colors duration-150">
+                <td className="p-2 max-w-[280px]">
+                  {renderName ? renderName(row) : (
+                    <span className="font-medium text-xs break-words">{row[nameKey]}</span>
+                  )}
+                </td>
+                {METRIC_COLS.map(col => (
+                  <td key={col.key} className="p-2 text-right text-xs font-mono tabular-nums">
+                    {col.format(row[col.key] as number)}
+                  </td>
+                ))}
+                {showWoW && (
+                  <>
+                    <td className="p-2 text-right">
+                      <ChangeIndicator pct={row.pctSpentChange} lowerIsBetter />
+                    </td>
+                    <td className="p-2 text-right">
+                      <ChangeIndicator pct={row.pctCplChange} lowerIsBetter />
+                    </td>
+                  </>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ── Creative table (with thumbnail + sparkline) ───────────────────────────────
 function CreativeTable({ rows }: { rows: WeeklyCreativeRow[] }) {
   const flat = useMemo(() =>
     rows.map(r => ({ ...r, ...flattenMetrics(r.thisWeek) })), [rows]);
@@ -314,143 +436,6 @@ function CreativeTable({ rows }: { rows: WeeklyCreativeRow[] }) {
   );
 }
 
-// ── Campaign table ─────────────────────────────────────────────────────────────
-function CampaignTable({ rows }: { rows: WeeklyCampaignRow[] }) {
-  const flat = useMemo(() =>
-    rows.map(r => ({ ...r, ...flattenMetrics(r.thisWeek) })), [rows]);
-  const { sorted, handleSort, SortIcon } = useSortableTable(flat, '_spent');
-
-  if (rows.length === 0) {
-    return (
-      <div className="flex items-center justify-center py-12 text-muted-foreground text-sm">
-        No campaign data for this week
-      </div>
-    );
-  }
-
-  return (
-    <div className="border border-border rounded-lg overflow-hidden">
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-border bg-muted/40">
-              <th
-                className="text-left p-2 font-semibold text-xs min-w-[200px] cursor-pointer hover:bg-muted/60 transition-colors"
-                onClick={() => handleSort('campaignName')}
-              >
-                <div className="flex items-center gap-1">Campaign <SortIcon col="campaignName" /></div>
-              </th>
-              {METRIC_COLS.map(col => (
-                <th
-                  key={col.key}
-                  className="text-right p-2 font-semibold text-xs cursor-pointer hover:bg-muted/60 transition-colors whitespace-nowrap"
-                  onClick={() => handleSort(col.key)}
-                >
-                  <div className="flex items-center justify-end gap-1">{col.label}<SortIcon col={col.key} /></div>
-                </th>
-              ))}
-              <th className="text-right p-2 font-semibold text-xs whitespace-nowrap">%Spent WoW</th>
-              <th className="text-right p-2 font-semibold text-xs whitespace-nowrap">%CPL WoW</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border/50">
-            {sorted.map(row => (
-              <tr key={row.campaignId} className="hover:bg-muted/30 transition-colors duration-150">
-                <td className="p-2 max-w-[280px]">
-                  <div className="font-medium text-xs break-words">{row.campaignName}</div>
-                  <div className={cn(
-                    'text-[10px] font-medium mt-0.5',
-                    row.status === 'ACTIVE' ? 'text-green-600' : 'text-muted-foreground'
-                  )}>{row.status}</div>
-                </td>
-                {METRIC_COLS.map(col => (
-                  <td key={col.key} className="p-2 text-right text-xs font-mono tabular-nums">
-                    {col.format(row[col.key] as number)}
-                  </td>
-                ))}
-                <td className="p-2 text-right">
-                  <ChangeIndicator pct={row.pctSpentChange} lowerIsBetter />
-                </td>
-                <td className="p-2 text-right">
-                  <ChangeIndicator pct={row.pctCplChange} lowerIsBetter />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-// ── Lead form table ────────────────────────────────────────────────────────────
-function LeadFormTable({ rows }: { rows: WeeklyFormRow[] }) {
-  const flat = useMemo(() =>
-    rows.map(r => ({ ...r, ...flattenMetrics(r.thisWeek) })), [rows]);
-  const { sorted, handleSort, SortIcon } = useSortableTable(flat, '_leads');
-
-  if (rows.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center py-12 gap-1.5 text-muted-foreground text-sm">
-        <span>No lead form data available</span>
-        <span className="text-xs text-center max-w-xs">
-          Lead forms appear when creatives are linked to a LinkedIn Lead Gen Form
-        </span>
-      </div>
-    );
-  }
-
-  return (
-    <div className="border border-border rounded-lg overflow-hidden">
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-border bg-muted/40">
-              <th
-                className="text-left p-2 font-semibold text-xs min-w-[200px] cursor-pointer hover:bg-muted/60 transition-colors"
-                onClick={() => handleSort('formName')}
-              >
-                <div className="flex items-center gap-1">Lead Form <SortIcon col="formName" /></div>
-              </th>
-              {METRIC_COLS.map(col => (
-                <th
-                  key={col.key}
-                  className="text-right p-2 font-semibold text-xs cursor-pointer hover:bg-muted/60 transition-colors whitespace-nowrap"
-                  onClick={() => handleSort(col.key)}
-                >
-                  <div className="flex items-center justify-end gap-1">{col.label}<SortIcon col={col.key} /></div>
-                </th>
-              ))}
-              <th className="text-right p-2 font-semibold text-xs whitespace-nowrap">%Spent WoW</th>
-              <th className="text-right p-2 font-semibold text-xs whitespace-nowrap">%CPL WoW</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border/50">
-            {sorted.map(row => (
-              <tr key={row.formId} className="hover:bg-muted/30 transition-colors duration-150">
-                <td className="p-2 max-w-[280px]">
-                  <span className="font-medium text-xs break-words">{row.formName}</span>
-                </td>
-                {METRIC_COLS.map(col => (
-                  <td key={col.key} className="p-2 text-right text-xs font-mono tabular-nums">
-                    {col.format(row[col.key] as number)}
-                  </td>
-                ))}
-                <td className="p-2 text-right">
-                  <ChangeIndicator pct={row.pctSpentChange} lowerIsBetter />
-                </td>
-                <td className="p-2 text-right">
-                  <ChangeIndicator pct={row.pctCplChange} lowerIsBetter />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
 // ── Skeleton ───────────────────────────────────────────────────────────────────
 function WeeklyReportSkeleton() {
   return (
@@ -473,13 +458,171 @@ function WeeklyReportSkeleton() {
   );
 }
 
+// ── Objective filter type ──────────────────────────────────────────────────────
+type ObjectiveFilter = 'all' | 'leadgen' | 'others';
+
 // ── Main component ─────────────────────────────────────────────────────────────
 export function WeeklyReport({ accessToken, selectedAccount }: Props) {
   const { data, isLoading, error, fetchReport } = useWeeklyReport(accessToken);
+  const [objectiveFilter, setObjectiveFilter] = useState<ObjectiveFilter>('all');
 
   useEffect(() => {
     if (selectedAccount) fetchReport(selectedAccount);
   }, [selectedAccount, fetchReport]);
+
+  // Build a campaignId → objectiveType lookup from byCampaign
+  const campaignObjectiveMap = useMemo(() => {
+    if (!data) return new Map<string, string>();
+    const map = new Map<string, string>();
+    for (const c of data.byCampaign) {
+      map.set(c.campaignId, c.objectiveType || 'UNKNOWN');
+    }
+    return map;
+  }, [data]);
+
+  // Filter helpers
+  const matchesObjective = (objectiveType: string): boolean => {
+    if (objectiveFilter === 'all') return true;
+    const isLeadGen = objectiveType === 'LEAD_GENERATION';
+    return objectiveFilter === 'leadgen' ? isLeadGen : !isLeadGen;
+  };
+
+  // Filtered data
+  const filteredCreatives = useMemo(() => {
+    if (!data) return [];
+    if (objectiveFilter === 'all') return data.byCreative;
+    return data.byCreative.filter(c => {
+      const obj = campaignObjectiveMap.get(c.campaignId) || 'UNKNOWN';
+      return matchesObjective(obj);
+    });
+  }, [data, objectiveFilter, campaignObjectiveMap]);
+
+  const filteredCampaigns = useMemo(() => {
+    if (!data) return [];
+    if (objectiveFilter === 'all') return data.byCampaign;
+    return data.byCampaign.filter(c => matchesObjective(c.objectiveType));
+  }, [data, objectiveFilter]);
+
+  const filteredCampaignGroups = useMemo(() => {
+    if (!data) return data?.byCampaignGroup || [];
+    // Campaign groups don't have objective directly, so we keep all when filter is 'all'
+    // For leadgen/others, aggregate from campaigns belonging to each group
+    if (objectiveFilter === 'all') return data.byCampaignGroup;
+    // Build group metrics from filtered campaigns
+    const groupMap = new Map<string, { thisW: { impressions: number; clicks: number; spent: number; leads: number }; lastW: { impressions: number; clicks: number; spent: number; leads: number }; name: string }>();
+    for (const c of filteredCampaigns) {
+      if (!c.campaignGroupId) continue;
+      const existing = groupMap.get(c.campaignGroupId);
+      if (!existing) {
+        const grp = data.byCampaignGroup.find(g => g.campaignGroupId === c.campaignGroupId);
+        groupMap.set(c.campaignGroupId, {
+          name: grp?.campaignGroupName || `Group ${c.campaignGroupId}`,
+          thisW: { impressions: c.thisWeek.impressions, clicks: c.thisWeek.clicks, spent: c.thisWeek.spent, leads: c.thisWeek.leads },
+          lastW: { impressions: c.lastWeek.impressions, clicks: c.lastWeek.clicks, spent: c.lastWeek.spent, leads: c.lastWeek.leads },
+        });
+      } else {
+        existing.thisW.impressions += c.thisWeek.impressions;
+        existing.thisW.clicks += c.thisWeek.clicks;
+        existing.thisW.spent += c.thisWeek.spent;
+        existing.thisW.leads += c.thisWeek.leads;
+        existing.lastW.impressions += c.lastWeek.impressions;
+        existing.lastW.clicks += c.lastWeek.clicks;
+        existing.lastW.spent += c.lastWeek.spent;
+        existing.lastW.leads += c.lastWeek.leads;
+      }
+    }
+    return [...groupMap.entries()].map(([id, g]) => {
+      const thisM = { ...g.thisW, ctr: g.thisW.impressions > 0 ? (g.thisW.clicks / g.thisW.impressions) * 100 : 0, cpl: g.thisW.leads > 0 ? g.thisW.spent / g.thisW.leads : 0 };
+      const lastM = { ...g.lastW, ctr: g.lastW.impressions > 0 ? (g.lastW.clicks / g.lastW.impressions) * 100 : 0, cpl: g.lastW.leads > 0 ? g.lastW.spent / g.lastW.leads : 0 };
+      return {
+        campaignGroupId: id,
+        campaignGroupName: g.name,
+        thisWeek: thisM,
+        lastWeek: lastM,
+        pctSpentChange: g.lastW.spent > 0 ? ((g.thisW.spent - g.lastW.spent) / g.lastW.spent) * 100 : null,
+        pctCplChange: lastM.cpl > 0 ? ((thisM.cpl - lastM.cpl) / lastM.cpl) * 100 : null,
+      };
+    }).sort((a, b) => b.thisWeek.spent - a.thisWeek.spent);
+  }, [data, objectiveFilter, filteredCampaigns]);
+
+  // Creative type aggregation (from filtered creatives)
+  const byCreativeType = useMemo(() => {
+    const typeMap = new Map<string, { thisW: { impressions: number; clicks: number; spent: number; leads: number }; lastW: { impressions: number; clicks: number; spent: number; leads: number } }>();
+    for (const c of filteredCreatives) {
+      const type = c.type.replace(/_/g, ' ') || 'Unknown';
+      const existing = typeMap.get(type);
+      if (!existing) {
+        typeMap.set(type, {
+          thisW: { impressions: c.thisWeek.impressions, clicks: c.thisWeek.clicks, spent: c.thisWeek.spent, leads: c.thisWeek.leads },
+          lastW: { impressions: c.lastWeek.impressions, clicks: c.lastWeek.clicks, spent: c.lastWeek.spent, leads: c.lastWeek.leads },
+        });
+      } else {
+        existing.thisW.impressions += c.thisWeek.impressions;
+        existing.thisW.clicks += c.thisWeek.clicks;
+        existing.thisW.spent += c.thisWeek.spent;
+        existing.thisW.leads += c.thisWeek.leads;
+        existing.lastW.impressions += c.lastWeek.impressions;
+        existing.lastW.clicks += c.lastWeek.clicks;
+        existing.lastW.spent += c.lastWeek.spent;
+        existing.lastW.leads += c.lastWeek.leads;
+      }
+    }
+    return [...typeMap.entries()].map(([type, g]) => {
+      const thisM = { ...g.thisW, ctr: g.thisW.impressions > 0 ? (g.thisW.clicks / g.thisW.impressions) * 100 : 0, cpl: g.thisW.leads > 0 ? g.thisW.spent / g.thisW.leads : 0 };
+      const lastM = { ...g.lastW, ctr: g.lastW.impressions > 0 ? (g.lastW.clicks / g.lastW.impressions) * 100 : 0, cpl: g.lastW.leads > 0 ? g.lastW.spent / g.lastW.leads : 0 };
+      return {
+        creativeType: type,
+        thisWeek: thisM,
+        lastWeek: lastM,
+        pctSpentChange: g.lastW.spent > 0 ? ((g.thisW.spent - g.lastW.spent) / g.lastW.spent) * 100 : null,
+        pctCplChange: lastM.cpl > 0 ? ((thisM.cpl - lastM.cpl) / lastM.cpl) * 100 : null,
+        ...{ _spent: thisM.spent, _impr: thisM.impressions, _clicks: thisM.clicks, _leads: thisM.leads, _ctr: thisM.ctr, _cpl: thisM.cpl },
+      };
+    }).sort((a, b) => b.thisWeek.spent - a.thisWeek.spent);
+  }, [filteredCreatives]);
+
+  // Theme aggregation (from filtered creatives)
+  const byTheme = useMemo(() => {
+    const themeMap = new Map<string, { thisW: { impressions: number; clicks: number; spent: number; leads: number }; lastW: { impressions: number; clicks: number; spent: number; leads: number } }>();
+    for (const c of filteredCreatives) {
+      const theme = extractTheme(c.creativeName);
+      const existing = themeMap.get(theme);
+      if (!existing) {
+        themeMap.set(theme, {
+          thisW: { impressions: c.thisWeek.impressions, clicks: c.thisWeek.clicks, spent: c.thisWeek.spent, leads: c.thisWeek.leads },
+          lastW: { impressions: c.lastWeek.impressions, clicks: c.lastWeek.clicks, spent: c.lastWeek.spent, leads: c.lastWeek.leads },
+        });
+      } else {
+        existing.thisW.impressions += c.thisWeek.impressions;
+        existing.thisW.clicks += c.thisWeek.clicks;
+        existing.thisW.spent += c.thisWeek.spent;
+        existing.thisW.leads += c.thisWeek.leads;
+        existing.lastW.impressions += c.lastWeek.impressions;
+        existing.lastW.clicks += c.lastWeek.clicks;
+        existing.lastW.spent += c.lastWeek.spent;
+        existing.lastW.leads += c.lastWeek.leads;
+      }
+    }
+    return [...themeMap.entries()].map(([theme, g]) => {
+      const thisM = { ...g.thisW, ctr: g.thisW.impressions > 0 ? (g.thisW.clicks / g.thisW.impressions) * 100 : 0, cpl: g.thisW.leads > 0 ? g.thisW.spent / g.thisW.leads : 0 };
+      const lastM = { ...g.lastW, ctr: g.lastW.impressions > 0 ? (g.lastW.clicks / g.lastW.impressions) * 100 : 0, cpl: g.lastW.leads > 0 ? g.lastW.spent / g.lastW.leads : 0 };
+      return {
+        theme,
+        thisWeek: thisM,
+        lastWeek: lastM,
+        pctSpentChange: g.lastW.spent > 0 ? ((g.thisW.spent - g.lastW.spent) / g.lastW.spent) * 100 : null,
+        pctCplChange: lastM.cpl > 0 ? ((thisM.cpl - lastM.cpl) / lastM.cpl) * 100 : null,
+        ...{ _spent: thisM.spent, _impr: thisM.impressions, _clicks: thisM.clicks, _leads: thisM.leads, _ctr: thisM.ctr, _cpl: thisM.cpl },
+      };
+    }).sort((a, b) => b.thisWeek.spent - a.thisWeek.spent);
+  }, [filteredCreatives]);
+
+  // Flatten for campaign/group tables
+  const flatCampaigns = useMemo(() =>
+    filteredCampaigns.map(r => ({ ...r, ...flattenMetrics(r.thisWeek) })), [filteredCampaigns]);
+
+  const flatCampaignGroups = useMemo(() =>
+    filteredCampaignGroups.map(r => ({ ...r, ...flattenMetrics(r.thisWeek) })), [filteredCampaignGroups]);
 
   if (!selectedAccount) {
     return (
@@ -504,7 +647,7 @@ export function WeeklyReport({ accessToken, selectedAccount }: Props) {
 
   if (!data) return null;
 
-  const { summary, weekRange, byCreative, byCampaign, byLeadForm, demographics } = data;
+  const { summary, weekRange, byLeadForm, demographics } = data;
 
   return (
     <div className="space-y-6">
@@ -516,17 +659,32 @@ export function WeeklyReport({ accessToken, selectedAccount }: Props) {
           </h2>
           <p className="text-xs text-muted-foreground mt-0.5">
             vs. {formatWeekRange(weekRange.lastWeek.start, weekRange.lastWeek.end)}
+            <span className="ml-2 text-muted-foreground/60">(Sun–Sat)</span>
           </p>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => selectedAccount && fetchReport(selectedAccount)}
-          className="gap-1.5"
-        >
-          <RefreshCw className="h-3.5 w-3.5" />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          {/* Objective filter */}
+          <Select value={objectiveFilter} onValueChange={(v) => setObjectiveFilter(v as ObjectiveFilter)}>
+            <SelectTrigger className="w-[160px] h-8 text-xs">
+              <Filter className="h-3.5 w-3.5 mr-1.5 shrink-0" />
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Objectives</SelectItem>
+              <SelectItem value="leadgen">Lead Generation</SelectItem>
+              <SelectItem value="others">Others</SelectItem>
+            </SelectContent>
+          </Select>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => selectedAccount && fetchReport(selectedAccount)}
+            className="gap-1.5"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {/* KPI summary bar */}
@@ -579,29 +737,93 @@ export function WeeklyReport({ accessToken, selectedAccount }: Props) {
 
       {/* Performance breakdown tabs */}
       <Tabs defaultValue="creative" className="space-y-4">
-        <TabsList className="h-9">
+        <TabsList className="h-9 flex-wrap">
           <TabsTrigger value="creative" className="text-xs sm:text-sm gap-1.5">
-            By Creative
-            <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4">{byCreative.length}</Badge>
+            <ImageIcon className="h-3 w-3" />
+            Creative
+            <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4">{filteredCreatives.length}</Badge>
           </TabsTrigger>
           <TabsTrigger value="campaign" className="text-xs sm:text-sm gap-1.5">
-            By Campaign
-            <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4">{byCampaign.length}</Badge>
+            Campaign
+            <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4">{filteredCampaigns.length}</Badge>
+          </TabsTrigger>
+          <TabsTrigger value="campaignGroup" className="text-xs sm:text-sm gap-1.5">
+            <FolderOpen className="h-3 w-3" />
+            Group
+            <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4">{filteredCampaignGroups.length}</Badge>
+          </TabsTrigger>
+          <TabsTrigger value="creativeType" className="text-xs sm:text-sm gap-1.5">
+            <Palette className="h-3 w-3" />
+            Type
+            <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4">{byCreativeType.length}</Badge>
+          </TabsTrigger>
+          <TabsTrigger value="theme" className="text-xs sm:text-sm gap-1.5">
+            <Tag className="h-3 w-3" />
+            Theme
+            <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4">{byTheme.length}</Badge>
           </TabsTrigger>
           <TabsTrigger value="leadform" className="text-xs sm:text-sm gap-1.5">
-            By Lead Form
+            Lead Form
             <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4">{byLeadForm.length}</Badge>
           </TabsTrigger>
         </TabsList>
 
         <TabsContent value="creative">
-          <CreativeTable rows={byCreative} />
+          <CreativeTable rows={filteredCreatives} />
         </TabsContent>
+
         <TabsContent value="campaign">
-          <CampaignTable rows={byCampaign} />
+          <GenericMetricsTable
+            rows={flatCampaigns}
+            nameKey="campaignName"
+            nameLabel="Campaign"
+            emptyMessage="No campaign data for this week"
+            renderName={(row) => (
+              <div>
+                <div className="font-medium text-xs break-words">{row.campaignName}</div>
+                <div className={cn(
+                  'text-[10px] font-medium mt-0.5',
+                  row.status === 'ACTIVE' ? 'text-green-600' : 'text-muted-foreground'
+                )}>{row.status}</div>
+              </div>
+            )}
+          />
         </TabsContent>
+
+        <TabsContent value="campaignGroup">
+          <GenericMetricsTable
+            rows={flatCampaignGroups}
+            nameKey="campaignGroupName"
+            nameLabel="Campaign Group"
+            emptyMessage="No campaign group data for this week"
+          />
+        </TabsContent>
+
+        <TabsContent value="creativeType">
+          <GenericMetricsTable
+            rows={byCreativeType}
+            nameKey="creativeType"
+            nameLabel="Creative Type"
+            emptyMessage="No creative type data"
+          />
+        </TabsContent>
+
+        <TabsContent value="theme">
+          <GenericMetricsTable
+            rows={byTheme}
+            nameKey="theme"
+            nameLabel="Theme"
+            emptyMessage="No theme data (creative names need img_/doc_/message_ prefix)"
+          />
+        </TabsContent>
+
         <TabsContent value="leadform">
-          <LeadFormTable rows={byLeadForm} />
+          <GenericMetricsTable
+            rows={useMemo(() => byLeadForm.map(r => ({ ...r, ...flattenMetrics(r.thisWeek) })), [byLeadForm])}
+            nameKey="formName"
+            nameLabel="Lead Form"
+            emptyMessage="No lead form data available"
+          />
         </TabsContent>
       </Tabs>
 

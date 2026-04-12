@@ -11225,24 +11225,23 @@ serve(async (req) => {
           });
         }
 
-        // ── Date ranges (calendar weeks, Mon–Sun) ───────────────────────────
+        // ── Date ranges (calendar weeks, Sun–Sat) ───────────────────────────
         const now = new Date();
         const dayOfWeek = now.getDay(); // 0=Sun
-        const daysFromMon = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-        const thisMonday = new Date(now);
-        thisMonday.setDate(now.getDate() - daysFromMon);
-        thisMonday.setHours(0, 0, 0, 0);
+        const thisSunday = new Date(now);
+        thisSunday.setDate(now.getDate() - dayOfWeek);
+        thisSunday.setHours(0, 0, 0, 0);
 
-        const lastMonday = new Date(thisMonday);
-        lastMonday.setDate(thisMonday.getDate() - 7);
-        const lastSunday = new Date(thisMonday);
-        lastSunday.setDate(thisMonday.getDate() - 1);
+        const lastSunday = new Date(thisSunday);
+        lastSunday.setDate(thisSunday.getDate() - 7);
+        const lastSaturday = new Date(thisSunday);
+        lastSaturday.setDate(thisSunday.getDate() - 1);
 
         const fmtD = (d: Date) =>
           `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
-        const thisWeekRange = { start: fmtD(thisMonday), end: fmtD(now) };
-        const lastWeekRange = { start: fmtD(lastMonday), end: fmtD(lastSunday) };
+        const thisWeekRange = { start: fmtD(thisSunday), end: fmtD(now) };
+        const lastWeekRange = { start: fmtD(lastSunday), end: fmtD(lastSaturday) };
 
         console.log(`[get_weekly_report] thisWeek: ${thisWeekRange.start} → ${thisWeekRange.end}`);
         console.log(`[get_weekly_report] lastWeek: ${lastWeekRange.start} → ${lastWeekRange.end}`);
@@ -11280,6 +11279,7 @@ serve(async (req) => {
           r_dailyThis,
           r_jobTitle, r_seniority, r_industry, r_companySize,
           r_campaigns,
+          r_campGroupThis, r_campGroupLast,
         ] = await Promise.allSettled([
           fetch(wrBuildUrl(thisWeekRange.start, thisWeekRange.end, 'CREATIVE', 'ALL'), { headers: authHdr }).then(r => r.json()),
           fetch(wrBuildUrl(lastWeekRange.start, lastWeekRange.end, 'CREATIVE', 'ALL'), { headers: authHdr }).then(r => r.json()),
@@ -11290,7 +11290,9 @@ serve(async (req) => {
           fetch(wrBuildUrl(thisWeekRange.start, thisWeekRange.end, 'MEMBER_SENIORITY', 'ALL'), { headers: authHdr }).then(r => r.json()),
           fetch(wrBuildUrl(thisWeekRange.start, thisWeekRange.end, 'MEMBER_INDUSTRY', 'ALL'), { headers: authHdr }).then(r => r.json()),
           fetch(wrBuildUrl(thisWeekRange.start, thisWeekRange.end, 'MEMBER_COMPANY_SIZE', 'ALL'), { headers: authHdr }).then(r => r.json()),
-          fetch(`https://api.linkedin.com/v2/adCampaignsV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=500`, { headers: authHdr }).then(r => r.json()),
+          fetch(`https://api.linkedin.com/v2/adCampaignsV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=500&fields=id,name,status,objectiveType,campaignGroup`, { headers: authHdr }).then(r => r.json()),
+          fetch(wrBuildUrl(thisWeekRange.start, thisWeekRange.end, 'CAMPAIGN_GROUP', 'ALL'), { headers: authHdr }).then(r => r.json()),
+          fetch(wrBuildUrl(lastWeekRange.start, lastWeekRange.end, 'CAMPAIGN_GROUP', 'ALL'), { headers: authHdr }).then(r => r.json()),
         ]);
 
         function wrEls(r: PromiseSettledResult<any>): any[] {
@@ -11412,12 +11414,16 @@ serve(async (req) => {
 
         console.log(`[get_weekly_report] Creative metadata: ${creativeMetaMap.size} resolved, refs fetched: ${wrUniqueRefs.length}`);
 
-        // ── Campaign names ───────────────────────────────────────────────────
-        const campaignNameMap = new Map<string, { name: string; status: string }>();
+        // ── Campaign names + objective + group ────────────────────────────
+        const campaignNameMap = new Map<string, { name: string; status: string; objectiveType: string; campaignGroupId: string }>();
         for (const camp of wrEls(r_campaigns)) {
+          const cgUrn = camp.campaignGroup || '';
+          const cgId = cgUrn.split(':').pop() || '';
           campaignNameMap.set(camp.id?.toString() || '', {
             name: camp.name || `Campaign ${camp.id}`,
             status: camp.status || 'UNKNOWN',
+            objectiveType: camp.objectiveType || 'UNKNOWN',
+            campaignGroupId: cgId,
           });
         }
 
@@ -11489,7 +11495,7 @@ serve(async (req) => {
         const allCreativeUrns = new Set([...creativeThisMap.keys(), ...creativeLastMap.keys()]);
 
         type NameAgg = {
-          creativeName: string; imageUrl: string; type: string; status: string; formUrn: string;
+          creativeName: string; imageUrl: string; type: string; status: string; formUrn: string; campaignId: string;
           thisW: { impressions: number; clicks: number; spent: number; leads: number };
           lastW: { impressions: number; clicks: number; spent: number; leads: number };
           trendByDate: Map<string, { spent: number; clicks: number; leads: number; impressions: number }>;
@@ -11511,6 +11517,7 @@ serve(async (req) => {
               type: meta.type,
               status: meta.status,
               formUrn: meta.formUrn,
+              campaignId: meta.campaignId,
               thisW: { ...thisW },
               lastW: { ...lastW },
               trendByDate: new Map(trendPoints.map(t => [t.date, { spent: t.spent, clicks: t.clicks, leads: t.leads, impressions: t.impressions }])),
@@ -11540,6 +11547,7 @@ serve(async (req) => {
           type: agg.type,
           status: agg.status,
           formUrn: agg.formUrn,
+          campaignId: agg.campaignId,
           thisWeek: wrMetrics(agg.thisW),
           lastWeek: wrMetrics(agg.lastW),
           pctSpentChange: wrPct(agg.thisW.spent, agg.lastW.spent),
@@ -11568,13 +11576,59 @@ serve(async (req) => {
         const allCampUrns = new Set([...campThisMap.keys(), ...campLastMap.keys()]);
         const byCampaign = [...allCampUrns].map(urn => {
           const id = urn.split(':').pop() || urn;
-          const meta = campaignNameMap.get(id) || { name: `Campaign ${id}`, status: 'UNKNOWN' };
+          const meta = campaignNameMap.get(id) || { name: `Campaign ${id}`, status: 'UNKNOWN', objectiveType: 'UNKNOWN', campaignGroupId: '' };
           const thisW = campThisMap.get(urn) || { impressions: 0, clicks: 0, spent: 0, leads: 0 };
           const lastW = campLastMap.get(urn) || { impressions: 0, clicks: 0, spent: 0, leads: 0 };
           return {
             campaignId: id,
             campaignName: meta.name,
             status: meta.status,
+            objectiveType: meta.objectiveType,
+            campaignGroupId: meta.campaignGroupId,
+            thisWeek: wrMetrics(thisW),
+            lastWeek: wrMetrics(lastW),
+            pctSpentChange: wrPct(thisW.spent, lastW.spent),
+            pctCplChange: wrPct(
+              thisW.leads > 0 ? thisW.spent / thisW.leads : 0,
+              lastW.leads > 0 ? lastW.spent / lastW.leads : 0
+            ),
+          };
+        }).sort((a, b) => b.thisWeek.spent - a.thisWeek.spent);
+
+        // ── By campaign group ────────────────────────────────────────────────
+        const campGroupNameMap = new Map<string, string>();
+        try {
+          const cgResp = await fetch(
+            `https://api.linkedin.com/v2/adCampaignGroupsV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=500`,
+            { headers: authHdr }
+          );
+          if (cgResp.ok) {
+            const cgData = await cgResp.json();
+            for (const g of (cgData.elements || [])) {
+              campGroupNameMap.set(g.id?.toString() || '', g.name || `Group ${g.id}`);
+            }
+          }
+        } catch (e) { console.error('[get_weekly_report] Campaign group names error:', e); }
+
+        const cgThisMap = new Map<string, { impressions: number; clicks: number; spent: number; leads: number }>();
+        const cgLastMap = new Map<string, { impressions: number; clicks: number; spent: number; leads: number }>();
+        for (const el of wrEls(r_campGroupThis)) {
+          const p = wrParseEl(el);
+          cgThisMap.set(p.urn, { impressions: p.impressions, clicks: p.clicks, spent: p.spent, leads: p.leads });
+        }
+        for (const el of wrEls(r_campGroupLast)) {
+          const p = wrParseEl(el);
+          cgLastMap.set(p.urn, { impressions: p.impressions, clicks: p.clicks, spent: p.spent, leads: p.leads });
+        }
+        const allCgUrns = new Set([...cgThisMap.keys(), ...cgLastMap.keys()]);
+        const byCampaignGroup = [...allCgUrns].map(urn => {
+          const id = urn.split(':').pop() || urn;
+          const groupName = campGroupNameMap.get(id) || `Group ${id}`;
+          const thisW = cgThisMap.get(urn) || { impressions: 0, clicks: 0, spent: 0, leads: 0 };
+          const lastW = cgLastMap.get(urn) || { impressions: 0, clicks: 0, spent: 0, leads: 0 };
+          return {
+            campaignGroupId: id,
+            campaignGroupName: groupName,
             thisWeek: wrMetrics(thisW),
             lastWeek: wrMetrics(lastW),
             pctSpentChange: wrPct(thisW.spent, lastW.spent),
@@ -11678,13 +11732,14 @@ serve(async (req) => {
           ),
         };
 
-        console.log(`[get_weekly_report] Done. Creatives: ${byCreative.length}, Campaigns: ${byCampaign.length}, Forms: ${byLeadForm.length}`);
+        console.log(`[get_weekly_report] Done. Creatives: ${byCreative.length}, Campaigns: ${byCampaign.length}, Groups: ${byCampaignGroup.length}, Forms: ${byLeadForm.length}`);
 
         return new Response(JSON.stringify({
           weekRange: { thisWeek: thisWeekRange, lastWeek: lastWeekRange },
           summary,
           byCreative,
           byCampaign,
+          byCampaignGroup,
           byLeadForm,
           demographics,
         }), {
