@@ -617,12 +617,15 @@ export function WeeklyReport({ accessToken, selectedAccount }: Props) {
     }).sort((a, b) => b.thisWeek.spent - a.thisWeek.spent);
   }, [filteredCreatives]);
 
-  // Flatten for campaign/group tables
+  // Flatten for campaign/group/form tables
   const flatCampaigns = useMemo(() =>
     filteredCampaigns.map(r => ({ ...r, ...flattenMetrics(r.thisWeek) })), [filteredCampaigns]);
 
   const flatCampaignGroups = useMemo(() =>
     filteredCampaignGroups.map(r => ({ ...r, ...flattenMetrics(r.thisWeek) })), [filteredCampaignGroups]);
+
+  const flatLeadForms = useMemo(() =>
+    (data?.byLeadForm ?? []).map(r => ({ ...r, ...flattenMetrics(r.thisWeek) })), [data]);
 
   if (!selectedAccount) {
     return (
@@ -819,7 +822,7 @@ export function WeeklyReport({ accessToken, selectedAccount }: Props) {
 
         <TabsContent value="leadform">
           <GenericMetricsTable
-            rows={useMemo(() => byLeadForm.map(r => ({ ...r, ...flattenMetrics(r.thisWeek) })), [byLeadForm])}
+            rows={flatLeadForms}
             nameKey="formName"
             nameLabel="Lead Form"
             emptyMessage="No lead form data available"
