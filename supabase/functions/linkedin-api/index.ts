@@ -11225,24 +11225,23 @@ serve(async (req) => {
           });
         }
 
-        // ── Date ranges (calendar weeks, Mon–Sun) ───────────────────────────
+        // ── Date ranges (calendar weeks, Sun–Sat) ───────────────────────────
         const now = new Date();
         const dayOfWeek = now.getDay(); // 0=Sun
-        const daysFromMon = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-        const thisMonday = new Date(now);
-        thisMonday.setDate(now.getDate() - daysFromMon);
-        thisMonday.setHours(0, 0, 0, 0);
+        const thisSunday = new Date(now);
+        thisSunday.setDate(now.getDate() - dayOfWeek);
+        thisSunday.setHours(0, 0, 0, 0);
 
-        const lastMonday = new Date(thisMonday);
-        lastMonday.setDate(thisMonday.getDate() - 7);
-        const lastSunday = new Date(thisMonday);
-        lastSunday.setDate(thisMonday.getDate() - 1);
+        const lastSunday = new Date(thisSunday);
+        lastSunday.setDate(thisSunday.getDate() - 7);
+        const lastSaturday = new Date(thisSunday);
+        lastSaturday.setDate(thisSunday.getDate() - 1);
 
         const fmtD = (d: Date) =>
           `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
-        const thisWeekRange = { start: fmtD(thisMonday), end: fmtD(now) };
-        const lastWeekRange = { start: fmtD(lastMonday), end: fmtD(lastSunday) };
+        const thisWeekRange = { start: fmtD(thisSunday), end: fmtD(now) };
+        const lastWeekRange = { start: fmtD(lastSunday), end: fmtD(lastSaturday) };
 
         console.log(`[get_weekly_report] thisWeek: ${thisWeekRange.start} → ${thisWeekRange.end}`);
         console.log(`[get_weekly_report] lastWeek: ${lastWeekRange.start} → ${lastWeekRange.end}`);
@@ -11280,6 +11279,7 @@ serve(async (req) => {
           r_dailyThis,
           r_jobTitle, r_seniority, r_industry, r_companySize,
           r_campaigns,
+          r_campGroupThis, r_campGroupLast,
         ] = await Promise.allSettled([
           fetch(wrBuildUrl(thisWeekRange.start, thisWeekRange.end, 'CREATIVE', 'ALL'), { headers: authHdr }).then(r => r.json()),
           fetch(wrBuildUrl(lastWeekRange.start, lastWeekRange.end, 'CREATIVE', 'ALL'), { headers: authHdr }).then(r => r.json()),
@@ -11290,7 +11290,9 @@ serve(async (req) => {
           fetch(wrBuildUrl(thisWeekRange.start, thisWeekRange.end, 'MEMBER_SENIORITY', 'ALL'), { headers: authHdr }).then(r => r.json()),
           fetch(wrBuildUrl(thisWeekRange.start, thisWeekRange.end, 'MEMBER_INDUSTRY', 'ALL'), { headers: authHdr }).then(r => r.json()),
           fetch(wrBuildUrl(thisWeekRange.start, thisWeekRange.end, 'MEMBER_COMPANY_SIZE', 'ALL'), { headers: authHdr }).then(r => r.json()),
-          fetch(`https://api.linkedin.com/v2/adCampaignsV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=500`, { headers: authHdr }).then(r => r.json()),
+          fetch(`https://api.linkedin.com/v2/adCampaignsV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=500&fields=id,name,status,objectiveType,campaignGroup`, { headers: authHdr }).then(r => r.json()),
+          fetch(wrBuildUrl(thisWeekRange.start, thisWeekRange.end, 'CAMPAIGN_GROUP', 'ALL'), { headers: authHdr }).then(r => r.json()),
+          fetch(wrBuildUrl(lastWeekRange.start, lastWeekRange.end, 'CAMPAIGN_GROUP', 'ALL'), { headers: authHdr }).then(r => r.json()),
         ]);
 
         function wrEls(r: PromiseSettledResult<any>): any[] {
