@@ -11730,13 +11730,14 @@ serve(async (req) => {
           ),
         };
 
-        console.log(`[get_weekly_report] Done. Creatives: ${byCreative.length}, Campaigns: ${byCampaign.length}, Forms: ${byLeadForm.length}`);
+        console.log(`[get_weekly_report] Done. Creatives: ${byCreative.length}, Campaigns: ${byCampaign.length}, Groups: ${byCampaignGroup.length}, Forms: ${byLeadForm.length}`);
 
         return new Response(JSON.stringify({
           weekRange: { thisWeek: thisWeekRange, lastWeek: lastWeekRange },
           summary,
           byCreative,
           byCampaign,
+          byCampaignGroup,
           byLeadForm,
           demographics,
         }), {
