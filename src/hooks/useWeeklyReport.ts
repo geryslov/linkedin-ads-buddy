@@ -36,6 +36,17 @@ export interface WeeklyCampaignRow {
   campaignId: string;
   campaignName: string;
   status: string;
+  objectiveType: string;
+  campaignGroupId: string;
+  thisWeek: WeekMetrics;
+  lastWeek: WeekMetrics;
+  pctSpentChange: number | null;
+  pctCplChange: number | null;
+}
+
+export interface WeeklyCampaignGroupRow {
+  campaignGroupId: string;
+  campaignGroupName: string;
   thisWeek: WeekMetrics;
   lastWeek: WeekMetrics;
   pctSpentChange: number | null;
@@ -76,6 +87,7 @@ export interface WeeklyReportData {
   };
   byCreative: WeeklyCreativeRow[];
   byCampaign: WeeklyCampaignRow[];
+  byCampaignGroup: WeeklyCampaignGroupRow[];
   byLeadForm: WeeklyFormRow[];
   demographics: {
     jobTitle: DemoEntry[];
