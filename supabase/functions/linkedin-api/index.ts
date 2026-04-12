@@ -11495,7 +11495,7 @@ serve(async (req) => {
         const allCreativeUrns = new Set([...creativeThisMap.keys(), ...creativeLastMap.keys()]);
 
         type NameAgg = {
-          creativeName: string; imageUrl: string; type: string; status: string; formUrn: string;
+          creativeName: string; imageUrl: string; type: string; status: string; formUrn: string; campaignId: string;
           thisW: { impressions: number; clicks: number; spent: number; leads: number };
           lastW: { impressions: number; clicks: number; spent: number; leads: number };
           trendByDate: Map<string, { spent: number; clicks: number; leads: number; impressions: number }>;
@@ -11517,6 +11517,7 @@ serve(async (req) => {
               type: meta.type,
               status: meta.status,
               formUrn: meta.formUrn,
+              campaignId: meta.campaignId,
               thisW: { ...thisW },
               lastW: { ...lastW },
               trendByDate: new Map(trendPoints.map(t => [t.date, { spent: t.spent, clicks: t.clicks, leads: t.leads, impressions: t.impressions }])),
@@ -11546,6 +11547,7 @@ serve(async (req) => {
           type: agg.type,
           status: agg.status,
           formUrn: agg.formUrn,
+          campaignId: agg.campaignId,
           thisWeek: wrMetrics(agg.thisW),
           lastWeek: wrMetrics(agg.lastW),
           pctSpentChange: wrPct(agg.thisW.spent, agg.lastW.spent),
