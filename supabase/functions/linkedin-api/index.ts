@@ -530,6 +530,18 @@ function formatPivotValue(urn: string, pivot: string): string {
     '141': 'International Trade and Development',
   };
   
+  const companySizeMap: Record<string, string> = {
+    'SIZE_1': '1',
+    'SIZE_2_TO_10': '2-10',
+    'SIZE_11_TO_50': '11-50',
+    'SIZE_51_TO_200': '51-200',
+    'SIZE_201_TO_500': '201-500',
+    'SIZE_501_TO_1000': '501-1,000',
+    'SIZE_1001_TO_5000': '1,001-5,000',
+    'SIZE_5001_TO_10000': '5,001-10,000',
+    'SIZE_10001_OR_MORE': '10,001+',
+  };
+
   switch (pivot) {
     case 'MEMBER_JOB_FUNCTION':
       return jobFunctionMap[value] || `Job Function ${value}`;
@@ -537,11 +549,11 @@ function formatPivotValue(urn: string, pivot: string): string {
       return seniorityMap[value] || `Seniority ${value}`;
     case 'MEMBER_INDUSTRY':
       return industryMap[value] || `Industry ${value}`;
+    case 'MEMBER_COMPANY_SIZE':
+      return companySizeMap[value] || value.replace(/^SIZE_/i, '').replace(/_/g, ' ') || 'Unknown';
     case 'MEMBER_COUNTRY':
-      // Country codes are usually ISO 2-letter codes
       return value.toUpperCase();
     case 'MEMBER_JOB_TITLE':
-      // Job titles come as-is from LinkedIn
       return value || 'Unknown Job Title';
     default:
       return value || 'Unknown';
