@@ -11422,7 +11422,7 @@ serve(async (req) => {
         console.log(`[get_weekly_report] Creative metadata: ${creativeMetaMap.size} resolved, refs fetched: ${wrUniqueRefs.length}`);
 
         // ── Campaign names + objective + group ────────────────────────────
-        const campaignNameMap = new Map<string, { name: string; status: string; objectiveType: string; campaignGroupId: string }>();
+        const campaignNameMap = new Map<string, { name: string; status: string; objectiveType: string; campaignGroupId: string; type: string }>();
         for (const camp of wrEls(r_campaigns)) {
           const cgUrn = camp.campaignGroup || '';
           const cgId = cgUrn.split(':').pop() || '';
@@ -11431,6 +11431,7 @@ serve(async (req) => {
             status: camp.status || 'UNKNOWN',
             objectiveType: camp.objectiveType || 'UNKNOWN',
             campaignGroupId: cgId,
+            type: camp.type || 'SPONSORED_UPDATES',
           });
         }
 
