@@ -11574,13 +11574,59 @@ serve(async (req) => {
         const allCampUrns = new Set([...campThisMap.keys(), ...campLastMap.keys()]);
         const byCampaign = [...allCampUrns].map(urn => {
           const id = urn.split(':').pop() || urn;
-          const meta = campaignNameMap.get(id) || { name: `Campaign ${id}`, status: 'UNKNOWN' };
+          const meta = campaignNameMap.get(id) || { name: `Campaign ${id}`, status: 'UNKNOWN', objectiveType: 'UNKNOWN', campaignGroupId: '' };
           const thisW = campThisMap.get(urn) || { impressions: 0, clicks: 0, spent: 0, leads: 0 };
           const lastW = campLastMap.get(urn) || { impressions: 0, clicks: 0, spent: 0, leads: 0 };
           return {
             campaignId: id,
             campaignName: meta.name,
             status: meta.status,
+            objectiveType: meta.objectiveType,
+            campaignGroupId: meta.campaignGroupId,
+            thisWeek: wrMetrics(thisW),
+            lastWeek: wrMetrics(lastW),
+            pctSpentChange: wrPct(thisW.spent, lastW.spent),
+            pctCplChange: wrPct(
+              thisW.leads > 0 ? thisW.spent / thisW.leads : 0,
+              lastW.leads > 0 ? lastW.spent / lastW.leads : 0
+            ),
+          };
+        }).sort((a, b) => b.thisWeek.spent - a.thisWeek.spent);
+
+        // ── By campaign group ────────────────────────────────────────────────
+        const campGroupNameMap = new Map<string, string>();
+        try {
+          const cgResp = await fetch(
+            `https://api.linkedin.com/v2/adCampaignGroupsV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=500`,
+            { headers: authHdr }
+          );
+          if (cgResp.ok) {
+            const cgData = await cgResp.json();
+            for (const g of (cgData.elements || [])) {
+              campGroupNameMap.set(g.id?.toString() || '', g.name || `Group ${g.id}`);
+            }
+          }
+        } catch (e) { console.error('[get_weekly_report] Campaign group names error:', e); }
+
+        const cgThisMap = new Map<string, { impressions: number; clicks: number; spent: number; leads: number }>();
+        const cgLastMap = new Map<string, { impressions: number; clicks: number; spent: number; leads: number }>();
+        for (const el of wrEls(r_campGroupThis)) {
+          const p = wrParseEl(el);
+          cgThisMap.set(p.urn, { impressions: p.impressions, clicks: p.clicks, spent: p.spent, leads: p.leads });
+        }
+        for (const el of wrEls(r_campGroupLast)) {
+          const p = wrParseEl(el);
+          cgLastMap.set(p.urn, { impressions: p.impressions, clicks: p.clicks, spent: p.spent, leads: p.leads });
+        }
+        const allCgUrns = new Set([...cgThisMap.keys(), ...cgLastMap.keys()]);
+        const byCampaignGroup = [...allCgUrns].map(urn => {
+          const id = urn.split(':').pop() || urn;
+          const groupName = campGroupNameMap.get(id) || `Group ${id}`;
+          const thisW = cgThisMap.get(urn) || { impressions: 0, clicks: 0, spent: 0, leads: 0 };
+          const lastW = cgLastMap.get(urn) || { impressions: 0, clicks: 0, spent: 0, leads: 0 };
+          return {
+            campaignGroupId: id,
+            campaignGroupName: groupName,
             thisWeek: wrMetrics(thisW),
             lastWeek: wrMetrics(lastW),
             pctSpentChange: wrPct(thisW.spent, lastW.spent),
