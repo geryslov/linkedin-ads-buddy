@@ -11537,17 +11537,19 @@ serve(async (req) => {
             if (campInfo.type === 'SPONSORED_INMAILS') finalType = 'MESSAGE_AD';
             else if (campInfo.type === 'TEXT_AD') finalType = 'TEXT_AD';
             else if (campInfo.type === 'DYNAMIC') {
-              if (finalType === 'SPONSORED_CONTENT') finalType = 'SPOTLIGHT_AD'; // fallback for dynamic
+              if (finalType === 'SPONSORED_CONTENT') finalType = 'SPOTLIGHT_AD';
             }
           }
-          // Further refine: if it has a lead form, mark as gated
+          // Determine gated vs engagement using formUrn OR campaign objective
           const hasForm = !!(meta.formUrn);
-          if (hasForm && (finalType === 'SPONSORED_CONTENT' || finalType === 'VIDEO' || finalType === 'DOCUMENT_AD' || finalType === 'CAROUSEL')) {
+          const isLeadGenCampaign = campInfo?.objectiveType === 'LEAD_GENERATION';
+          const isGated = hasForm || isLeadGenCampaign;
+          if (isGated && (finalType === 'SPONSORED_CONTENT' || finalType === 'VIDEO' || finalType === 'DOCUMENT_AD' || finalType === 'CAROUSEL')) {
             if (finalType === 'VIDEO') finalType = 'VIDEO_GATED';
             else if (finalType === 'DOCUMENT_AD') finalType = 'DOC_GATED';
             else if (finalType === 'CAROUSEL') finalType = 'CAROUSEL_GATED';
             else finalType = 'IMAGE_GATED';
-          } else if (!hasForm && finalType === 'SPONSORED_CONTENT') {
+          } else if (!isGated && finalType === 'SPONSORED_CONTENT') {
             finalType = 'IMAGE_ENG';
           }
 
@@ -11727,21 +11729,27 @@ serve(async (req) => {
         }).sort((a, b) => b.thisWeek.spent - a.thisWeek.spent);
 
         // ── Demographics ─────────────────────────────────────────────────────
-        function wrParseDemos(items: any[]) {
-          return items.map(el => ({
-            name: el.pivotValue || 'Unknown',
-            impressions: el.impressions || 0,
-            clicks: el.clicks || 0,
-            spent: parseFloat(el.costInLocalCurrency || '0'),
-            leads: (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0),
-          })).sort((a, b) => b.impressions - a.impressions).slice(0, 20);
+        function wrParseDemos(items: any[], pivotType: string) {
+          return items.map(el => {
+            const rawValue = el.pivotValue || '';
+            // Extract the ID from URN format (e.g. "urn:li:title:152" → "152", "urn:li:seniority:6" → "6")
+            const idPart = rawValue.includes(':') ? rawValue.split(':').pop() || rawValue : rawValue;
+            const resolvedName = formatPivotValue(idPart, pivotType);
+            return {
+              name: resolvedName,
+              impressions: el.impressions || 0,
+              clicks: el.clicks || 0,
+              spent: parseFloat(el.costInLocalCurrency || '0'),
+              leads: (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0),
+            };
+          }).sort((a, b) => b.impressions - a.impressions).slice(0, 20);
         }
 
         const demographics = {
-          jobTitle: wrParseDemos(wrEls(r_jobTitle)),
-          seniority: wrParseDemos(wrEls(r_seniority)),
-          industry: wrParseDemos(wrEls(r_industry)),
-          companySize: wrParseDemos(wrEls(r_companySize)),
+          jobTitle: wrParseDemos(wrEls(r_jobTitle), 'MEMBER_JOB_TITLE'),
+          seniority: wrParseDemos(wrEls(r_seniority), 'MEMBER_SENIORITY'),
+          industry: wrParseDemos(wrEls(r_industry), 'MEMBER_INDUSTRY'),
+          companySize: wrParseDemos(wrEls(r_companySize), 'MEMBER_COMPANY_SIZE'),
         };
 
         // ── Account summary ───────────────────────────────────────────────────
