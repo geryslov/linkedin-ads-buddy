@@ -11530,11 +11530,32 @@ serve(async (req) => {
           const lastW = creativeLastMap.get(urn) || { impressions: 0, clicks: 0, spent: 0, leads: 0 };
           const trendPoints = (creativeTrendMap.get(urn) || []).sort((a, b) => a.date.localeCompare(b.date));
 
+          // Refine type using campaign info
+          let finalType = meta.type;
+          const campInfo = campaignNameMap.get(meta.campaignId);
+          if (campInfo) {
+            if (campInfo.type === 'SPONSORED_INMAILS') finalType = 'MESSAGE_AD';
+            else if (campInfo.type === 'TEXT_AD') finalType = 'TEXT_AD';
+            else if (campInfo.type === 'DYNAMIC') {
+              if (finalType === 'SPONSORED_CONTENT') finalType = 'SPOTLIGHT_AD'; // fallback for dynamic
+            }
+          }
+          // Further refine: if it has a lead form, mark as gated
+          const hasForm = !!(meta.formUrn);
+          if (hasForm && (finalType === 'SPONSORED_CONTENT' || finalType === 'VIDEO' || finalType === 'DOCUMENT_AD' || finalType === 'CAROUSEL')) {
+            if (finalType === 'VIDEO') finalType = 'VIDEO_GATED';
+            else if (finalType === 'DOCUMENT_AD') finalType = 'DOC_GATED';
+            else if (finalType === 'CAROUSEL') finalType = 'CAROUSEL_GATED';
+            else finalType = 'IMAGE_GATED';
+          } else if (!hasForm && finalType === 'SPONSORED_CONTENT') {
+            finalType = 'IMAGE_ENG';
+          }
+
           if (!byNameAgg.has(creativeName)) {
             byNameAgg.set(creativeName, {
               creativeName,
               imageUrl: meta.imageUrl || '',
-              type: meta.type,
+              type: finalType,
               status: meta.status,
               formUrn: meta.formUrn,
               campaignId: meta.campaignId,
