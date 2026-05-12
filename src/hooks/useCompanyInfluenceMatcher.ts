@@ -17,6 +17,10 @@ export interface MatchedObjective {
   spent: number;
   leads: number;
   engagements: number;
+  likes: number;
+  comments: number;
+  reactions: number;
+  shares: number;
   ctr: number;
   cpc: number;
   cpm: number;
