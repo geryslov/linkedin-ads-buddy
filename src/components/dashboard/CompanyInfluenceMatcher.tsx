@@ -21,7 +21,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Progress } from '@/components/ui/progress';
-import { exportToCSV, companyInfluenceColumns } from '@/lib/exportUtils';
+import { exportToCSV } from '@/lib/exportUtils';
 import {
   Upload,
   Download,
@@ -140,7 +140,6 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
     parseCSV,
     clearUpload,
     updateColumnMapping,
-    getExportData,
   } = useCompanyInfluenceMatcher(companyData, objectiveBreakdownCache);
 
   // Build campaign name → creatives map
@@ -245,11 +244,15 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
 
       const fetchPromises: Promise<void>[] = [];
       for (const m of matched) {
-        for (const obj of m.objectives) {
+        const breakdownSource = m.linkedin.objectiveBreakdown && m.linkedin.objectiveBreakdown.length > 0
+          ? m.linkedin.objectiveBreakdown
+          : (objectiveBreakdownCache.get(m.linkedin.entityUrn) || []);
+        for (const obj of breakdownSource) {
           const cacheKey = `${m.linkedin.entityUrn}::${obj.objective}`;
-          if (!localBreakdown.has(cacheKey) && obj.campaignIds.length > 0) {
+          const campaignIds = obj.campaignIds || [];
+          if (!localBreakdown.has(cacheKey) && campaignIds.length > 0) {
             fetchPromises.push(
-              fetchCampaignBreakdown(selectedAccount, m.linkedin.entityUrn, obj.objective, obj.campaignIds, obj.campaignNamesMap)
+              fetchCampaignBreakdown(selectedAccount, m.linkedin.entityUrn, obj.objective, campaignIds, obj.campaignNames || {})
                 .then((breakdowns) => {
                   if (breakdowns) {
                     for (const [companyUrn, campaigns] of Object.entries(breakdowns)) {
@@ -264,103 +267,127 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
       }
       if (fetchPromises.length > 0) await Promise.all(fetchPromises);
 
-      // Build flat rows — every row carries full Company / Objective / Campaign (ad set) / Creative context
+      // Build flat rows from the exact same company/objective/campaign sources used by the breakdown table.
       const rows: Record<string, any>[] = [];
       const num = (n: number) => (n || 0);
       const cur = (n: number) => (n || 0).toFixed(2);
 
       for (const m of matched) {
         const li = m.linkedin;
+        const rawObjectives = li.objectiveBreakdown && li.objectiveBreakdown.length > 0
+          ? li.objectiveBreakdown
+          : (objectiveBreakdownCache.get(li.entityUrn) || []);
 
-        if (m.objectives.length === 0) {
-          rows.push({
-            scope: 'Company total',
-            company: li.entityName,
-            companyUrl: li.website || '',
-            objective: '',
-            campaign: '',
-            creative: '',
-            impressions: num(li.impressions),
-            clicks: num(li.clicks),
-            spend: cur(li.spent),
-            engagements: num(li.engagements),
-            likes: num(li.likes),
-            comments: num(li.comments),
-            reactions: num(li.reactions),
-            shares: num(li.shares),
-            leads: num(li.leads),
-          });
+        rows.push({
+          level: 'Company',
+          uploadedCompany: m.uploaded.name,
+          matchedCompany: li.entityName,
+          website: li.website || m.uploaded.url || '',
+          objective: '',
+          campaign: '',
+          creative: '',
+          impressions: num(li.impressions),
+          clicks: num(li.clicks),
+          landingPageClicks: num(li.landingPageClicks),
+          spend: cur(li.spent),
+          leads: num(li.leads),
+          engagements: num(li.engagements),
+          likes: num(li.likes),
+          comments: num(li.comments),
+          reactions: num(li.reactions),
+          shares: num(li.shares),
+          ctr: li.ctr.toFixed(2),
+          cpc: cur(li.cpc),
+          cpm: cur(li.cpm),
+        });
+
+        if (rawObjectives.length === 0) {
           continue;
         }
 
-        for (const obj of m.objectives) {
+        for (const obj of rawObjectives) {
           const cacheKey = `${li.entityUrn}::${obj.objective}`;
-          const campaigns = (localBreakdown.get(cacheKey) || []).filter((c: any) => (c.impressions || 0) > 0);
+          const campaigns = localBreakdown.get(cacheKey) || [];
+
+          rows.push({
+            level: 'Objective',
+            uploadedCompany: m.uploaded.name,
+            matchedCompany: li.entityName,
+            website: li.website || m.uploaded.url || '',
+            objective: fmtObj(obj.objective),
+            campaign: '',
+            creative: '',
+            impressions: num(obj.impressions),
+            clicks: num(obj.clicks),
+            landingPageClicks: num(obj.landingPageClicks),
+            spend: cur(obj.spent),
+            leads: num(obj.leads),
+            engagements: num(obj.engagements),
+            likes: num(obj.likes),
+            comments: num(obj.comments),
+            reactions: num(obj.reactions),
+            shares: num(obj.shares),
+            ctr: num(obj.ctr).toFixed(2),
+            cpc: cur(obj.cpc),
+            cpm: cur(obj.cpm),
+          });
 
           if (campaigns.length === 0) {
-            rows.push({
-              scope: 'Objective total',
-              company: li.entityName,
-              companyUrl: li.website || '',
-              objective: fmtObj(obj.objective),
-              campaign: '',
-              creative: '',
-              impressions: num(obj.impressions),
-              clicks: num(obj.clicks),
-              spend: cur(obj.spent),
-              engagements: num(obj.engagements),
-              likes: num(obj.likes),
-              comments: num(obj.comments),
-              reactions: num(obj.reactions),
-              shares: num(obj.shares),
-              leads: num(obj.leads),
-            });
             continue;
           }
 
           for (const camp of campaigns) {
             const creatives = creativeByCampaign.get(camp.campaignName) || [];
 
+            rows.push({
+              level: 'Campaign',
+              uploadedCompany: m.uploaded.name,
+              matchedCompany: li.entityName,
+              website: li.website || m.uploaded.url || '',
+              objective: fmtObj(obj.objective),
+              campaign: camp.campaignName,
+              creative: '',
+              impressions: num(camp.impressions),
+              clicks: num(camp.clicks),
+              landingPageClicks: num(camp.landingPageClicks),
+              spend: cur(camp.spent),
+              leads: num(camp.leads),
+              engagements: num(camp.engagements),
+              likes: num(camp.likes),
+              comments: num(camp.comments),
+              reactions: num(camp.reactions),
+              shares: num(camp.shares),
+              ctr: num(camp.ctr).toFixed(2),
+              cpc: cur(camp.cpc),
+              cpm: cur(camp.cpm),
+            });
+
             if (creatives.length === 0) {
-              rows.push({
-                scope: 'Ad set (company-attributed)',
-                company: li.entityName,
-                companyUrl: li.website || '',
-                objective: fmtObj(obj.objective),
-                campaign: camp.campaignName,
-                creative: '',
-                impressions: num(camp.impressions),
-                clicks: num(camp.clicks),
-                spend: cur(camp.spent),
-                engagements: num(camp.engagements),
-                likes: num(camp.likes),
-                comments: num(camp.comments),
-                reactions: num(camp.reactions),
-                shares: num(camp.shares),
-                leads: 0,
-              });
               continue;
             }
 
             for (const cr of creatives) {
-              const totalCampImpr = creatives.reduce((s, c) => s + (c.impressions || 0), 0);
-              const share = totalCampImpr > 0 ? (cr.impressions || 0) / totalCampImpr : (1 / Math.max(creatives.length, 1));
               rows.push({
-                scope: 'Creative (company-attributed, pro-rated)',
-                company: li.entityName,
-                companyUrl: li.website || '',
+                level: 'Creative',
+                uploadedCompany: m.uploaded.name,
+                matchedCompany: li.entityName,
+                website: li.website || m.uploaded.url || '',
                 objective: fmtObj(obj.objective),
                 campaign: camp.campaignName,
                 creative: cr.creativeName || cr.creativeId,
-                impressions: Math.round(num(camp.impressions) * share),
-                clicks: Math.round(num(camp.clicks) * share),
-                spend: (num(camp.spent) * share).toFixed(2),
-                engagements: Math.round(num(camp.engagements) * share),
-                likes: Math.round(num(camp.likes) * share),
-                comments: Math.round(num(camp.comments) * share),
-                reactions: Math.round(num(camp.reactions) * share),
-                shares: Math.round(num(camp.shares) * share),
-                leads: 0,
+                impressions: num(cr.impressions),
+                clicks: num(cr.clicks),
+                landingPageClicks: '',
+                spend: cur(cr.spent),
+                leads: num(cr.leads),
+                engagements: '',
+                likes: '',
+                comments: '',
+                reactions: '',
+                shares: '',
+                ctr: cr.ctr.toFixed(2),
+                cpc: cur(cr.cpc),
+                cpm: cur(cr.cpm),
               });
             }
           }
@@ -368,27 +395,32 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
       }
 
       const columns = [
-        { key: 'scope', label: 'Scope' },
-        { key: 'company', label: 'Company' },
-        { key: 'companyUrl', label: 'Company URL' },
+        { key: 'level', label: 'Level' },
+        { key: 'uploadedCompany', label: 'Uploaded Company' },
+        { key: 'matchedCompany', label: 'Matched Company' },
+        { key: 'website', label: 'Website' },
         { key: 'objective', label: 'Objective' },
-        { key: 'campaign', label: 'Campaign (Ad Set)' },
+        { key: 'campaign', label: 'Campaign' },
         { key: 'creative', label: 'Creative' },
         { key: 'impressions', label: 'Impressions' },
         { key: 'clicks', label: 'Clicks' },
+        { key: 'landingPageClicks', label: 'LP Clicks' },
         { key: 'spend', label: 'Spend' },
-        { key: 'engagements', label: 'Total Engagements' },
+        { key: 'leads', label: 'Leads' },
+        { key: 'engagements', label: 'Engagements' },
         { key: 'likes', label: 'Likes' },
         { key: 'comments', label: 'Comments' },
         { key: 'reactions', label: 'Reactions' },
         { key: 'shares', label: 'Shares' },
-        { key: 'leads', label: 'Leads' },
+        { key: 'ctr', label: 'CTR %' },
+        { key: 'cpc', label: 'CPC' },
+        { key: 'cpm', label: 'CPM' },
       ];
       exportToCSV(rows, 'influence_match_breakdown', columns);
     } finally {
       setIsExporting(false);
     }
-  }, [selectedAccount, matched, campaignBreakdownCache, fetchCampaignBreakdown, creativeByCampaign]);
+  }, [selectedAccount, matched, campaignBreakdownCache, objectiveBreakdownCache, fetchCampaignBreakdown, creativeByCampaign]);
 
   const toggleCompany = useCallback((key: string) => {
     setExpandedCompanies(prev => {
