@@ -249,9 +249,10 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
           : (objectiveBreakdownCache.get(m.linkedin.entityUrn) || []);
         for (const obj of breakdownSource) {
           const cacheKey = `${m.linkedin.entityUrn}::${obj.objective}`;
-          if (!localBreakdown.has(cacheKey) && obj.campaignIds.length > 0) {
+          const campaignIds = obj.campaignIds || [];
+          if (!localBreakdown.has(cacheKey) && campaignIds.length > 0) {
             fetchPromises.push(
-              fetchCampaignBreakdown(selectedAccount, m.linkedin.entityUrn, obj.objective, obj.campaignIds, obj.campaignNames || {})
+              fetchCampaignBreakdown(selectedAccount, m.linkedin.entityUrn, obj.objective, campaignIds, obj.campaignNames || {})
                 .then((breakdowns) => {
                   if (breakdowns) {
                     for (const [companyUrn, campaigns] of Object.entries(breakdowns)) {
