@@ -331,22 +331,24 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
             }
 
             for (const cr of creatives) {
+              const totalCampImpr = creatives.reduce((s, c) => s + (c.impressions || 0), 0);
+              const share = totalCampImpr > 0 ? (cr.impressions || 0) / totalCampImpr : (1 / Math.max(creatives.length, 1));
               rows.push({
-                scope: 'Creative (ad-set-wide metrics)',
+                scope: 'Creative (company-attributed, pro-rated)',
                 company: li.entityName,
                 companyUrl: li.website || '',
                 objective: fmtObj(obj.objective),
                 campaign: camp.campaignName,
                 creative: cr.creativeName || cr.creativeId,
-                impressions: num(cr.impressions),
-                clicks: num(cr.clicks),
-                spend: cur(cr.spent),
-                engagements: 0,
-                likes: 0,
-                comments: 0,
-                reactions: 0,
-                shares: 0,
-                leads: num((cr as any).leads || 0),
+                impressions: Math.round(num(camp.impressions) * share),
+                clicks: Math.round(num(camp.clicks) * share),
+                spend: (num(camp.spent) * share).toFixed(2),
+                engagements: Math.round(num(camp.engagements) * share),
+                likes: Math.round(num(camp.likes) * share),
+                comments: Math.round(num(camp.comments) * share),
+                reactions: Math.round(num(camp.reactions) * share),
+                shares: Math.round(num(camp.shares) * share),
+                leads: 0,
               });
             }
           }
