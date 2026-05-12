@@ -2739,19 +2739,23 @@ serve(async (req) => {
           const uniqueObjectives = Array.from(objectiveToCampaigns.keys());
           console.log(`[get_objective_breakdowns] Found ${uniqueObjectives.length} objectives: ${uniqueObjectives.join(', ')}`);
 
-          // Step 3: Query per objective group sequentially
+          // Step 3: Query per objective group in parallel (avoids 150s edge timeout)
           // companyUrn -> [{objective, metrics, campaignIds, campaignNames}]
           const result: Record<string, any[]> = {};
           const objectiveCampaignInfo: Record<string, { campaignIds: string[]; campaignNames: Record<string, string> }> = {};
 
-          for (const objective of uniqueObjectives) {
-            const campIds = objectiveToCampaigns.get(objective) || [];
-            if (campIds.length === 0) continue;
+          const objectivesWithCampaigns = uniqueObjectives
+            .map(objective => ({ objective, campIds: objectiveToCampaigns.get(objective) || [] }))
+            .filter(o => o.campIds.length > 0);
 
+          for (const { objective, campIds } of objectivesWithCampaigns) {
             const names: Record<string, string> = {};
             campIds.forEach(id => { names[id] = campaignNameMap.get(id) || `Campaign ${id}`; });
             objectiveCampaignInfo[objective] = { campaignIds: campIds, campaignNames: names };
+          }
 
+          // Run all objective queries concurrently
+          const objectiveResults = await Promise.all(objectivesWithCampaigns.map(async ({ objective, campIds }) => {
             try {
               const qParams = new URLSearchParams();
               qParams.set('q', 'analytics');
@@ -2783,40 +2787,46 @@ serve(async (req) => {
                 response = await fetch(fullUrl, { headers: { 'Authorization': `Bearer ${accessToken}` } });
               }
 
-              if (!response.ok) { console.log(`[get_objective_breakdowns] Objective ${objective} failed: ${response.status}`); continue; }
-              const data = await response.json();
-              const elements = data.elements || [];
-
-              for (const el of elements) {
-                const entityUrn = el.pivotValue || '';
-                if (!entityUrn) continue;
-                const impressions = el.impressions || 0;
-                const clicks = el.clicks || 0;
-                const spent = parseFloat(el.costInLocalCurrency || '0');
-                const leads = (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
-                const landingPageClicks = el.landingPageClicks || 0;
-                const engagements = el.totalEngagements || 0;
-                const likes = el.likes || 0;
-                const comments = el.comments || 0;
-                const reactions = el.reactions || 0;
-                const shares = el.shares || 0;
-                if (impressions === 0 && clicks === 0 && spent === 0 && leads === 0 && engagements === 0 && landingPageClicks === 0) continue;
-
-                if (!result[entityUrn]) result[entityUrn] = [];
-                const existing = result[entityUrn].find((e: any) => e.objective === objective);
-                if (existing) {
-                  existing.impressions += impressions; existing.clicks += clicks; existing.spent += spent;
-                  existing.leads += leads; existing.landingPageClicks += landingPageClicks;
-                  existing.engagements += engagements; existing.likes += likes;
-                  existing.comments += comments; existing.reactions += reactions; existing.shares += shares;
-                } else {
-                  result[entityUrn].push({ objective, impressions, clicks, spent: parseFloat(spent.toFixed(2)), leads, landingPageClicks, engagements, likes, comments, reactions, shares });
-                }
+              if (!response.ok) {
+                console.log(`[get_objective_breakdowns] Objective ${objective} failed: ${response.status}`);
+                return { objective, elements: [] as any[] };
               }
-              console.log(`[get_objective_breakdowns] Objective ${objective}: processed ${elements.length} elements`);
+              const data = await response.json();
+              return { objective, elements: data.elements || [] };
             } catch (e) {
               console.log(`[get_objective_breakdowns] Objective ${objective} error:`, e);
+              return { objective, elements: [] as any[] };
             }
+          }));
+
+          for (const { objective, elements } of objectiveResults) {
+            for (const el of elements) {
+              const entityUrn = el.pivotValue || '';
+              if (!entityUrn) continue;
+              const impressions = el.impressions || 0;
+              const clicks = el.clicks || 0;
+              const spent = parseFloat(el.costInLocalCurrency || '0');
+              const leads = (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
+              const landingPageClicks = el.landingPageClicks || 0;
+              const engagements = el.totalEngagements || 0;
+              const likes = el.likes || 0;
+              const comments = el.comments || 0;
+              const reactions = el.reactions || 0;
+              const shares = el.shares || 0;
+              if (impressions === 0 && clicks === 0 && spent === 0 && leads === 0 && engagements === 0 && landingPageClicks === 0) continue;
+
+              if (!result[entityUrn]) result[entityUrn] = [];
+              const existing = result[entityUrn].find((e: any) => e.objective === objective);
+              if (existing) {
+                existing.impressions += impressions; existing.clicks += clicks; existing.spent += spent;
+                existing.leads += leads; existing.landingPageClicks += landingPageClicks;
+                existing.engagements += engagements; existing.likes += likes;
+                existing.comments += comments; existing.reactions += reactions; existing.shares += shares;
+              } else {
+                result[entityUrn].push({ objective, impressions, clicks, spent: parseFloat(spent.toFixed(2)), leads, landingPageClicks, engagements, likes, comments, reactions, shares });
+              }
+            }
+            console.log(`[get_objective_breakdowns] Objective ${objective}: processed ${elements.length} elements`);
           }
 
           // Compute derived metrics and attach campaign info
