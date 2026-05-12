@@ -245,11 +245,14 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
 
       const fetchPromises: Promise<void>[] = [];
       for (const m of matched) {
-        for (const obj of m.objectives) {
+        const breakdownSource = m.linkedin.objectiveBreakdown && m.linkedin.objectiveBreakdown.length > 0
+          ? m.linkedin.objectiveBreakdown
+          : (objectiveBreakdownCache.get(m.linkedin.entityUrn) || []);
+        for (const obj of breakdownSource) {
           const cacheKey = `${m.linkedin.entityUrn}::${obj.objective}`;
           if (!localBreakdown.has(cacheKey) && obj.campaignIds.length > 0) {
             fetchPromises.push(
-              fetchCampaignBreakdown(selectedAccount, m.linkedin.entityUrn, obj.objective, obj.campaignIds, obj.campaignNamesMap)
+              fetchCampaignBreakdown(selectedAccount, m.linkedin.entityUrn, obj.objective, obj.campaignIds, obj.campaignNames || {})
                 .then((breakdowns) => {
                   if (breakdowns) {
                     for (const [companyUrn, campaigns] of Object.entries(breakdowns)) {
@@ -417,7 +420,7 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
     } finally {
       setIsExporting(false);
     }
-  }, [selectedAccount, matched, campaignBreakdownCache, fetchCampaignBreakdown, creativeByCampaign]);
+  }, [selectedAccount, matched, campaignBreakdownCache, objectiveBreakdownCache, fetchCampaignBreakdown, creativeByCampaign]);
 
   const toggleCompany = useCallback((key: string) => {
     setExpandedCompanies(prev => {
