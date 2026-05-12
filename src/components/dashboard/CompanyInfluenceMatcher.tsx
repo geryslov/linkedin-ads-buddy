@@ -21,7 +21,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Progress } from '@/components/ui/progress';
-import { exportToCSV, companyInfluenceColumns } from '@/lib/exportUtils';
+import { exportToCSV } from '@/lib/exportUtils';
 import {
   Upload,
   Download,
@@ -140,7 +140,6 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
     parseCSV,
     clearUpload,
     updateColumnMapping,
-    getExportData,
   } = useCompanyInfluenceMatcher(companyData, objectiveBreakdownCache);
 
   // Build campaign name → creatives map
