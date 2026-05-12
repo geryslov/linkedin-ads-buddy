@@ -252,69 +252,86 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
       }
       if (fetchPromises.length > 0) await Promise.all(fetchPromises);
 
-      // Build hierarchical rows: Company → Objective → Campaign → Creative
+      // Build flat rows — every row carries full Company / Objective / Campaign (ad set) / Creative context
       const rows: Record<string, any>[] = [];
       const num = (n: number) => (n || 0);
       const cur = (n: number) => (n || 0).toFixed(2);
 
       for (const m of matched) {
         const li = m.linkedin;
-        // Company total row
-        rows.push({
-          level: 'Company',
-          company: li.entityName,
-          objective: '',
-          campaign: '',
-          creative: '',
-          impressions: num(li.impressions),
-          clicks: num(li.clicks),
-          spend: cur(li.spent),
-          engagements: num(li.engagements),
-        });
 
-        for (const obj of m.objectives) {
+        if (m.objectives.length === 0) {
           rows.push({
-            level: '  Objective',
+            scope: 'Company total',
             company: li.entityName,
-            objective: obj.objective,
+            companyUrl: li.website || '',
+            objective: '',
             campaign: '',
             creative: '',
-            impressions: num(obj.impressions),
-            clicks: num(obj.clicks),
-            spend: cur(obj.spent),
-            engagements: num(obj.engagements),
+            impressions: num(li.impressions),
+            clicks: num(li.clicks),
+            spend: cur(li.spent),
+            engagements: num(li.engagements),
+            leads: num(li.leads),
           });
+          continue;
+        }
 
+        for (const obj of m.objectives) {
           const cacheKey = `${li.entityUrn}::${obj.objective}`;
-          const campaigns = campaignBreakdownCache.get(cacheKey) || [];
-          const visibleCampaigns = campaigns.filter(c => (c.impressions || 0) > 0);
+          const campaigns = (campaignBreakdownCache.get(cacheKey) || []).filter(c => (c.impressions || 0) > 0);
 
-          for (const camp of visibleCampaigns) {
+          if (campaigns.length === 0) {
+            // Objective row only (no per-campaign breakdown available)
             rows.push({
-              level: '    Campaign',
+              scope: 'Objective total',
               company: li.entityName,
-              objective: obj.objective,
-              campaign: camp.campaignName,
+              companyUrl: li.website || '',
+              objective: fmtObj(obj.objective),
+              campaign: '',
               creative: '',
-              impressions: num(camp.impressions),
-              clicks: num(camp.clicks),
-              spend: cur(camp.spent),
-              engagements: num(camp.engagements),
+              impressions: num(obj.impressions),
+              clicks: num(obj.clicks),
+              spend: cur(obj.spent),
+              engagements: num(obj.engagements),
+              leads: num(obj.leads),
             });
+            continue;
+          }
 
-            // Creatives under this campaign (account-wide metrics, not company-specific)
+          for (const camp of campaigns) {
             const creatives = creativeByCampaign.get(camp.campaignName) || [];
+
+            if (creatives.length === 0) {
+              rows.push({
+                scope: 'Ad set (company-attributed)',
+                company: li.entityName,
+                companyUrl: li.website || '',
+                objective: fmtObj(obj.objective),
+                campaign: camp.campaignName,
+                creative: '',
+                impressions: num(camp.impressions),
+                clicks: num(camp.clicks),
+                spend: cur(camp.spent),
+                engagements: num(camp.engagements),
+                leads: 0,
+              });
+              continue;
+            }
+
             for (const cr of creatives) {
               rows.push({
-                level: '      Creative (campaign-wide)',
+                scope: 'Creative (ad-set-wide metrics)',
                 company: li.entityName,
-                objective: obj.objective,
+                companyUrl: li.website || '',
+                objective: fmtObj(obj.objective),
                 campaign: camp.campaignName,
                 creative: cr.creativeName || cr.creativeId,
                 impressions: num(cr.impressions),
                 clicks: num(cr.clicks),
                 spend: cur(cr.spent),
                 engagements: 0,
+                leads: num((cr as any).leads || 0),
               });
             }
           }
@@ -322,15 +339,17 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
       }
 
       const columns = [
-        { key: 'level', label: 'Level' },
+        { key: 'scope', label: 'Scope' },
         { key: 'company', label: 'Company' },
+        { key: 'companyUrl', label: 'Company URL' },
         { key: 'objective', label: 'Objective' },
-        { key: 'campaign', label: 'Campaign' },
+        { key: 'campaign', label: 'Campaign (Ad Set)' },
         { key: 'creative', label: 'Creative' },
         { key: 'impressions', label: 'Impressions' },
         { key: 'clicks', label: 'Clicks' },
         { key: 'spend', label: 'Spend' },
         { key: 'engagements', label: 'Engagements' },
+        { key: 'leads', label: 'Leads' },
       ];
       exportToCSV(rows, 'influence_match_breakdown', columns);
     } finally {
