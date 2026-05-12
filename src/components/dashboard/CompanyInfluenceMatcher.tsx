@@ -831,8 +831,9 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
                 <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-muted-foreground" />
                 <Input placeholder="Search..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-8 w-[180px] h-8 text-xs" />
               </div>
-              <Button variant="outline" size="sm" className="text-xs h-8" onClick={handleExport} disabled={matched.length === 0}>
-                <Download className="h-3.5 w-3.5 mr-1" />Export
+              <Button variant="outline" size="sm" className="text-xs h-8" onClick={handleExport} disabled={matched.length === 0 || isExporting}>
+                {isExporting ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Download className="h-3.5 w-3.5 mr-1" />}
+                {isExporting ? 'Preparing...' : 'Export'}
               </Button>
             </div>
           </div>
