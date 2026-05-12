@@ -264,57 +264,72 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
       }
       if (fetchPromises.length > 0) await Promise.all(fetchPromises);
 
-      // Build flat rows — every row carries full Company / Objective / Campaign (ad set) / Creative context
+      // Build flat rows from the exact same company/objective/campaign sources used by the breakdown table.
       const rows: Record<string, any>[] = [];
       const num = (n: number) => (n || 0);
       const cur = (n: number) => (n || 0).toFixed(2);
 
       for (const m of matched) {
         const li = m.linkedin;
+        const rawObjectives = li.objectiveBreakdown && li.objectiveBreakdown.length > 0
+          ? li.objectiveBreakdown
+          : (objectiveBreakdownCache.get(li.entityUrn) || []);
 
-        if (m.objectives.length === 0) {
-          rows.push({
-            scope: 'Company total',
-            company: li.entityName,
-            companyUrl: li.website || '',
-            objective: '',
-            campaign: '',
-            creative: '',
-            impressions: num(li.impressions),
-            clicks: num(li.clicks),
-            spend: cur(li.spent),
-            engagements: num(li.engagements),
-            likes: num(li.likes),
-            comments: num(li.comments),
-            reactions: num(li.reactions),
-            shares: num(li.shares),
-            leads: num(li.leads),
-          });
+        rows.push({
+          level: 'Company',
+          uploadedCompany: m.uploaded.name,
+          matchedCompany: li.entityName,
+          website: li.website || m.uploaded.url || '',
+          objective: '',
+          campaign: '',
+          creative: '',
+          impressions: num(li.impressions),
+          clicks: num(li.clicks),
+          landingPageClicks: num(li.landingPageClicks),
+          spend: cur(li.spent),
+          leads: num(li.leads),
+          engagements: num(li.engagements),
+          likes: num(li.likes),
+          comments: num(li.comments),
+          reactions: num(li.reactions),
+          shares: num(li.shares),
+          ctr: li.ctr.toFixed(2),
+          cpc: cur(li.cpc),
+          cpm: cur(li.cpm),
+        });
+
+        if (rawObjectives.length === 0) {
           continue;
         }
 
-        for (const obj of m.objectives) {
+        for (const obj of rawObjectives) {
           const cacheKey = `${li.entityUrn}::${obj.objective}`;
-          const campaigns = (localBreakdown.get(cacheKey) || []).filter((c: any) => (c.impressions || 0) > 0);
+          const campaigns = localBreakdown.get(cacheKey) || [];
+
+          rows.push({
+            level: 'Objective',
+            uploadedCompany: m.uploaded.name,
+            matchedCompany: li.entityName,
+            website: li.website || m.uploaded.url || '',
+            objective: fmtObj(obj.objective),
+            campaign: '',
+            creative: '',
+            impressions: num(obj.impressions),
+            clicks: num(obj.clicks),
+            landingPageClicks: num(obj.landingPageClicks),
+            spend: cur(obj.spent),
+            leads: num(obj.leads),
+            engagements: num(obj.engagements),
+            likes: num(obj.likes),
+            comments: num(obj.comments),
+            reactions: num(obj.reactions),
+            shares: num(obj.shares),
+            ctr: num(obj.ctr).toFixed(2),
+            cpc: cur(obj.cpc),
+            cpm: cur(obj.cpm),
+          });
 
           if (campaigns.length === 0) {
-            rows.push({
-              scope: 'Objective total',
-              company: li.entityName,
-              companyUrl: li.website || '',
-              objective: fmtObj(obj.objective),
-              campaign: '',
-              creative: '',
-              impressions: num(obj.impressions),
-              clicks: num(obj.clicks),
-              spend: cur(obj.spent),
-              engagements: num(obj.engagements),
-              likes: num(obj.likes),
-              comments: num(obj.comments),
-              reactions: num(obj.reactions),
-              shares: num(obj.shares),
-              leads: num(obj.leads),
-            });
             continue;
           }
 
