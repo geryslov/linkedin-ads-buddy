@@ -295,7 +295,7 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
 
         for (const obj of m.objectives) {
           const cacheKey = `${li.entityUrn}::${obj.objective}`;
-          const campaigns = (campaignBreakdownCache.get(cacheKey) || []).filter(c => (c.impressions || 0) > 0);
+          const campaigns = (localBreakdown.get(cacheKey) || []).filter((c: any) => (c.impressions || 0) > 0);
 
           if (campaigns.length === 0) {
             rows.push({
