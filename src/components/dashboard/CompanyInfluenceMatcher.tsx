@@ -336,46 +336,55 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
           for (const camp of campaigns) {
             const creatives = creativeByCampaign.get(camp.campaignName) || [];
 
+            rows.push({
+              level: 'Campaign',
+              uploadedCompany: m.uploaded.name,
+              matchedCompany: li.entityName,
+              website: li.website || m.uploaded.url || '',
+              objective: fmtObj(obj.objective),
+              campaign: camp.campaignName,
+              creative: '',
+              impressions: num(camp.impressions),
+              clicks: num(camp.clicks),
+              landingPageClicks: num(camp.landingPageClicks),
+              spend: cur(camp.spent),
+              leads: num(camp.leads),
+              engagements: num(camp.engagements),
+              likes: num(camp.likes),
+              comments: num(camp.comments),
+              reactions: num(camp.reactions),
+              shares: num(camp.shares),
+              ctr: num(camp.ctr).toFixed(2),
+              cpc: cur(camp.cpc),
+              cpm: cur(camp.cpm),
+            });
+
             if (creatives.length === 0) {
-              rows.push({
-                scope: 'Ad set (company-attributed)',
-                company: li.entityName,
-                companyUrl: li.website || '',
-                objective: fmtObj(obj.objective),
-                campaign: camp.campaignName,
-                creative: '',
-                impressions: num(camp.impressions),
-                clicks: num(camp.clicks),
-                spend: cur(camp.spent),
-                engagements: num(camp.engagements),
-                likes: num(camp.likes),
-                comments: num(camp.comments),
-                reactions: num(camp.reactions),
-                shares: num(camp.shares),
-                leads: 0,
-              });
               continue;
             }
 
             for (const cr of creatives) {
-              const totalCampImpr = creatives.reduce((s, c) => s + (c.impressions || 0), 0);
-              const share = totalCampImpr > 0 ? (cr.impressions || 0) / totalCampImpr : (1 / Math.max(creatives.length, 1));
               rows.push({
-                scope: 'Creative (company-attributed, pro-rated)',
-                company: li.entityName,
-                companyUrl: li.website || '',
+                level: 'Creative',
+                uploadedCompany: m.uploaded.name,
+                matchedCompany: li.entityName,
+                website: li.website || m.uploaded.url || '',
                 objective: fmtObj(obj.objective),
                 campaign: camp.campaignName,
                 creative: cr.creativeName || cr.creativeId,
-                impressions: Math.round(num(camp.impressions) * share),
-                clicks: Math.round(num(camp.clicks) * share),
-                spend: (num(camp.spent) * share).toFixed(2),
-                engagements: Math.round(num(camp.engagements) * share),
-                likes: Math.round(num(camp.likes) * share),
-                comments: Math.round(num(camp.comments) * share),
-                reactions: Math.round(num(camp.reactions) * share),
-                shares: Math.round(num(camp.shares) * share),
-                leads: 0,
+                impressions: num(cr.impressions),
+                clicks: num(cr.clicks),
+                landingPageClicks: '',
+                spend: cur(cr.spent),
+                leads: num(cr.leads),
+                engagements: '',
+                likes: '',
+                comments: '',
+                reactions: '',
+                shares: '',
+                ctr: cr.ctr.toFixed(2),
+                cpc: cur(cr.cpc),
+                cpm: cur(cr.cpm),
               });
             }
           }
