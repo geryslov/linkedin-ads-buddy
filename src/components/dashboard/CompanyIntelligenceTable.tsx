@@ -18,7 +18,7 @@ interface CompanyIntelligenceTableProps {
   isLoading: boolean;
 }
 
-type SortKey = 'companyName' | 'paidImpressions' | 'paidClicks' | 'paidLeads' | 'paidEngagements' | 'organicImpressions' | 'organicEngagements' | 'engagementLevel' | 'paidCtr';
+type SortKey = 'companyName' | 'paidImpressions' | 'paidClicks' | 'paidLeads' | 'paidQualifiedLeads' | 'conversions' | 'paidEngagements' | 'organicImpressions' | 'organicEngagements' | 'engagementLevel' | 'paidCtr';
 type SortOrder = 'asc' | 'desc';
 type EngagementFilter = 'all' | 'VERY_HIGH' | 'HIGH' | 'MEDIUM' | 'LOW' | 'VERY_LOW';
 
@@ -168,6 +168,8 @@ export function CompanyIntelligenceTable({ data, isLoading }: CompanyIntelligenc
                 <SortableHeader label="Paid Clicks" sortKeyName="paidClicks" />
                 <SortableHeader label="CTR" sortKeyName="paidCtr" />
                 <SortableHeader label="Leads" sortKeyName="paidLeads" />
+                <SortableHeader label="Qualified Leads" sortKeyName="paidQualifiedLeads" />
+                <SortableHeader label="Conversions" sortKeyName="conversions" />
                 <SortableHeader label="Paid Engagements" sortKeyName="paidEngagements" />
                 <SortableHeader label="Organic Impressions" sortKeyName="organicImpressions" />
                 <SortableHeader label="Organic Engagements" sortKeyName="organicEngagements" />
@@ -176,7 +178,7 @@ export function CompanyIntelligenceTable({ data, isLoading }: CompanyIntelligenc
             <TableBody>
               {filteredAndSortedData.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
+                  <TableCell colSpan={11} className="text-center py-8 text-muted-foreground">
                     {data.length === 0 
                       ? 'No company intelligence data available. This API requires special provisioning from LinkedIn.'
                       : 'No companies match your search criteria'}
@@ -214,6 +216,8 @@ export function CompanyIntelligenceTable({ data, isLoading }: CompanyIntelligenc
                     <TableCell>{row.paidClicks.toLocaleString()}</TableCell>
                     <TableCell>{row.paidCtr}%</TableCell>
                     <TableCell>{row.paidLeads.toLocaleString()}</TableCell>
+                    <TableCell>{(row.paidQualifiedLeads || 0).toLocaleString()}</TableCell>
+                    <TableCell>{(row.conversions || 0).toLocaleString()}</TableCell>
                     <TableCell>{row.paidEngagements.toLocaleString()}</TableCell>
                     <TableCell>{row.organicImpressions.toLocaleString()}</TableCell>
                     <TableCell>{row.organicEngagements.toLocaleString()}</TableCell>

@@ -24,6 +24,7 @@ import { LeadSyncReport } from "@/components/dashboard/LeadSyncReport";
 import { LeadRecordsViewer } from "@/components/dashboard/LeadRecordsViewer";
 import { WeeklyReport } from "@/components/dashboard/WeeklyReport";
 import { ActivityReport } from "@/components/dashboard/ActivityReport";
+import { AnalyticsDashboard } from "@/components/dashboard/AnalyticsDashboard";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -215,16 +216,12 @@ export default function Dashboard() {
                   <MetricCard
                     title="Impressions"
                     value={analytics.impressions.toLocaleString()}
-                    change="+12.5% from last period"
-                    changeType="positive"
                     icon={Eye}
                     delay={0}
                   />
                   <MetricCard
                     title="Clicks"
                     value={analytics.clicks.toLocaleString()}
-                    change="+8.2% from last period"
-                    changeType="positive"
                     icon={MousePointerClick}
                     delay={50}
                   />
@@ -237,8 +234,6 @@ export default function Dashboard() {
                   <MetricCard
                     title="Conversions"
                     value={analytics.conversions.toLocaleString()}
-                    change="+15.3% from last period"
-                    changeType="positive"
                     icon={Target}
                     delay={150}
                   />
@@ -302,45 +297,10 @@ export default function Dashboard() {
         )}
 
         {activeTab === "analytics" && (
-          <div className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-              {analytics && (
-                <>
-                  <MetricCard
-                    title="Click-Through Rate"
-                    value={`${analytics.ctr}%`}
-                    icon={MousePointerClick}
-                    delay={0}
-                  />
-                  <MetricCard
-                    title="Cost Per Click"
-                    value={`$${analytics.cpc}`}
-                    icon={DollarSign}
-                    delay={50}
-                  />
-                  <MetricCard
-                    title="Total Impressions"
-                    value={analytics.impressions.toLocaleString()}
-                    icon={Eye}
-                    delay={100}
-                  />
-                  <MetricCard
-                    title="Total Conversions"
-                    value={analytics.conversions.toLocaleString()}
-                    icon={Target}
-                    delay={150}
-                  />
-                </>
-              )}
-            </div>
-            
-            <div className="glass rounded-xl p-8 animate-slide-up" style={{ animationDelay: '200ms' }}>
-              <h3 className="text-lg font-semibold mb-4">Performance Summary</h3>
-              <p className="text-muted-foreground">
-                Detailed analytics charts and performance tracking will appear here once you have more campaign data.
-              </p>
-            </div>
-          </div>
+          <AnalyticsDashboard
+            accessToken={accessToken}
+            selectedAccount={selectedAccount}
+          />
         )}
 
         {activeTab === "budget_pacing" && (

@@ -2,7 +2,7 @@ import { useState, useCallback, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 
-export type LookbackWindow = 'LAST_7_DAYS' | 'LAST_30_DAYS' | 'LAST_60_DAYS' | 'LAST_90_DAYS';
+export type LookbackWindow = 'LAST_7_DAYS' | 'LAST_30_DAYS' | 'LAST_60_DAYS' | 'LAST_90_DAYS' | 'LAST_180_DAYS';
 
 export interface CompanyIntelligence {
   companyName: string;
@@ -12,6 +12,8 @@ export interface CompanyIntelligence {
   paidImpressions: number;
   paidClicks: number;
   paidLeads: number;
+  paidQualifiedLeads: number;
+  conversions: number;
   paidEngagements: number;
   organicImpressions: number;
   organicEngagements: number;
