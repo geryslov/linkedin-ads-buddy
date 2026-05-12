@@ -392,21 +392,26 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
       }
 
       const columns = [
-        { key: 'scope', label: 'Scope' },
-        { key: 'company', label: 'Company' },
-        { key: 'companyUrl', label: 'Company URL' },
+        { key: 'level', label: 'Level' },
+        { key: 'uploadedCompany', label: 'Uploaded Company' },
+        { key: 'matchedCompany', label: 'Matched Company' },
+        { key: 'website', label: 'Website' },
         { key: 'objective', label: 'Objective' },
-        { key: 'campaign', label: 'Campaign (Ad Set)' },
+        { key: 'campaign', label: 'Campaign' },
         { key: 'creative', label: 'Creative' },
         { key: 'impressions', label: 'Impressions' },
         { key: 'clicks', label: 'Clicks' },
+        { key: 'landingPageClicks', label: 'LP Clicks' },
         { key: 'spend', label: 'Spend' },
-        { key: 'engagements', label: 'Total Engagements' },
+        { key: 'leads', label: 'Leads' },
+        { key: 'engagements', label: 'Engagements' },
         { key: 'likes', label: 'Likes' },
         { key: 'comments', label: 'Comments' },
         { key: 'reactions', label: 'Reactions' },
         { key: 'shares', label: 'Shares' },
-        { key: 'leads', label: 'Leads' },
+        { key: 'ctr', label: 'CTR %' },
+        { key: 'cpc', label: 'CPC' },
+        { key: 'cpm', label: 'CPM' },
       ];
       exportToCSV(rows, 'influence_match_breakdown', columns);
     } finally {
