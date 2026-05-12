@@ -232,9 +232,111 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
     e.target.value = '';
   }, [handleFileSelect]);
 
-  const handleExport = useCallback(() => {
-    exportToCSV(getExportData(dateRange, campaignBreakdownCache), 'influence_match_results', companyInfluenceColumns);
-  }, [getExportData, dateRange, campaignBreakdownCache]);
+  const [isExporting, setIsExporting] = useState(false);
+
+  const handleExport = useCallback(async () => {
+    if (!selectedAccount) return;
+    setIsExporting(true);
+    try {
+      // Ensure campaign breakdown is loaded for every matched company × objective
+      const fetchPromises: Promise<void>[] = [];
+      for (const m of matched) {
+        for (const obj of m.objectives) {
+          const cacheKey = `${m.linkedin.entityUrn}::${obj.objective}`;
+          if (!campaignBreakdownCache.has(cacheKey) && obj.campaignIds.length > 0) {
+            fetchPromises.push(
+              fetchCampaignBreakdown(selectedAccount, m.linkedin.entityUrn, obj.objective, obj.campaignIds, obj.campaignNamesMap)
+            );
+          }
+        }
+      }
+      if (fetchPromises.length > 0) await Promise.all(fetchPromises);
+
+      // Build hierarchical rows: Company → Objective → Campaign → Creative
+      const rows: Record<string, any>[] = [];
+      const num = (n: number) => (n || 0);
+      const cur = (n: number) => (n || 0).toFixed(2);
+
+      for (const m of matched) {
+        const li = m.linkedin;
+        // Company total row
+        rows.push({
+          level: 'Company',
+          company: li.entityName,
+          objective: '',
+          campaign: '',
+          creative: '',
+          impressions: num(li.impressions),
+          clicks: num(li.clicks),
+          spend: cur(li.spent),
+          engagements: num(li.engagements),
+        });
+
+        for (const obj of m.objectives) {
+          rows.push({
+            level: '  Objective',
+            company: li.entityName,
+            objective: obj.objective,
+            campaign: '',
+            creative: '',
+            impressions: num(obj.impressions),
+            clicks: num(obj.clicks),
+            spend: cur(obj.spent),
+            engagements: num(obj.engagements),
+          });
+
+          const cacheKey = `${li.entityUrn}::${obj.objective}`;
+          const campaigns = campaignBreakdownCache.get(cacheKey) || [];
+          const visibleCampaigns = campaigns.filter(c => (c.impressions || 0) > 0);
+
+          for (const camp of visibleCampaigns) {
+            rows.push({
+              level: '    Campaign',
+              company: li.entityName,
+              objective: obj.objective,
+              campaign: camp.campaignName,
+              creative: '',
+              impressions: num(camp.impressions),
+              clicks: num(camp.clicks),
+              spend: cur(camp.spent),
+              engagements: num(camp.engagements),
+            });
+
+            // Creatives under this campaign (account-wide metrics, not company-specific)
+            const creatives = creativeByCampaign.get(camp.campaignName) || [];
+            for (const cr of creatives) {
+              rows.push({
+                level: '      Creative (campaign-wide)',
+                company: li.entityName,
+                objective: obj.objective,
+                campaign: camp.campaignName,
+                creative: cr.creativeName || cr.creativeId,
+                impressions: num(cr.impressions),
+                clicks: num(cr.clicks),
+                spend: cur(cr.spent),
+                engagements: 0,
+              });
+            }
+          }
+        }
+      }
+
+      const columns = [
+        { key: 'level', label: 'Level' },
+        { key: 'company', label: 'Company' },
+        { key: 'objective', label: 'Objective' },
+        { key: 'campaign', label: 'Campaign' },
+        { key: 'creative', label: 'Creative' },
+        { key: 'impressions', label: 'Impressions' },
+        { key: 'clicks', label: 'Clicks' },
+        { key: 'spend', label: 'Spend' },
+        { key: 'engagements', label: 'Engagements' },
+      ];
+      exportToCSV(rows, 'influence_match_breakdown', columns);
+    } finally {
+      setIsExporting(false);
+    }
+  }, [selectedAccount, matched, campaignBreakdownCache, fetchCampaignBreakdown, creativeByCampaign]);
 
   const toggleCompany = useCallback((key: string) => {
     setExpandedCompanies(prev => {
