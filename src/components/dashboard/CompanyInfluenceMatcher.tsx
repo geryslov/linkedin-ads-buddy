@@ -272,6 +272,10 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
             clicks: num(li.clicks),
             spend: cur(li.spent),
             engagements: num(li.engagements),
+            likes: num(li.likes),
+            comments: num(li.comments),
+            reactions: num(li.reactions),
+            shares: num(li.shares),
             leads: num(li.leads),
           });
           continue;
@@ -282,7 +286,6 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
           const campaigns = (campaignBreakdownCache.get(cacheKey) || []).filter(c => (c.impressions || 0) > 0);
 
           if (campaigns.length === 0) {
-            // Objective row only (no per-campaign breakdown available)
             rows.push({
               scope: 'Objective total',
               company: li.entityName,
@@ -294,6 +297,10 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
               clicks: num(obj.clicks),
               spend: cur(obj.spent),
               engagements: num(obj.engagements),
+              likes: num(obj.likes),
+              comments: num(obj.comments),
+              reactions: num(obj.reactions),
+              shares: num(obj.shares),
               leads: num(obj.leads),
             });
             continue;
@@ -314,6 +321,10 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
                 clicks: num(camp.clicks),
                 spend: cur(camp.spent),
                 engagements: num(camp.engagements),
+                likes: num(camp.likes),
+                comments: num(camp.comments),
+                reactions: num(camp.reactions),
+                shares: num(camp.shares),
                 leads: 0,
               });
               continue;
@@ -331,6 +342,10 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
                 clicks: num(cr.clicks),
                 spend: cur(cr.spent),
                 engagements: 0,
+                likes: 0,
+                comments: 0,
+                reactions: 0,
+                shares: 0,
                 leads: num((cr as any).leads || 0),
               });
             }
@@ -348,7 +363,11 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
         { key: 'impressions', label: 'Impressions' },
         { key: 'clicks', label: 'Clicks' },
         { key: 'spend', label: 'Spend' },
-        { key: 'engagements', label: 'Engagements' },
+        { key: 'engagements', label: 'Total Engagements' },
+        { key: 'likes', label: 'Likes' },
+        { key: 'comments', label: 'Comments' },
+        { key: 'reactions', label: 'Reactions' },
+        { key: 'shares', label: 'Shares' },
         { key: 'leads', label: 'Leads' },
       ];
       exportToCSV(rows, 'influence_match_breakdown', columns);

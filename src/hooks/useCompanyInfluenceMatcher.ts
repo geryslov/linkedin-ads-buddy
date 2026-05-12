@@ -17,6 +17,10 @@ export interface MatchedObjective {
   spent: number;
   leads: number;
   engagements: number;
+  likes: number;
+  comments: number;
+  reactions: number;
+  shares: number;
   ctr: number;
   cpc: number;
   cpm: number;
@@ -125,6 +129,10 @@ function buildObjectives(ob: ObjectiveBreakdownItem[]): { objectives: MatchedObj
       spent: item.spent,
       leads: item.leads,
       engagements: item.engagements,
+      likes: item.likes || 0,
+      comments: item.comments || 0,
+      reactions: item.reactions || 0,
+      shares: item.shares || 0,
       ctr: item.ctr,
       cpc: item.cpc,
       cpm: item.cpm,
