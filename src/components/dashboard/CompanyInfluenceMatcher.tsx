@@ -238,14 +238,26 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
     if (!selectedAccount) return;
     setIsExporting(true);
     try {
-      // Ensure campaign breakdown is loaded for every matched company × objective
+      // Build a local merged breakdown map: cacheKey -> CampaignBreakdownItem[]
+      const localBreakdown = new Map<string, any[]>();
+      // Seed with already-cached entries
+      for (const [k, v] of campaignBreakdownCache.entries()) localBreakdown.set(k, v);
+
       const fetchPromises: Promise<void>[] = [];
       for (const m of matched) {
         for (const obj of m.objectives) {
           const cacheKey = `${m.linkedin.entityUrn}::${obj.objective}`;
-          if (!campaignBreakdownCache.has(cacheKey) && obj.campaignIds.length > 0) {
+          if (!localBreakdown.has(cacheKey) && obj.campaignIds.length > 0) {
             fetchPromises.push(
               fetchCampaignBreakdown(selectedAccount, m.linkedin.entityUrn, obj.objective, obj.campaignIds, obj.campaignNamesMap)
+                .then((breakdowns) => {
+                  if (breakdowns) {
+                    for (const [companyUrn, campaigns] of Object.entries(breakdowns)) {
+                      localBreakdown.set(`${companyUrn}::${obj.objective}`, campaigns as any[]);
+                    }
+                  }
+                  if (!localBreakdown.has(cacheKey)) localBreakdown.set(cacheKey, []);
+                })
             );
           }
         }
@@ -283,7 +295,7 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
 
         for (const obj of m.objectives) {
           const cacheKey = `${li.entityUrn}::${obj.objective}`;
-          const campaigns = (campaignBreakdownCache.get(cacheKey) || []).filter(c => (c.impressions || 0) > 0);
+          const campaigns = (localBreakdown.get(cacheKey) || []).filter((c: any) => (c.impressions || 0) > 0);
 
           if (campaigns.length === 0) {
             rows.push({

@@ -322,11 +322,13 @@ export function useCompanyDemographic(accessToken: string | null) {
     campaignIds: string[],
     campaignNames: Record<string, string>,
   ) => {
-    if (!accessToken || !accountId || campaignIds.length === 0) return;
+    if (!accessToken || !accountId || campaignIds.length === 0) return {} as Record<string, CampaignBreakdownItem[]>;
     
     const cacheKey = `${entityUrn}::${objective}`;
-    if (campaignBreakdownCache.has(cacheKey)) return;
-    if (loadingObjectives.has(cacheKey)) return;
+    if (campaignBreakdownCache.has(cacheKey)) {
+      return { [entityUrn]: campaignBreakdownCache.get(cacheKey) || [] };
+    }
+    if (loadingObjectives.has(cacheKey)) return {} as Record<string, CampaignBreakdownItem[]>;
     
     setLoadingObjectives(prev => new Set(prev).add(cacheKey));
     
@@ -341,7 +343,7 @@ export function useCompanyDemographic(accessToken: string | null) {
       
       if (fetchError) throw fetchError;
       
-      const breakdowns = data?.breakdowns || {};
+      const breakdowns = (data?.breakdowns || {}) as Record<string, CampaignBreakdownItem[]>;
       setCampaignBreakdownCache(prev => {
         const next = new Map(prev);
         for (const [companyUrn, campaigns] of Object.entries(breakdowns)) {
@@ -353,9 +355,11 @@ export function useCompanyDemographic(accessToken: string | null) {
         }
         return next;
       });
+      return breakdowns;
     } catch (err: any) {
       console.error('Fetch campaign breakdown error:', err);
       setCampaignBreakdownCache(prev => new Map(prev).set(cacheKey, []));
+      return {} as Record<string, CampaignBreakdownItem[]>;
     } finally {
       setLoadingObjectives(prev => {
         const next = new Set(prev);
