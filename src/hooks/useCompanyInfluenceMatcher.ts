@@ -240,9 +240,9 @@ export function useCompanyInfluenceMatcher(linkedInData: CompanyDemographicItem[
           const breakdownSource = linkedinMatch.objectiveBreakdown 
             || objectiveBreakdownCache?.get(linkedinMatch.entityUrn) 
             || [];
-          const { objectives, allNames } = breakdownSource.length > 0
+          const { objectives, allNames, allCreativeNames } = breakdownSource.length > 0
             ? buildObjectives(breakdownSource)
-            : { objectives: [], allNames: [] };
+            : { objectives: [], allNames: [], allCreativeNames: [] };
 
           const costPerLead = linkedinMatch.leads > 0
             ? linkedinMatch.spent / linkedinMatch.leads
@@ -258,6 +258,7 @@ export function useCompanyInfluenceMatcher(linkedInData: CompanyDemographicItem[
             matchType,
             objectives,
             allCampaignNames: allNames,
+            allCreativeNames,
             costPerLead,
             engagementRate,
           });
