@@ -39,7 +39,21 @@ export interface ObjectiveBreakdownItem {
   campaignNames?: Record<string, string>;
   creativeIds?: string[];
   creativeNames?: Record<string, string>;
+  creativeCampaignMap?: Record<string, string>;
   campaignBreakdown?: CampaignBreakdownItem[];
+}
+
+export interface CreativeCompanyMetrics {
+  impressions: number;
+  clicks: number;
+  landingPageClicks: number;
+  spent: number;
+  leads: number;
+  engagements: number;
+  ctr: number;
+  cpc: number;
+  cpm: number;
+  costPerLead: number;
 }
 
 export interface CompanyDemographicItem {
