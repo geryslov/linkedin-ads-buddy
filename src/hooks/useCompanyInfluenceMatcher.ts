@@ -27,6 +27,9 @@ export interface MatchedObjective {
   campaignNames: string[];
   campaignIds: string[];
   campaignNamesMap: Record<string, string>;
+  creativeNames: string[];
+  creativeIds: string[];
+  creativeNamesMap: Record<string, string>;
 }
 
 export interface MatchedCompany {
@@ -38,6 +41,7 @@ export interface MatchedCompany {
   matchType: 'name' | 'domain';
   objectives: MatchedObjective[];
   allCampaignNames: string[];
+  allCreativeNames: string[];
   /** Derived metrics */
   costPerLead: number;
   engagementRate: number;
@@ -109,8 +113,9 @@ function detectColumns(headers: string[]): { nameCol: string | null; urlCol: str
   };
 }
 
-function buildObjectives(ob: ObjectiveBreakdownItem[]): { objectives: MatchedObjective[]; allNames: string[] } {
+function buildObjectives(ob: ObjectiveBreakdownItem[]): { objectives: MatchedObjective[]; allNames: string[]; allCreativeNames: string[] } {
   const allNames = new Set<string>();
+  const allCreativeNames = new Set<string>();
   const objectives: MatchedObjective[] = ob.map(item => {
     const names: string[] = [];
     if (item.campaignNames) {
@@ -118,6 +123,15 @@ function buildObjectives(ob: ObjectiveBreakdownItem[]): { objectives: MatchedObj
         if (n) {
           names.push(n);
           allNames.add(n);
+        }
+      }
+    }
+    const creatives: string[] = [];
+    if (item.creativeNames) {
+      for (const n of Object.values(item.creativeNames)) {
+        if (n) {
+          creatives.push(n);
+          allCreativeNames.add(n);
         }
       }
     }
@@ -139,9 +153,12 @@ function buildObjectives(ob: ObjectiveBreakdownItem[]): { objectives: MatchedObj
       campaignNames: names,
       campaignIds: item.campaignIds || [],
       campaignNamesMap: item.campaignNames || {},
+      creativeNames: creatives,
+      creativeIds: item.creativeIds || [],
+      creativeNamesMap: item.creativeNames || {},
     };
   });
-  return { objectives, allNames: Array.from(allNames) };
+  return { objectives, allNames: Array.from(allNames), allCreativeNames: Array.from(allCreativeNames) };
 }
 
 export function isMatchedItem(item: MatchedCompany | UnmatchedCompany): item is MatchedCompany {
@@ -223,9 +240,9 @@ export function useCompanyInfluenceMatcher(linkedInData: CompanyDemographicItem[
           const breakdownSource = linkedinMatch.objectiveBreakdown 
             || objectiveBreakdownCache?.get(linkedinMatch.entityUrn) 
             || [];
-          const { objectives, allNames } = breakdownSource.length > 0
+          const { objectives, allNames, allCreativeNames } = breakdownSource.length > 0
             ? buildObjectives(breakdownSource)
-            : { objectives: [], allNames: [] };
+            : { objectives: [], allNames: [], allCreativeNames: [] };
 
           const costPerLead = linkedinMatch.leads > 0
             ? linkedinMatch.spent / linkedinMatch.leads
@@ -241,6 +258,7 @@ export function useCompanyInfluenceMatcher(linkedInData: CompanyDemographicItem[
             matchType,
             objectives,
             allCampaignNames: allNames,
+            allCreativeNames,
             costPerLead,
             engagementRate,
           });
@@ -457,6 +475,13 @@ export function useCompanyInfluenceMatcher(linkedInData: CompanyDemographicItem[
         }
       }
 
+      const creativeNamesForExport = new Set<string>();
+      for (const obj of m.objectives) {
+        for (const name of obj.creativeNames) {
+          if (name) creativeNamesForExport.add(name);
+        }
+      }
+
       return {
         companyName: m.uploaded.name,
         companyUrl: m.uploaded.url,
@@ -466,6 +491,7 @@ export function useCompanyInfluenceMatcher(linkedInData: CompanyDemographicItem[
         linkedInWebsite: m.linkedin.website || '',
         objectives: m.objectives.map(o => o.objective).join('; '),
         campaignNames: Array.from(campaignNamesForExport).join('; '),
+        creativeNames: Array.from(creativeNamesForExport).join('; '),
         impactPeriod: linkedInDateRange ? `${linkedInDateRange.start} to ${linkedInDateRange.end}` : '',
         impressions: m.linkedin.impressions,
         clicks: m.linkedin.clicks,

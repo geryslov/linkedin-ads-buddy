@@ -1043,7 +1043,15 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
                                         </Badge>
                                         <span className="text-[11px] text-muted-foreground">
                                           {obj.campaignNames.length} campaign{obj.campaignNames.length !== 1 ? 's' : ''}
+                                          {obj.creativeNames.length > 0 && (
+                                            <> · {obj.creativeNames.length} creative{obj.creativeNames.length !== 1 ? 's' : ''}</>
+                                          )}
                                         </span>
+                                        {obj.creativeNames.length > 0 && (
+                                          <span className="text-[10px] text-muted-foreground/80 truncate max-w-[280px]" title={obj.creativeNames.join(', ')}>
+                                            — {obj.creativeNames.slice(0, 3).join(', ')}{obj.creativeNames.length > 3 ? `, +${obj.creativeNames.length - 3} more` : ''}
+                                          </span>
+                                        )}
                                       </div>
                                     </td>
                                     <MetricCell value={fmtNum(obj.impressions)} className="text-muted-foreground" />
