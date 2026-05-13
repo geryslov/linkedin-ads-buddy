@@ -2855,13 +2855,14 @@ serve(async (req) => {
           for (const [obj, ids] of objectiveToCampaigns.entries()) {
             for (const id of ids) campaignIdToObjective.set(id, obj);
           }
-          // objective -> { creativeIds, creativeNames }
-          const objectiveCreativeInfo: Record<string, { creativeIds: string[]; creativeNames: Record<string, string> }> = {};
+          // objective -> { creativeIds, creativeNames, creativeCampaignMap }
+          const objectiveCreativeInfo: Record<string, { creativeIds: string[]; creativeNames: Record<string, string>; creativeCampaignMap: Record<string, string> }> = {};
           for (const [cid, info] of creativeIdToInfo.entries()) {
             const obj = campaignIdToObjective.get(info.campaignId) || 'UNCLASSIFIED';
-            if (!objectiveCreativeInfo[obj]) objectiveCreativeInfo[obj] = { creativeIds: [], creativeNames: {} };
+            if (!objectiveCreativeInfo[obj]) objectiveCreativeInfo[obj] = { creativeIds: [], creativeNames: {}, creativeCampaignMap: {} };
             objectiveCreativeInfo[obj].creativeIds.push(cid);
             objectiveCreativeInfo[obj].creativeNames[cid] = info.name;
+            if (info.campaignId) objectiveCreativeInfo[obj].creativeCampaignMap[cid] = info.campaignId;
           }
 
           // Step 3: Query per objective group in parallel (avoids 150s edge timeout)
@@ -2959,7 +2960,7 @@ serve(async (req) => {
           for (const [entityUrn, breakdowns] of Object.entries(result)) {
             finalResult[entityUrn] = breakdowns.map((b: any) => {
               const info = objectiveCampaignInfo[b.objective] || { campaignIds: [], campaignNames: {} };
-              const cInfo = objectiveCreativeInfo[b.objective] || { creativeIds: [], creativeNames: {} };
+              const cInfo = objectiveCreativeInfo[b.objective] || { creativeIds: [], creativeNames: {}, creativeCampaignMap: {} };
               return {
                 ...b,
                 ctr: b.impressions > 0 ? parseFloat(((b.clicks / b.impressions) * 100).toFixed(2)) : 0,
@@ -2969,6 +2970,7 @@ serve(async (req) => {
                 campaignNames: info.campaignNames,
                 creativeIds: cInfo.creativeIds,
                 creativeNames: cInfo.creativeNames,
+                creativeCampaignMap: cInfo.creativeCampaignMap,
               };
             });
           }
