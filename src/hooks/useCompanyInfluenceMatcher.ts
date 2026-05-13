@@ -475,6 +475,13 @@ export function useCompanyInfluenceMatcher(linkedInData: CompanyDemographicItem[
         }
       }
 
+      const creativeNamesForExport = new Set<string>();
+      for (const obj of m.objectives) {
+        for (const name of obj.creativeNames) {
+          if (name) creativeNamesForExport.add(name);
+        }
+      }
+
       return {
         companyName: m.uploaded.name,
         companyUrl: m.uploaded.url,
@@ -484,6 +491,7 @@ export function useCompanyInfluenceMatcher(linkedInData: CompanyDemographicItem[
         linkedInWebsite: m.linkedin.website || '',
         objectives: m.objectives.map(o => o.objective).join('; '),
         campaignNames: Array.from(campaignNamesForExport).join('; '),
+        creativeNames: Array.from(creativeNamesForExport).join('; '),
         impactPeriod: linkedInDateRange ? `${linkedInDateRange.start} to ${linkedInDateRange.end}` : '',
         impressions: m.linkedin.impressions,
         clicks: m.linkedin.clicks,
