@@ -135,6 +135,10 @@ export function useCompanyDemographic(accessToken: string | null) {
   const [objectiveBreakdownCache, setObjectiveBreakdownCache] = useState<Map<string, ObjectiveBreakdownItem[]>>(new Map());
   const [isLoadingObjectiveBreakdowns, setIsLoadingObjectiveBreakdowns] = useState(false);
   const [objectiveBreakdownsFetched, setObjectiveBreakdownsFetched] = useState(false);
+  // Per-creative-per-company breakdown
+  const [creativeCompanyCache, setCreativeCompanyCache] = useState<Map<string, Map<string, CreativeCompanyMetrics>>>(new Map());
+  const [loadingCreativeBreakdown, setLoadingCreativeBreakdown] = useState(false);
+  const [creativeBreakdownProgress, setCreativeBreakdownProgress] = useState<{ loaded: number; total: number } | null>(null);
   // Progressive loading state
   const [totalCompanies, setTotalCompanies] = useState<number | null>(null);
   const [loadedCount, setLoadedCount] = useState(0);
