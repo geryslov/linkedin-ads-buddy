@@ -451,7 +451,7 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
     } finally {
       setIsExporting(false);
     }
-  }, [selectedAccount, matched, campaignBreakdownCache, objectiveBreakdownCache, fetchCampaignBreakdown, creativeByCampaign]);
+  }, [selectedAccount, matched, campaignBreakdownCache, objectiveBreakdownCache, fetchCampaignBreakdown, creativeCompanyCache]);
 
   const toggleCompany = useCallback((key: string) => {
     setExpandedCompanies(prev => {
