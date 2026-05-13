@@ -811,6 +811,12 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
                   Objectives...
                 </Badge>
               )}
+              {loadingCreativeBreakdown && (
+                <Badge variant="outline" className="animate-pulse text-[10px]">
+                  <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                  Creatives per company{creativeBreakdownProgress ? ` (${creativeBreakdownProgress.total})` : ''}…
+                </Badge>
+              )}
               {!isLoadingLinkedIn && companyData.length > 0 && (
                 <Badge variant="secondary" className="text-[10px]">
                   <CheckCircle2 className="h-3 w-3 mr-1 text-green-500" />
