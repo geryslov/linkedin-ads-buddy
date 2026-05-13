@@ -194,6 +194,20 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
     fetchObjectiveBreakdowns(selectedAccount, matched.map(m => m.linkedin.entityUrn), true);
   }, [selectedAccount, matched, fetchObjectiveBreakdowns]);
 
+  // After objectives load for matched companies, eagerly fetch per-creative × per-company breakdown
+  useEffect(() => {
+    if (!selectedAccount || matched.length === 0 || isLoadingObjectiveBreakdowns) return;
+    const matchedUrns = matched.map(m => m.linkedin.entityUrn);
+    const allCreativeIds = new Set<string>();
+    for (const m of matched) {
+      for (const obj of m.objectives) {
+        for (const cid of obj.creativeIds) allCreativeIds.add(cid);
+      }
+    }
+    if (allCreativeIds.size === 0) return;
+    fetchCreativeCompanyBreakdown(selectedAccount, Array.from(allCreativeIds), matchedUrns);
+  }, [selectedAccount, matched, isLoadingObjectiveBreakdowns, fetchCreativeCompanyBreakdown]);
+
   const handleFetch = useCallback(() => {
     if (selectedAccount) {
       prevMatchedUrnsRef.current = ''; // force objectives re-fetch
