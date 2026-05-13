@@ -27,6 +27,9 @@ export interface MatchedObjective {
   campaignNames: string[];
   campaignIds: string[];
   campaignNamesMap: Record<string, string>;
+  creativeNames: string[];
+  creativeIds: string[];
+  creativeNamesMap: Record<string, string>;
 }
 
 export interface MatchedCompany {
