@@ -2770,8 +2770,102 @@ serve(async (req) => {
           const uniqueObjectives = Array.from(objectiveToCampaigns.keys());
           console.log(`[get_objective_breakdowns] Found ${uniqueObjectives.length} objectives: ${uniqueObjectives.join(', ')}`);
 
+          // Step 2.6: Probe creatives that delivered in range, then resolve names + parent campaigns
+          // (LinkedIn doesn't allow MEMBER_COMPANY × CREATIVE dual pivot, so we list creatives that
+          //  ran inside the matched campaigns instead of attributing per-company-per-creative.)
+          // creativeId -> { name, campaignId }
+          const creativeIdToInfo = new Map<string, { name: string; campaignId: string }>();
+          try {
+            const activeCreativeIds = new Set<string>();
+            const crPageSize = 10000;
+            let crStart = 0;
+            let crHasMore = true;
+            while (crHasMore && crStart <= 100000) {
+              const crQp = new URLSearchParams();
+              crQp.set('q', 'analytics');
+              crQp.set('dateRange.start.day', String(startDay));
+              crQp.set('dateRange.start.month', String(startMonth));
+              crQp.set('dateRange.start.year', String(startYear));
+              crQp.set('dateRange.end.day', String(endDay));
+              crQp.set('dateRange.end.month', String(endMonth));
+              crQp.set('dateRange.end.year', String(endYear));
+              crQp.set('timeGranularity', 'ALL');
+              crQp.set('pivot', 'CREATIVE');
+              crQp.set('accounts[0]', `urn:li:sponsoredAccount:${accountId}`);
+              crQp.set('fields', 'pivotValue,impressions');
+              crQp.set('count', String(crPageSize));
+              crQp.set('start', String(crStart));
+              const crResp = await fetch(`https://api.linkedin.com/v2/adAnalyticsV2?${crQp.toString()}`, {
+                headers: { 'Authorization': `Bearer ${accessToken}` },
+              });
+              if (!crResp.ok) { crHasMore = false; break; }
+              const crData = await crResp.json();
+              const crEls = crData.elements || [];
+              for (const el of crEls) {
+                if ((el.impressions || 0) > 0 && el.pivotValue) {
+                  const m = el.pivotValue.match(/:(\d+)$/);
+                  if (m) activeCreativeIds.add(m[1]);
+                }
+              }
+              const paging = crData.paging;
+              if (crEls.length === 0) { crHasMore = false; }
+              else if (paging?.total && (crStart + crEls.length) < paging.total) { crStart += crEls.length; }
+              else if (!paging?.total && crEls.length >= crPageSize) { crStart += crEls.length; }
+              else { crHasMore = false; }
+            }
+            console.log(`[get_objective_breakdowns] Creative probe: ${activeCreativeIds.size} creatives active in range`);
+
+            // Resolve names + parent campaign for each active creative (cap 500, batches of 10)
+            const creativeIdList = Array.from(activeCreativeIds).slice(0, 500);
+            const batchSize = 10;
+            for (let i = 0; i < creativeIdList.length; i += batchSize) {
+              const batch = creativeIdList.slice(i, i + batchSize);
+              await Promise.all(batch.map(async (cid) => {
+                try {
+                  const cUrn = encodeURIComponent(`urn:li:sponsoredCreative:${cid}`);
+                  const cUrl = `https://api.linkedin.com/rest/adAccounts/${accountId}/creatives/${cUrn}`;
+                  const cResp = await fetch(cUrl, {
+                    headers: {
+                      'Authorization': `Bearer ${accessToken}`,
+                      'LinkedIn-Version': '202511',
+                      'X-Restli-Protocol-Version': '2.0.0',
+                    },
+                  });
+                  if (!cResp.ok) {
+                    creativeIdToInfo.set(cid, { name: `Creative ${cid}`, campaignId: '' });
+                    return;
+                  }
+                  const cd = await cResp.json();
+                  const campaignUrn = cd.campaign || '';
+                  const campaignId = campaignUrn.split(':').pop() || '';
+                  const name = cd.name || `Creative ${cid}`;
+                  creativeIdToInfo.set(cid, { name, campaignId });
+                } catch {
+                  creativeIdToInfo.set(cid, { name: `Creative ${cid}`, campaignId: '' });
+                }
+              }));
+            }
+            console.log(`[get_objective_breakdowns] Resolved ${creativeIdToInfo.size} creative names`);
+          } catch (e) {
+            console.log('[get_objective_breakdowns] Creative probe failed:', e);
+          }
+
+          // Build campaignId -> objective lookup for grouping creatives
+          const campaignIdToObjective = new Map<string, string>();
+          for (const [obj, ids] of objectiveToCampaigns.entries()) {
+            for (const id of ids) campaignIdToObjective.set(id, obj);
+          }
+          // objective -> { creativeIds, creativeNames }
+          const objectiveCreativeInfo: Record<string, { creativeIds: string[]; creativeNames: Record<string, string> }> = {};
+          for (const [cid, info] of creativeIdToInfo.entries()) {
+            const obj = campaignIdToObjective.get(info.campaignId) || 'UNCLASSIFIED';
+            if (!objectiveCreativeInfo[obj]) objectiveCreativeInfo[obj] = { creativeIds: [], creativeNames: {} };
+            objectiveCreativeInfo[obj].creativeIds.push(cid);
+            objectiveCreativeInfo[obj].creativeNames[cid] = info.name;
+          }
+
           // Step 3: Query per objective group in parallel (avoids 150s edge timeout)
-          // companyUrn -> [{objective, metrics, campaignIds, campaignNames}]
+          // companyUrn -> [{objective, metrics, campaignIds, campaignNames, creativeIds, creativeNames}]
           const result: Record<string, any[]> = {};
           const objectiveCampaignInfo: Record<string, { campaignIds: string[]; campaignNames: Record<string, string> }> = {};
 
