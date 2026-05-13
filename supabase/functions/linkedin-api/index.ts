@@ -2959,6 +2959,7 @@ serve(async (req) => {
           for (const [entityUrn, breakdowns] of Object.entries(result)) {
             finalResult[entityUrn] = breakdowns.map((b: any) => {
               const info = objectiveCampaignInfo[b.objective] || { campaignIds: [], campaignNames: {} };
+              const cInfo = objectiveCreativeInfo[b.objective] || { creativeIds: [], creativeNames: {} };
               return {
                 ...b,
                 ctr: b.impressions > 0 ? parseFloat(((b.clicks / b.impressions) * 100).toFixed(2)) : 0,
@@ -2966,6 +2967,8 @@ serve(async (req) => {
                 cpm: b.impressions > 0 ? parseFloat(((b.spent / b.impressions) * 1000).toFixed(2)) : 0,
                 campaignIds: info.campaignIds,
                 campaignNames: info.campaignNames,
+                creativeIds: cInfo.creativeIds,
+                creativeNames: cInfo.creativeNames,
               };
             });
           }
