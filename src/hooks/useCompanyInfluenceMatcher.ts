@@ -112,8 +112,9 @@ function detectColumns(headers: string[]): { nameCol: string | null; urlCol: str
   };
 }
 
-function buildObjectives(ob: ObjectiveBreakdownItem[]): { objectives: MatchedObjective[]; allNames: string[] } {
+function buildObjectives(ob: ObjectiveBreakdownItem[]): { objectives: MatchedObjective[]; allNames: string[]; allCreativeNames: string[] } {
   const allNames = new Set<string>();
+  const allCreativeNames = new Set<string>();
   const objectives: MatchedObjective[] = ob.map(item => {
     const names: string[] = [];
     if (item.campaignNames) {
@@ -121,6 +122,15 @@ function buildObjectives(ob: ObjectiveBreakdownItem[]): { objectives: MatchedObj
         if (n) {
           names.push(n);
           allNames.add(n);
+        }
+      }
+    }
+    const creatives: string[] = [];
+    if (item.creativeNames) {
+      for (const n of Object.values(item.creativeNames)) {
+        if (n) {
+          creatives.push(n);
+          allCreativeNames.add(n);
         }
       }
     }
@@ -142,9 +152,12 @@ function buildObjectives(ob: ObjectiveBreakdownItem[]): { objectives: MatchedObj
       campaignNames: names,
       campaignIds: item.campaignIds || [],
       campaignNamesMap: item.campaignNames || {},
+      creativeNames: creatives,
+      creativeIds: item.creativeIds || [],
+      creativeNamesMap: item.creativeNames || {},
     };
   });
-  return { objectives, allNames: Array.from(allNames) };
+  return { objectives, allNames: Array.from(allNames), allCreativeNames: Array.from(allCreativeNames) };
 }
 
 export function isMatchedItem(item: MatchedCompany | UnmatchedCompany): item is MatchedCompany {
