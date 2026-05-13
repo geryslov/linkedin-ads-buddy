@@ -1,63 +1,68 @@
 ## Goal
-Show the **creative names** that delivered for each matched company in the Influence Matcher (and Company Demographic table), the same way campaign names are shown today, and include them in the CSV export.
+Show **per-creative impressions / clicks / spend / leads for each matched company** within the existing Influence Matcher drill-down. Numbers will be real (queried from LinkedIn), not estimated.
 
-## Important constraint (worth surfacing up front)
-LinkedIn's analytics API does **not** allow a dual pivot like `MEMBER_COMPANY × CREATIVE` — that combination is what causes the 500 errors we already had to design around. So we **cannot** get true "impressions per creative per company" without one query per (company, creative) pair, which would explode into thousands of calls.
+## Why this works (no dual-pivot violation)
+LinkedIn analytics does not allow `pivots=[MEMBER_COMPANY, CREATIVE]` in one query (that's the 500 we already coded around). But it **does** allow `pivot=MEMBER_COMPANY` + filter `creatives[0]=urn:li:sponsoredCreative:{id}`. So we issue **one MEMBER_COMPANY query per creative**, then on the client we already know which company-row each result belongs to.
 
-What we *can* do cleanly, mirroring the existing campaign-name behaviour:
+## UX
+After the user runs Influence Matcher and matched companies are identified:
 
-- Pull the list of creatives that **delivered (impressions > 0)** within the matched campaigns over the selected date range.
-- Resolve their names via the Creatives API (already done elsewhere in the codebase).
-- Attach those creative names to each objective bucket (so when a company expands, you see the campaigns *and* the creatives that ran inside those campaigns during that period).
+```text
+▼ Acme Corp  (impressions, clicks, spend totals)
+   ▼ Lead Generation  (objective row — already exists)
+       ▼ Campaign A — 12,400 impressions  (already exists)
+           • Creative "Q4 Demo Video"        — 8,200 impr · 14 clicks · $42  ← NEW
+           • Creative "Q4 Carousel"          — 4,200 impr ·  6 clicks · $19  ← NEW
+       ▶ Campaign B
+   ▶ Brand Awareness
+```
 
-This gives "creatives that contributed to this company's results" — not "this creative drove X impressions on this company". If you actually need per-creative per-company numbers, that's a separate, much heavier feature.
+A 4th nesting level under each campaign row, only rendered when that campaign is expanded. Loading skeleton shown until the eager fetch finishes.
+
+## Fetch strategy (Hybrid)
+1. Influence Matcher matches finishes → we know the set of matched company URNs and the set of creative IDs already collected by the existing creative probe (the one added in the previous step).
+2. Kick off background fetch: for each creative ID, run one paginated `pivot=MEMBER_COMPANY` analytics call filtered to `accounts[0]=...` + `creatives[0]=urn:li:sponsoredCreative:{id}` for the date range.
+3. Filter results client-side (or in the edge function) to the matched company URNs only — drop everything else.
+4. Run with concurrency cap of 5 to avoid rate-limit spikes. Show progress (`X / N creatives loaded`) in the matcher header.
+5. Cache results by `(accountId, dateRange, creativeId)` so re-expanding companies/campaigns is instant.
 
 ## Changes
 
-### 1. Edge function — `supabase/functions/linkedin-api/index.ts`, `get_objective_breakdowns` case (~lines 2659–2894)
+### 1. Edge function — `supabase/functions/linkedin-api/index.ts`
+New action `get_creative_company_breakdown`:
+- Input: `{ accountId, dateRange, creativeIds: string[], companyUrns: string[] }`
+- For each `creativeId`: paginated `pivot=MEMBER_COMPANY` analytics call with `creatives[0]=urn:li:sponsoredCreative:{id}` (raw template string per Rest.li rules).
+- Aggregate into `{ [companyUrn]: { [creativeId]: { impressions, clicks, costInLocalCurrency, leads } } }`, dropping company URNs not in the input set.
+- Concurrency cap 5, return all results in one response.
 
-After the activity probe (line ~2729) and before the per-objective MEMBER_COMPANY queries:
+### 2. Hook — `src/hooks/useCompanyDemographic.ts`
+- Add `creativeCompanyCache: Map<string, Map<string, CreativeMetrics>>` keyed by `companyUrn → creativeId`.
+- Add `fetchCreativeCompanyBreakdown(accountId, creativeIds, companyUrns)` that calls the new edge action and populates the cache.
+- Add `loadingCreativeBreakdown` boolean and `creativeBreakdownProgress: { loaded, total }` for UI feedback.
 
-a. **Probe creatives active in range** — single paginated `pivot=CREATIVE` analytics call filtered to `accounts[0]` for the date range, fields `pivotValue,impressions`. Collect `{creativeId → campaignId}` map (we'll need a follow-up `/rest/creatives` lookup for the campaign reference) and the set of creative IDs with impressions > 0.
-
-b. **Resolve creative names** — batch GET `/rest/creatives` (using the existing helper pattern around lines 1431/1604/3087) for the active creative IDs; pull `name` (or fall back to ad type / `Creative {id}`) and the parent `campaign` URN.
-
-c. **Group creatives by objective** — using the campaign→objective map already built at line 2732, produce `objectiveCreativeInfo: { [objective]: { creativeIds: string[], creativeNames: Record<string,string> } }`.
-
-d. **Attach to result** — extend the `finalResult` mapping (line ~2864) so each objective bucket also carries `creativeIds` and `creativeNames` (same shape as `campaignIds` / `campaignNames`).
-
-### 2. Frontend types — `src/hooks/useCompanyDemographic.ts`
-
-Add to `ObjectiveBreakdownItem` (line 23):
-
-```ts
-creativeIds?: string[];
-creativeNames?: Record<string, string>;
-```
-
-No other changes in this file — values flow through the existing breakdown plumbing.
-
-### 3. Influence matcher — `src/hooks/useCompanyInfluenceMatcher.ts`
-
-a. Extend `MatchedObjective` with `creativeNames: string[]` and `creativeNamesMap: Record<string,string>`.
-b. In `buildObjectives`, mirror the campaign-names logic to collect creative names per objective, plus an `allCreativeNames` set on the parent `MatchedCompany`.
-c. In `getExportData`, add a new column `creativeNames` (semicolon-joined, deduped) right after `campaignNames`.
+### 3. Hook — `src/hooks/useCompanyInfluenceMatcher.ts`
+- After matching completes and before/while user explores, trigger `fetchCreativeCompanyBreakdown` with the union of `creativeIds` from matched objectives and the set of matched company URNs.
+- Extend `MatchedCampaign` (or add it if it doesn't exist yet at that level) with `creativeBreakdown: Array<{ creativeId, creativeName, impressions, clicks, spent, leads }>`, populated from the cache once it lands.
+- Extend `getExportData` to include rows or columns for creative-level breakdown.
 
 ### 4. UI — `src/components/dashboard/CompanyInfluenceMatcher.tsx`
+- Under each campaign row in the expanded objective view, render a collapsible list of creatives with metrics (uses existing `Collapsible` primitive).
+- Show a small skeleton + progress text while `loadingCreativeBreakdown` is true.
+- Reuse existing number formatting / chip styles for visual consistency.
 
-Wherever the per-objective campaign names are rendered today (the expanded objective row), render a second labeled list "Creatives" with the same chip/text styling. Keep it collapsed-friendly (truncate to first N + "+X more") if the existing campaign list does that.
-
-### 5. Optional (nice-to-have)
-Surface "Creatives" as a column or inline list on the matched-company row when the user hasn't expanded the objective breakdown — so the CSV and the on-screen view stay aligned.
+### 5. CSV export
+- Add a new export option "Include creative breakdown" — when checked, emits one row per (company × objective × campaign × creative) instead of per (company × objective).
 
 ## Out of scope
-- True per-creative × per-company attribution (would require an explicit drill-down feature and many more API calls).
-- Creative thumbnails / previews (we already have `CreativeThumbnail` if you want it later, but not part of this change).
-- Any change to the company-level totals or the `UNCLASSIFIED` bucket logic — those stay as just-fixed.
+- Per-creative breakdown for **non-matched** companies (covered by hybrid choice).
+- Creative thumbnails inside the breakdown rows (we have `CreativeThumbnail` available if you want it later).
+- Demographics-tab-wide creative drill-down (this plan is Influence Matcher only).
 
 ## Verification
 1. Deploy `linkedin-api`.
-2. Run Company Demographic → Influence Matcher for a known account.
-3. Expand a matched company → confirm each objective lists both campaign names *and* creative names.
-4. Export CSV → confirm new `creativeNames` column populated.
-5. Edge logs should show `[get_objective_breakdowns] Creative probe: N creatives active`.
+2. Open Influence Matcher → run a match for an account with several active creatives.
+3. Header shows `Loading creative breakdown: 12 / 47…` then disappears.
+4. Expand a matched company → expand an objective → expand a campaign → confirm creatives list with non-zero metrics.
+5. Confirm sum of per-creative impressions for a (company, campaign) ≈ campaign-level number for that company (small drift OK due to LinkedIn rounding).
+6. Edge logs show: `[get_creative_company_breakdown] N creatives × M companies, concurrency=5`.
+7. Export CSV with new option enabled → confirm extra rows.
