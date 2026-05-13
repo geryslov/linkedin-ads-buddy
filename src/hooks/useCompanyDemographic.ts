@@ -540,6 +540,10 @@ export function useCompanyDemographic(accessToken: string | null) {
     fetchObjectiveBreakdowns,
     objectiveBreakdownCache,
     isLoadingObjectiveBreakdowns,
+    creativeCompanyCache,
+    fetchCreativeCompanyBreakdown,
+    loadingCreativeBreakdown,
+    creativeBreakdownProgress,
     totalCompanies,
     loadedCount,
   };
