@@ -355,7 +355,19 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
           }
 
           for (const camp of campaigns) {
-            const creatives = creativeByCampaign.get(camp.campaignName) || [];
+            // Per-company creatives for this campaign
+            const objMatched = m.objectives.find(o => o.objective === obj.objective);
+            const creativeCampaignMap = objMatched?.creativeCampaignMap || {};
+            const creativeNamesMap = objMatched?.creativeNamesMap || {};
+            const companyCreatives = creativeCompanyCache.get(li.entityUrn);
+            const creatives = objMatched?.creativeIds
+              .filter(cid => creativeCampaignMap[cid] === camp.campaignId)
+              .map(cid => ({
+                creativeId: cid,
+                creativeName: creativeNamesMap[cid] || `Creative ${cid}`,
+                metrics: companyCreatives?.get(cid),
+              }))
+              .filter(c => c.metrics && c.metrics.impressions > 0) || [];
 
             rows.push({
               level: 'Campaign',
@@ -385,6 +397,7 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
             }
 
             for (const cr of creatives) {
+              const cm = cr.metrics!;
               rows.push({
                 level: 'Creative',
                 uploadedCompany: m.uploaded.name,
@@ -392,20 +405,20 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
                 website: li.website || m.uploaded.url || '',
                 objective: fmtObj(obj.objective),
                 campaign: camp.campaignName,
-                creative: cr.creativeName || cr.creativeId,
-                impressions: num(cr.impressions),
-                clicks: num(cr.clicks),
-                landingPageClicks: '',
-                spend: cur(cr.spent),
-                leads: num(cr.leads),
-                engagements: '',
+                creative: cr.creativeName,
+                impressions: num(cm.impressions),
+                clicks: num(cm.clicks),
+                landingPageClicks: num(cm.landingPageClicks),
+                spend: cur(cm.spent),
+                leads: num(cm.leads),
+                engagements: num(cm.engagements),
                 likes: '',
                 comments: '',
                 reactions: '',
                 shares: '',
-                ctr: cr.ctr.toFixed(2),
-                cpc: cur(cr.cpc),
-                cpm: cur(cr.cpm),
+                ctr: cm.ctr.toFixed(2),
+                cpc: cur(cm.cpc),
+                cpm: cur(cm.cpm),
               });
             }
           }
