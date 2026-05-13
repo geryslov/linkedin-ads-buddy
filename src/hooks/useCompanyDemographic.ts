@@ -39,7 +39,21 @@ export interface ObjectiveBreakdownItem {
   campaignNames?: Record<string, string>;
   creativeIds?: string[];
   creativeNames?: Record<string, string>;
+  creativeCampaignMap?: Record<string, string>;
   campaignBreakdown?: CampaignBreakdownItem[];
+}
+
+export interface CreativeCompanyMetrics {
+  impressions: number;
+  clicks: number;
+  landingPageClicks: number;
+  spent: number;
+  leads: number;
+  engagements: number;
+  ctr: number;
+  cpc: number;
+  cpm: number;
+  costPerLead: number;
 }
 
 export interface CompanyDemographicItem {
@@ -121,6 +135,10 @@ export function useCompanyDemographic(accessToken: string | null) {
   const [objectiveBreakdownCache, setObjectiveBreakdownCache] = useState<Map<string, ObjectiveBreakdownItem[]>>(new Map());
   const [isLoadingObjectiveBreakdowns, setIsLoadingObjectiveBreakdowns] = useState(false);
   const [objectiveBreakdownsFetched, setObjectiveBreakdownsFetched] = useState(false);
+  // Per-creative-per-company breakdown
+  const [creativeCompanyCache, setCreativeCompanyCache] = useState<Map<string, Map<string, CreativeCompanyMetrics>>>(new Map());
+  const [loadingCreativeBreakdown, setLoadingCreativeBreakdown] = useState(false);
+  const [creativeBreakdownProgress, setCreativeBreakdownProgress] = useState<{ loaded: number; total: number } | null>(null);
   // Progressive loading state
   const [totalCompanies, setTotalCompanies] = useState<number | null>(null);
   const [loadedCount, setLoadedCount] = useState(0);
@@ -286,6 +304,9 @@ export function useCompanyDemographic(accessToken: string | null) {
               cpm: b.cpm || 0,
               campaignIds: b.campaignIds || [],
               campaignNames: b.campaignNames || {},
+              creativeIds: b.creativeIds || [],
+              creativeNames: b.creativeNames || {},
+              creativeCampaignMap: b.creativeCampaignMap || {},
             })));
           }
           
@@ -419,6 +440,9 @@ export function useCompanyDemographic(accessToken: string | null) {
           cpm: b.cpm || 0,
           campaignIds: b.campaignIds || [],
           campaignNames: b.campaignNames || {},
+          creativeIds: b.creativeIds || [],
+          creativeNames: b.creativeNames || {},
+          creativeCampaignMap: b.creativeCampaignMap || {},
         })));
       }
       
@@ -432,6 +456,46 @@ export function useCompanyDemographic(accessToken: string | null) {
       setIsLoadingObjectiveBreakdowns(false);
     }
   }, [accessToken, dateRange, selectedCampaignIds, objectiveBreakdownsFetched, isLoadingObjectiveBreakdowns, objectiveBreakdownCache.size]);
+
+  // Eager fetch per-creative × per-company breakdown for matched companies
+  const creativeBreakdownReqRef = useRef<string>('');
+  const fetchCreativeCompanyBreakdown = useCallback(async (
+    accountId: string,
+    creativeIds: string[],
+    companyUrns: string[],
+  ) => {
+    if (!accessToken || !accountId || creativeIds.length === 0 || companyUrns.length === 0) return;
+    const reqKey = `${accountId}::${dateRange.start}::${dateRange.end}::${creativeIds.slice().sort().join(',')}::${companyUrns.slice().sort().join(',')}`;
+    if (reqKey === creativeBreakdownReqRef.current) return;
+    creativeBreakdownReqRef.current = reqKey;
+
+    setLoadingCreativeBreakdown(true);
+    setCreativeBreakdownProgress({ loaded: 0, total: creativeIds.length });
+    try {
+      const { data, error: fetchError } = await supabase.functions.invoke('linkedin-api', {
+        body: {
+          action: 'get_creative_company_breakdown',
+          accessToken,
+          params: { accountId, dateRange, creativeIds, companyUrns },
+        },
+      });
+      if (fetchError) throw fetchError;
+      const breakdowns = (data?.breakdowns || {}) as Record<string, Record<string, CreativeCompanyMetrics>>;
+      const next = new Map<string, Map<string, CreativeCompanyMetrics>>();
+      for (const [companyUrn, byCreative] of Object.entries(breakdowns)) {
+        const inner = new Map<string, CreativeCompanyMetrics>();
+        for (const [cid, m] of Object.entries(byCreative)) inner.set(cid, m);
+        next.set(companyUrn, inner);
+      }
+      setCreativeCompanyCache(next);
+      setCreativeBreakdownProgress({ loaded: creativeIds.length, total: creativeIds.length });
+      console.log(`Creative-company breakdown loaded: ${next.size} companies`);
+    } catch (err: any) {
+      console.error('Fetch creative-company breakdown error:', err);
+    } finally {
+      setLoadingCreativeBreakdown(false);
+    }
+  }, [accessToken, dateRange]);
 
   const totals = useMemo(() => {
     return companyData.reduce(
@@ -476,6 +540,10 @@ export function useCompanyDemographic(accessToken: string | null) {
     fetchObjectiveBreakdowns,
     objectiveBreakdownCache,
     isLoadingObjectiveBreakdowns,
+    creativeCompanyCache,
+    fetchCreativeCompanyBreakdown,
+    loadingCreativeBreakdown,
+    creativeBreakdownProgress,
     totalCompanies,
     loadedCount,
   };

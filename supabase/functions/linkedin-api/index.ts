@@ -2855,13 +2855,14 @@ serve(async (req) => {
           for (const [obj, ids] of objectiveToCampaigns.entries()) {
             for (const id of ids) campaignIdToObjective.set(id, obj);
           }
-          // objective -> { creativeIds, creativeNames }
-          const objectiveCreativeInfo: Record<string, { creativeIds: string[]; creativeNames: Record<string, string> }> = {};
+          // objective -> { creativeIds, creativeNames, creativeCampaignMap }
+          const objectiveCreativeInfo: Record<string, { creativeIds: string[]; creativeNames: Record<string, string>; creativeCampaignMap: Record<string, string> }> = {};
           for (const [cid, info] of creativeIdToInfo.entries()) {
             const obj = campaignIdToObjective.get(info.campaignId) || 'UNCLASSIFIED';
-            if (!objectiveCreativeInfo[obj]) objectiveCreativeInfo[obj] = { creativeIds: [], creativeNames: {} };
+            if (!objectiveCreativeInfo[obj]) objectiveCreativeInfo[obj] = { creativeIds: [], creativeNames: {}, creativeCampaignMap: {} };
             objectiveCreativeInfo[obj].creativeIds.push(cid);
             objectiveCreativeInfo[obj].creativeNames[cid] = info.name;
+            if (info.campaignId) objectiveCreativeInfo[obj].creativeCampaignMap[cid] = info.campaignId;
           }
 
           // Step 3: Query per objective group in parallel (avoids 150s edge timeout)
@@ -2959,7 +2960,7 @@ serve(async (req) => {
           for (const [entityUrn, breakdowns] of Object.entries(result)) {
             finalResult[entityUrn] = breakdowns.map((b: any) => {
               const info = objectiveCampaignInfo[b.objective] || { campaignIds: [], campaignNames: {} };
-              const cInfo = objectiveCreativeInfo[b.objective] || { creativeIds: [], creativeNames: {} };
+              const cInfo = objectiveCreativeInfo[b.objective] || { creativeIds: [], creativeNames: {}, creativeCampaignMap: {} };
               return {
                 ...b,
                 ctr: b.impressions > 0 ? parseFloat(((b.clicks / b.impressions) * 100).toFixed(2)) : 0,
@@ -2969,6 +2970,7 @@ serve(async (req) => {
                 campaignNames: info.campaignNames,
                 creativeIds: cInfo.creativeIds,
                 creativeNames: cInfo.creativeNames,
+                creativeCampaignMap: cInfo.creativeCampaignMap,
               };
             });
           }
@@ -2988,6 +2990,107 @@ serve(async (req) => {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           });
         }
+      }
+
+      case 'get_creative_company_breakdown': {
+        // Per-creative MEMBER_COMPANY pivot, one query per creative, optionally filtered to companyUrns.
+        const { accountId, dateRange, creativeIds: rawCreativeIds, companyUrns } = params || {};
+        const creativeIds: string[] = Array.isArray(rawCreativeIds) ? rawCreativeIds.filter((x: any) => typeof x === 'string' && x) : [];
+        const companyUrnSet: Set<string> | undefined = Array.isArray(companyUrns) && companyUrns.length > 0 ? new Set(companyUrns as string[]) : undefined;
+        const startDate = dateRange?.start || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        const endDate = dateRange?.end || new Date().toISOString().split('T')[0];
+        const [startYear, startMonth, startDay] = startDate.split('-').map(Number);
+        const [endYear, endMonth, endDay] = endDate.split('-').map(Number);
+
+        if (!accountId || creativeIds.length === 0) {
+          return new Response(JSON.stringify({ breakdowns: {} }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+
+        console.log(`[get_creative_company_breakdown] ${creativeIds.length} creatives × ${companyUrnSet ? companyUrnSet.size : 'all'} companies, concurrency=5`);
+
+        const result: Record<string, Record<string, any>> = {};
+
+        const fetchOne = async (creativeId: string) => {
+          try {
+            const pageSize = 10000;
+            let start = 0;
+            let hasMore = true;
+            while (hasMore && start <= 100000) {
+              const qp = new URLSearchParams();
+              qp.set('q', 'analytics');
+              qp.set('dateRange.start.day', String(startDay));
+              qp.set('dateRange.start.month', String(startMonth));
+              qp.set('dateRange.start.year', String(startYear));
+              qp.set('dateRange.end.day', String(endDay));
+              qp.set('dateRange.end.month', String(endMonth));
+              qp.set('dateRange.end.year', String(endYear));
+              qp.set('timeGranularity', 'ALL');
+              qp.set('pivot', 'MEMBER_COMPANY');
+              qp.set('accounts[0]', `urn:li:sponsoredAccount:${accountId}`);
+              qp.set('creatives[0]', `urn:li:sponsoredCreative:${creativeId}`);
+              qp.set('fields', 'pivotValue,impressions,clicks,landingPageClicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions,totalEngagements');
+              qp.set('count', String(pageSize));
+              qp.set('start', String(start));
+              const resp = await fetch(`https://api.linkedin.com/v2/adAnalyticsV2?${qp.toString()}`, {
+                headers: { 'Authorization': `Bearer ${accessToken}` },
+              });
+              if (!resp.ok) {
+                console.log(`[get_creative_company_breakdown] Creative ${creativeId} failed: ${resp.status}`);
+                hasMore = false;
+                break;
+              }
+              const data = await resp.json();
+              const els = data.elements || [];
+              for (const el of els) {
+                const companyUrn = el.pivotValue || '';
+                if (!companyUrn) continue;
+                if (companyUrnSet && !companyUrnSet.has(companyUrn)) continue;
+                const impressions = el.impressions || 0;
+                const clicks = el.clicks || 0;
+                const spent = parseFloat(el.costInLocalCurrency || '0');
+                const leads = (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
+                if (impressions === 0 && clicks === 0 && spent === 0 && leads === 0) continue;
+                if (!result[companyUrn]) result[companyUrn] = {};
+                result[companyUrn][creativeId] = {
+                  impressions,
+                  clicks,
+                  landingPageClicks: el.landingPageClicks || 0,
+                  spent: parseFloat(spent.toFixed(2)),
+                  leads,
+                  engagements: el.totalEngagements || 0,
+                  ctr: impressions > 0 ? parseFloat(((clicks / impressions) * 100).toFixed(2)) : 0,
+                  cpc: clicks > 0 ? parseFloat((spent / clicks).toFixed(2)) : 0,
+                  cpm: impressions > 0 ? parseFloat(((spent / impressions) * 1000).toFixed(2)) : 0,
+                  costPerLead: leads > 0 ? parseFloat((spent / leads).toFixed(2)) : 0,
+                };
+              }
+              const paging = data.paging;
+              if (els.length === 0) hasMore = false;
+              else if (paging?.total && (start + els.length) < paging.total) start += els.length;
+              else if (!paging?.total && els.length >= pageSize) start += els.length;
+              else hasMore = false;
+            }
+          } catch (e) {
+            console.log(`[get_creative_company_breakdown] Creative ${creativeId} error:`, e);
+          }
+        };
+
+        const concurrency = 5;
+        let idx = 0;
+        const workers = Array.from({ length: Math.min(concurrency, creativeIds.length) }, async () => {
+          while (idx < creativeIds.length) {
+            const myIdx = idx++;
+            await fetchOne(creativeIds[myIdx]);
+          }
+        });
+        await Promise.all(workers);
+
+        console.log(`[get_creative_company_breakdown] Complete: ${Object.keys(result).length} companies have creative-level data`);
+        return new Response(JSON.stringify({ breakdowns: result }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
       }
 
       case 'get_company_campaign_breakdown': {

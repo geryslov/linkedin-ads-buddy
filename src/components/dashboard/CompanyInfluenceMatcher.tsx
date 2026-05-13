@@ -98,6 +98,10 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
     fetchObjectiveBreakdowns,
     objectiveBreakdownCache,
     isLoadingObjectiveBreakdowns,
+    creativeCompanyCache,
+    fetchCreativeCompanyBreakdown,
+    loadingCreativeBreakdown,
+    creativeBreakdownProgress,
   } = useCompanyDemographic(accessToken);
 
   const {
@@ -189,6 +193,20 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
     prevMatchedUrnsRef.current = urnsKey;
     fetchObjectiveBreakdowns(selectedAccount, matched.map(m => m.linkedin.entityUrn), true);
   }, [selectedAccount, matched, fetchObjectiveBreakdowns]);
+
+  // After objectives load for matched companies, eagerly fetch per-creative × per-company breakdown
+  useEffect(() => {
+    if (!selectedAccount || matched.length === 0 || isLoadingObjectiveBreakdowns) return;
+    const matchedUrns = matched.map(m => m.linkedin.entityUrn);
+    const allCreativeIds = new Set<string>();
+    for (const m of matched) {
+      for (const obj of m.objectives) {
+        for (const cid of obj.creativeIds) allCreativeIds.add(cid);
+      }
+    }
+    if (allCreativeIds.size === 0) return;
+    fetchCreativeCompanyBreakdown(selectedAccount, Array.from(allCreativeIds), matchedUrns);
+  }, [selectedAccount, matched, isLoadingObjectiveBreakdowns, fetchCreativeCompanyBreakdown]);
 
   const handleFetch = useCallback(() => {
     if (selectedAccount) {
@@ -337,7 +355,19 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
           }
 
           for (const camp of campaigns) {
-            const creatives = creativeByCampaign.get(camp.campaignName) || [];
+            // Per-company creatives for this campaign
+            const objMatched = m.objectives.find(o => o.objective === obj.objective);
+            const creativeCampaignMap = objMatched?.creativeCampaignMap || {};
+            const creativeNamesMap = objMatched?.creativeNamesMap || {};
+            const companyCreatives = creativeCompanyCache.get(li.entityUrn);
+            const creatives = objMatched?.creativeIds
+              .filter(cid => creativeCampaignMap[cid] === camp.campaignId)
+              .map(cid => ({
+                creativeId: cid,
+                creativeName: creativeNamesMap[cid] || `Creative ${cid}`,
+                metrics: companyCreatives?.get(cid),
+              }))
+              .filter(c => c.metrics && c.metrics.impressions > 0) || [];
 
             rows.push({
               level: 'Campaign',
@@ -367,6 +397,7 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
             }
 
             for (const cr of creatives) {
+              const cm = cr.metrics!;
               rows.push({
                 level: 'Creative',
                 uploadedCompany: m.uploaded.name,
@@ -374,20 +405,20 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
                 website: li.website || m.uploaded.url || '',
                 objective: fmtObj(obj.objective),
                 campaign: camp.campaignName,
-                creative: cr.creativeName || cr.creativeId,
-                impressions: num(cr.impressions),
-                clicks: num(cr.clicks),
-                landingPageClicks: '',
-                spend: cur(cr.spent),
-                leads: num(cr.leads),
-                engagements: '',
+                creative: cr.creativeName,
+                impressions: num(cm.impressions),
+                clicks: num(cm.clicks),
+                landingPageClicks: num(cm.landingPageClicks),
+                spend: cur(cm.spent),
+                leads: num(cm.leads),
+                engagements: num(cm.engagements),
                 likes: '',
                 comments: '',
                 reactions: '',
                 shares: '',
-                ctr: cr.ctr.toFixed(2),
-                cpc: cur(cr.cpc),
-                cpm: cur(cr.cpm),
+                ctr: cm.ctr.toFixed(2),
+                cpc: cur(cm.cpc),
+                cpm: cur(cm.cpm),
               });
             }
           }
@@ -420,7 +451,7 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
     } finally {
       setIsExporting(false);
     }
-  }, [selectedAccount, matched, campaignBreakdownCache, objectiveBreakdownCache, fetchCampaignBreakdown, creativeByCampaign]);
+  }, [selectedAccount, matched, campaignBreakdownCache, objectiveBreakdownCache, fetchCampaignBreakdown, creativeCompanyCache]);
 
   const toggleCompany = useCallback((key: string) => {
     setExpandedCompanies(prev => {
@@ -655,7 +686,18 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
     return campaigns.map((camp, cIdx) => {
       const campKey = `${objKey}::${cIdx}`;
       const isCampExpanded = expandedCampaigns.has(campKey);
-      const creatives = creativeByCampaign.get(camp.campaignName) || [];
+
+      // Per-company-per-creative metrics for this campaign
+      const companyCreativeMap = creativeCompanyCache.get(entityUrn);
+      const creativesForCampaign = obj.creativeIds
+        .filter(cid => obj.creativeCampaignMap[cid] === camp.campaignId)
+        .map(cid => ({
+          creativeId: cid,
+          creativeName: obj.creativeNamesMap[cid] || `Creative ${cid}`,
+          metrics: companyCreativeMap?.get(cid),
+        }))
+        .filter(c => c.metrics && c.metrics.impressions > 0);
+
       const campCpl = camp.leads > 0 ? camp.spent / camp.leads : 0;
 
       return (
@@ -667,7 +709,7 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
             onClick={(e) => { e.stopPropagation(); toggleCampaign(campKey); }}
           >
             <td className="w-8 px-3 py-2 pl-8">
-              {creatives.length > 0 && (
+              {creativesForCampaign.length > 0 && (
                 isCampExpanded
                   ? <ChevronDown className="h-3 w-3 text-muted-foreground" />
                   : <ChevronRight className="h-3 w-3 text-muted-foreground" />
@@ -679,11 +721,13 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
                 <span className="text-xs truncate max-w-[220px]" title={camp.campaignName}>
                   {camp.campaignName}
                 </span>
-                {creatives.length > 0 && (
+                {creativesForCampaign.length > 0 ? (
                   <span className="text-[10px] text-muted-foreground">
-                    {creatives.length} creative{creatives.length !== 1 ? 's' : ''}
+                    {creativesForCampaign.length} creative{creativesForCampaign.length !== 1 ? 's' : ''}
                   </span>
-                )}
+                ) : loadingCreativeBreakdown ? (
+                  <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
+                ) : null}
               </div>
             </td>
             <MetricCell value={fmtNum(camp.impressions)} className="text-muted-foreground" />
@@ -696,31 +740,40 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
             <td />
           </tr>
 
-          {/* Creative rows under campaign */}
-          {isCampExpanded && creatives.map((cr, crIdx) => (
-            <tr key={`${campKey}::cr${crIdx}`} className="border-l-4 border-l-purple-500/10" onClick={(e) => e.stopPropagation()}>
-              <td className="w-8" />
-              <td className="px-3 py-1.5" colSpan={2}>
-                <div className="flex items-center gap-2 pl-14">
-                  <ImageIcon className="h-3 w-3 text-purple-400 shrink-0" />
-                  <span className="text-[11px] text-muted-foreground truncate max-w-[200px]" title={cr.creativeName}>
-                    {cr.creativeName}
-                  </span>
-                  <Badge variant="outline" className="text-[9px] px-1 py-0 font-normal">
-                    {cr.type.replace(/_/g, ' ')}
-                  </Badge>
-                </div>
+          {/* Per-company creative rows under campaign */}
+          {isCampExpanded && creativesForCampaign.map((cr, crIdx) => {
+            const m = cr.metrics!;
+            return (
+              <tr key={`${campKey}::cr${crIdx}`} className="border-l-4 border-l-purple-500/10" onClick={(e) => e.stopPropagation()}>
+                <td className="w-8" />
+                <td className="px-3 py-1.5" colSpan={2}>
+                  <div className="flex items-center gap-2 pl-14">
+                    <ImageIcon className="h-3 w-3 text-purple-400 shrink-0" />
+                    <span className="text-[11px] text-muted-foreground truncate max-w-[220px]" title={cr.creativeName}>
+                      {cr.creativeName}
+                    </span>
+                  </div>
+                </td>
+                <MetricCell value={fmtNum(m.impressions)} className="text-muted-foreground/70" />
+                <MetricCell value={fmtNum(m.clicks)} className="text-muted-foreground/70" />
+                <MetricCell value={fmtCur(m.spent)} className="text-muted-foreground/70" />
+                <MetricCell value={m.leads > 0 ? fmtNum(m.leads) : '—'} className="text-muted-foreground/70" />
+                <MetricCell value={fmtNum(m.engagements)} className="text-muted-foreground/70" />
+                <MetricCell value={`${m.ctr.toFixed(2)}%`} className="text-muted-foreground/70" />
+                <MetricCell value={m.costPerLead > 0 ? fmtCur(m.costPerLead) : '—'} className="text-muted-foreground/70" />
+                <td />
+              </tr>
+            );
+          })}
+          {isCampExpanded && creativesForCampaign.length === 0 && (
+            <tr key={`${campKey}::cr-empty`} className="border-l-4 border-l-purple-500/10">
+              <td colSpan={12} className="px-3 py-2 pl-24 text-[11px] text-muted-foreground italic">
+                {loadingCreativeBreakdown
+                  ? 'Loading per-creative breakdown for this company…'
+                  : 'No creative-level data for this company in the date range.'}
               </td>
-              <MetricCell value={fmtNum(cr.impressions)} className="text-muted-foreground/70" />
-              <MetricCell value={fmtNum(cr.clicks)} className="text-muted-foreground/70" />
-              <MetricCell value={fmtCur(cr.spent)} className="text-muted-foreground/70" />
-              <MetricCell value={cr.leads > 0 ? fmtNum(cr.leads) : '—'} className="text-muted-foreground/70" />
-              <MetricCell value="—" className="text-muted-foreground/70" />
-              <MetricCell value={`${cr.ctr.toFixed(2)}%`} className="text-muted-foreground/70" />
-              <MetricCell value={cr.costPerLead > 0 ? fmtCur(cr.costPerLead) : '—'} className="text-muted-foreground/70" />
-              <td />
             </tr>
-          ))}
+          )}
         </>
       );
     });
@@ -756,6 +809,12 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
                 <Badge variant="outline" className="animate-pulse text-[10px]">
                   <Loader2 className="h-3 w-3 mr-1 animate-spin" />
                   Objectives...
+                </Badge>
+              )}
+              {loadingCreativeBreakdown && (
+                <Badge variant="outline" className="animate-pulse text-[10px]">
+                  <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                  Creatives per company{creativeBreakdownProgress ? ` (${creativeBreakdownProgress.total})` : ''}…
                 </Badge>
               )}
               {!isLoadingLinkedIn && companyData.length > 0 && (
