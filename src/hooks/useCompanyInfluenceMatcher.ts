@@ -30,6 +30,7 @@ export interface MatchedObjective {
   creativeNames: string[];
   creativeIds: string[];
   creativeNamesMap: Record<string, string>;
+  creativeCampaignMap: Record<string, string>;
 }
 
 export interface MatchedCompany {
@@ -156,6 +157,7 @@ function buildObjectives(ob: ObjectiveBreakdownItem[]): { objectives: MatchedObj
       creativeNames: creatives,
       creativeIds: item.creativeIds || [],
       creativeNamesMap: item.creativeNames || {},
+      creativeCampaignMap: item.creativeCampaignMap || {},
     };
   });
   return { objectives, allNames: Array.from(allNames), allCreativeNames: Array.from(allCreativeNames) };
