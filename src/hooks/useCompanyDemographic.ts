@@ -304,6 +304,9 @@ export function useCompanyDemographic(accessToken: string | null) {
               cpm: b.cpm || 0,
               campaignIds: b.campaignIds || [],
               campaignNames: b.campaignNames || {},
+              creativeIds: b.creativeIds || [],
+              creativeNames: b.creativeNames || {},
+              creativeCampaignMap: b.creativeCampaignMap || {},
             })));
           }
           
@@ -437,6 +440,9 @@ export function useCompanyDemographic(accessToken: string | null) {
           cpm: b.cpm || 0,
           campaignIds: b.campaignIds || [],
           campaignNames: b.campaignNames || {},
+          creativeIds: b.creativeIds || [],
+          creativeNames: b.creativeNames || {},
+          creativeCampaignMap: b.creativeCampaignMap || {},
         })));
       }
       
