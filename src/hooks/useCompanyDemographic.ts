@@ -37,6 +37,8 @@ export interface ObjectiveBreakdownItem {
   cpm: number;
   campaignIds?: string[];
   campaignNames?: Record<string, string>;
+  creativeIds?: string[];
+  creativeNames?: Record<string, string>;
   campaignBreakdown?: CampaignBreakdownItem[];
 }
 
