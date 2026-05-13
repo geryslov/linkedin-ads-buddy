@@ -2684,56 +2684,87 @@ serve(async (req) => {
           }
           console.log(`[get_objective_breakdowns] Fetched ${allCampaigns.length} campaigns`);
 
-          // Step 1.5: Find campaigns that actually delivered in the date range
+          // Step 1.5: Find campaigns that actually delivered in the date range (paginated)
           const campaignsActiveInRange = new Set<string>();
           try {
-            const actQp = new URLSearchParams();
-            actQp.set('q', 'analytics');
-            actQp.set('dateRange.start.day', String(startDay));
-            actQp.set('dateRange.start.month', String(startMonth));
-            actQp.set('dateRange.start.year', String(startYear));
-            actQp.set('dateRange.end.day', String(endDay));
-            actQp.set('dateRange.end.month', String(endMonth));
-            actQp.set('dateRange.end.year', String(endYear));
-            actQp.set('timeGranularity', 'ALL');
-            actQp.set('pivot', 'CAMPAIGN');
-            actQp.set('accounts[0]', `urn:li:sponsoredAccount:${accountId}`);
-            actQp.set('fields', 'pivotValue,impressions');
-            actQp.set('count', '10000');
-            const actResp = await fetch(`https://api.linkedin.com/v2/adAnalyticsV2?${actQp.toString()}`, {
-              headers: { 'Authorization': `Bearer ${accessToken}` },
-            });
-            if (actResp.ok) {
+            const actPageSize = 10000;
+            let actStart = 0;
+            let actHasMore = true;
+            while (actHasMore && actStart <= 100000) {
+              const actQp = new URLSearchParams();
+              actQp.set('q', 'analytics');
+              actQp.set('dateRange.start.day', String(startDay));
+              actQp.set('dateRange.start.month', String(startMonth));
+              actQp.set('dateRange.start.year', String(startYear));
+              actQp.set('dateRange.end.day', String(endDay));
+              actQp.set('dateRange.end.month', String(endMonth));
+              actQp.set('dateRange.end.year', String(endYear));
+              actQp.set('timeGranularity', 'ALL');
+              actQp.set('pivot', 'CAMPAIGN');
+              actQp.set('accounts[0]', `urn:li:sponsoredAccount:${accountId}`);
+              actQp.set('fields', 'pivotValue,impressions');
+              actQp.set('count', String(actPageSize));
+              actQp.set('start', String(actStart));
+              const actResp = await fetch(`https://api.linkedin.com/v2/adAnalyticsV2?${actQp.toString()}`, {
+                headers: { 'Authorization': `Bearer ${accessToken}` },
+              });
+              if (!actResp.ok) { actHasMore = false; break; }
               const actData = await actResp.json();
-              for (const el of (actData.elements || [])) {
+              const actEls = actData.elements || [];
+              for (const el of actEls) {
                 if ((el.impressions || 0) > 0 && el.pivotValue) {
                   const m = el.pivotValue.match(/:(\d+)$/);
                   if (m) campaignsActiveInRange.add(m[1]);
                 }
               }
-              console.log(`[get_objective_breakdowns] ${campaignsActiveInRange.size} campaigns active in range`);
+              const paging = actData.paging;
+              if (actEls.length === 0) { actHasMore = false; }
+              else if (paging?.total && (actStart + actEls.length) < paging.total) { actStart += actEls.length; }
+              else if (!paging?.total && actEls.length >= actPageSize) { actStart += actEls.length; }
+              else { actHasMore = false; }
             }
+            console.log(`[get_objective_breakdowns] Activity probe paged: ${campaignsActiveInRange.size} campaigns active in range`);
           } catch (e) {
             console.log('[get_objective_breakdowns] Campaign activity query failed, using all campaigns');
           }
 
-          // Step 2: Group campaigns by objective (only those active in the date range)
+          // Step 2: Group campaigns by objective. Keep UNCLASSIFIED bucket so deleted/objectiveless campaigns still count.
           const objectiveToCampaigns = new Map<string, string[]>();
           const campaignNameMap = new Map<string, string>();
           const filteredCampaignSet = filterCampaignIds && filterCampaignIds.length > 0 ? new Set(filterCampaignIds.map(String)) : null;
+          const seenCampaignIds = new Set<string>();
 
           for (const campaign of allCampaigns) {
-            const objective = campaign.objectiveType || campaign.type || 'UNKNOWN';
             const campaignId = campaign.id?.toString() || '';
+            if (!campaignId) continue;
+            // Bucket by objectiveType, fall back to type, fall back to UNCLASSIFIED
+            const objective = campaign.objectiveType || campaign.type || 'UNCLASSIFIED';
             const campaignName = campaign.name || `Campaign ${campaignId}`;
-            if (!campaignId || objective === 'UNKNOWN') continue;
             if (filteredCampaignSet && !filteredCampaignSet.has(campaignId)) continue;
             // Skip campaigns with no deliveries in the selected time frame
             if (campaignsActiveInRange.size > 0 && !campaignsActiveInRange.has(campaignId)) continue;
             campaignNameMap.set(campaignId, campaignName);
+            seenCampaignIds.add(campaignId);
             const existing = objectiveToCampaigns.get(objective) || [];
             existing.push(campaignId);
             objectiveToCampaigns.set(objective, existing);
+          }
+
+          // Step 2.5: Backfill campaigns that delivered impressions but aren't in /adCampaignsV2
+          // (deleted/archived). Bucket them under UNCLASSIFIED so their company impressions show up.
+          if (campaignsActiveInRange.size > 0) {
+            const orphanIds: string[] = [];
+            for (const id of campaignsActiveInRange) {
+              if (seenCampaignIds.has(id)) continue;
+              if (filteredCampaignSet && !filteredCampaignSet.has(id)) continue;
+              orphanIds.push(id);
+              campaignNameMap.set(id, `Campaign ${id}`);
+            }
+            if (orphanIds.length > 0) {
+              const existing = objectiveToCampaigns.get('UNCLASSIFIED') || [];
+              objectiveToCampaigns.set('UNCLASSIFIED', existing.concat(orphanIds));
+              console.log(`[get_objective_breakdowns] Backfilled ${orphanIds.length} orphan campaigns into UNCLASSIFIED`);
+            }
           }
 
           const uniqueObjectives = Array.from(objectiveToCampaigns.keys());
