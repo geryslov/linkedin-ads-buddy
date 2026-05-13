@@ -98,6 +98,10 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
     fetchObjectiveBreakdowns,
     objectiveBreakdownCache,
     isLoadingObjectiveBreakdowns,
+    creativeCompanyCache,
+    fetchCreativeCompanyBreakdown,
+    loadingCreativeBreakdown,
+    creativeBreakdownProgress,
   } = useCompanyDemographic(accessToken);
 
   const {
