@@ -673,7 +673,18 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
     return campaigns.map((camp, cIdx) => {
       const campKey = `${objKey}::${cIdx}`;
       const isCampExpanded = expandedCampaigns.has(campKey);
-      const creatives = creativeByCampaign.get(camp.campaignName) || [];
+
+      // Per-company-per-creative metrics for this campaign
+      const companyCreativeMap = creativeCompanyCache.get(entityUrn);
+      const creativesForCampaign = obj.creativeIds
+        .filter(cid => obj.creativeCampaignMap[cid] === camp.campaignId)
+        .map(cid => ({
+          creativeId: cid,
+          creativeName: obj.creativeNamesMap[cid] || `Creative ${cid}`,
+          metrics: companyCreativeMap?.get(cid),
+        }))
+        .filter(c => c.metrics && c.metrics.impressions > 0);
+
       const campCpl = camp.leads > 0 ? camp.spent / camp.leads : 0;
 
       return (
@@ -685,7 +696,7 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
             onClick={(e) => { e.stopPropagation(); toggleCampaign(campKey); }}
           >
             <td className="w-8 px-3 py-2 pl-8">
-              {creatives.length > 0 && (
+              {creativesForCampaign.length > 0 && (
                 isCampExpanded
                   ? <ChevronDown className="h-3 w-3 text-muted-foreground" />
                   : <ChevronRight className="h-3 w-3 text-muted-foreground" />
@@ -697,11 +708,13 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
                 <span className="text-xs truncate max-w-[220px]" title={camp.campaignName}>
                   {camp.campaignName}
                 </span>
-                {creatives.length > 0 && (
+                {creativesForCampaign.length > 0 ? (
                   <span className="text-[10px] text-muted-foreground">
-                    {creatives.length} creative{creatives.length !== 1 ? 's' : ''}
+                    {creativesForCampaign.length} creative{creativesForCampaign.length !== 1 ? 's' : ''}
                   </span>
-                )}
+                ) : loadingCreativeBreakdown ? (
+                  <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
+                ) : null}
               </div>
             </td>
             <MetricCell value={fmtNum(camp.impressions)} className="text-muted-foreground" />
@@ -714,31 +727,40 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
             <td />
           </tr>
 
-          {/* Creative rows under campaign */}
-          {isCampExpanded && creatives.map((cr, crIdx) => (
-            <tr key={`${campKey}::cr${crIdx}`} className="border-l-4 border-l-purple-500/10" onClick={(e) => e.stopPropagation()}>
-              <td className="w-8" />
-              <td className="px-3 py-1.5" colSpan={2}>
-                <div className="flex items-center gap-2 pl-14">
-                  <ImageIcon className="h-3 w-3 text-purple-400 shrink-0" />
-                  <span className="text-[11px] text-muted-foreground truncate max-w-[200px]" title={cr.creativeName}>
-                    {cr.creativeName}
-                  </span>
-                  <Badge variant="outline" className="text-[9px] px-1 py-0 font-normal">
-                    {cr.type.replace(/_/g, ' ')}
-                  </Badge>
-                </div>
+          {/* Per-company creative rows under campaign */}
+          {isCampExpanded && creativesForCampaign.map((cr, crIdx) => {
+            const m = cr.metrics!;
+            return (
+              <tr key={`${campKey}::cr${crIdx}`} className="border-l-4 border-l-purple-500/10" onClick={(e) => e.stopPropagation()}>
+                <td className="w-8" />
+                <td className="px-3 py-1.5" colSpan={2}>
+                  <div className="flex items-center gap-2 pl-14">
+                    <ImageIcon className="h-3 w-3 text-purple-400 shrink-0" />
+                    <span className="text-[11px] text-muted-foreground truncate max-w-[220px]" title={cr.creativeName}>
+                      {cr.creativeName}
+                    </span>
+                  </div>
+                </td>
+                <MetricCell value={fmtNum(m.impressions)} className="text-muted-foreground/70" />
+                <MetricCell value={fmtNum(m.clicks)} className="text-muted-foreground/70" />
+                <MetricCell value={fmtCur(m.spent)} className="text-muted-foreground/70" />
+                <MetricCell value={m.leads > 0 ? fmtNum(m.leads) : '—'} className="text-muted-foreground/70" />
+                <MetricCell value={fmtNum(m.engagements)} className="text-muted-foreground/70" />
+                <MetricCell value={`${m.ctr.toFixed(2)}%`} className="text-muted-foreground/70" />
+                <MetricCell value={m.costPerLead > 0 ? fmtCur(m.costPerLead) : '—'} className="text-muted-foreground/70" />
+                <td />
+              </tr>
+            );
+          })}
+          {isCampExpanded && creativesForCampaign.length === 0 && (
+            <tr key={`${campKey}::cr-empty`} className="border-l-4 border-l-purple-500/10">
+              <td colSpan={12} className="px-3 py-2 pl-24 text-[11px] text-muted-foreground italic">
+                {loadingCreativeBreakdown
+                  ? 'Loading per-creative breakdown for this company…'
+                  : 'No creative-level data for this company in the date range.'}
               </td>
-              <MetricCell value={fmtNum(cr.impressions)} className="text-muted-foreground/70" />
-              <MetricCell value={fmtNum(cr.clicks)} className="text-muted-foreground/70" />
-              <MetricCell value={fmtCur(cr.spent)} className="text-muted-foreground/70" />
-              <MetricCell value={cr.leads > 0 ? fmtNum(cr.leads) : '—'} className="text-muted-foreground/70" />
-              <MetricCell value="—" className="text-muted-foreground/70" />
-              <MetricCell value={`${cr.ctr.toFixed(2)}%`} className="text-muted-foreground/70" />
-              <MetricCell value={cr.costPerLead > 0 ? fmtCur(cr.costPerLead) : '—'} className="text-muted-foreground/70" />
-              <td />
             </tr>
-          ))}
+          )}
         </>
       );
     });
