@@ -41,6 +41,7 @@ export interface MatchedCompany {
   matchType: 'name' | 'domain';
   objectives: MatchedObjective[];
   allCampaignNames: string[];
+  allCreativeNames: string[];
   /** Derived metrics */
   costPerLead: number;
   engagementRate: number;
