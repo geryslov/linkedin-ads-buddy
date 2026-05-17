@@ -6,13 +6,154 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import {
-  Sparkles, Send, Loader2, RefreshCw, AlertTriangle, TrendingDown, CheckCircle2,
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+} from '@/components/ui/table';
+import {
+  Sparkles, Send, Loader2, RefreshCw, AlertTriangle, TrendingDown,
+  TrendingUp, CheckCircle2, ChevronDown, ChevronRight, Minus,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
+import type { CreativePerformanceRow } from '@/hooks/useCreativePerformanceReport';
+import type { CreativeFatigueItem } from '@/hooks/useCreativeFatigue';
 
 interface CreativeAnalyzerProps {
   accessToken: string | null;
   selectedAccount: string | null;
+}
+
+type StatusGroup = 'fatigued' | 'warning' | 'healthy' | 'no_data';
+
+function TrendIndicator({ value, invert }: { value: number; invert?: boolean }) {
+  const isPositive = invert ? value < 0 : value > 0;
+  const isNegative = invert ? value > 0 : value < 0;
+  if (Math.abs(value) < 1) return <Minus className="h-3 w-3 text-muted-foreground" />;
+  return (
+    <span className={`inline-flex items-center gap-0.5 text-xs font-medium ${
+      isPositive ? 'text-green-600' : isNegative ? 'text-red-500' : 'text-muted-foreground'
+    }`}>
+      {isPositive ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
+      {Math.abs(value).toFixed(0)}%
+    </span>
+  );
+}
+
+function StatusBadge({ status }: { status: string }) {
+  switch (status) {
+    case 'fatigued':
+      return <Badge variant="destructive" className="text-[10px] px-1.5 py-0">Fatigued</Badge>;
+    case 'warning':
+      return <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-amber-500/50 text-amber-600">Warning</Badge>;
+    case 'healthy':
+      return <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-green-500/50 text-green-600">Healthy</Badge>;
+    default:
+      return <Badge variant="outline" className="text-[10px] px-1.5 py-0">—</Badge>;
+  }
+}
+
+function CreativeGroupTable({
+  title,
+  icon,
+  creatives,
+  fatigueMap,
+  defaultOpen,
+}: {
+  title: string;
+  icon: React.ReactNode;
+  creatives: CreativePerformanceRow[];
+  fatigueMap: Map<string, CreativeFatigueItem>;
+  defaultOpen: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+
+  if (creatives.length === 0) return null;
+
+  return (
+    <div className="border border-border/70 rounded-lg overflow-hidden bg-card">
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center justify-between px-4 py-3 hover:bg-muted/30 transition-colors"
+      >
+        <div className="flex items-center gap-2">
+          {icon}
+          <span className="text-sm font-semibold">{title}</span>
+          <span className="text-xs text-muted-foreground">({creatives.length})</span>
+        </div>
+        {open ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+      </button>
+
+      {open && (
+        <div className="overflow-x-auto border-t border-border/50">
+          <Table className="min-w-[900px]">
+            <TableHeader>
+              <TableRow className="bg-muted/20 text-xs">
+                <TableHead className="font-semibold">Creative Name</TableHead>
+                <TableHead className="font-semibold">Campaign</TableHead>
+                <TableHead className="font-semibold text-center">Status</TableHead>
+                <TableHead className="font-semibold text-right">Impr (7d)</TableHead>
+                <TableHead className="font-semibold text-right">Clicks (7d)</TableHead>
+                <TableHead className="font-semibold text-right">CTR (7d)</TableHead>
+                <TableHead className="font-semibold text-right">CTR (30d)</TableHead>
+                <TableHead className="font-semibold text-center">CTR Trend</TableHead>
+                <TableHead className="font-semibold text-right">Spend (7d)</TableHead>
+                <TableHead className="font-semibold text-center">Delivery Trend</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {creatives.map((c, idx) => {
+                const fatigue = fatigueMap.get(c.creativeName);
+                const ctrChange = c.last30d.ctr > 0
+                  ? ((c.last7d.ctr - c.last30d.ctr) / c.last30d.ctr) * 100
+                  : 0;
+                const deliveryChange = c.last30d.impressions > 0
+                  ? ((c.last7d.impressions * (30 / 7)) - c.last30d.impressions) / c.last30d.impressions * 100
+                  : 0;
+                const campaignNames = c.campaigns.map((camp: any) => camp.campaignName).join(', ');
+
+                return (
+                  <TableRow key={idx} className="hover:bg-muted/20 text-xs">
+                    <TableCell className="font-medium max-w-[220px]">
+                      <span className="block truncate" title={c.creativeName}>
+                        {c.creativeName}
+                      </span>
+                    </TableCell>
+                    <TableCell className="max-w-[180px]">
+                      <span className="block truncate text-muted-foreground" title={campaignNames}>
+                        {campaignNames || '—'}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <StatusBadge status={fatigue?.status || 'healthy'} />
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {c.last7d.impressions.toLocaleString()}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {c.last7d.clicks.toLocaleString()}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {c.last7d.ctr.toFixed(2)}%
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums text-muted-foreground">
+                      {c.last30d.ctr.toFixed(2)}%
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <TrendIndicator value={ctrChange} />
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      ${c.last7d.spent.toFixed(0)}
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <TrendIndicator value={deliveryChange} />
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function CreativeAnalyzer({ accessToken, selectedAccount }: CreativeAnalyzerProps) {
@@ -26,7 +167,6 @@ export function CreativeAnalyzer({ accessToken, selectedAccount }: CreativeAnaly
   const scrollRef = useRef<HTMLDivElement>(null);
   const [hasRun, setHasRun] = useState(false);
 
-  // Auto-fetch on mount when account is selected
   useEffect(() => {
     if (selectedAccount && accessToken && !hasRun) {
       setHasRun(true);
@@ -34,7 +174,6 @@ export function CreativeAnalyzer({ accessToken, selectedAccount }: CreativeAnaly
     }
   }, [selectedAccount, accessToken, hasRun, fetchAndAnalyze]);
 
-  // Auto-scroll on new messages
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -51,6 +190,7 @@ export function CreativeAnalyzer({ accessToken, selectedAccount }: CreativeAnaly
 
   const handleRefresh = () => {
     if (selectedAccount) {
+      setHasRun(false);
       clearHistory();
       fetchAndAnalyze(selectedAccount);
     }
@@ -63,6 +203,39 @@ export function CreativeAnalyzer({ accessToken, selectedAccount }: CreativeAnaly
     'What new creative variations should I test next?',
     'Compare performance by campaign — any outliers?',
   ];
+
+  // Group creatives by fatigue status
+  const groupedCreatives = (() => {
+    if (!analysisData) return { fatigued: [], warning: [], healthy: [], no_data: [] };
+
+    const fatigueMap = new Map<string, CreativeFatigueItem>();
+    for (const f of analysisData.fatigueItems) {
+      fatigueMap.set(f.creativeName, f);
+    }
+
+    const groups: Record<StatusGroup, CreativePerformanceRow[]> = {
+      fatigued: [], warning: [], healthy: [], no_data: [],
+    };
+
+    for (const row of analysisData.performanceRows) {
+      const fatigue = fatigueMap.get(row.creativeName);
+      if (!fatigue) {
+        if (row.last7d.impressions > 0) groups.healthy.push(row);
+        else groups.no_data.push(row);
+      } else {
+        groups[fatigue.status as StatusGroup]?.push(row) ?? groups.healthy.push(row);
+      }
+    }
+
+    return groups;
+  })();
+
+  const fatigueMap = new Map<string, CreativeFatigueItem>();
+  if (analysisData) {
+    for (const f of analysisData.fatigueItems) {
+      fatigueMap.set(f.creativeName, f);
+    }
+  }
 
   if (isLoadingData && !analysisData) {
     return (
@@ -77,6 +250,7 @@ export function CreativeAnalyzer({ accessToken, selectedAccount }: CreativeAnaly
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-20 rounded-lg" />)}
         </div>
+        <Skeleton className="h-64 rounded-lg" />
         <Skeleton className="h-96 rounded-lg" />
       </div>
     );
@@ -99,47 +273,75 @@ export function CreativeAnalyzer({ accessToken, selectedAccount }: CreativeAnaly
       {/* Summary cards */}
       {analysisData && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div className="border border-border/70 rounded-lg p-4 bg-card">
-            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Creatives Analyzed</p>
-            <p className="text-2xl font-bold mt-1">{analysisData.summary.totalCreatives}</p>
+          <div className="border border-border/70 rounded-lg p-4 bg-card shadow-sm">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Creatives Analyzed</p>
+            <p className="text-2xl font-bold mt-1 tabular-nums">{analysisData.summary.totalCreatives}</p>
             <p className="text-xs text-muted-foreground">{analysisData.summary.activeCreatives} active</p>
           </div>
-          <div className="border border-border/70 rounded-lg p-4 bg-card">
-            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Fatigue Status</p>
-            <div className="flex items-center gap-2 mt-1">
+          <div className="border border-border/70 rounded-lg p-4 bg-card shadow-sm">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Fatigue Status</p>
+            <div className="flex flex-wrap items-center gap-1.5 mt-2">
               {analysisData.summary.fatigued > 0 && (
-                <Badge variant="destructive" className="text-xs">
+                <Badge variant="destructive" className="text-[10px]">
                   <TrendingDown className="h-3 w-3 mr-0.5" />
                   {analysisData.summary.fatigued} fatigued
                 </Badge>
               )}
               {analysisData.summary.warning > 0 && (
-                <Badge variant="outline" className="text-xs border-amber-500/50 text-amber-600">
+                <Badge variant="outline" className="text-[10px] border-amber-500/50 text-amber-600">
                   {analysisData.summary.warning} warning
                 </Badge>
               )}
               {analysisData.summary.fatigued === 0 && analysisData.summary.warning === 0 && (
-                <Badge variant="outline" className="text-xs border-green-500/50 text-green-600">
+                <Badge variant="outline" className="text-[10px] border-green-500/50 text-green-600">
                   <CheckCircle2 className="h-3 w-3 mr-0.5" /> All healthy
                 </Badge>
               )}
             </div>
           </div>
-          <div className="border border-border/70 rounded-lg p-4 bg-card">
-            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">7-Day Spend</p>
-            <p className="text-2xl font-bold mt-1">${analysisData.summary.totalSpend7d.toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>
+          <div className="border border-border/70 rounded-lg p-4 bg-card shadow-sm">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">7-Day Spend</p>
+            <p className="text-2xl font-bold mt-1 tabular-nums">${analysisData.summary.totalSpend7d.toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>
             <p className="text-xs text-muted-foreground">{analysisData.summary.totalImpressions7d.toLocaleString()} impressions</p>
           </div>
-          <div className="border border-border/70 rounded-lg p-4 bg-card">
-            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Avg CTR (7d)</p>
-            <p className="text-2xl font-bold mt-1">{analysisData.summary.avgCtr7d.toFixed(2)}%</p>
+          <div className="border border-border/70 rounded-lg p-4 bg-card shadow-sm">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Avg CTR (7d)</p>
+            <p className="text-2xl font-bold mt-1 tabular-nums">{analysisData.summary.avgCtr7d.toFixed(2)}%</p>
           </div>
         </div>
       )}
 
-      {/* AI Analysis panel — inline, not dialog */}
+      {/* Grouped creative breakdown */}
+      {analysisData && (
+        <div className="space-y-3">
+          <h3 className="text-sm font-semibold text-foreground">Creative Breakdown by Health Status</h3>
+
+          <CreativeGroupTable
+            title="Fatigued — Action Required"
+            icon={<TrendingDown className="h-4 w-4 text-red-500" />}
+            creatives={groupedCreatives.fatigued}
+            fatigueMap={fatigueMap}
+            defaultOpen={true}
+          />
+          <CreativeGroupTable
+            title="Warning — Monitor Closely"
+            icon={<AlertTriangle className="h-4 w-4 text-amber-500" />}
+            creatives={groupedCreatives.warning}
+            fatigueMap={fatigueMap}
+            defaultOpen={true}
+          />
+          <CreativeGroupTable
+            title="Healthy — Performing Well"
+            icon={<CheckCircle2 className="h-4 w-4 text-green-500" />}
+            creatives={groupedCreatives.healthy}
+            fatigueMap={fatigueMap}
+            defaultOpen={false}
+          />
+        </div>
+      )}
+
+      {/* AI Analysis panel */}
       <div className="border border-border/70 rounded-lg bg-card shadow-sm overflow-hidden">
-        {/* Header */}
         <div className="flex items-center justify-between px-5 py-3 border-b border-border/50 bg-muted/30">
           <div className="flex items-center gap-2">
             <Sparkles className="h-4 w-4 text-primary" />
@@ -152,11 +354,10 @@ export function CreativeAnalyzer({ accessToken, selectedAccount }: CreativeAnaly
           </Button>
         </div>
 
-        {/* Messages */}
-        <ScrollArea className="max-h-[60vh] px-5 py-4" ref={scrollRef}>
+        <ScrollArea className="max-h-[50vh] px-5 py-4" ref={scrollRef}>
           <div className="space-y-4">
             {messages.length === 0 && !isLoading && (
-              <div className="text-center text-muted-foreground text-sm py-8">
+              <div className="text-center text-muted-foreground text-sm py-6">
                 <p>Waiting for analysis to complete...</p>
               </div>
             )}
@@ -184,10 +385,9 @@ export function CreativeAnalyzer({ accessToken, selectedAccount }: CreativeAnaly
           </div>
         </ScrollArea>
 
-        {/* Follow-up suggestions — show after first analysis completes */}
         {messages.length > 0 && !isLoading && (
           <div className="px-5 py-3 border-t border-border/50 bg-muted/20">
-            <p className="text-xs text-muted-foreground mb-2">Follow-up questions:</p>
+            <p className="text-[11px] text-muted-foreground mb-2 uppercase tracking-wider font-medium">Follow-up questions</p>
             <div className="flex flex-wrap gap-1.5">
               {followUpQuestions.map(q => (
                 <button
@@ -202,7 +402,6 @@ export function CreativeAnalyzer({ accessToken, selectedAccount }: CreativeAnaly
           </div>
         )}
 
-        {/* Input */}
         {error && (
           <div className="mx-5 mb-2 text-sm text-destructive bg-destructive/10 rounded-md px-3 py-2">
             {error}
