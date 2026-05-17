@@ -25,6 +25,7 @@ import { LeadRecordsViewer } from "@/components/dashboard/LeadRecordsViewer";
 import { WeeklyReport } from "@/components/dashboard/WeeklyReport";
 import { ActivityReport } from "@/components/dashboard/ActivityReport";
 import { AnalyticsDashboard } from "@/components/dashboard/AnalyticsDashboard";
+import { CreativeAnalyzer } from "@/components/dashboard/CreativeAnalyzer";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -59,6 +60,7 @@ const tabMeta: Record<string, { group: string; title: string; subtitle: string }
   forms_leads:         { group: "Leads",      title: "Forms & Leads",               subtitle: "Lead generation form submissions and responses" },
   lead_records:        { group: "Leads",      title: "Lead Records",                subtitle: "Browse all registered leads across your forms" },
   activity_report:     { group: "Analytics",  title: "Activity Report",              subtitle: "Track performance of grouped campaign activities" },
+  creative_analyzer:   { group: "Analytics",  title: "Creative Analyzer",            subtitle: "AI-powered creative fatigue detection and pattern analysis" },
 };
 
 export default function Dashboard() {
@@ -404,6 +406,13 @@ export default function Dashboard() {
 
         {activeTab === "activity_report" && (
           <ActivityReport
+            accessToken={accessToken}
+            selectedAccount={selectedAccount}
+          />
+        )}
+
+        {activeTab === "creative_analyzer" && (
+          <CreativeAnalyzer
             accessToken={accessToken}
             selectedAccount={selectedAccount}
           />

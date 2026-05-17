@@ -27,6 +27,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Radio,
+  Sparkles,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -78,6 +79,7 @@ const navGroups: NavGroup[] = [
       { id: "weekly_report", label: "Weekly Report", icon: CalendarRange },
       { id: "conv_breakdown", label: "Conv. Breakdown", icon: Grid3x3 },
       { id: "activity_report", label: "Activity Report", icon: ClipboardList },
+      { id: "creative_analyzer", label: "Creative Analyzer", icon: Sparkles },
     ],
   },
   {
