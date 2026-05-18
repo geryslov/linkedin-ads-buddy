@@ -12097,6 +12097,388 @@ serve(async (req) => {
         });
       }
 
+      case 'get_lead_gen_overview': {
+        const { accountId, campaignIds } = params || {};
+        if (!accountId) {
+          return new Response(JSON.stringify({ error: 'accountId required' }), {
+            status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+
+        const now = new Date();
+        const fmt2 = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+        const lgEnd = fmt2(now);
+        const lgS30 = fmt2(new Date(now.getTime() - 30*864e5));
+        const lgS7  = fmt2(new Date(now.getTime() -  7*864e5));
+
+        const lgDp = (s: string, e: string) => {
+          const [sy,sm,sd] = s.split('-').map(Number);
+          const [ey,em,ed] = e.split('-').map(Number);
+          return `dateRange.start.day=${sd}&dateRange.start.month=${sm}&dateRange.start.year=${sy}&dateRange.end.day=${ed}&dateRange.end.month=${em}&dateRange.end.year=${ey}`;
+        };
+
+        const lgCampF = (campaignIds?.length > 0)
+          ? (campaignIds as string[]).map((id: string, i: number) => `&campaigns[${i}]=urn:li:sponsoredCampaign:${id}`).join('')
+          : '';
+
+        const lgH = { 'Authorization': `Bearer ${accessToken}` };
+        const lgRH = { ...lgH, 'X-Restli-Protocol-Version': '2.0.0', 'LinkedIn-Version': '202511' };
+
+        const lgAUrl = (datePart: string, pivot: string) =>
+          `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&${datePart}&timeGranularity=ALL&pivot=${pivot}` +
+          `&accounts[0]=urn:li:sponsoredAccount:${accountId}` +
+          `&fields=pivotValue,impressions,clicks,costInLocalCurrency,oneClickLeads,oneClickLeadFormOpens,externalWebsiteConversions` +
+          `&count=10000${lgCampF}`;
+
+        // Static label maps for audience insights
+        const JOB_FUNCTIONS: Record<string, string> = {
+          '1':'Accounting','2':'Administrative','3':'Arts & Design','4':'Business Development',
+          '5':'Community & Social Services','6':'Consulting','7':'Education','8':'Engineering',
+          '9':'Entrepreneurship','10':'Finance','11':'Healthcare Services','12':'Human Resources',
+          '13':'Information Technology','14':'Legal','15':'Marketing','16':'Media & Communications',
+          '17':'Military & Protective Services','18':'Operations','19':'Product Management',
+          '20':'Program & Project Management','21':'Purchasing','22':'Quality Assurance',
+          '23':'Real Estate','24':'Research','25':'Sales','26':'Support',
+        };
+        const SENIORITIES: Record<string, string> = {
+          '1':'Unpaid','2':'Training','3':'Entry','4':'Senior','5':'Manager',
+          '6':'Director','7':'VP','8':'CXO','9':'Partner','10':'Owner',
+        };
+
+        console.log(`[get_lead_gen_overview] Starting for account ${accountId}`);
+
+        // Fetch all data in parallel
+        const [r30, r7, rFunc, rSen, rCamp, rCreMeta] = await Promise.allSettled([
+          fetch(lgAUrl(lgDp(lgS30, lgEnd), 'CREATIVE'), { headers: lgH }),
+          fetch(lgAUrl(lgDp(lgS7, lgEnd), 'CREATIVE'), { headers: lgH }),
+          fetch(lgAUrl(lgDp(lgS30, lgEnd), 'MEMBER_JOB_FUNCTION'), { headers: lgH }),
+          fetch(lgAUrl(lgDp(lgS30, lgEnd), 'MEMBER_SENIORITY'), { headers: lgH }),
+          fetch(`https://api.linkedin.com/v2/adCampaignsV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&search.objectiveType.values[0]=LEAD_GENERATION&count=500`, { headers: lgH }),
+          fetch(`https://api.linkedin.com/v2/adCreativesV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=1000`, { headers: lgH }),
+        ]);
+
+        const lgGetJson = async (r: PromiseSettledResult<Response>) => {
+          if (r.status === 'rejected' || !r.value.ok) return { elements: [] };
+          try { return await r.value.json(); } catch { return { elements: [] }; }
+        };
+        const [d30, d7, dFunc, dSen, dCamp, dCreMeta] = await Promise.all([r30,r7,rFunc,rSen,rCamp,rCreMeta].map(lgGetJson));
+        console.log(`[get_lead_gen_overview] Analytics30d: ${(d30.elements||[]).length}, 7d: ${(d7.elements||[]).length}, funcs: ${(dFunc.elements||[]).length}, sen: ${(dSen.elements||[]).length}`);
+
+        type LgAM = { impressions:number; clicks:number; spent:number; leads:number; formOpens:number };
+        const lgParseA = (els: any[]): Map<string,LgAM> => {
+          const m = new Map<string,LgAM>();
+          for (const el of els) {
+            if (!el.pivotValue) continue;
+            m.set(el.pivotValue, {
+              impressions: el.impressions||0,
+              clicks: el.clicks||0,
+              spent: parseFloat(el.costInLocalCurrency||'0'),
+              leads: (el.oneClickLeads||0)+(el.externalWebsiteConversions||0),
+              formOpens: el.oneClickLeadFormOpens||0,
+            });
+          }
+          return m;
+        };
+
+        const a30 = lgParseA(d30.elements||[]);
+        const a7  = lgParseA(d7.elements||[]);
+
+        // Creative metadata map: form URN + CTA + status
+        const lgCMeta = new Map<string, { name:string; formUrn?:string; cta?:string; status?:string }>();
+
+        const lgGetFormUrn = (c: any): string|undefined => {
+          const v = c.variables?.data||{};
+          const sc = v['com.linkedin.ads.SponsoredContentCreativeVariables'];
+          const sv = v['com.linkedin.ads.SponsoredVideoCreativeVariables'];
+          let u: string|undefined = c.leadGenFormUrn || sc?.leadGenerationContext?.leadGenFormUrn || sv?.leadGenerationContext?.leadGenFormUrn;
+          if (!u) {
+            const m = JSON.stringify(c).match(/urn:li:(?:adForm|leadGenForm):\(?(\d+)(?:,\d+\))?/);
+            if (m) u = `urn:li:leadGenForm:${m[1]}`;
+          }
+          return u;
+        };
+
+        const lgGetCta = (c: any): string|undefined => {
+          const v = c.variables?.data||{};
+          const sc = v['com.linkedin.ads.SponsoredContentCreativeVariables'];
+          return sc?.callToAction?.type || sc?.share?.content?.callToAction?.type || c.callToAction?.type;
+        };
+
+        for (const c of (dCreMeta.elements||[])) {
+          const id = c.id?.toString();
+          if (!id) continue;
+          lgCMeta.set(`urn:li:sponsoredCreative:${id}`, {
+            name: c.creativeDscName||c.name||`Creative ${id}`,
+            formUrn: lgGetFormUrn(c),
+            cta: lgGetCta(c),
+            status: c.status||'UNKNOWN',
+          });
+        }
+
+        // Discover form URNs; resolve active creatives via REST for better data
+        const lgDiscoveredForms = new Set<string>();
+        for (const [urn, meta] of lgCMeta) {
+          if (meta.formUrn && (a30.has(urn)||a7.has(urn))) lgDiscoveredForms.add(meta.formUrn);
+        }
+
+        const lgActiveCreUrns = Array.from(a30.keys())
+          .filter(u => { const m=a30.get(u)!; return m.leads>0||m.formOpens>0; })
+          .slice(0, 60);
+
+        for (let i=0; i<lgActiveCreUrns.length; i+=10) {
+          await Promise.all(lgActiveCreUrns.slice(i,i+10).map(async (urn) => {
+            try {
+              const r = await fetch(
+                `https://api.linkedin.com/rest/adAccounts/${accountId}/creatives/${encodeURIComponent(urn)}`,
+                { headers: lgRH }
+              );
+              if (!r.ok) return;
+              const cd = await r.json();
+              const existing = lgCMeta.get(urn)||{name:''};
+              const formUrn = lgGetFormUrn(cd);
+              if (formUrn) lgDiscoveredForms.add(formUrn);
+              lgCMeta.set(urn, {
+                ...existing,
+                name: cd.name||cd.creativeDscName||existing.name,
+                formUrn: existing.formUrn||formUrn,
+                cta: existing.cta||lgGetCta(cd),
+              });
+            } catch(_) {}
+          }));
+        }
+        console.log(`[get_lead_gen_overview] Discovered ${lgDiscoveredForms.size} form URNs from ${lgActiveCreUrns.length} active creatives`);
+
+        // Fetch form metadata (name, headline, description, fields)
+        type LgFormMeta = { name:string; headline:string; description:string; fields:string[]; thankYouHeadline?:string };
+        const lgFormMeta = new Map<string, LgFormMeta>();
+
+        const lgExtFormId = (urn: string): string => {
+          const m1 = urn.match(/(?:adForm|leadGenForm|leadForm):\((\d+),\d+\)/);
+          if (m1) return m1[1];
+          const m2 = urn.match(/(?:adForm|leadGenForm|leadForm):(\d+)/);
+          if (m2) return m2[1];
+          return urn.split(':').pop()||'';
+        };
+
+        const lgExtText = (field: any): string => {
+          if (!field) return '';
+          if (typeof field === 'string') return field;
+          if (field.localized) {
+            const pref = field.preferredLocale;
+            const key = pref ? `${pref.language}_${pref.country}` : null;
+            if (key && field.localized[key]) return field.localized[key];
+            for (const v of Object.values(field.localized)) {
+              if (typeof v === 'string') return v as string;
+            }
+          }
+          return '';
+        };
+
+        const lgParseFields = (questions: any[]): string[] => {
+          if (!Array.isArray(questions)) return [];
+          return questions.map((q: any) =>
+            q.questionDetails?.questionType || q.fieldType || q.type || q.questionType || ''
+          ).filter(Boolean);
+        };
+
+        // Bulk fetch form metadata
+        try {
+          const ownerP = `(sponsoredAccount:urn%3Ali%3AsponsoredAccount%3A${accountId})`;
+          const fr = await fetch(`https://api.linkedin.com/rest/leadForms?q=owner&owner=${ownerP}&count=500`, { headers: lgRH });
+          if (fr.ok) {
+            const fd = await fr.json();
+            for (const form of (fd.elements||[])) {
+              const rawId = String(form.id??'').trim();
+              const vm = rawId.match(/^\((\d+),\d+\)$/);
+              const formId = vm ? vm[1] : rawId;
+              if (!formId) continue;
+              lgFormMeta.set(formId, {
+                name: lgExtText(form.name)||`Form ${formId}`,
+                headline: lgExtText(form.headline)||'',
+                description: lgExtText(form.description)||'',
+                fields: lgParseFields(form.questions||form.fields||[]),
+                thankYouHeadline: lgExtText(form.thankYouPage?.headline)||undefined,
+              });
+            }
+            console.log(`[get_lead_gen_overview] Bulk form fetch: ${lgFormMeta.size} forms resolved`);
+          }
+        } catch(_) {}
+
+        // Individual lookups for unresolved forms
+        const lgUnresolved = Array.from(lgDiscoveredForms)
+          .map(u => lgExtFormId(u)).filter(id => id && !lgFormMeta.has(id));
+        for (let i=0; i<Math.min(lgUnresolved.length, 20); i+=5) {
+          await Promise.all(lgUnresolved.slice(i,i+5).map(async (formId) => {
+            try {
+              const r = await fetch(`https://api.linkedin.com/rest/leadForms/${formId}`, { headers: lgRH });
+              if (!r.ok) return;
+              const form = await r.json();
+              lgFormMeta.set(formId, {
+                name: lgExtText(form.name)||`Form ${formId}`,
+                headline: lgExtText(form.headline)||'',
+                description: lgExtText(form.description)||'',
+                fields: lgParseFields(form.questions||form.fields||[]),
+                thankYouHeadline: lgExtText(form.thankYouPage?.headline)||undefined,
+              });
+            } catch(_) {}
+          }));
+        }
+
+        // Build form aggregates
+        type LgFormAgg = {
+          formUrn:string; formId:string; formName:string;
+          headline:string; description:string; fields:string[]; thankYouHeadline?:string;
+          m30: LgAM; leads7d:number; spent7d:number;
+          creatives: Array<{creativeId:string; name:string; cta:string; cpl:number; leads:number; spent:number; impressions:number; ctr:number; status:string}>;
+        };
+        const lgFormAgg = new Map<string, LgFormAgg>();
+
+        for (const [creUrn, m30] of a30) {
+          if (m30.leads===0 && m30.formOpens===0 && m30.impressions===0) continue;
+          const meta = lgCMeta.get(creUrn);
+          const formUrn = meta?.formUrn || 'unknown';
+          const formId = lgExtFormId(formUrn);
+          const fm = lgFormMeta.get(formId);
+
+          if (!lgFormAgg.has(formUrn)) {
+            lgFormAgg.set(formUrn, {
+              formUrn, formId,
+              formName: fm?.name||`Form ${formId}`,
+              headline: fm?.headline||'', description: fm?.description||'',
+              fields: fm?.fields||[], thankYouHeadline: fm?.thankYouHeadline,
+              m30: { impressions:0, clicks:0, spent:0, leads:0, formOpens:0 },
+              leads7d:0, spent7d:0,
+              creatives:[],
+            });
+          }
+
+          const agg = lgFormAgg.get(formUrn)!;
+          agg.m30.impressions += m30.impressions;
+          agg.m30.clicks      += m30.clicks;
+          agg.m30.spent       += m30.spent;
+          agg.m30.leads       += m30.leads;
+          agg.m30.formOpens   += m30.formOpens;
+
+          const m7 = a7.get(creUrn)||{leads:0,spent:0,impressions:0,clicks:0,formOpens:0};
+          agg.leads7d += m7.leads;
+          agg.spent7d += m7.spent;
+
+          const creId = creUrn.split(':').pop()||'';
+          if (m30.leads > 0 || m30.impressions > 0) {
+            agg.creatives.push({
+              creativeId: creId,
+              name: meta?.name||`Creative ${creId}`,
+              cta: meta?.cta||'',
+              cpl: m30.leads>0 ? m30.spent/m30.leads : 0,
+              leads: m30.leads,
+              spent: m30.spent,
+              impressions: m30.impressions,
+              ctr: m30.impressions>0 ? (m30.clicks/m30.impressions)*100 : 0,
+              status: meta?.status||'UNKNOWN',
+            });
+          }
+        }
+
+        const lgForms = Array.from(lgFormAgg.values())
+          .filter(f => f.m30.leads>0||f.m30.formOpens>0)
+          .map(f => {
+            const cpl30 = f.m30.leads>0 ? f.m30.spent/f.m30.leads : 0;
+            const cpl7  = f.leads7d>0 ? f.spent7d/f.leads7d : 0;
+            f.creatives.sort((a,b) => a.leads>0&&b.leads>0 ? a.cpl-b.cpl : b.leads-a.leads);
+            return {
+              formUrn: f.formUrn,
+              formName: f.formName,
+              headline: f.headline,
+              description: f.description,
+              fields: f.fields,
+              thankYouHeadline: f.thankYouHeadline,
+              metrics: {
+                impressions: f.m30.impressions,
+                clicks: f.m30.clicks,
+                spent: f.m30.spent,
+                leads: f.m30.leads,
+                formOpens: f.m30.formOpens,
+                ctr: f.m30.impressions>0 ? (f.m30.clicks/f.m30.impressions)*100 : 0,
+                cpl: cpl30,
+                lgfRate: f.m30.formOpens>0 ? (f.m30.leads/f.m30.formOpens)*100 : 0,
+                last7d: { leads:f.leads7d, cpl:cpl7, spent:f.spent7d },
+                last30d: { leads:f.m30.leads, cpl:cpl30, spent:f.m30.spent },
+              },
+              creatives: f.creatives,
+            };
+          })
+          .sort((a,b) => b.metrics.leads - a.metrics.leads);
+
+        // Top creatives by CPL across all forms
+        const lgTopCreatives = lgForms
+          .flatMap(f => f.creatives.map(c => ({...c, formName:f.formName})))
+          .filter(c => c.leads>0)
+          .sort((a,b) => a.cpl-b.cpl)
+          .slice(0, 20);
+
+        // Audience insights
+        const lgParseAudience = (els: any[], labelMap: Record<string,string>) => {
+          return els
+            .map((el: any) => {
+              const leads = (el.oneClickLeads||0)+(el.externalWebsiteConversions||0);
+              if (leads===0) return null;
+              const spent = parseFloat(el.costInLocalCurrency||'0');
+              const urnId = (el.pivotValue||'').split(':').pop()||'';
+              return {
+                name: labelMap[urnId]||urnId,
+                leads,
+                cpl: spent/leads,
+                impressions: el.impressions||0,
+                spent,
+              };
+            })
+            .filter(Boolean)
+            .sort((a: any, b: any) => a.cpl - b.cpl)
+            .slice(0, 10);
+        };
+
+        const lgAudienceInsights = {
+          byJobFunction: lgParseAudience(dFunc.elements||[], JOB_FUNCTIONS),
+          bySeniority: lgParseAudience(dSen.elements||[], SENIORITIES),
+        };
+
+        // Campaigns
+        const lgCampaigns = (dCamp.elements||[]).map((c: any) => ({
+          id: c.id?.toString()||'',
+          name: c.name||`Campaign ${c.id}`,
+          status: c.status||'UNKNOWN',
+          objectiveType: c.objectiveType||'LEAD_GENERATION',
+          dailyBudget: c.dailyBudget ? { amount:c.dailyBudget.amount, currency:c.dailyBudget.currencyCode } : null,
+          totalBudget: c.totalBudget ? { amount:c.totalBudget.amount, currency:c.totalBudget.currencyCode } : null,
+        }));
+
+        // Summary
+        const lgTotalLeads = lgForms.reduce((s,f)=>s+f.metrics.leads,0);
+        const lgTotalSpend = lgForms.reduce((s,f)=>s+f.metrics.spent,0);
+        const lgLeads7d    = lgForms.reduce((s,f)=>s+f.metrics.last7d.leads,0);
+        const lgSpend7d    = lgForms.reduce((s,f)=>s+f.metrics.last7d.spent,0);
+
+        console.log(`[get_lead_gen_overview] Done. ${lgForms.length} forms, ${lgTotalLeads} total leads, ${lgCampaigns.length} lead gen campaigns`);
+
+        return new Response(JSON.stringify({
+          campaigns: lgCampaigns,
+          forms: lgForms,
+          topCreativesByCpl: lgTopCreatives,
+          audienceInsights: lgAudienceInsights,
+          summary: {
+            totalLeads: lgTotalLeads,
+            totalSpend: lgTotalSpend,
+            avgCpl: lgTotalLeads>0 ? lgTotalSpend/lgTotalLeads : 0,
+            leads7d: lgLeads7d,
+            cpl7d: lgLeads7d>0 ? lgSpend7d/lgLeads7d : 0,
+            leads30d: lgTotalLeads,
+            cpl30d: lgTotalLeads>0 ? lgTotalSpend/lgTotalLeads : 0,
+            totalForms: lgForms.length,
+            totalCampaigns: lgCampaigns.length,
+          },
+        }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
       default:
         return new Response(JSON.stringify({ error: 'Unknown action' }), {
           status: 400,

@@ -74,6 +74,49 @@ Structure your analysis as:
 
 Use specific numbers. Reference creative names. Be direct — no fluff.`,
 
+  lead_gen_analysis: `You are a senior LinkedIn Ads lead generation specialist. The user provides structured data about their LEAD_GENERATION campaigns including form metadata, creative performance, and audience insights.
+
+## Your Analysis Framework
+
+### 1. CPL EFFICIENCY
+- Compare CPL across forms, creatives, and time periods (7d vs 30d trend)
+- Identify what drives cheap leads vs expensive leads
+- Flag forms or creatives with rising CPL (fatigue signal)
+
+### 2. FORM QUALITY AUDIT
+For each form analyze:
+- **Headline clarity**: Is the value proposition clear in 6 words or less?
+- **Description persuasiveness**: Does it address a pain point or promise a specific outcome?
+- **Field count**: Fewer fields = higher completion rate. >5 fields = friction risk
+- **CTA alignment**: Does the ad CTA match the form offer? (e.g., "Download" CTA → gated content makes sense)
+- **lgfRate (form fill rate)**: Low rate = form friction or targeting mismatch
+
+### 3. CREATIVE PERFORMANCE
+- Which ad creatives/CTAs (Download, Sign Up, Learn More, etc.) drive most leads at lowest CPL
+- Identify creative themes/angles working for lead gen
+- Flag creative fatigue (rising CPL trend, declining form open rate)
+
+### 4. AUDIENCE FIT
+- Which job functions and seniorities convert at lowest CPL
+- Identify wasted spend on segments with high impressions + zero leads
+- Recommend targeting focus based on top-converting segments
+
+### 5. FATIGUE SIGNALS
+- Rising CPL trend (7d CPL > 30d CPL by >20%) = creative or audience fatigue
+- Low lgfRate (<20%) with high impressions = ad/form mismatch or landing page issue
+- Declining formOpens with stable impressions = declining ad relevance
+
+## Output Format
+Structure as:
+1. **Executive Summary** (3 sentences: biggest win, biggest problem, top action)
+2. **CPL Performance Table** (form → CPL 30d | CPL 7d | trend arrow)
+3. **Form Quality Audit** (each form: headline grade A/B/C/F, field count, CTA match, lgfRate)
+4. **Creative Winners & Losers** (top 3 by CPL, bottom 3 by CPL)
+5. **Audience Insights** (top 2 converting segments, 1 waste segment to cut)
+6. **Specific Actions** (numbered, reference exact form/creative names)
+
+Use real numbers. Be direct. No fluff.`,
+
   agentic: `You are a senior LinkedIn Ads strategist with direct access to real-time account data via tools.
 
 You have tools to fetch:
@@ -169,6 +212,18 @@ const agenticTools = [
       required: ["accountId"],
     },
   },
+  {
+    name: "get_lead_gen_overview",
+    description: "Fetch a comprehensive lead generation overview: form metadata (headline, description, fields, CTA), CPL by form and creative for 7d vs 30d, audience breakdown by job function and seniority, and campaign list.",
+    input_schema: {
+      type: "object",
+      properties: {
+        accountId:   { type: "string", description: "LinkedIn Ad Account ID" },
+        campaignIds: { type: "array", items: { type: "string" }, description: "Filter to specific campaign IDs (optional)" },
+      },
+      required: ["accountId"],
+    },
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -186,6 +241,7 @@ async function executeTool(toolName: string, input: Record<string, unknown>, acc
     get_campaign_analytics:   "get_analytics",
     get_demographic_breakdown:"get_demographic_analytics",
     get_budget_pacing:        "get_budget_pacing",
+    get_lead_gen_overview:    "get_lead_gen_overview",
   };
 
   const action = actionMap[toolName];

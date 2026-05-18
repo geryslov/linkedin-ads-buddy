@@ -26,6 +26,7 @@ const TOOL_LABELS: Record<string, string> = {
   get_campaign_analytics:    'Fetching campaign analytics',
   get_demographic_breakdown: 'Fetching demographic data',
   get_budget_pacing:         'Checking budget pacing',
+  get_lead_gen_overview:     'Fetching lead gen overview',
 };
 
 export function useAIAnalysis() {

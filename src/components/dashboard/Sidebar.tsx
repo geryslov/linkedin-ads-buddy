@@ -28,6 +28,7 @@ import {
   PanelLeftOpen,
   Radio,
   Sparkles,
+  Target,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -80,6 +81,7 @@ const navGroups: NavGroup[] = [
       { id: "conv_breakdown", label: "Conv. Breakdown", icon: Grid3x3 },
       { id: "activity_report", label: "Activity Report", icon: ClipboardList },
       { id: "creative_analyzer", label: "Creative Analyzer", icon: Sparkles },
+      { id: "lead_gen_analyzer", label: "Lead Gen Analyzer", icon: Target },
     ],
   },
   {
