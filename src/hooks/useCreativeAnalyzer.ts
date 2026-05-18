@@ -51,11 +51,13 @@ export function useCreativeAnalyzer(accessToken: string | null) {
   const [analysisData, setAnalysisData] = useState<CreativeAnalysisData | null>(null);
   const [isLoadingData, setIsLoadingData] = useState(false);
   const [dataError, setDataError] = useState<string | null>(null);
+  const [currentAccountId, setCurrentAccountId] = useState<string | null>(null);
   const aiAnalysis = useAIAnalysis();
 
   const fetchAndAnalyze = useCallback(async (accountId: string, autoAnalyze = true) => {
     if (!accessToken || !accountId) return;
 
+    setCurrentAccountId(accountId);
     setIsLoadingData(true);
     setDataError(null);
     aiAnalysis.clearHistory();
@@ -191,8 +193,17 @@ export function useCreativeAnalyzer(accessToken: string | null) {
   const askFollowUp = useCallback((question: string) => {
     if (!analysisData) return;
     const aiData = buildAIPayload(analysisData.performanceRows, analysisData.fatigueItems);
-    aiAnalysis.ask(question, aiData, 'creative_analysis');
-  }, [analysisData, aiAnalysis]);
+    // Use agentic mode for follow-up questions when we have auth context
+    if (accessToken && currentAccountId) {
+      aiAnalysis.ask(question, aiData, 'creative_analysis', {
+        mode: 'agentic',
+        accountId: currentAccountId,
+        accessToken,
+      });
+    } else {
+      aiAnalysis.ask(question, aiData, 'creative_analysis');
+    }
+  }, [analysisData, aiAnalysis, accessToken, currentAccountId]);
 
   return {
     analysisData,

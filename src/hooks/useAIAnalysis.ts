@@ -5,17 +5,45 @@ interface Message {
   content: string;
 }
 
+export interface ToolEvent {
+  id: string;
+  tool: string;
+  status: 'running' | 'done' | 'error';
+  timestamp: number;
+}
+
+interface AskOptions {
+  mode?: 'agentic';
+  accountId?: string;
+  accessToken?: string;
+}
+
 const ANALYZE_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-data`;
+
+const TOOL_LABELS: Record<string, string> = {
+  get_creative_performance:  'Fetching creative performance',
+  get_creative_fatigue:      'Checking fatigue signals',
+  get_campaign_analytics:    'Fetching campaign analytics',
+  get_demographic_breakdown: 'Fetching demographic data',
+  get_budget_pacing:         'Checking budget pacing',
+};
 
 export function useAIAnalysis() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [toolEvents, setToolEvents] = useState<ToolEvent[]>([]);
   const abortRef = useRef<AbortController | null>(null);
 
-  const ask = useCallback(async (question: string, data: unknown, reportType = 'creative_performance') => {
+  const ask = useCallback(async (
+    question: string,
+    data: unknown,
+    reportType = 'creative_performance',
+    options: AskOptions = {},
+  ) => {
     setError(null);
     setIsLoading(true);
+    setToolEvents([]);
 
     const userMsg: Message = { role: 'user', content: question };
     setMessages(prev => [...prev, userMsg]);
@@ -38,13 +66,20 @@ export function useAIAnalysis() {
     };
 
     try {
+      const body: Record<string, unknown> = { question, data, reportType };
+      if (options.mode === 'agentic' && options.accountId && options.accessToken) {
+        body.mode = 'agentic';
+        body.accountId = options.accountId;
+        body.accessToken = options.accessToken;
+      }
+
       const resp = await fetch(ANALYZE_URL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
         },
-        body: JSON.stringify({ question, data, reportType }),
+        body: JSON.stringify(body),
         signal: controller.signal,
       });
 
@@ -81,8 +116,37 @@ export function useAIAnalysis() {
 
           try {
             const parsed = JSON.parse(jsonStr);
+
+            // Standard text delta
             const content = parsed.choices?.[0]?.delta?.content as string | undefined;
-            if (content) upsert(content);
+            if (content) { upsert(content); continue; }
+
+            // Tool-call event: { type: "tool_call", tool: "...", id: "..." }
+            if (parsed.type === 'tool_call') {
+              const event: ToolEvent = {
+                id:        parsed.id || parsed.tool,
+                tool:      parsed.tool,
+                status:    'running',
+                timestamp: Date.now(),
+              };
+              setToolEvents(prev => {
+                const exists = prev.find(e => e.id === event.id);
+                return exists ? prev : [...prev, event];
+              });
+              continue;
+            }
+
+            // Tool-result event: { type: "tool_result", tool: "...", id: "...", done: true, error?: true }
+            if (parsed.type === 'tool_result') {
+              setToolEvents(prev =>
+                prev.map(e =>
+                  e.id === (parsed.id || parsed.tool)
+                    ? { ...e, status: parsed.error ? 'error' : 'done' }
+                    : e
+                )
+              );
+              continue;
+            }
           } catch {
             buffer = line + '\n' + buffer;
             break;
@@ -90,7 +154,7 @@ export function useAIAnalysis() {
         }
       }
 
-      // flush remaining
+      // Flush remaining buffer
       if (buffer.trim()) {
         for (let raw of buffer.split('\n')) {
           if (!raw) continue;
@@ -122,7 +186,8 @@ export function useAIAnalysis() {
   const clearHistory = useCallback(() => {
     setMessages([]);
     setError(null);
+    setToolEvents([]);
   }, []);
 
-  return { messages, isLoading, error, ask, cancel, clearHistory };
+  return { messages, isLoading, error, toolEvents, toolLabels: TOOL_LABELS, ask, cancel, clearHistory };
 }

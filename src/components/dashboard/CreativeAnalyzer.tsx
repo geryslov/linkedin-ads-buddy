@@ -363,6 +363,7 @@ export function CreativeAnalyzer({ accessToken, selectedAccount }: CreativeAnaly
     analysisData, isLoadingData, dataError,
     fetchAndAnalyze, askFollowUp,
     messages, isLoading, error, cancel, clearHistory,
+    toolEvents, toolLabels,
   } = useCreativeAnalyzer(accessToken);
 
   const [input, setInput] = useState('');
@@ -594,6 +595,34 @@ export function CreativeAnalyzer({ accessToken, selectedAccount }: CreativeAnaly
                   )}
                 </div>
               ))}
+
+              {/* Tool-call status badges (agentic mode) */}
+              {toolEvents.length > 0 && (
+                <div className="flex flex-col gap-1.5">
+                  {toolEvents.map(evt => (
+                    <div
+                      key={evt.id}
+                      className={cn(
+                        'inline-flex items-center gap-2 text-[11px] px-3 py-1.5 rounded-full border w-fit transition-all duration-300',
+                        evt.status === 'running'
+                          ? 'bg-primary/5 border-primary/25 text-primary'
+                          : evt.status === 'error'
+                          ? 'bg-destructive/5 border-destructive/20 text-destructive/70 opacity-60'
+                          : 'bg-green-500/5 border-green-500/20 text-green-600 dark:text-green-400 opacity-70',
+                      )}
+                    >
+                      {evt.status === 'running' ? (
+                        <Loader2 className="h-3 w-3 animate-spin shrink-0" />
+                      ) : evt.status === 'error' ? (
+                        <AlertTriangle className="h-3 w-3 shrink-0" />
+                      ) : (
+                        <CheckCircle2 className="h-3 w-3 shrink-0" />
+                      )}
+                      {toolLabels[evt.tool] ?? evt.tool.replace(/_/g, ' ')}
+                    </div>
+                  ))}
+                </div>
+              )}
 
               {isLoading && (messages.length === 0 || messages[messages.length - 1]?.role !== 'assistant') && (
                 <div className="rounded-2xl rounded-tl-sm bg-muted/20 border border-border/30 px-4 py-3">

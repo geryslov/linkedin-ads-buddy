@@ -6,16 +6,16 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+const MODEL = "claude-sonnet-4-20250514";
+const MAX_TOKENS = 4096;
+const MAX_TOOL_ITERATIONS = 5;
 
-  try {
-    const { question, data, reportType } = await req.json();
-    const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
-    if (!ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY is not configured");
+// ---------------------------------------------------------------------------
+// System prompts
+// ---------------------------------------------------------------------------
 
-    const systemPrompts: Record<string, string> = {
-      creative_performance: `You are a senior LinkedIn Ads performance analyst. The user will provide their creative performance data as JSON and ask questions about it.
+const systemPrompts: Record<string, string> = {
+  creative_performance: `You are a senior LinkedIn Ads performance analyst. The user will provide their creative performance data as JSON and ask questions about it.
 
 Your role:
 - Analyze creative performance trends and anomalies
@@ -31,7 +31,7 @@ Trend flags: A creative is flagged if 7d CPL is >15% above 30d CPL, or 7d CTR is
 
 Be concise and data-driven. Use specific numbers from the data. Format your response in markdown with headers and bullet points.`,
 
-      creative_analysis: `You are a senior LinkedIn Ads creative strategist and performance analyst. You specialize in engagement objective campaigns. The user provides structured creative performance data and fatigue signals.
+  creative_analysis: `You are a senior LinkedIn Ads creative strategist and performance analyst. You specialize in engagement objective campaigns. The user provides structured creative performance data and fatigue signals.
 
 ## Your Analysis Framework
 
@@ -73,9 +73,332 @@ Structure your analysis as:
 5. **Specific Actions** (numbered list: pause X, create variation of Y, shift budget from A to B)
 
 Use specific numbers. Reference creative names. Be direct — no fluff.`,
-    };
 
-    const systemPrompt = systemPrompts[reportType || 'creative_performance'] || systemPrompts.creative_performance;
+  agentic: `You are a senior LinkedIn Ads strategist with direct access to real-time account data via tools.
+
+You have tools to fetch:
+- Creative performance metrics (multi-period: 7d, 14d, 30d, last month)
+- Creative fatigue signals (CTR and delivery trends)
+- Campaign-level analytics for any date range
+- Demographic audience breakdowns
+- Budget pacing and spend data
+
+## Behavior
+- Use tools when the user's question requires fresh or specific data you don't have yet
+- If the initial context already contains the answer, respond directly without calling tools
+- Call tools in parallel when fetching independent data (e.g., fatigue + performance together)
+- After tool results, synthesize findings concisely — don't just repeat raw numbers
+- Be specific: name exact creatives, campaigns, and metrics
+- Format in markdown with headers and bullets
+
+## When to use tools
+- "What's happening with X creative right now?" → get_creative_performance
+- "Which creatives are fatigued?" → get_creative_fatigue
+- "How's our budget tracking?" → get_budget_pacing
+- "Who's seeing our ads?" → get_demographic_breakdown
+- "How did campaign Y perform last week?" → get_campaign_analytics`,
+};
+
+// ---------------------------------------------------------------------------
+// Tool definitions for agentic mode
+// ---------------------------------------------------------------------------
+
+const agenticTools = [
+  {
+    name: "get_creative_performance",
+    description: "Fetch multi-period creative performance (Last 7d, 14d, 30d, last month): spend, impressions, clicks, CTR, CPL, and trend per creative.",
+    input_schema: {
+      type: "object",
+      properties: {
+        accountId: { type: "string", description: "LinkedIn Ad Account ID" },
+      },
+      required: ["accountId"],
+    },
+  },
+  {
+    name: "get_creative_fatigue",
+    description: "Detect creative fatigue: compares last 7d vs prior 7d CTR and delivery. Returns fatigued/warning/healthy status with signals per creative.",
+    input_schema: {
+      type: "object",
+      properties: {
+        accountId:            { type: "string",  description: "LinkedIn Ad Account ID" },
+        ctrDeclineThreshold:  { type: "number",  description: "CTR decline % threshold for warning (default 15)" },
+        minImpressions:       { type: "number",  description: "Minimum impressions to include (default 500)" },
+      },
+      required: ["accountId"],
+    },
+  },
+  {
+    name: "get_campaign_analytics",
+    description: "Fetch campaign-level analytics (impressions, clicks, spend, conversions) for a date range.",
+    input_schema: {
+      type: "object",
+      properties: {
+        accountId:  { type: "string", description: "LinkedIn Ad Account ID" },
+        startDate:  { type: "string", description: "Start date YYYY-MM-DD" },
+        endDate:    { type: "string", description: "End date YYYY-MM-DD" },
+        campaignIds: { type: "array", items: { type: "string" }, description: "Filter to specific campaign IDs (optional)" },
+      },
+      required: ["accountId"],
+    },
+  },
+  {
+    name: "get_demographic_breakdown",
+    description: "Fetch ad performance broken down by a demographic pivot: job function, seniority, country, or industry.",
+    input_schema: {
+      type: "object",
+      properties: {
+        accountId:  { type: "string", description: "LinkedIn Ad Account ID" },
+        pivot:      { type: "string", enum: ["MEMBER_JOB_FUNCTION", "MEMBER_SENIORITY", "MEMBER_COUNTRY", "MEMBER_INDUSTRY"], description: "Demographic dimension" },
+        startDate:  { type: "string", description: "Start date YYYY-MM-DD (default: 30d ago)" },
+        endDate:    { type: "string", description: "End date YYYY-MM-DD (default: today)" },
+        campaignIds: { type: "array", items: { type: "string" }, description: "Filter to specific campaigns (optional)" },
+      },
+      required: ["accountId", "pivot"],
+    },
+  },
+  {
+    name: "get_budget_pacing",
+    description: "Fetch current month daily spend data and pacing status. Pass monthlyBudget to get on-track/underspend/overspend calculation.",
+    input_schema: {
+      type: "object",
+      properties: {
+        accountId:     { type: "string", description: "LinkedIn Ad Account ID" },
+        monthlyBudget: { type: "number", description: "Monthly budget target in account currency (optional)" },
+      },
+      required: ["accountId"],
+    },
+  },
+];
+
+// ---------------------------------------------------------------------------
+// Tool executor: calls linkedin-api edge function internally
+// ---------------------------------------------------------------------------
+
+async function executeTool(toolName: string, input: Record<string, unknown>, accessToken: string): Promise<unknown> {
+  const supabaseUrl = Deno.env.get("SUPABASE_URL");
+  const serviceKey  = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!supabaseUrl || !serviceKey) throw new Error("Supabase env vars not configured");
+
+  const actionMap: Record<string, string> = {
+    get_creative_performance: "get_creative_performance_report",
+    get_creative_fatigue:     "get_creative_fatigue",
+    get_campaign_analytics:   "get_analytics",
+    get_demographic_breakdown:"get_demographic_analytics",
+    get_budget_pacing:        "get_budget_pacing",
+  };
+
+  const action = actionMap[toolName];
+  if (!action) throw new Error(`Unknown tool: ${toolName}`);
+
+  const { accountId, ...rest } = input;
+
+  // Build params specific to each action
+  let params: Record<string, unknown> = { accountId, ...rest };
+
+  if (toolName === "get_creative_performance") {
+    const now = new Date();
+    const fmt = (d: Date) => d.toISOString().split("T")[0];
+    const lastMonthEnd   = new Date(now.getFullYear(), now.getMonth(), 0);
+    const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    params = {
+      accountId,
+      dateRanges: [
+        { key: "last7d",    start: fmt(new Date(now.getTime() - 7  * 86400000)), end: fmt(now) },
+        { key: "last14d",   start: fmt(new Date(now.getTime() - 14 * 86400000)), end: fmt(now) },
+        { key: "last30d",   start: fmt(new Date(now.getTime() - 30 * 86400000)), end: fmt(now) },
+        { key: "lastMonth", start: fmt(lastMonthStart), end: fmt(lastMonthEnd) },
+      ],
+    };
+  }
+
+  if (toolName === "get_creative_fatigue") {
+    const now = new Date();
+    const fmt = (d: Date) => d.toISOString().split("T")[0];
+    params = {
+      accountId,
+      dateRange: {
+        start: fmt(new Date(now.getTime() - 30 * 86400000)),
+        end:   fmt(now),
+      },
+      thresholds: {
+        ctrDecline:     (input.ctrDeclineThreshold as number) ?? 15,
+        cplIncrease:    20,
+        minImpressions: (input.minImpressions as number) ?? 500,
+      },
+    };
+  }
+
+  if (toolName === "get_campaign_analytics") {
+    const now = new Date();
+    const fmt = (d: Date) => d.toISOString().split("T")[0];
+    params = {
+      accountId,
+      startDate: input.startDate ?? fmt(new Date(now.getTime() - 30 * 86400000)),
+      endDate:   input.endDate ?? fmt(now),
+      ...(input.campaignIds ? { campaignIds: input.campaignIds } : {}),
+    };
+  }
+
+  if (toolName === "get_demographic_breakdown") {
+    const now = new Date();
+    const fmt = (d: Date) => d.toISOString().split("T")[0];
+    params = {
+      accountId,
+      pivot:     input.pivot,
+      startDate: input.startDate ?? fmt(new Date(now.getTime() - 30 * 86400000)),
+      endDate:   input.endDate ?? fmt(now),
+      ...(input.campaignIds ? { campaignIds: input.campaignIds } : {}),
+    };
+  }
+
+  const resp = await fetch(`${supabaseUrl}/functions/v1/linkedin-api`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${serviceKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ action, accessToken, params }),
+  });
+
+  if (!resp.ok) {
+    const err = await resp.text();
+    throw new Error(`Tool ${toolName} failed (${resp.status}): ${err.slice(0, 200)}`);
+  }
+
+  return await resp.json();
+}
+
+// ---------------------------------------------------------------------------
+// Agentic loop handler
+// ---------------------------------------------------------------------------
+
+async function handleAgentic(
+  question: string,
+  initialData: unknown,
+  accountId: string,
+  accessToken: string,
+  apiKey: string,
+): Promise<Response> {
+  const encoder = new TextEncoder();
+  const readable = new ReadableStream({
+    async start(controller) {
+      const send = (payload: unknown) => {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
+      };
+
+      const messages: Array<{ role: string; content: unknown }> = [
+        {
+          role: "user",
+          content: question + (initialData
+            ? `\n\n<context>\n${JSON.stringify(initialData, null, 2)}\n</context>`
+            : ""),
+        },
+      ];
+
+      try {
+        for (let iter = 0; iter < MAX_TOOL_ITERATIONS; iter++) {
+          const resp = await fetch("https://api.anthropic.com/v1/messages", {
+            method: "POST",
+            headers: {
+              "x-api-key": apiKey,
+              "anthropic-version": "2023-06-01",
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              model: MODEL,
+              system: systemPrompts.agentic,
+              messages,
+              tools: agenticTools,
+              max_tokens: MAX_TOKENS,
+            }),
+          });
+
+          if (!resp.ok) {
+            const err = await resp.text();
+            throw new Error(`Anthropic error ${resp.status}: ${err.slice(0, 300)}`);
+          }
+
+          const data = await resp.json();
+          const toolUseBlocks = (data.content as any[]).filter((b: any) => b.type === "tool_use");
+          const textBlocks    = (data.content as any[]).filter((b: any) => b.type === "text");
+
+          // No more tool calls → stream the final text
+          if (toolUseBlocks.length === 0 || data.stop_reason === "end_turn") {
+            const text = textBlocks.map((b: any) => b.text).join("");
+            // Emit in sentence-sized chunks for a streaming feel
+            const sentences = text.match(/[^.!?\n]+[.!?\n]+|[^.!?\n]+$/g) || [text];
+            for (const chunk of sentences) {
+              send({ choices: [{ delta: { content: chunk } }] });
+            }
+            break;
+          }
+
+          // Append assistant response to conversation
+          messages.push({ role: "assistant", content: data.content });
+
+          // Execute each tool call and collect results
+          const toolResults: any[] = [];
+          for (const block of toolUseBlocks) {
+            // Notify frontend: tool is running
+            send({ type: "tool_call", tool: block.name, id: block.id });
+
+            try {
+              const result = await executeTool(block.name, block.input as Record<string, unknown>, accessToken);
+              toolResults.push({
+                type: "tool_result",
+                tool_use_id: block.id,
+                content: JSON.stringify(result),
+              });
+              send({ type: "tool_result", tool: block.name, id: block.id, done: true });
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : "Unknown error";
+              toolResults.push({
+                type: "tool_result",
+                tool_use_id: block.id,
+                content: `Error: ${msg}`,
+                is_error: true,
+              });
+              send({ type: "tool_result", tool: block.name, id: block.id, done: true, error: true });
+            }
+          }
+
+          messages.push({ role: "user", content: toolResults });
+        }
+      } catch (e) {
+        console.error("[agentic] error:", e);
+        send({ choices: [{ delta: { content: `\n\n_Error: ${e instanceof Error ? e.message : "Unknown"}_` } }] });
+      } finally {
+        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(readable, {
+    headers: { ...corsHeaders, "Content-Type": "text/event-stream" },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Main handler
+// ---------------------------------------------------------------------------
+
+serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+
+  try {
+    const { question, data, reportType, mode, accountId, accessToken } = await req.json();
+    const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
+    if (!ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY is not configured");
+
+    // ── Agentic mode ──────────────────────────────────────────────────────────
+    if (mode === "agentic" && accountId && accessToken) {
+      return handleAgentic(question, data ?? null, accountId, accessToken, ANTHROPIC_API_KEY);
+    }
+
+    // ── Standard streaming mode ───────────────────────────────────────────────
+    const systemPrompt = systemPrompts[reportType || "creative_performance"] || systemPrompts.creative_performance;
 
     const userContent = `Report type: ${reportType || "creative_performance"}
 
@@ -92,10 +415,10 @@ Question: ${question}`;
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
+        model: MODEL,
         system: systemPrompt,
         messages: [{ role: "user", content: userContent }],
-        max_tokens: 4096,
+        max_tokens: MAX_TOKENS,
         stream: true,
       }),
     });
