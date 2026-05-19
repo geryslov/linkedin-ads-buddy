@@ -12117,18 +12117,8 @@ serve(async (req) => {
           return `dateRange.start.day=${sd}&dateRange.start.month=${sm}&dateRange.start.year=${sy}&dateRange.end.day=${ed}&dateRange.end.month=${em}&dateRange.end.year=${ey}`;
         };
 
-        const lgCampF = (campaignIds?.length > 0)
-          ? (campaignIds as string[]).map((id: string, i: number) => `&campaigns[${i}]=urn:li:sponsoredCampaign:${id}`).join('')
-          : '';
-
         const lgH = { 'Authorization': `Bearer ${accessToken}` };
         const lgRH = { ...lgH, 'X-Restli-Protocol-Version': '2.0.0', 'LinkedIn-Version': '202511' };
-
-        const lgAUrl = (datePart: string, pivot: string) =>
-          `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&${datePart}&timeGranularity=ALL&pivot=${pivot}` +
-          `&accounts[0]=urn:li:sponsoredAccount:${accountId}` +
-          `&fields=pivotValue,impressions,clicks,costInLocalCurrency,oneClickLeads,oneClickLeadFormOpens,externalWebsiteConversions` +
-          `&count=10000${lgCampF}`;
 
         // Static label maps for audience insights
         const JOB_FUNCTIONS: Record<string, string> = {
@@ -12147,22 +12137,72 @@ serve(async (req) => {
 
         console.log(`[get_lead_gen_overview] Starting for account ${accountId}`);
 
-        // Fetch all data in parallel
-        const [r30, r7, rFunc, rSen, rCamp, rCreMeta] = await Promise.allSettled([
-          fetch(lgAUrl(lgDp(lgS30, lgEnd), 'CREATIVE'), { headers: lgH }),
-          fetch(lgAUrl(lgDp(lgS7, lgEnd), 'CREATIVE'), { headers: lgH }),
-          fetch(lgAUrl(lgDp(lgS30, lgEnd), 'MEMBER_JOB_FUNCTION'), { headers: lgH }),
-          fetch(lgAUrl(lgDp(lgS30, lgEnd), 'MEMBER_SENIORITY'), { headers: lgH }),
+        // Step 1: Fetch lead-gen campaigns + all creatives first so we can scope analytics
+        const [rCamp, rCreMeta] = await Promise.allSettled([
           fetch(`https://api.linkedin.com/v2/adCampaignsV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&search.objectiveType.values[0]=LEAD_GENERATION&count=500`, { headers: lgH }),
           fetch(`https://api.linkedin.com/v2/adCreativesV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=1000`, { headers: lgH }),
         ]);
-
         const lgGetJson = async (r: PromiseSettledResult<Response>) => {
           if (r.status === 'rejected' || !r.value.ok) return { elements: [] };
           try { return await r.value.json(); } catch { return { elements: [] }; }
         };
-        const [d30, d7, dFunc, dSen, dCamp, dCreMeta] = await Promise.all([r30,r7,rFunc,rSen,rCamp,rCreMeta].map(lgGetJson));
+        const [dCamp, dCreMeta] = await Promise.all([rCamp, rCreMeta].map(lgGetJson));
+
+        // Build the set of LEAD_GENERATION campaign IDs (intersected with caller's campaignIds if provided)
+        let lgCampaignIds: string[] = (dCamp.elements||[])
+          .map((c: any) => c.id?.toString())
+          .filter(Boolean);
+        if (Array.isArray(campaignIds) && campaignIds.length > 0) {
+          const allowed = new Set(campaignIds.map(String));
+          lgCampaignIds = lgCampaignIds.filter(id => allowed.has(id));
+        }
+        console.log(`[get_lead_gen_overview] Scoping to ${lgCampaignIds.length} LEAD_GENERATION campaign(s)`);
+
+        // Restrict creatives to ones belonging to lead-gen campaigns
+        const lgCampUrnSet = new Set(lgCampaignIds.map(id => `urn:li:sponsoredCampaign:${id}`));
+        const lgCreativesFiltered = (dCreMeta.elements||[]).filter((c: any) =>
+          !c.campaign || lgCampUrnSet.has(c.campaign)
+        );
+        const lgAllowedCreUrns = new Set<string>(
+          lgCreativesFiltered.map((c: any) => `urn:li:sponsoredCreative:${c.id}`).filter(Boolean)
+        );
+
+        // Build campaigns[] filter for analytics — chunk to avoid URI-too-long
+        const lgCampF = lgCampaignIds.length > 0
+          ? lgCampaignIds.map((id, i) => `&campaigns[${i}]=urn:li:sponsoredCampaign:${id}`).join('')
+          : '';
+
+        const lgAUrl = (datePart: string, pivot: string) =>
+          `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&${datePart}&timeGranularity=ALL&pivot=${pivot}` +
+          `&accounts[0]=urn:li:sponsoredAccount:${accountId}` +
+          `&fields=pivotValue,impressions,clicks,costInLocalCurrency,oneClickLeads,oneClickLeadFormOpens,externalWebsiteConversions` +
+          `&count=10000${lgCampF}`;
+
+        // If no lead-gen campaigns exist, short-circuit with empty payload
+        if (lgCampaignIds.length === 0) {
+          return new Response(JSON.stringify({
+            campaigns: [], forms: [], topCreativesByCpl: [],
+            audienceInsights: { byJobFunction: [], bySeniority: [] },
+            summary: { totalLeads:0, totalSpend:0, avgCpl:0, leads7d:0, cpl7d:0, leads30d:0, cpl30d:0, totalForms:0, totalCampaigns:0 },
+          }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        // Step 2: Fetch analytics scoped to lead-gen campaigns
+        const [r30, r7, rFunc, rSen] = await Promise.allSettled([
+          fetch(lgAUrl(lgDp(lgS30, lgEnd), 'CREATIVE'), { headers: lgH }),
+          fetch(lgAUrl(lgDp(lgS7, lgEnd), 'CREATIVE'), { headers: lgH }),
+          fetch(lgAUrl(lgDp(lgS30, lgEnd), 'MEMBER_JOB_FUNCTION'), { headers: lgH }),
+          fetch(lgAUrl(lgDp(lgS30, lgEnd), 'MEMBER_SENIORITY'), { headers: lgH }),
+        ]);
+        const [d30, d7, dFunc, dSen] = await Promise.all([r30,r7,rFunc,rSen].map(lgGetJson));
+        // Safety: also drop any creative rows not in our allowed set (defense-in-depth)
+        if (lgAllowedCreUrns.size > 0) {
+          d30.elements = (d30.elements||[]).filter((el: any) => !el.pivotValue || lgAllowedCreUrns.has(el.pivotValue));
+          d7.elements  = (d7.elements ||[]).filter((el: any) => !el.pivotValue || lgAllowedCreUrns.has(el.pivotValue));
+        }
         console.log(`[get_lead_gen_overview] Analytics30d: ${(d30.elements||[]).length}, 7d: ${(d7.elements||[]).length}, funcs: ${(dFunc.elements||[]).length}, sen: ${(dSen.elements||[]).length}`);
+        // Replace dCreMeta.elements with the filtered list for downstream metadata loop
+        dCreMeta.elements = lgCreativesFiltered;
 
         type LgAM = { impressions:number; clicks:number; spent:number; leads:number; formOpens:number };
         const lgParseA = (els: any[]): Map<string,LgAM> => {
