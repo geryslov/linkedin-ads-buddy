@@ -12552,21 +12552,6 @@ serve(async (req) => {
         const lgLeads7d    = lgAll7.leads;
         const lgSpend7d    = lgAll7.spent;
 
-        // Campaigns
-        const lgCampaigns = (dCamp.elements||[]).map((c: any) => ({
-          id: c.id?.toString()||'',
-          name: c.name||`Campaign ${c.id}`,
-          status: c.status||'UNKNOWN',
-          objectiveType: c.objectiveType||'LEAD_GENERATION',
-          dailyBudget: c.dailyBudget ? { amount:c.dailyBudget.amount, currency:c.dailyBudget.currencyCode } : null,
-          totalBudget: c.totalBudget ? { amount:c.totalBudget.amount, currency:c.totalBudget.currencyCode } : null,
-        }));
-
-        // Summary
-        const lgTotalLeads = lgForms.reduce((s,f)=>s+f.metrics.leads,0);
-        const lgTotalSpend = lgForms.reduce((s,f)=>s+f.metrics.spent,0);
-        const lgLeads7d    = lgForms.reduce((s,f)=>s+f.metrics.last7d.leads,0);
-        const lgSpend7d    = lgForms.reduce((s,f)=>s+f.metrics.last7d.spent,0);
 
         console.log(`[get_lead_gen_overview] Done. ${lgForms.length} forms, ${lgTotalLeads} total leads, ${lgCampaigns.length} lead gen campaigns`);
 
