@@ -12182,12 +12182,14 @@ serve(async (req) => {
 
         // Restrict creatives to ones belonging to lead-gen campaigns
         const lgCampUrnSet = new Set(lgCampaignIds.map(id => `urn:li:sponsoredCampaign:${id}`));
-        const lgCreativesFiltered = (dCreMeta.elements||[]).filter((c: any) =>
-          !c.campaign || lgCampUrnSet.has(c.campaign)
-        );
+        const lgCreativesFiltered = (dCreMeta.elements||[]).filter((c: any) => {
+          const creativeCampaign = typeof c.campaign === 'string' ? c.campaign : '';
+          return creativeCampaign ? lgCampUrnSet.has(creativeCampaign) : false;
+        });
         const lgAllowedCreUrns = new Set<string>(
           lgCreativesFiltered.map((c: any) => `urn:li:sponsoredCreative:${c.id}`).filter(Boolean)
         );
+        console.log(`[get_lead_gen_overview] ${lgCreativesFiltered.length} creatives belong to LEAD_GENERATION campaigns`);
 
         // Build campaigns[] filter for analytics — chunk to avoid URI-too-long
         const lgCampF = lgCampaignIds.length > 0
