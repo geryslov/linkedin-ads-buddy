@@ -12188,11 +12188,27 @@ serve(async (req) => {
         }
 
         // Step 2: Fetch analytics scoped to lead-gen campaigns
+        // Use POST query tunneling to avoid 414 URI Too Long when many campaigns are filtered
+        const lgFetchA = async (datePart: string, pivot: string): Promise<Response> => {
+          const url = lgAUrl(datePart, pivot);
+          if (url.length < 7000) {
+            const r = await fetch(url, { headers: lgH });
+            if (r.status !== 414) return r;
+          }
+          const qIdx = url.indexOf('?');
+          const base = url.slice(0, qIdx);
+          const qs = url.slice(qIdx + 1);
+          return fetch(base, {
+            method: 'POST',
+            headers: { ...lgH, 'Content-Type': 'application/x-www-form-urlencoded', 'X-HTTP-Method-Override': 'GET' },
+            body: qs,
+          });
+        };
         const [r30, r7, rFunc, rSen] = await Promise.allSettled([
-          fetch(lgAUrl(lgDp(lgS30, lgEnd), 'CREATIVE'), { headers: lgH }),
-          fetch(lgAUrl(lgDp(lgS7, lgEnd), 'CREATIVE'), { headers: lgH }),
-          fetch(lgAUrl(lgDp(lgS30, lgEnd), 'MEMBER_JOB_FUNCTION'), { headers: lgH }),
-          fetch(lgAUrl(lgDp(lgS30, lgEnd), 'MEMBER_SENIORITY'), { headers: lgH }),
+          lgFetchA(lgDp(lgS30, lgEnd), 'CREATIVE'),
+          lgFetchA(lgDp(lgS7, lgEnd), 'CREATIVE'),
+          lgFetchA(lgDp(lgS30, lgEnd), 'MEMBER_JOB_FUNCTION'),
+          lgFetchA(lgDp(lgS30, lgEnd), 'MEMBER_SENIORITY'),
         ]);
         const [d30, d7, dFunc, dSen] = await Promise.all([r30,r7,rFunc,rSen].map(lgGetJson));
         // Safety: also drop any creative rows not in our allowed set (defense-in-depth)
