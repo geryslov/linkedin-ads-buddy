@@ -12253,7 +12253,9 @@ serve(async (req) => {
               impressions: el.impressions||0,
               clicks: el.clicks||0,
               spent: parseFloat(el.costInLocalCurrency||'0'),
-              leads: (el.oneClickLeads||0)+(el.externalWebsiteConversions||0),
+              // LEAD_GENERATION objective: leads = oneClickLeads only.
+              // externalWebsiteConversions belong to website-conversion campaigns and would inflate leads / understate CPL.
+              leads: el.oneClickLeads||0,
               formOpens: el.oneClickLeadFormOpens||0,
             });
           }
@@ -12262,6 +12264,18 @@ serve(async (req) => {
 
         const a30 = lgParseA(d30.elements||[]);
         const a7  = lgParseA(d7.elements||[]);
+
+        // True totals across ALL lead-gen creatives (not just forms with leads).
+        // Forms aggregate is intentionally form-scoped; summary must reflect full account spend on lead-gen.
+        const lgSumAll = (m: Map<string,LgAM>) => {
+          let impressions=0, clicks=0, spent=0, leads=0, formOpens=0;
+          for (const v of m.values()) {
+            impressions+=v.impressions; clicks+=v.clicks; spent+=v.spent; leads+=v.leads; formOpens+=v.formOpens;
+          }
+          return { impressions, clicks, spent, leads, formOpens };
+        };
+        const lgAll30 = lgSumAll(a30);
+        const lgAll7  = lgSumAll(a7);
 
         // Creative metadata map: form URN + CTA + status
         const lgCMeta = new Map<string, { name:string; formUrn?:string; cta?:string; status?:string }>();
