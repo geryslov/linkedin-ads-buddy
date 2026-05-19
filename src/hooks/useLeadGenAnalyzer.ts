@@ -120,7 +120,7 @@ export function useLeadGenAnalyzer(accessToken: string | null) {
       }
       setOverviewData(data);
 
-      if (autoAnalyze && (data.forms.length > 0 || data.summary.totalLeads > 0)) {
+      if (autoAnalyze && (data.forms.length > 0 || data.summary.totalLeads > 0 || data.summary.totalCampaigns > 0)) {
         const aiPayload = buildAIPayload(data);
         aiAnalysis.ask(
           'Analyze my lead generation campaigns. Audit each form (headline, description, fields, CTA alignment), identify CPL trends and fatigue signals, highlight best and worst performing creatives, and give me specific actions to improve CPL and lead volume.',

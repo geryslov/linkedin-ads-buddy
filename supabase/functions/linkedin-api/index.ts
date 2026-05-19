@@ -12137,16 +12137,38 @@ serve(async (req) => {
 
         console.log(`[get_lead_gen_overview] Starting for account ${accountId}`);
 
-        // Step 1: Fetch lead-gen campaigns + all creatives first so we can scope analytics
-        const [rCamp, rCreMeta] = await Promise.allSettled([
-          fetch(`https://api.linkedin.com/v2/adCampaignsV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&search.objectiveType.values[0]=LEAD_GENERATION&count=500`, { headers: lgH }),
-          fetch(`https://api.linkedin.com/v2/adCreativesV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=1000`, { headers: lgH }),
-        ]);
         const lgGetJson = async (r: PromiseSettledResult<Response>) => {
           if (r.status === 'rejected' || !r.value.ok) return { elements: [] };
           try { return await r.value.json(); } catch { return { elements: [] }; }
         };
-        const [dCamp, dCreMeta] = await Promise.all([rCamp, rCreMeta].map(lgGetJson));
+
+        // Step 1: Fetch campaigns + creatives, then filter objective locally.
+        // LinkedIn's objectiveType search filter can return empty for some accounts even when LEAD_GENERATION campaigns exist.
+        const lgFetchPaged = async (baseUrl: string, label: string, count = 500, maxStart = 5000) => {
+          const elements: any[] = [];
+          for (let start = 0; start <= maxStart; start += count) {
+            const r = await fetch(`${baseUrl}&count=${count}&start=${start}`, { headers: lgH });
+            if (!r.ok) {
+              console.log(`[get_lead_gen_overview] ${label} fetch failed ${r.status}`);
+              break;
+            }
+            const d = await r.json().catch(() => ({ elements: [] }));
+            const page = d.elements || [];
+            elements.push(...page);
+            if (page.length < count) break;
+          }
+          console.log(`[get_lead_gen_overview] ${label}: fetched ${elements.length}`);
+          return { elements };
+        };
+
+        const [dCampAll, dCreMeta] = await Promise.all([
+          lgFetchPaged(`https://api.linkedin.com/v2/adCampaignsV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}`, 'campaigns', 100),
+          lgFetchPaged(`https://api.linkedin.com/v2/adCreativesV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}`, 'creatives', 500),
+        ]);
+
+        const dCamp = {
+          elements: (dCampAll.elements || []).filter((c: any) => String(c.objectiveType || c.type || '').toUpperCase() === 'LEAD_GENERATION'),
+        };
 
         // Build the set of LEAD_GENERATION campaign IDs (intersected with caller's campaignIds if provided)
         let lgCampaignIds: string[] = (dCamp.elements||[])
@@ -12160,12 +12182,14 @@ serve(async (req) => {
 
         // Restrict creatives to ones belonging to lead-gen campaigns
         const lgCampUrnSet = new Set(lgCampaignIds.map(id => `urn:li:sponsoredCampaign:${id}`));
-        const lgCreativesFiltered = (dCreMeta.elements||[]).filter((c: any) =>
-          !c.campaign || lgCampUrnSet.has(c.campaign)
-        );
+        const lgCreativesFiltered = (dCreMeta.elements||[]).filter((c: any) => {
+          const creativeCampaign = typeof c.campaign === 'string' ? c.campaign : '';
+          return creativeCampaign ? lgCampUrnSet.has(creativeCampaign) : false;
+        });
         const lgAllowedCreUrns = new Set<string>(
           lgCreativesFiltered.map((c: any) => `urn:li:sponsoredCreative:${c.id}`).filter(Boolean)
         );
+        console.log(`[get_lead_gen_overview] ${lgCreativesFiltered.length} creatives belong to LEAD_GENERATION campaigns`);
 
         // Build campaigns[] filter for analytics — chunk to avoid URI-too-long
         const lgCampF = lgCampaignIds.length > 0
