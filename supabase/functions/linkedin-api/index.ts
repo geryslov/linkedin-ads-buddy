@@ -12253,7 +12253,9 @@ serve(async (req) => {
               impressions: el.impressions||0,
               clicks: el.clicks||0,
               spent: parseFloat(el.costInLocalCurrency||'0'),
-              leads: (el.oneClickLeads||0)+(el.externalWebsiteConversions||0),
+              // LEAD_GENERATION objective: leads = oneClickLeads only.
+              // externalWebsiteConversions belong to website-conversion campaigns and would inflate leads / understate CPL.
+              leads: el.oneClickLeads||0,
               formOpens: el.oneClickLeadFormOpens||0,
             });
           }
@@ -12262,6 +12264,18 @@ serve(async (req) => {
 
         const a30 = lgParseA(d30.elements||[]);
         const a7  = lgParseA(d7.elements||[]);
+
+        // True totals across ALL lead-gen creatives (not just forms with leads).
+        // Forms aggregate is intentionally form-scoped; summary must reflect full account spend on lead-gen.
+        const lgSumAll = (m: Map<string,LgAM>) => {
+          let impressions=0, clicks=0, spent=0, leads=0, formOpens=0;
+          for (const v of m.values()) {
+            impressions+=v.impressions; clicks+=v.clicks; spent+=v.spent; leads+=v.leads; formOpens+=v.formOpens;
+          }
+          return { impressions, clicks, spent, leads, formOpens };
+        };
+        const lgAll30 = lgSumAll(a30);
+        const lgAll7  = lgSumAll(a7);
 
         // Creative metadata map: form URN + CTA + status
         const lgCMeta = new Map<string, { name:string; formUrn?:string; cta?:string; status?:string }>();
@@ -12500,7 +12514,7 @@ serve(async (req) => {
         const lgParseAudience = (els: any[], labelMap: Record<string,string>) => {
           return els
             .map((el: any) => {
-              const leads = (el.oneClickLeads||0)+(el.externalWebsiteConversions||0);
+              const leads = el.oneClickLeads||0;
               if (leads===0) return null;
               const spent = parseFloat(el.costInLocalCurrency||'0');
               const urnId = (el.pivotValue||'').split(':').pop()||'';
@@ -12532,11 +12546,12 @@ serve(async (req) => {
           totalBudget: c.totalBudget ? { amount:c.totalBudget.amount, currency:c.totalBudget.currencyCode } : null,
         }));
 
-        // Summary
-        const lgTotalLeads = lgForms.reduce((s,f)=>s+f.metrics.leads,0);
-        const lgTotalSpend = lgForms.reduce((s,f)=>s+f.metrics.spent,0);
-        const lgLeads7d    = lgForms.reduce((s,f)=>s+f.metrics.last7d.leads,0);
-        const lgSpend7d    = lgForms.reduce((s,f)=>s+f.metrics.last7d.spent,0);
+        // Summary — use raw analytics totals so spend isn't lost when a creative's form can't be resolved.
+        const lgTotalLeads = lgAll30.leads;
+        const lgTotalSpend = lgAll30.spent;
+        const lgLeads7d    = lgAll7.leads;
+        const lgSpend7d    = lgAll7.spent;
+
 
         console.log(`[get_lead_gen_overview] Done. ${lgForms.length} forms, ${lgTotalLeads} total leads, ${lgCampaigns.length} lead gen campaigns`);
 
