@@ -12162,7 +12162,7 @@ serve(async (req) => {
         };
 
         const [dCampAll, dCreMeta] = await Promise.all([
-          lgFetchPaged(`https://api.linkedin.com/v2/adCampaignsV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}`, 'campaigns', 500),
+          lgFetchPaged(`https://api.linkedin.com/v2/adCampaignsV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}`, 'campaigns', 100),
           lgFetchPaged(`https://api.linkedin.com/v2/adCreativesV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}`, 'creatives', 500),
         ]);
 
