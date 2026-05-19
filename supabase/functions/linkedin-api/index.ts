@@ -12514,7 +12514,7 @@ serve(async (req) => {
         const lgParseAudience = (els: any[], labelMap: Record<string,string>) => {
           return els
             .map((el: any) => {
-              const leads = (el.oneClickLeads||0)+(el.externalWebsiteConversions||0);
+              const leads = el.oneClickLeads||0;
               if (leads===0) return null;
               const spent = parseFloat(el.costInLocalCurrency||'0');
               const urnId = (el.pivotValue||'').split(':').pop()||'';
@@ -12535,6 +12535,22 @@ serve(async (req) => {
           byJobFunction: lgParseAudience(dFunc.elements||[], JOB_FUNCTIONS),
           bySeniority: lgParseAudience(dSen.elements||[], SENIORITIES),
         };
+
+        // Campaigns
+        const lgCampaigns = (dCamp.elements||[]).map((c: any) => ({
+          id: c.id?.toString()||'',
+          name: c.name||`Campaign ${c.id}`,
+          status: c.status||'UNKNOWN',
+          objectiveType: c.objectiveType||'LEAD_GENERATION',
+          dailyBudget: c.dailyBudget ? { amount:c.dailyBudget.amount, currency:c.dailyBudget.currencyCode } : null,
+          totalBudget: c.totalBudget ? { amount:c.totalBudget.amount, currency:c.totalBudget.currencyCode } : null,
+        }));
+
+        // Summary — use raw analytics totals so spend isn't lost when a creative's form can't be resolved.
+        const lgTotalLeads = lgAll30.leads;
+        const lgTotalSpend = lgAll30.spent;
+        const lgLeads7d    = lgAll7.leads;
+        const lgSpend7d    = lgAll7.spent;
 
         // Campaigns
         const lgCampaigns = (dCamp.elements||[]).map((c: any) => ({
