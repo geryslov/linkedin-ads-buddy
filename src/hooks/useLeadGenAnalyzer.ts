@@ -96,9 +96,28 @@ export function useLeadGenAnalyzer(accessToken: string | null) {
         },
       });
 
-      if (result.error) throw new Error(result.error.message || 'Failed to fetch lead gen data');
+      if (result.error) {
+        // Supabase wraps function errors — extract the real message
+        let msg = 'Failed to fetch lead gen data';
+        try {
+          const ctx = (result.error as any).context;
+          if (ctx && typeof ctx === 'object' && ctx.error) {
+            msg = ctx.error;
+          } else if (typeof ctx === 'string') {
+            msg = ctx;
+          } else {
+            msg = result.error.message || msg;
+          }
+        } catch { /* use default */ }
+        console.error('[useLeadGenAnalyzer] Edge function error:', result.error);
+        throw new Error(msg);
+      }
 
       const data: LeadGenOverviewData = result.data;
+      if (!data || !data.summary) {
+        console.error('[useLeadGenAnalyzer] Unexpected response shape:', data);
+        throw new Error('Received empty or malformed response from edge function');
+      }
       setOverviewData(data);
 
       if (autoAnalyze && (data.forms.length > 0 || data.summary.totalLeads > 0)) {
@@ -111,7 +130,7 @@ export function useLeadGenAnalyzer(accessToken: string | null) {
       }
     } catch (err) {
       console.error('[useLeadGenAnalyzer] Error:', err);
-      setDataError('Failed to fetch lead generation data');
+      setDataError(err instanceof Error ? err.message : 'Failed to fetch lead generation data');
     } finally {
       setIsLoadingData(false);
     }
