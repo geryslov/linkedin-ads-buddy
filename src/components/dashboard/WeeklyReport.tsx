@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import {
   useWeeklyReport,
   WeeklyCreativeRow,
@@ -8,6 +8,7 @@ import {
   DemoEntry,
   WeekMetrics,
 } from '@/hooks/useWeeklyReport';
+import { useAIAnalysis } from '@/hooks/useAIAnalysis';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -38,7 +39,13 @@ import {
   FolderOpen,
   Palette,
   Tag,
+  Sparkles,
+  Copy,
+  Check,
+  Loader2,
+  Send,
 } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
 import { LineChart, Line, ResponsiveContainer } from 'recharts';
 
 interface Props {
@@ -464,7 +471,11 @@ type ObjectiveFilter = 'all' | 'leadgen' | 'others';
 // ── Main component ─────────────────────────────────────────────────────────────
 export function WeeklyReport({ accessToken, selectedAccount }: Props) {
   const { data, isLoading, error, fetchReport } = useWeeklyReport(accessToken);
+  const aiAnalysis = useAIAnalysis();
   const [objectiveFilter, setObjectiveFilter] = useState<ObjectiveFilter>('all');
+  const [copied, setCopied] = useState(false);
+  const [digestInput, setDigestInput] = useState('');
+  const digestEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (selectedAccount) fetchReport(selectedAccount);
@@ -844,6 +855,181 @@ export function WeeklyReport({ accessToken, selectedAccount }: Props) {
           <DemoChart title="Industry" data={demographics.industry} icon={ClipboardList} />
           <DemoChart title="Company Size" data={demographics.companySize} icon={Users} />
         </div>
+      </div>
+
+      {/* ── AI Weekly Digest ──────────────────────────────────────── */}
+      <div className={cn(
+        'border rounded-xl bg-card shadow-sm overflow-hidden transition-all duration-300',
+        aiAnalysis.isLoading ? 'border-primary/40 shadow-[0_0_0_1px_hsl(221_83%_53%_/_0.08)]' : 'border-primary/20',
+      )}>
+        <div className="flex items-center justify-between px-5 py-3 border-b border-primary/10 bg-primary/[0.03]">
+          <div className="flex items-center gap-2.5">
+            <div className={cn('h-6 w-6 rounded-md flex items-center justify-center transition-colors', aiAnalysis.isLoading ? 'bg-primary/20' : 'bg-primary/10')}>
+              <Sparkles className={cn('h-3.5 w-3.5 text-primary', aiAnalysis.isLoading && 'animate-pulse')} />
+            </div>
+            <span className="text-sm font-semibold">AI Client Digest</span>
+            {aiAnalysis.isLoading && (
+              <div className="flex gap-0.5 items-center ml-0.5">
+                {[0, 1, 2].map(i => (
+                  <span key={i} className="h-1 w-1 rounded-full bg-primary/50 animate-bounce"
+                    style={{ animationDelay: `${i * 160}ms`, animationDuration: '900ms' }} />
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            {/* Copy button — visible when there's assistant text */}
+            {aiAnalysis.messages.some(m => m.role === 'assistant') && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 text-xs gap-1.5"
+                onClick={() => {
+                  const text = aiAnalysis.messages.filter(m => m.role === 'assistant').pop()?.content || '';
+                  navigator.clipboard.writeText(text);
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 2000);
+                }}
+              >
+                {copied ? <Check className="h-3 w-3 text-green-600" /> : <Copy className="h-3 w-3" />}
+                {copied ? 'Copied!' : 'Copy'}
+              </Button>
+            )}
+            <Button
+              variant="default"
+              size="sm"
+              className="h-7 text-xs gap-1.5"
+              disabled={aiAnalysis.isLoading}
+              onClick={() => {
+                aiAnalysis.clearHistory();
+                const digestPayload = {
+                  weekRange,
+                  summary,
+                  topCreatives: filteredCreatives.slice(0, 10).map(c => ({
+                    name: c.creativeName, status: c.status,
+                    thisWeek: { spent: c.thisWeek.spent, impressions: c.thisWeek.impressions, clicks: c.thisWeek.clicks, leads: c.thisWeek.leads, ctr: +c.thisWeek.ctr.toFixed(2), cpl: +c.thisWeek.cpl.toFixed(2) },
+                    lastWeek: { spent: c.lastWeek.spent, impressions: c.lastWeek.impressions, clicks: c.lastWeek.clicks, leads: c.lastWeek.leads, ctr: +c.lastWeek.ctr.toFixed(2), cpl: +c.lastWeek.cpl.toFixed(2) },
+                    pctSpentChange: c.pctSpentChange, pctCplChange: c.pctCplChange,
+                  })),
+                  topCampaigns: filteredCampaigns.slice(0, 8).map(c => ({
+                    name: c.campaignName, status: c.status, objective: c.objectiveType,
+                    thisWeek: { spent: c.thisWeek.spent, leads: c.thisWeek.leads, ctr: +c.thisWeek.ctr.toFixed(2), cpl: +c.thisWeek.cpl.toFixed(2) },
+                    pctSpentChange: c.pctSpentChange, pctCplChange: c.pctCplChange,
+                  })),
+                  leadForms: byLeadForm.slice(0, 5).map(f => ({
+                    name: f.formName,
+                    thisWeek: { leads: f.thisWeek.leads, cpl: +f.thisWeek.cpl.toFixed(2), spent: f.thisWeek.spent },
+                    pctCplChange: f.pctCplChange,
+                  })),
+                  topDemographics: {
+                    jobTitles: demographics.jobTitle.slice(0, 5).map(d => d.name.replace(/^urn:li:[^:]+:/i, '')),
+                    seniorities: demographics.seniority.slice(0, 3).map(d => d.name.replace(/^urn:li:[^:]+:/i, '')),
+                  },
+                };
+                aiAnalysis.ask(
+                  'Write a client-ready weekly performance digest I can paste into email or Slack.',
+                  digestPayload,
+                  'weekly_digest',
+                );
+              }}
+            >
+              <Sparkles className="h-3 w-3" />
+              {aiAnalysis.messages.length > 0 ? 'Regenerate' : 'Generate Digest'}
+            </Button>
+          </div>
+        </div>
+
+        {/* Streaming progress */}
+        {aiAnalysis.isLoading && (
+          <div className="h-0.5 bg-primary/10 overflow-hidden">
+            <div className="h-full bg-primary/40 animate-pulse w-full" />
+          </div>
+        )}
+
+        {/* Messages */}
+        <div className="max-h-[500px] overflow-y-auto scroll-smooth" style={{ scrollbarWidth: 'thin' }}>
+          <div className="px-5 py-4 space-y-4">
+            {aiAnalysis.messages.length === 0 && !aiAnalysis.isLoading && (
+              <div className="flex flex-col items-center justify-center py-12 text-center">
+                <div className="h-10 w-10 rounded-xl bg-primary/8 border border-primary/15 flex items-center justify-center mb-3">
+                  <Sparkles className="h-4.5 w-4.5 text-primary/60" />
+                </div>
+                <p className="text-sm text-muted-foreground">Click "Generate Digest" to create a client-ready summary</p>
+                <p className="text-xs text-muted-foreground/60 mt-1">AI writes a narrative you can paste into email or Slack</p>
+              </div>
+            )}
+
+            {aiAnalysis.messages.map((msg, i) => (
+              <div key={i}>
+                {msg.role === 'user' ? (
+                  <div className="flex justify-end">
+                    <div className="bg-primary text-primary-foreground rounded-2xl rounded-tr-sm px-4 py-2.5 text-sm max-w-[75%] shadow-sm">
+                      {msg.content}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-2xl rounded-tl-sm bg-muted/30 border border-border/40 px-4 py-3.5">
+                    <div className="prose prose-sm dark:prose-invert max-w-none
+                      [&>*:first-child]:mt-0 [&>*:last-child]:mb-0
+                      [&_h1]:text-base [&_h1]:font-bold [&_h1]:mt-5 [&_h1]:mb-2
+                      [&_h2]:text-sm [&_h2]:font-bold [&_h2]:mt-4 [&_h2]:mb-1.5
+                      [&_h3]:text-sm [&_h3]:font-semibold [&_h3]:mt-3 [&_h3]:mb-1
+                      [&_li]:text-[13px] [&_p]:text-[13px] [&_p]:leading-relaxed
+                      [&_strong]:text-foreground
+                      [&_ul]:space-y-0.5 [&_ol]:space-y-0.5
+                    ">
+                      <ReactMarkdown>{msg.content}</ReactMarkdown>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+
+            {aiAnalysis.isLoading && aiAnalysis.messages.length === 0 && (
+              <div className="rounded-2xl rounded-tl-sm bg-muted/20 border border-border/30 px-4 py-3">
+                <div className="flex gap-1 items-center h-4">
+                  {[0, 1, 2].map(i => (
+                    <span key={i} className="h-1.5 w-1.5 rounded-full bg-primary/50 animate-bounce"
+                      style={{ animationDelay: `${i * 160}ms`, animationDuration: '900ms' }} />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div ref={digestEndRef} />
+          </div>
+        </div>
+
+        {/* Follow-up input */}
+        {aiAnalysis.messages.length > 0 && (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              const q = digestInput.trim();
+              if (!q) return;
+              setDigestInput('');
+              aiAnalysis.ask(q, { weekRange, summary }, 'weekly_digest');
+            }}
+            className="flex gap-2 px-4 py-3 border-t border-border/40 bg-muted/5"
+          >
+            <input
+              value={digestInput}
+              onChange={e => setDigestInput(e.target.value)}
+              placeholder="Ask for a different tone, add details, or adjust the digest..."
+              disabled={aiAnalysis.isLoading}
+              className="flex-1 h-9 text-sm bg-transparent border border-border/60 rounded-md px-3 focus:outline-none focus:ring-1 focus:ring-primary/40"
+            />
+            {aiAnalysis.isLoading ? (
+              <Button type="button" size="icon" variant="ghost" onClick={aiAnalysis.cancel} className="h-9 w-9 text-muted-foreground hover:text-destructive">
+                <Loader2 className="h-4 w-4 animate-spin" />
+              </Button>
+            ) : (
+              <Button type="submit" size="icon" disabled={!digestInput.trim()} className="h-9 w-9">
+                <Send className="h-4 w-4" />
+              </Button>
+            )}
+          </form>
+        )}
       </div>
     </div>
   );

@@ -27,6 +27,8 @@ import { ActivityReport } from "@/components/dashboard/ActivityReport";
 import { AnalyticsDashboard } from "@/components/dashboard/AnalyticsDashboard";
 import { CreativeAnalyzer } from "@/components/dashboard/CreativeAnalyzer";
 import { LeadGenAnalyzer } from "@/components/dashboard/LeadGenAnalyzer";
+import { AgenticChatDrawer } from "@/components/dashboard/AgenticChatDrawer";
+import { AccountHealthCheck } from "@/components/dashboard/AccountHealthCheck";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -63,6 +65,7 @@ const tabMeta: Record<string, { group: string; title: string; subtitle: string }
   activity_report:     { group: "Analytics",  title: "Activity Report",              subtitle: "Track performance of grouped campaign activities" },
   creative_analyzer:   { group: "Analytics",  title: "Creative Analyzer",            subtitle: "AI-powered creative fatigue detection and pattern analysis" },
   lead_gen_analyzer:   { group: "Analytics",  title: "Lead Gen Analyzer",             subtitle: "CPL analysis, form quality, creative performance for lead generation campaigns" },
+  account_health:      { group: "Analytics",  title: "Account Health",                subtitle: "AI-powered account diagnosis with severity-ranked action items" },
 };
 
 export default function Dashboard() {
@@ -426,8 +429,18 @@ export default function Dashboard() {
             selectedAccount={selectedAccount}
           />
         )}
+
+        {activeTab === "account_health" && (
+          <AccountHealthCheck
+            accessToken={accessToken}
+            selectedAccount={selectedAccount}
+          />
+        )}
         </div>{/* end p-6 content wrapper */}
       </main>
+
+      {/* Global AI Advisor — floating chat available on every tab */}
+      <AgenticChatDrawer accessToken={accessToken} selectedAccount={selectedAccount} />
     </div>
   );
 }

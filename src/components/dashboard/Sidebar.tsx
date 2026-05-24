@@ -29,6 +29,7 @@ import {
   Radio,
   Sparkles,
   Target,
+  Shield,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -82,6 +83,7 @@ const navGroups: NavGroup[] = [
       { id: "activity_report", label: "Activity Report", icon: ClipboardList },
       { id: "creative_analyzer", label: "Creative Analyzer", icon: Sparkles },
       { id: "lead_gen_analyzer", label: "Lead Gen Analyzer", icon: Target },
+      { id: "account_health", label: "Account Health", icon: Shield },
     ],
   },
   {
