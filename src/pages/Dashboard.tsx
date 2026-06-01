@@ -29,6 +29,7 @@ import { CreativeAnalyzer } from "@/components/dashboard/CreativeAnalyzer";
 import { LeadGenAnalyzer } from "@/components/dashboard/LeadGenAnalyzer";
 import { AgenticChatDrawer } from "@/components/dashboard/AgenticChatDrawer";
 import { AccountHealthCheck } from "@/components/dashboard/AccountHealthCheck";
+import { PerformanceSegmentation } from "@/components/dashboard/PerformanceSegmentation";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -66,6 +67,7 @@ const tabMeta: Record<string, { group: string; title: string; subtitle: string }
   creative_analyzer:   { group: "Analytics",  title: "Creative Analyzer",            subtitle: "AI-powered creative fatigue detection and pattern analysis" },
   lead_gen_analyzer:   { group: "Analytics",  title: "Lead Gen Analyzer",             subtitle: "CPL analysis, form quality, creative performance for lead generation campaigns" },
   account_health:      { group: "Analytics",  title: "Account Health",                subtitle: "AI-powered account diagnosis with severity-ranked action items" },
+  segmentation:        { group: "Analytics",  title: "Segmentation",                  subtitle: "Performance segmentation by business line, objective, activity, and audience" },
 };
 
 export default function Dashboard() {
@@ -432,6 +434,13 @@ export default function Dashboard() {
 
         {activeTab === "account_health" && (
           <AccountHealthCheck
+            accessToken={accessToken}
+            selectedAccount={selectedAccount}
+          />
+        )}
+
+        {activeTab === "segmentation" && (
+          <PerformanceSegmentation
             accessToken={accessToken}
             selectedAccount={selectedAccount}
           />
