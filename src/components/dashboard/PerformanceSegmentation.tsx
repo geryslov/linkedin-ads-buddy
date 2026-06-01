@@ -251,6 +251,7 @@ export function PerformanceSegmentation({ accessToken, selectedAccount }: Props)
     tree, flatRows, scorecard,
     isLoading, error,
     compareBaseline, setCompareBaseline,
+    hasBaseline, hasConfig, baselinePeriod,
     fetchReport,
   } = usePerformanceSegmentation(accessToken);
 
@@ -328,10 +329,15 @@ export function PerformanceSegmentation({ accessToken, selectedAccount }: Props)
         </div>
 
         <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2">
-            <Switch checked={compareBaseline} onCheckedChange={setCompareBaseline} className="h-4 w-7" />
-            <span className="text-xs text-muted-foreground">vs Baseline (Mar–May 2026)</span>
-          </div>
+          {hasBaseline && (
+            <div className="flex items-center gap-2">
+              <Switch checked={compareBaseline} onCheckedChange={setCompareBaseline} className="h-4 w-7" />
+              <span className="text-xs text-muted-foreground">vs Baseline{baselinePeriod ? ` (${baselinePeriod.replace('..', ' – ')})` : ''}</span>
+            </div>
+          )}
+          {!hasConfig && tree.length > 0 && (
+            <Badge variant="outline" className="text-[10px] text-muted-foreground">Generic parser — no custom config for this account</Badge>
+          )}
           <div className="flex items-center border border-border/60 rounded-md overflow-hidden">
             <button onClick={() => setViewMode('tree')}
               className={cn('h-8 px-3 text-xs flex items-center gap-1.5 transition-colors', viewMode === 'tree' ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground hover:bg-muted/30')}>
@@ -373,9 +379,9 @@ export function PerformanceSegmentation({ accessToken, selectedAccount }: Props)
       )}
 
       {/* ── Baseline label ─────────────────────────────────────── */}
-      {compareBaseline && (
+      {compareBaseline && hasBaseline && (
         <p className="text-[10px] text-muted-foreground text-center">
-          Benchmark: 1 Mar – 31 May 2026 · Date range: {startDate} to {endDate}
+          Benchmark: {baselinePeriod?.replace('..', ' – ') || 'frozen baseline'} · Date range: {startDate} to {endDate}
         </p>
       )}
     </div>

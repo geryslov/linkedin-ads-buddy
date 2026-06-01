@@ -2,9 +2,8 @@
 // Takes parsed ad set rows + metrics, builds a 5-level hierarchy tree,
 // looks up baselines, and computes deltas.
 
-import type { ParsedAdSet } from './adSetParser';
+import type { ParsedAdSet, BenchmarkTarget } from './adSetParser';
 import { getHeadlineMetric } from './adSetParser';
-import baselineData from '../data/windward_benchmark_baseline.json';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -99,13 +98,11 @@ function sumRaw(rows: RawMetrics[]): RawMetrics {
 
 // ─── Baseline lookup ─────────────────────────────────────────────────────────
 
-type LevelKey = 'business_line' | 'bl_objective' | 'bl_objective_activity';
-const LEVEL_KEYS: LevelKey[] = ['business_line', 'bl_objective', 'bl_objective_activity'];
+const LEVEL_NAMES = ['business_line', 'bl_objective', 'bl_objective_activity', 'bl_objective_activity_adtype', 'bl_objective_activity_adtype_segment'];
 
-export function getBaseline(level: number, key: string): BaselineEntry | null {
-  const levels = (baselineData as any).levels;
-  const levelNames = ['business_line', 'bl_objective', 'bl_objective_activity', 'bl_objective_activity_adtype', 'bl_objective_activity_adtype_segment'];
-  const levelData = levels[levelNames[level]];
+export function getBaseline(level: number, key: string, baselineData: any | null): BaselineEntry | null {
+  if (!baselineData?.levels) return null;
+  const levelData = baselineData.levels[LEVEL_NAMES[level]];
   if (!levelData) return null;
   return levelData[key] || null;
 }
@@ -121,27 +118,23 @@ function computeDelta(current: number | null, baseline: number | null, lowerIsBe
 
 // ─── Benchmark flag ──────────────────────────────────────────────────────────
 
-function evaluateBenchmark(activityType: string, objective: string, metrics: DerivedMetrics): 'PASS' | 'MISS' | 'PAUSE' | null {
-  // TLA CTR >= 7%
-  if (activityType === 'Thought Leader Ads' && metrics.ctr != null) {
-    return metrics.ctr >= 0.07 ? 'PASS' : 'MISS';
-  }
-  // Page Boosts CTR >= 4%
-  if (activityType === 'Page Boosts' && metrics.ctr != null) {
-    return metrics.ctr >= 0.04 ? 'PASS' : 'MISS';
-  }
-  // Lead Gen CPL
-  if (objective === 'Lead Generation' && metrics.cpl != null) {
-    if (metrics.cpl > 100) return 'PAUSE';
-    if (metrics.cpl <= 50) return 'PASS';
-    return 'MISS';
+function evaluateBenchmark(activityType: string, objective: string, metrics: DerivedMetrics, benchmarks: BenchmarkTarget[]): 'PASS' | 'MISS' | 'PAUSE' | null {
+  for (const bm of benchmarks) {
+    const matches = (!bm.activityFilter || activityType === bm.activityFilter) &&
+                    (!bm.objectiveFilter || objective === bm.objectiveFilter);
+    if (!matches) continue;
+    const val = (metrics as any)[bm.metric] as number | null;
+    if (val == null) continue;
+    const pass = bm.op === '>=' ? val >= bm.value : bm.op === '<=' ? val <= bm.value : val > bm.value;
+    if (bm.op === '>') return pass ? bm.failFlag : null; // ">" is a negative check (CPL > 100 → PAUSE)
+    return pass ? 'PASS' : bm.failFlag;
   }
   return null;
 }
 
 // ─── Build tree ──────────────────────────────────────────────────────────────
 
-export function buildSegmentationTree(rows: ParsedAdSetRow[], compareBaseline: boolean): SegmentNode[] {
+export function buildSegmentationTree(rows: ParsedAdSetRow[], compareBaseline: boolean, baselineData: any | null = null, benchmarks: BenchmarkTarget[] = []): SegmentNode[] {
   // Level definitions: dimension extractors for the hierarchy
   const levelDefs: Array<{ extract: (p: ParsedAdSet) => string }> = [
     { extract: p => p.business_line },
@@ -185,7 +178,7 @@ export function buildSegmentationTree(rows: ParsedAdSetRow[], compareBaseline: b
       const secondaryValue = (metrics as any)[hm.secondaryKey] as number | null;
 
       // Baseline lookup
-      const baseline = compareBaseline ? getBaseline(level, key) : null;
+      const baseline = compareBaseline ? getBaseline(level, key, baselineData) : null;
       const headlineDelta = baseline && headlineValue != null
         ? computeDelta(headlineValue, (baseline as any)[hm.key], hm.lowerIsBetter)
         : null;
@@ -196,7 +189,7 @@ export function buildSegmentationTree(rows: ParsedAdSetRow[], compareBaseline: b
       // Benchmark flag (only applies at activity_type level = 2)
       const dominantActivity = level >= 2 ? key.split('||')[2] || '' : '';
       const benchmarkFlag = level >= 2
-        ? evaluateBenchmark(dominantActivity, dominantObj, metrics)
+        ? evaluateBenchmark(dominantActivity, dominantObj, metrics, benchmarks)
         : null;
 
       const children = buildLevel(groupRows, level + 1, key);
@@ -254,47 +247,31 @@ export interface ScorecardItem {
   baselineValue?: number | null;
 }
 
-export function evaluateScorecard(rows: ParsedAdSetRow[], compareBaseline: boolean): ScorecardItem[] {
+export function evaluateScorecard(rows: ParsedAdSetRow[], compareBaseline: boolean, baselineData: any | null = null, benchmarks: BenchmarkTarget[] = []): ScorecardItem[] {
   const items: ScorecardItem[] = [];
 
-  // TLA CTR >= 7%
-  const tlaRows = rows.filter(r => r.parsed.activity_type === 'Thought Leader Ads');
-  if (tlaRows.length > 0) {
-    const raw = sumRaw(tlaRows.map(r => r.metrics));
-    const m = deriveMetrics(raw);
-    const bl = compareBaseline ? getBaseline(2, `${tlaRows[0].parsed.business_line}||Engagement||Thought Leader Ads`) : null;
-    items.push({
-      label: 'TLA CTR ≥ 7%',
-      target: '≥ 7%',
-      currentValue: m.ctr,
-      flag: m.ctr != null ? (m.ctr >= 0.07 ? 'PASS' : 'MISS') : 'N/A',
-      baselineValue: bl?.ctr,
-    });
-  }
+  for (const bm of benchmarks) {
+    if (bm.op === '>') continue; // Skip negative-check benchmarks (e.g., CPL > 100 = PAUSE)
 
-  // Page Boosts CTR >= 4%
-  const pbRows = rows.filter(r => r.parsed.activity_type === 'Page Boosts');
-  if (pbRows.length > 0) {
-    const raw = sumRaw(pbRows.map(r => r.metrics));
-    const m = deriveMetrics(raw);
-    items.push({
-      label: 'Page Boosts CTR ≥ 4%',
-      target: '≥ 4%',
-      currentValue: m.ctr,
-      flag: m.ctr != null ? (m.ctr >= 0.04 ? 'PASS' : 'MISS') : 'N/A',
+    const filtered = rows.filter(r => {
+      if (bm.activityFilter && r.parsed.activity_type !== bm.activityFilter) return false;
+      if (bm.objectiveFilter && r.parsed.objective !== bm.objectiveFilter) return false;
+      return true;
     });
-  }
+    if (filtered.length === 0) continue;
 
-  // Lead Gen CPL <= $50
-  const lgRows = rows.filter(r => r.parsed.objective === 'Lead Generation');
-  if (lgRows.length > 0) {
-    const raw = sumRaw(lgRows.map(r => r.metrics));
+    const raw = sumRaw(filtered.map(r => r.metrics));
     const m = deriveMetrics(raw);
+    const val = (m as any)[bm.metric] as number | null;
+    const pass = val != null && (bm.op === '>=' ? val >= bm.value : val <= bm.value);
+
+    const fmtTarget = bm.op === '>=' ? `≥ ${bm.metric === 'ctr' ? `${bm.value * 100}%` : `$${bm.value}`}` : `≤ $${bm.value}`;
+
     items.push({
-      label: 'Lead Gen CPL ≤ $50',
-      target: '≤ $50',
-      currentValue: m.cpl,
-      flag: m.cpl != null ? (m.cpl <= 50 ? 'PASS' : m.cpl > 100 ? 'PAUSE' : 'MISS') : 'N/A',
+      label: `${bm.label}`,
+      target: fmtTarget,
+      currentValue: val,
+      flag: val != null ? (pass ? 'PASS' : bm.failFlag) : 'N/A',
     });
   }
 
