@@ -29,7 +29,7 @@ import {
   Radio,
   Sparkles,
   Target,
-  Shield,
+  Layers as LayersAlias,
   Layers,
 } from "lucide-react";
 
