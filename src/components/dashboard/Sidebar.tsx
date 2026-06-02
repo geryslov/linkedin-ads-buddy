@@ -29,7 +29,6 @@ import {
   Radio,
   Sparkles,
   Target,
-  Shield,
   Layers,
 } from "lucide-react";
 
