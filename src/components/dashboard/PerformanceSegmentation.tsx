@@ -7,9 +7,7 @@ import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
 import {
   RefreshCw, ChevronDown, ChevronRight, Layers, AlertTriangle,
-  CheckCircle2, XCircle, PauseCircle, TrendingUp, TrendingDown,
-  ArrowUp, ArrowDown, Table2, Network, Calendar, DollarSign,
-  MousePointerClick, Target, Eye, Activity, Filter,
+  ArrowUp, ArrowDown, Table2, Network, Calendar, Crown,
 } from 'lucide-react';
 
 interface Props {
@@ -17,41 +15,39 @@ interface Props {
   selectedAccount: string | null;
 }
 
-// ─── Midnight Indigo theming (scoped to this page only) ──────────────────────
-// Locally overrides design tokens so the rest of the app keeps its light theme.
-const indigoTheme: React.CSSProperties = {
-  // Surfaces
-  ['--si-bg' as any]: '#0a0a1a',
-  ['--si-panel' as any]: '#101028',
-  ['--si-panel-2' as any]: '#141432',
-  ['--si-elevated' as any]: '#1a1a3d',
-  ['--si-border' as any]: 'rgba(120,120,200,0.14)',
-  ['--si-border-strong' as any]: 'rgba(140,140,220,0.28)',
-  // Text
-  ['--si-text' as any]: '#e7e7f5',
-  ['--si-text-dim' as any]: '#9a9ac0',
-  ['--si-text-mute' as any]: '#62628a',
-  // Accent
-  ['--si-accent' as any]: '#6366f1',
-  ['--si-accent-soft' as any]: 'rgba(99,102,241,0.14)',
-  ['--si-accent-ring' as any]: 'rgba(99,102,241,0.4)',
-  // Status
-  ['--si-good' as any]: '#34d399',
-  ['--si-bad' as any]: '#f87171',
-  ['--si-warn' as any]: '#fbbf24',
-  fontFamily: "'DM Sans', system-ui, sans-serif",
-  color: 'var(--si-text)',
+// ─── Windward Funnel theme (scoped to this page) ─────────────────────────────
+const funnelTheme: React.CSSProperties = {
+  ['--ink' as any]: '#08151f',
+  ['--ink2' as any]: '#0d2030',
+  ['--panel' as any]: '#10283b',
+  ['--panel2' as any]: '#143049',
+  ['--line' as any]: '#1f4763',
+  ['--line2' as any]: '#2b5b7d',
+  ['--fog' as any]: '#cfe3ef',
+  ['--mute' as any]: '#7fa6bf',
+  ['--dim' as any]: '#5b829c',
+  ['--gold' as any]: '#e9b949',
+  ['--gold2' as any]: '#f5d27e',
+  ['--cyan' as any]: '#41c8d6',
+  ['--teal' as any]: '#2fa6a0',
+  ['--pass' as any]: '#4fd08a',
+  ['--passbg' as any]: '#10362a',
+  ['--miss' as any]: '#ef6a5e',
+  ['--missbg' as any]: '#3a1714',
+  color: 'var(--fog)',
+  fontFamily: "'Archivo', system-ui, sans-serif",
+  lineHeight: 1.45,
 };
 
-const displayFont = { fontFamily: "'Space Grotesk', system-ui, sans-serif" } as const;
+const serifFont = { fontFamily: "'Fraunces', serif" } as const;
+const monoFont = { fontFamily: "'Spline Sans Mono', monospace" } as const;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
 function fmt$(v: number | null) { return v != null ? `$${v.toFixed(2)}` : '—'; }
 function fmtPct(v: number | null) { return v != null ? `${(v * 100).toFixed(2)}%` : '—'; }
 function fmtNum(v: number) { return v.toLocaleString('en-US'); }
 function fmtCompact(v: number) {
-  if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(1)}M`;
+  if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(2)}M`;
   if (v >= 1_000) return `$${(v / 1_000).toFixed(1)}K`;
   return `$${v.toFixed(0)}`;
 }
@@ -61,181 +57,257 @@ function fmtMetricVal(key: string, v: number | null): string {
   return `$${v.toFixed(2)}`;
 }
 
-// ─── Depth hue accents for hierarchy levels ──────────────────────────────────
-const DEPTH_HUE = ['#6366f1', '#8b5cf6', '#d946ef', '#f59e0b', '#34d399'];
+// ─── Bench pill ──────────────────────────────────────────────────────────────
+function BenchPill({ flag }: { flag: 'PASS' | 'MISS' | 'PAUSE' | null }) {
+  if (!flag) return null;
+  const cls =
+    flag === 'PASS'  ? { bg: 'var(--passbg)', fg: 'var(--pass)', bd: '#1f5a41', text: 'beats' } :
+    flag === 'MISS'  ? { bg: 'var(--missbg)', fg: 'var(--miss)', bd: '#6e2a23', text: 'misses' } :
+                       { bg: '#3a2614', fg: 'var(--gold)', bd: '#5a3c1a', text: 'pause' };
+  return (
+    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md"
+      style={{ ...monoFont, fontSize: 10.5, background: cls.bg, color: cls.fg, border: `1px solid ${cls.bd}` }}>
+      <span className="w-1.5 h-1.5 rounded-full" style={{ background: cls.fg }} /> {cls.text}
+    </span>
+  );
+}
 
-// ─── Scorecard tile (compact, sidebar-friendly) ──────────────────────────────
-
-function ScorecardTile({ item }: { item: ScorecardItem }) {
-  const cfg = {
-    PASS:  { icon: CheckCircle2, color: 'var(--si-good)', label: 'PASS' },
-    MISS:  { icon: XCircle,      color: 'var(--si-bad)',  label: 'MISS' },
-    PAUSE: { icon: PauseCircle,  color: 'var(--si-warn)', label: 'PAUSE' },
-    'N/A': { icon: AlertTriangle,color: 'var(--si-text-mute)', label: 'N/A' },
-  }[item.flag];
-  const Icon = cfg.icon;
-  const isCpl = item.label.includes('CPL');
-  const target = isCpl ? 50 : 0.07;
-  const progress = item.currentValue != null
-    ? Math.min(100, isCpl ? (target / Math.max(item.currentValue, 0.01)) * 100 : (item.currentValue / target) * 100)
-    : 0;
+// ─── Activity card (level 2+ leaf-ish row) ───────────────────────────────────
+function ActivityCard({
+  node, rank, isWinner, depth,
+}: { node: SegmentNode; rank: number; isWinner: boolean; depth: number }) {
+  const [open, setOpen] = useState(false);
+  const hasChildren = node.children.length > 0;
 
   return (
     <div
-      className="rounded-xl p-3 transition-all"
+      className="relative rounded-xl transition-colors"
       style={{
-        background: 'var(--si-panel-2)',
-        border: '1px solid var(--si-border)',
-        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.03)',
+        background: 'var(--ink2)',
+        border: isWinner ? '1px solid var(--gold)' : '1px solid var(--line)',
+        boxShadow: isWinner ? '0 0 0 1px rgba(233,185,73,.25)' : 'none',
+        padding: '13px 15px',
       }}
     >
-      <div className="flex items-start justify-between gap-2 mb-2">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.12em]" style={{ color: 'var(--si-text-dim)' }}>
-          {item.label}
-        </p>
-        <span className="inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded-md"
-          style={{ color: cfg.color, background: 'rgba(255,255,255,0.04)' }}>
-          <Icon className="h-2.5 w-2.5" /> {cfg.label}
+      <div className="flex items-center gap-2.5">
+        <span style={{ ...monoFont, fontSize: 11, color: isWinner ? 'var(--gold)' : 'var(--dim)', width: 22 }}>
+          {String(rank).padStart(2, '0')}
+        </span>
+        <span className="font-semibold text-[15px]" style={{ color: 'var(--fog)' }}>
+          {node.label}
+        </span>
+        {isWinner && <Crown className="h-3.5 w-3.5" style={{ color: 'var(--gold)' }} />}
+        <span className="ml-auto flex items-center gap-2">
+          {hasChildren && (
+            <button onClick={() => setOpen(o => !o)}
+              className="px-2.5 py-1 rounded-md transition-colors"
+              style={{
+                ...monoFont, fontSize: 10.5,
+                color: open ? 'var(--cyan)' : 'var(--mute)',
+                border: `1px solid ${open ? 'var(--cyan)' : 'var(--line)'}`,
+              }}>
+              {open ? '— close' : `+ ${node.children.length} segment${node.children.length > 1 ? 's' : ''}`}
+            </button>
+          )}
         </span>
       </div>
-      <p className="text-xl font-bold tabular-nums leading-none" style={{ ...displayFont, color: cfg.color }}>
-        {item.currentValue != null
-          ? isCpl ? fmt$(item.currentValue) : fmtPct(item.currentValue)
-          : '—'}
-      </p>
-      <div className="mt-2.5 h-1 w-full rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.05)' }}>
-        <div className="h-full rounded-full transition-all duration-700"
-          style={{ width: `${progress}%`, background: cfg.color, opacity: 0.85 }} />
+
+      {/* Metrics row */}
+      <div className="flex gap-6 items-end mt-3 flex-wrap">
+        <Metric label={node.headline.name} value={fmtMetricVal(node.headline.lowerIsBetter ? node.headline.name.toLowerCase() : 'ctr', node.headline.value)} best={isWinner} />
+        <Metric label={node.secondary.name} value={fmtMetricVal(node.secondary.name.toLowerCase(), node.secondary.value)} muted />
+        <Metric label="Spend" value={fmtCompact(node.metrics.spend)} />
+        <Metric label="Impr" value={fmtNum(node.metrics.impressions)} muted />
+        <Metric label="Clicks" value={fmtNum(node.metrics.clicks)} muted />
+        {node.metrics.leads > 0 && <Metric label="Leads" value={fmtNum(node.metrics.leads)} best={node.metrics.leads > 0} />}
+        <div className="ml-auto"><BenchPill flag={node.benchmarkFlag} /></div>
       </div>
-      <p className="text-[9px] mt-1.5" style={{ color: 'var(--si-text-mute)' }}>Target {item.target}</p>
+
+      {/* Nested children (audiences / segments / ad types) */}
+      {open && hasChildren && (
+        <div className="mt-3 pt-3 flex flex-col gap-2"
+          style={{ borderTop: '1px solid var(--line)' }}>
+          <div style={{ ...monoFont, fontSize: 10, letterSpacing: '.2em', color: 'var(--teal)', textTransform: 'uppercase' }}>
+            {depth === 2 ? 'Audiences' : depth === 3 ? 'Segments' : 'Breakdown'} · {node.children.length}
+          </div>
+          {node.children.map((child, i) => (
+            <SegmentPod key={child.key} node={child} rank={i + 1} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
-// ─── Delta pill ──────────────────────────────────────────────────────────────
-
-function DeltaBadge({ delta }: { delta: { absolute: number; pct: number | null; isBetter: boolean } | null }) {
-  if (!delta || delta.pct == null) return null;
-  const color = delta.isBetter ? 'var(--si-good)' : 'var(--si-bad)';
-  const Icon = delta.isBetter ? TrendingUp : TrendingDown;
+function Metric({ label, value, best, muted }: { label: string; value: string; best?: boolean; muted?: boolean }) {
   return (
-    <span className="inline-flex items-center gap-0.5 text-[10px] font-bold tabular-nums px-1.5 py-0.5 rounded-md"
-      style={{ color, background: 'rgba(255,255,255,0.04)' }}>
-      <Icon className="h-3 w-3" />{delta.pct > 0 ? '+' : ''}{delta.pct.toFixed(1)}%
-    </span>
+    <div className="flex flex-col gap-0.5">
+      <span style={{ ...monoFont, fontSize: 9.5, letterSpacing: '.16em', color: 'var(--dim)', textTransform: 'uppercase' }}>{label}</span>
+      <span style={{
+        ...monoFont,
+        fontSize: muted ? 15 : 19,
+        fontWeight: 600,
+        color: best ? 'var(--gold2)' : muted ? 'var(--mute)' : 'var(--fog)',
+      }}>{value}</span>
+    </div>
   );
 }
 
-function BenchmarkBadge({ flag }: { flag: 'PASS' | 'MISS' | 'PAUSE' | null }) {
-  if (!flag) return null;
-  const color = flag === 'PASS' ? 'var(--si-good)' : flag === 'MISS' ? 'var(--si-bad)' : 'var(--si-warn)';
-  return (
-    <span className="inline-flex text-[9px] font-bold px-1.5 py-0.5 rounded-md"
-      style={{ color, background: 'rgba(255,255,255,0.04)', border: `1px solid ${color}40` }}>
-      {flag}
-    </span>
-  );
-}
-
-// ─── Tree row ────────────────────────────────────────────────────────────────
-
-function TreeNode({ node, depth, showBaseline, maxSpend }: { node: SegmentNode; depth: number; showBaseline: boolean; maxSpend: number }) {
-  const [expanded, setExpanded] = useState(depth < 2);
+// ─── Pod (audience / nested segment) ─────────────────────────────────────────
+function SegmentPod({ node, rank }: { node: SegmentNode; rank: number }) {
+  const [open, setOpen] = useState(false);
   const hasChildren = node.children.length > 0;
-  const spendPct = maxSpend > 0 ? (node.metrics.spend / maxSpend) * 100 : 0;
-  const hue = DEPTH_HUE[depth] || '#6366f1';
+  const dotColor = node.benchmarkFlag === 'PASS' ? 'var(--pass)' : node.benchmarkFlag === 'MISS' ? 'var(--miss)' : 'var(--dim)';
 
   return (
-    <>
+    <div className="rounded-lg overflow-hidden" style={{ background: 'var(--panel)', border: '1px solid var(--line)' }}>
       <button
-        onClick={() => hasChildren && setExpanded(!expanded)}
-        className={cn(
-          'group w-full flex items-center gap-2 text-left relative transition-colors',
-          hasChildren ? 'cursor-pointer' : 'cursor-default',
-        )}
-        style={{
-          paddingLeft: `${16 + depth * 22}px`,
-          paddingRight: '16px',
-          paddingTop: '9px',
-          paddingBottom: '9px',
-          borderBottom: '1px solid var(--si-border)',
-          borderLeft: `3px solid ${hue}`,
-          background: depth === 0 ? 'rgba(99,102,241,0.04)' : 'transparent',
-        }}
-        onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.025)'; }}
-        onMouseLeave={(e) => { e.currentTarget.style.background = depth === 0 ? 'rgba(99,102,241,0.04)' : 'transparent'; }}
+        onClick={() => hasChildren && setOpen(!open)}
+        className={cn('w-full flex items-center gap-3 px-3 py-2.5 text-left transition-colors',
+          hasChildren ? 'cursor-pointer hover:bg-[#16395266]' : 'cursor-default')}
       >
-        <div className="absolute inset-y-0 left-0 pointer-events-none"
-          style={{ width: `${spendPct}%`, background: `linear-gradient(90deg, ${hue}1a 0%, transparent 100%)` }} />
-
-        <span className="relative z-10 w-4 shrink-0">
-          {hasChildren ? (
-            expanded
-              ? <ChevronDown className="h-3.5 w-3.5" style={{ color: 'var(--si-text-dim)' }} />
-              : <ChevronRight className="h-3.5 w-3.5" style={{ color: 'var(--si-text-dim)' }} />
-          ) : null}
+        <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: dotColor }} />
+        <span style={{ ...monoFont, fontSize: 11, color: 'var(--gold2)', width: 18, textAlign: 'center', fontWeight: 600 }}>
+          {String(rank).padStart(2, '0')}
         </span>
-
-        <span className={cn(
-          'relative z-10 flex-1 min-w-0 truncate',
-          depth === 0 ? 'text-sm font-bold' : depth === 1 ? 'text-[13px] font-semibold' : 'text-[13px]',
-        )} style={depth <= 1 ? displayFont : undefined}>
-          {node.label}
-        </span>
-
-        <span className="relative z-10 text-[9px] font-mono px-1.5 py-0.5 rounded-md shrink-0"
-          style={{ background: 'rgba(255,255,255,0.04)', color: 'var(--si-text-dim)' }}>
-          {node.adSetCount}
-        </span>
-
-        <div className="relative z-10 flex items-center gap-3 shrink-0">
-          <span className="text-[11px] tabular-nums w-[72px] text-right font-semibold" style={{ color: 'var(--si-text)' }}>
-            {fmtCompact(node.metrics.spend)}
+        <span className="text-[13px] font-medium truncate" style={{ color: 'var(--fog)' }}>{node.label}</span>
+        <div className="ml-auto flex items-center gap-4">
+          <PodMetric label={node.headline.name}
+            value={fmtMetricVal(node.headline.lowerIsBetter ? node.headline.name.toLowerCase() : 'ctr', node.headline.value)}
+            best={node.benchmarkFlag === 'PASS'} />
+          <PodMetric label="Spend" value={fmtCompact(node.metrics.spend)} />
+          <span style={{ ...monoFont, fontSize: 9.5, padding: '3px 7px', borderRadius: 6,
+            background: node.benchmarkFlag === 'PASS' ? 'var(--passbg)' : node.benchmarkFlag === 'MISS' ? 'var(--missbg)' : 'transparent',
+            color: dotColor }}>
+            {node.benchmarkFlag || '—'}
           </span>
-          <div className="w-px h-3" style={{ background: 'var(--si-border)' }} />
-          <span className="text-[11px] tabular-nums w-[100px] text-right font-bold" style={{ color: 'var(--si-text)' }}>
-            <span className="text-[9px] font-medium mr-1" style={{ color: 'var(--si-text-mute)' }}>{node.headline.name}</span>
-            {fmtMetricVal(node.headline.lowerIsBetter ? node.headline.name.toLowerCase() : 'ctr', node.headline.value)}
-          </span>
-          <span className="text-[11px] tabular-nums w-[68px] text-right" style={{ color: 'var(--si-text-dim)' }}>
-            <span className="text-[9px] mr-0.5">CTR</span>
-            {fmtPct(node.metrics.ctr)}
-          </span>
-          <div className="w-14 flex justify-end"><BenchmarkBadge flag={node.benchmarkFlag} /></div>
-          {showBaseline && (
-            <div className="w-[72px] flex justify-end"><DeltaBadge delta={node.headlineDelta} /></div>
+          {hasChildren && (
+            <ChevronRight className="h-3 w-3 transition-transform"
+              style={{ color: 'var(--dim)', transform: open ? 'rotate(90deg)' : 'none' }} />
           )}
         </div>
       </button>
-
-      {expanded && hasChildren && node.children.map(child => (
-        <TreeNode key={child.key} node={child} depth={depth + 1} showBaseline={showBaseline} maxSpend={maxSpend} />
-      ))}
-    </>
-  );
-}
-
-// ─── Stat tile ───────────────────────────────────────────────────────────────
-
-function StatTile({ icon: Icon, label, value, accent }: { icon: any; label: string; value: string; accent?: string }) {
-  return (
-    <div className="rounded-xl p-3"
-      style={{ background: 'var(--si-panel-2)', border: '1px solid var(--si-border)' }}>
-      <div className="flex items-center gap-1.5 mb-1.5">
-        <Icon className="h-3 w-3" style={{ color: accent || 'var(--si-accent)' }} />
-        <span className="text-[9px] font-semibold uppercase tracking-[0.14em]" style={{ color: 'var(--si-text-mute)' }}>
-          {label}
-        </span>
-      </div>
-      <p className="text-lg font-bold tabular-nums leading-none" style={{ ...displayFont, color: 'var(--si-text)' }}>
-        {value}
-      </p>
+      {open && hasChildren && (
+        <div className="px-3 pb-3 flex flex-col gap-1.5">
+          <div style={{ ...monoFont, fontSize: 9, letterSpacing: '.18em', color: 'var(--gold)', textTransform: 'uppercase', margin: '3px 0' }}>
+            Breakdown
+          </div>
+          {node.children.map((c, i) => (
+            <div key={c.key} className="flex items-center gap-3 px-3 py-2 rounded-md"
+              style={{ background: 'var(--ink2)', border: '1px solid var(--line)' }}>
+              <span style={{ ...monoFont, fontSize: 11, color: 'var(--gold2)', fontWeight: 600 }}>{i + 1}</span>
+              <span className="flex-1 text-[12px] truncate" style={{ color: 'var(--fog)' }}>{c.label}</span>
+              <span style={{ ...monoFont, fontSize: 13, fontWeight: 600, color: 'var(--cyan)' }}>
+                {fmtMetricVal(c.headline.lowerIsBetter ? c.headline.name.toLowerCase() : 'ctr', c.headline.value)}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
-// ─── Flat table ──────────────────────────────────────────────────────────────
+function PodMetric({ label, value, best }: { label: string; value: string; best?: boolean }) {
+  return (
+    <div className="flex flex-col items-end">
+      <span style={{ ...monoFont, fontSize: 8.5, letterSpacing: '.12em', color: 'var(--dim)', textTransform: 'uppercase' }}>{label}</span>
+      <span style={{ ...monoFont, fontSize: 14, fontWeight: 600, color: best ? 'var(--gold2)' : 'var(--fog)' }}>{value}</span>
+    </div>
+  );
+}
 
+// ─── Objective section ───────────────────────────────────────────────────────
+function ObjectiveSection({ node }: { node: SegmentNode }) {
+  const [collapsed, setCollapsed] = useState(false);
+  // Winner: best activity by headline metric
+  const activities = node.children;
+  let winnerKey: string | null = null;
+  if (activities.length > 0) {
+    const sorted = [...activities].sort((a, b) => {
+      const av = a.headline.value ?? (a.headline.lowerIsBetter ? Infinity : -Infinity);
+      const bv = b.headline.value ?? (b.headline.lowerIsBetter ? Infinity : -Infinity);
+      return a.headline.lowerIsBetter ? av - bv : bv - av;
+    });
+    winnerKey = sorted[0]?.key ?? null;
+  }
+
+  return (
+    <div className="mt-3.5 mx-1.5" style={{ borderLeft: '2px solid var(--line2)' }}>
+      <button
+        onClick={() => setCollapsed(c => !c)}
+        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors hover:bg-[#16395280]"
+        style={{
+          marginLeft: -2,
+          borderLeft: '2px solid var(--cyan)',
+          background: 'var(--panel2)',
+        }}
+      >
+        <span style={{ ...serifFont, fontSize: 18, fontWeight: 600, letterSpacing: '.01em', color: 'var(--fog)' }}>
+          {node.label}
+        </span>
+        <span style={{
+          ...monoFont, fontSize: 10, letterSpacing: '.15em', textTransform: 'uppercase',
+          color: 'var(--ink)', background: 'var(--cyan)', padding: '3px 9px', borderRadius: 20, fontWeight: 600,
+        }}>
+          {node.headline.name}
+        </span>
+        <span className="ml-auto" style={{ ...monoFont, fontSize: 12.5, color: 'var(--mute)' }}>
+          {fmtCompact(node.metrics.spend)} · {activities.length} {activities.length === 1 ? 'play' : 'plays'}
+        </span>
+        <ChevronDown className="h-3.5 w-3.5 transition-transform"
+          style={{ color: 'var(--dim)', transform: collapsed ? 'rotate(-90deg)' : 'none' }} />
+      </button>
+
+      {!collapsed && (
+        <div className="mt-2 ml-4 pl-3.5 flex flex-col gap-2.5" style={{ borderLeft: '1px dashed var(--line)' }}>
+          {activities.map((act, i) => (
+            <ActivityCard key={act.key} node={act} rank={i + 1} isWinner={act.key === winnerKey} depth={2} />
+          ))}
+          {activities.length === 0 && (
+            <div className="text-center py-6" style={{ ...monoFont, fontSize: 11, color: 'var(--dim)' }}>
+              No activity data
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Business line panel ─────────────────────────────────────────────────────
+function BusinessLinePanel({ node }: { node: SegmentNode }) {
+  return (
+    <div
+      className="rounded-2xl overflow-hidden"
+      style={{
+        background: 'linear-gradient(180deg, var(--panel) 0%, var(--ink2) 100%)',
+        border: '1px solid var(--line)',
+        boxShadow: '0 18px 50px -22px rgba(0,0,0,.8)',
+      }}
+    >
+      <div className="flex items-baseline justify-between px-6 py-5"
+        style={{ borderBottom: '1px solid var(--line)', background: 'linear-gradient(90deg, rgba(233,185,73,.08), transparent)' }}>
+        <h2 style={{ ...serifFont, fontSize: 27, fontWeight: 600, margin: 0, letterSpacing: '-.01em', color: 'var(--fog)' }}>
+          {node.label}
+        </h2>
+        <span style={{ ...monoFont, fontSize: 15, color: 'var(--gold2)' }}>
+          {fmtCompact(node.metrics.spend)}
+        </span>
+      </div>
+      <div className="px-4 pb-5 pt-2.5">
+        {node.children.map(obj => <ObjectiveSection key={obj.key} node={obj} />)}
+        {node.children.length === 0 && (
+          <div className="text-center py-8" style={{ ...monoFont, fontSize: 12, color: 'var(--dim)' }}>
+            No objectives in this business line
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Flat table fallback ─────────────────────────────────────────────────────
 function FlatTable({ rows }: { rows: FlatRow[] }) {
   const [sortKey, setSortKey] = useState('spend');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
@@ -257,13 +329,10 @@ function FlatTable({ rows }: { rows: FlatRow[] }) {
     if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
     else { setSortKey(key); setSortDir('desc'); }
   };
-
-  const SortIcon = ({ col }: { col: string }) => {
-    if (sortKey !== col) return null;
-    return sortDir === 'desc'
-      ? <ArrowDown className="h-3 w-3 inline" style={{ color: 'var(--si-accent)' }} />
-      : <ArrowUp className="h-3 w-3 inline" style={{ color: 'var(--si-accent)' }} />;
-  };
+  const SortIcon = ({ col }: { col: string }) => sortKey !== col ? null :
+    sortDir === 'desc'
+      ? <ArrowDown className="h-3 w-3 inline" style={{ color: 'var(--cyan)' }} />
+      : <ArrowUp className="h-3 w-3 inline" style={{ color: 'var(--cyan)' }} />;
 
   const cols = [
     { key: 'campaignName', label: 'Campaign' },
@@ -282,17 +351,21 @@ function FlatTable({ rows }: { rows: FlatRow[] }) {
   ];
 
   return (
-    <div className="rounded-xl overflow-hidden"
-      style={{ background: 'var(--si-panel)', border: '1px solid var(--si-border)' }}>
-      <div className="overflow-x-auto" style={{ maxHeight: 700 }}>
-        <table className="w-full text-[11px]">
+    <div className="rounded-2xl overflow-hidden"
+      style={{ background: 'var(--panel)', border: '1px solid var(--line)',
+        boxShadow: '0 18px 50px -22px rgba(0,0,0,.8)' }}>
+      <div className="overflow-x-auto" style={{ maxHeight: 720 }}>
+        <table className="w-full text-[11.5px]" style={monoFont}>
           <thead className="sticky top-0 z-10">
-            <tr style={{ background: 'var(--si-panel-2)', borderBottom: '1px solid var(--si-border-strong)' }}>
+            <tr style={{ background: 'var(--panel2)', borderBottom: '1px solid var(--line2)' }}>
               {cols.map(c => (
                 <th key={c.key} onClick={() => toggleSort(c.key)}
-                  className={cn('px-2.5 py-2.5 font-semibold cursor-pointer whitespace-nowrap select-none transition-colors',
+                  className={cn('px-3 py-3 cursor-pointer whitespace-nowrap select-none uppercase',
                     c.align || 'text-left')}
-                  style={{ color: sortKey === c.key ? 'var(--si-accent)' : 'var(--si-text-dim)' }}>
+                  style={{
+                    fontSize: 10, letterSpacing: '.14em',
+                    color: sortKey === c.key ? 'var(--cyan)' : 'var(--dim)',
+                  }}>
                   {c.label} <SortIcon col={c.key} />
                 </th>
               ))}
@@ -300,25 +373,24 @@ function FlatTable({ rows }: { rows: FlatRow[] }) {
           </thead>
           <tbody>
             {sorted.map((row, i) => (
-              <tr key={i} style={{ borderBottom: '1px solid var(--si-border)' }}>
-                <td className="px-2.5 py-2 max-w-[260px] truncate font-medium" title={row.campaignName} style={{ color: 'var(--si-text)' }}>{row.campaignName}</td>
-                <td className="px-2.5 py-2">
-                  <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-md"
-                    style={{ background: 'var(--si-accent-soft)', color: 'var(--si-accent)', border: '1px solid var(--si-accent-ring)' }}>
+              <tr key={i} style={{ borderBottom: '1px solid var(--line)' }}>
+                <td className="px-3 py-2 max-w-[260px] truncate" title={row.campaignName} style={{ color: 'var(--fog)' }}>{row.campaignName}</td>
+                <td className="px-3 py-2">
+                  <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 4, background: 'rgba(65,200,214,0.12)', color: 'var(--cyan)', border: '1px solid rgba(65,200,214,0.3)' }}>
                     {row.parsed.business_line}
                   </span>
                 </td>
-                <td className="px-2.5 py-2" style={{ color: 'var(--si-text-dim)' }}>{row.parsed.objective}</td>
-                <td className="px-2.5 py-2" style={{ color: 'var(--si-text)' }}>{row.parsed.activity_type}</td>
-                <td className="px-2.5 py-2" style={{ color: 'var(--si-text-dim)' }}>{row.parsed.ad_type}</td>
-                <td className="px-2.5 py-2" style={{ color: 'var(--si-text-dim)' }}>{row.parsed.segment}</td>
-                <td className="px-2.5 py-2 tabular-nums text-right font-semibold" style={{ color: 'var(--si-text)' }}>{fmt$(row.metrics.spend)}</td>
-                <td className="px-2.5 py-2 tabular-nums text-right" style={{ color: 'var(--si-text-dim)' }}>{fmtNum(row.metrics.impressions)}</td>
-                <td className="px-2.5 py-2 tabular-nums text-right" style={{ color: 'var(--si-text-dim)' }}>{fmtNum(row.metrics.clicks)}</td>
-                <td className="px-2.5 py-2 tabular-nums text-right font-semibold" style={{ color: 'var(--si-text)' }}>{fmtNum(row.metrics.leads)}</td>
-                <td className="px-2.5 py-2 tabular-nums text-right" style={{ color: 'var(--si-text)' }}>{fmtPct(row.derived.ctr)}</td>
-                <td className="px-2.5 py-2 tabular-nums text-right" style={{ color: 'var(--si-text-dim)' }}>{fmt$(row.derived.cpc)}</td>
-                <td className="px-2.5 py-2 tabular-nums text-right" style={{ color: 'var(--si-text-dim)' }}>{fmt$(row.derived.cpl)}</td>
+                <td className="px-3 py-2" style={{ color: 'var(--mute)' }}>{row.parsed.objective}</td>
+                <td className="px-3 py-2" style={{ color: 'var(--fog)' }}>{row.parsed.activity_type}</td>
+                <td className="px-3 py-2" style={{ color: 'var(--mute)' }}>{row.parsed.ad_type}</td>
+                <td className="px-3 py-2" style={{ color: 'var(--mute)' }}>{row.parsed.segment}</td>
+                <td className="px-3 py-2 text-right" style={{ color: 'var(--gold2)' }}>{fmt$(row.metrics.spend)}</td>
+                <td className="px-3 py-2 text-right" style={{ color: 'var(--mute)' }}>{fmtNum(row.metrics.impressions)}</td>
+                <td className="px-3 py-2 text-right" style={{ color: 'var(--mute)' }}>{fmtNum(row.metrics.clicks)}</td>
+                <td className="px-3 py-2 text-right" style={{ color: 'var(--fog)' }}>{fmtNum(row.metrics.leads)}</td>
+                <td className="px-3 py-2 text-right" style={{ color: 'var(--fog)' }}>{fmtPct(row.derived.ctr)}</td>
+                <td className="px-3 py-2 text-right" style={{ color: 'var(--mute)' }}>{fmt$(row.derived.cpc)}</td>
+                <td className="px-3 py-2 text-right" style={{ color: 'var(--mute)' }}>{fmt$(row.derived.cpl)}</td>
               </tr>
             ))}
           </tbody>
@@ -329,7 +401,6 @@ function FlatTable({ rows }: { rows: FlatRow[] }) {
 }
 
 // ─── Main Component ──────────────────────────────────────────────────────────
-
 export function PerformanceSegmentation({ accessToken, selectedAccount }: Props) {
   const {
     tree, flatRows, scorecard,
@@ -339,14 +410,12 @@ export function PerformanceSegmentation({ accessToken, selectedAccount }: Props)
     fetchReport,
   } = usePerformanceSegmentation(accessToken);
 
-  const [viewMode, setViewMode] = useState<'tree' | 'flat'>('tree');
+  const [viewMode, setViewMode] = useState<'funnel' | 'flat'>('funnel');
   const [startDate, setStartDate] = useState(() => {
     const d = new Date(); d.setDate(d.getDate() - 30);
     return d.toISOString().split('T')[0];
   });
   const [endDate, setEndDate] = useState(() => new Date().toISOString().split('T')[0]);
-
-  const maxSpend = useMemo(() => tree.reduce((m, n) => Math.max(m, n.metrics.spend), 0), [tree]);
 
   const totals = useMemo(() => {
     const t = { spend: 0, impressions: 0, clicks: 0, leads: 0, adSets: flatRows.length };
@@ -359,245 +428,209 @@ export function PerformanceSegmentation({ accessToken, selectedAccount }: Props)
     return t;
   }, [flatRows]);
 
+  const passRate = useMemo(() => {
+    if (!scorecard.length) return null;
+    const valid = scorecard.filter(s => s.flag !== 'N/A');
+    if (!valid.length) return null;
+    return (valid.filter(s => s.flag === 'PASS').length / valid.length) * 100;
+  }, [scorecard]);
+
   useEffect(() => {
     if (selectedAccount && accessToken) fetchReport(selectedAccount, startDate, endDate);
   }, [selectedAccount, accessToken]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleRefresh = () => { if (selectedAccount) fetchReport(selectedAccount, startDate, endDate); };
 
+  // Outer wrapper — replicates the funnel background
+  const Shell = ({ children }: { children: React.ReactNode }) => (
+    <div
+      style={{
+        ...funnelTheme,
+        background: `
+          radial-gradient(1200px 600px at 15% -10%, #163149 0%, transparent 55%),
+          radial-gradient(1000px 700px at 110% 10%, #122a3f 0%, transparent 50%),
+          var(--ink)
+        `,
+        margin: '-1.5rem',
+        padding: '1.5rem',
+        minHeight: 'calc(100vh - 64px)',
+        position: 'relative',
+      }}
+    >
+      {/* Faint grid overlay */}
+      <div
+        aria-hidden
+        style={{
+          position: 'absolute', inset: 0, pointerEvents: 'none', opacity: 0.04, zIndex: 0,
+          backgroundImage:
+            'linear-gradient(var(--line) 1px, transparent 1px), linear-gradient(90deg, var(--line) 1px, transparent 1px)',
+          backgroundSize: '34px 34px',
+        }}
+      />
+      <div className="relative" style={{ zIndex: 1, maxWidth: 1320, margin: '0 auto' }}>
+        {children}
+      </div>
+    </div>
+  );
+
   if (!selectedAccount) {
     return (
-      <div style={indigoTheme} className="rounded-2xl p-16 text-center"
-        css-bg="var(--si-bg)">
-        <div style={{ background: 'var(--si-bg)' }} className="rounded-2xl p-16">
-          <Layers className="h-10 w-10 mx-auto mb-3" style={{ color: 'var(--si-text-mute)' }} />
-          <p style={{ color: 'var(--si-text-dim)' }}>Select an ad account to view segmentation</p>
+      <Shell>
+        <div className="text-center py-24">
+          <Layers className="h-10 w-10 mx-auto mb-3" style={{ color: 'var(--dim)' }} />
+          <p style={{ color: 'var(--mute)' }}>Select an ad account to view segmentation</p>
         </div>
-      </div>
+      </Shell>
     );
   }
 
   return (
-    <div
-      style={{ ...indigoTheme, background: 'var(--si-bg)' }}
-      className="rounded-2xl -m-6 p-6 min-h-[calc(100vh-64px)]"
-    >
-      {/* ── Header bar ──────────────────────────────────────────── */}
-      <header
-        className="rounded-2xl p-5 mb-5 flex items-center justify-between gap-4 flex-wrap"
-        style={{
-          background: 'linear-gradient(135deg, #141432 0%, #1a1a3d 100%)',
-          border: '1px solid var(--si-border-strong)',
-          boxShadow: '0 8px 24px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.04)',
-        }}
-      >
-        <div className="flex items-center gap-3">
-          <div className="h-11 w-11 rounded-xl flex items-center justify-center"
-            style={{ background: 'var(--si-accent-soft)', border: '1px solid var(--si-accent-ring)' }}>
-            <Network className="h-5 w-5" style={{ color: 'var(--si-accent)' }} />
-          </div>
-          <div>
-            <h1 className="text-xl font-bold leading-tight" style={displayFont}>Performance Segmentation</h1>
-            <p className="text-xs mt-0.5" style={{ color: 'var(--si-text-dim)' }}>
-              Hierarchy of business line → objective → activity → ad type → segment
-            </p>
-          </div>
+    <Shell>
+      {/* ── Header ─────────────────────────────────────────────── */}
+      <header className="pt-8 pb-6 mb-6" style={{ borderBottom: '1px solid var(--line)' }}>
+        <div style={{ ...monoFont, fontSize: 12, letterSpacing: '.32em', textTransform: 'uppercase', color: 'var(--gold)', marginBottom: 14 }}>
+          Paid Media · Segmentation Funnel
+        </div>
+        <h1 style={{
+          ...serifFont, fontWeight: 900, fontSize: 'clamp(34px, 5vw, 60px)',
+          lineHeight: 0.98, margin: 0, letterSpacing: '-.015em', color: 'var(--fog)',
+        }}>
+          The Performance <em style={{ fontStyle: 'italic', color: 'var(--cyan)' }}>Funnel</em>
+        </h1>
+        <p style={{ marginTop: 16, maxWidth: 760, color: 'var(--mute)', fontSize: 15 }}>
+          Every dollar traced from business line → objective → the plays that serve it → audiences → segments.
+          Each node carries its objective metric, its benchmark, and the best result achieved.
+        </p>
+
+        {/* Meta strip */}
+        <div className="flex flex-wrap gap-8 mt-6">
+          {[
+            { label: 'Spend', value: fmtCompact(totals.spend) },
+            { label: 'Impressions', value: fmtNum(totals.impressions) },
+            { label: 'Clicks', value: fmtNum(totals.clicks) },
+            { label: 'Leads', value: fmtNum(totals.leads) },
+            { label: 'Ad Sets', value: String(totals.adSets) },
+            ...(passRate != null ? [{ label: 'Bench Pass', value: `${passRate.toFixed(0)}%` }] : []),
+          ].map(m => (
+            <div key={m.label} style={monoFont}>
+              <b style={{ display: 'block', fontSize: 22, color: 'var(--fog)', fontWeight: 600 }}>{m.value}</b>
+              <span style={{ fontSize: 11, letterSpacing: '.2em', textTransform: 'uppercase', color: 'var(--dim)' }}>{m.label}</span>
+            </div>
+          ))}
         </div>
 
-        <div className="flex items-center gap-2 flex-wrap">
-          <div className="flex items-center gap-2 px-3 py-2 rounded-xl"
-            style={{ background: 'rgba(0,0,0,0.25)', border: '1px solid var(--si-border)' }}>
-            <Calendar className="h-3.5 w-3.5" style={{ color: 'var(--si-text-dim)' }} />
-            <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)}
-              className="h-6 text-xs bg-transparent border-none outline-none w-[120px]"
-              style={{ color: 'var(--si-text)', colorScheme: 'dark' }} />
-            <span className="text-xs" style={{ color: 'var(--si-text-mute)' }}>→</span>
-            <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)}
-              className="h-6 text-xs bg-transparent border-none outline-none w-[120px]"
-              style={{ color: 'var(--si-text)', colorScheme: 'dark' }} />
+        {/* Legend + controls */}
+        <div className="flex items-center justify-between flex-wrap gap-4 mt-6">
+          <div className="flex flex-wrap items-center gap-3" style={{ ...monoFont, fontSize: 11.5, color: 'var(--mute)' }}>
+            <Chip><Dot color="var(--pass)" /> beats benchmark</Chip>
+            <Chip><Dot color="var(--miss)" /> misses benchmark</Chip>
+            <Chip><Dot color="var(--dim)" /> no benchmark</Chip>
+            <Chip><Crown className="h-3 w-3" style={{ color: 'var(--gold)' }} /> best play in objective</Chip>
           </div>
-          <button onClick={handleRefresh} disabled={isLoading}
-            className="h-9 px-4 rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 transition-all disabled:opacity-50"
-            style={{
-              background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
-              color: '#fff',
-              boxShadow: '0 4px 12px rgba(99,102,241,0.35)',
-            }}>
-            <RefreshCw className={cn('h-3 w-3', isLoading && 'animate-spin')} /> Apply
-          </button>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-2 px-3 py-2 rounded-xl"
+              style={{ background: 'var(--panel)', border: '1px solid var(--line)' }}>
+              <Calendar className="h-3.5 w-3.5" style={{ color: 'var(--mute)' }} />
+              <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)}
+                className="h-6 text-xs bg-transparent border-none outline-none w-[120px]"
+                style={{ color: 'var(--fog)', colorScheme: 'dark', ...monoFont }} />
+              <span style={{ color: 'var(--dim)' }}>→</span>
+              <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)}
+                className="h-6 text-xs bg-transparent border-none outline-none w-[120px]"
+                style={{ color: 'var(--fog)', colorScheme: 'dark', ...monoFont }} />
+            </div>
+            <button onClick={handleRefresh} disabled={isLoading}
+              className="h-9 px-4 rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 transition-all disabled:opacity-50"
+              style={{
+                background: 'var(--gold)', color: 'var(--ink)',
+                ...monoFont, letterSpacing: '.08em', textTransform: 'uppercase',
+              }}>
+              <RefreshCw className={cn('h-3 w-3', isLoading && 'animate-spin')} /> Apply
+            </button>
+            {hasBaseline && (
+              <label className="flex items-center gap-2 cursor-pointer px-3 py-2 rounded-xl"
+                style={{ background: 'var(--panel)', border: '1px solid var(--line)' }}>
+                <Switch checked={compareBaseline} onCheckedChange={setCompareBaseline} />
+                <span style={{ ...monoFont, fontSize: 10.5, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '.1em' }}>
+                  vs Baseline
+                </span>
+              </label>
+            )}
+            <div className="flex items-center rounded-xl overflow-hidden"
+              style={{ background: 'var(--panel)', border: '1px solid var(--line)' }}>
+              {([['funnel', Network, 'Funnel'], ['flat', Table2, 'Table']] as const).map(([mode, Icon, label]) => (
+                <button key={mode} onClick={() => setViewMode(mode)}
+                  className="h-9 px-4 inline-flex items-center gap-1.5 transition-all"
+                  style={{
+                    background: viewMode === mode ? 'var(--panel2)' : 'transparent',
+                    color: viewMode === mode ? 'var(--cyan)' : 'var(--mute)',
+                    ...monoFont, fontSize: 11, textTransform: 'uppercase', letterSpacing: '.1em',
+                  }}>
+                  <Icon className="h-3 w-3" /> {label}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       </header>
 
-      {/* ── Loading / Error states ─────────────────────────────── */}
+      {/* ── Body ──────────────────────────────────────────────── */}
       {isLoading && tree.length === 0 ? (
-        <div className="grid grid-cols-12 gap-5">
-          <div className="col-span-12 lg:col-span-3 space-y-3">
-            {[...Array(6)].map((_, i) => (
-              <Skeleton key={i} className="h-20 rounded-xl" style={{ background: 'var(--si-panel-2)' }} />
-            ))}
-          </div>
-          <div className="col-span-12 lg:col-span-9">
-            <Skeleton className="h-[600px] rounded-2xl" style={{ background: 'var(--si-panel-2)' }} />
-          </div>
+        <div className="grid lg:grid-cols-2 gap-7">
+          {[...Array(2)].map((_, i) => (
+            <Skeleton key={i} className="h-[420px] rounded-2xl" style={{ background: 'var(--panel)' }} />
+          ))}
         </div>
       ) : error && tree.length === 0 ? (
         <div className="rounded-2xl p-12 text-center"
-          style={{ background: 'var(--si-panel)', border: '1px solid rgba(248,113,113,0.3)' }}>
-          <AlertTriangle className="h-8 w-8 mx-auto mb-3" style={{ color: 'var(--si-bad)' }} />
-          <p className="font-semibold mb-1" style={{ color: 'var(--si-bad)' }}>Failed to load segmentation data</p>
-          <p className="text-sm mb-4" style={{ color: 'var(--si-text-dim)' }}>{error}</p>
+          style={{ background: 'var(--panel)', border: '1px solid var(--miss)' }}>
+          <AlertTriangle className="h-8 w-8 mx-auto mb-3" style={{ color: 'var(--miss)' }} />
+          <p className="font-semibold mb-1" style={{ color: 'var(--miss)' }}>Failed to load segmentation data</p>
+          <p className="text-sm mb-4" style={{ color: 'var(--mute)' }}>{error}</p>
           <Button variant="outline" size="sm" onClick={handleRefresh}>
             <RefreshCw className="h-3.5 w-3.5 mr-1.5" /> Retry
           </Button>
         </div>
-      ) : (
-        // ── Sidebar layout ─────────────────────────────────────
-        <div className="grid grid-cols-12 gap-5">
-          {/* ── Left rail / Sidebar ───────────────────────────── */}
-          <aside className="col-span-12 lg:col-span-3 space-y-4">
-            {/* KPI tiles */}
-            <div className="space-y-2">
-              <h3 className="text-[10px] font-bold uppercase tracking-[0.16em] px-1" style={{ color: 'var(--si-text-mute)' }}>
-                Overview
-              </h3>
-              <div className="grid grid-cols-2 gap-2">
-                <StatTile icon={DollarSign} label="Spend" value={fmtCompact(totals.spend)} />
-                <StatTile icon={Target} label="Leads" value={fmtNum(totals.leads)} accent="var(--si-good)" />
-                <StatTile icon={Eye} label="Impr." value={fmtNum(totals.impressions)} />
-                <StatTile icon={MousePointerClick} label="Clicks" value={fmtNum(totals.clicks)} />
-              </div>
-              <div className="rounded-xl p-3"
-                style={{ background: 'var(--si-panel-2)', border: '1px solid var(--si-border)' }}>
-                <div className="flex items-center gap-1.5 mb-1.5">
-                  <Layers className="h-3 w-3" style={{ color: 'var(--si-accent)' }} />
-                  <span className="text-[9px] font-semibold uppercase tracking-[0.14em]" style={{ color: 'var(--si-text-mute)' }}>Ad Sets</span>
-                </div>
-                <p className="text-2xl font-bold tabular-nums leading-none" style={{ ...displayFont, color: 'var(--si-text)' }}>
-                  {totals.adSets}
-                </p>
-              </div>
-            </div>
-
-            {/* Scorecard */}
-            {scorecard.length > 0 && (
-              <div className="space-y-2">
-                <h3 className="text-[10px] font-bold uppercase tracking-[0.16em] px-1 flex items-center gap-1.5" style={{ color: 'var(--si-text-mute)' }}>
-                  <Activity className="h-3 w-3" /> Benchmarks
-                </h3>
-                <div className="space-y-2">
-                  {scorecard.map(item => <ScorecardTile key={item.label} item={item} />)}
-                </div>
-              </div>
-            )}
-
-            {/* Options */}
-            <div className="space-y-2">
-              <h3 className="text-[10px] font-bold uppercase tracking-[0.16em] px-1 flex items-center gap-1.5" style={{ color: 'var(--si-text-mute)' }}>
-                <Filter className="h-3 w-3" /> Options
-              </h3>
-              <div className="rounded-xl p-3 space-y-3"
-                style={{ background: 'var(--si-panel-2)', border: '1px solid var(--si-border)' }}>
-                {hasBaseline && (
-                  <label className="flex items-center justify-between gap-2 cursor-pointer">
-                    <span className="text-[11px]" style={{ color: 'var(--si-text-dim)' }}>
-                      vs Baseline
-                      {baselinePeriod && (
-                        <span className="block text-[9px] mt-0.5" style={{ color: 'var(--si-text-mute)' }}>
-                          {baselinePeriod.replace('..', ' – ')}
-                        </span>
-                      )}
-                    </span>
-                    <Switch checked={compareBaseline} onCheckedChange={setCompareBaseline} />
-                  </label>
-                )}
-                {!hasConfig && tree.length > 0 && (
-                  <div className="text-[10px] px-2 py-1.5 rounded-md text-center"
-                    style={{ color: 'var(--si-text-mute)', background: 'rgba(255,255,255,0.03)', border: '1px dashed var(--si-border)' }}>
-                    Using generic parser
-                  </div>
-                )}
-              </div>
-            </div>
-          </aside>
-
-          {/* ── Main content ───────────────────────────────────── */}
-          <section className="col-span-12 lg:col-span-9">
-            {/* View toggle + breadcrumb legend */}
-            <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
-              <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.14em]"
-                style={{ color: 'var(--si-text-mute)' }}>
-                {['Business', 'Objective', 'Activity', 'Ad Type', 'Segment'].map((label, i) => (
-                  <span key={label} className="flex items-center gap-1.5">
-                    {i > 0 && <ChevronRight className="h-2.5 w-2.5" style={{ color: 'var(--si-text-mute)' }} />}
-                    <span className="px-2 py-1 rounded-md"
-                      style={{ background: 'rgba(255,255,255,0.03)', borderLeft: `2px solid ${DEPTH_HUE[i]}` }}>
-                      {label}
-                    </span>
-                  </span>
-                ))}
-              </div>
-
-              <div className="flex items-center rounded-xl overflow-hidden"
-                style={{ background: 'var(--si-panel-2)', border: '1px solid var(--si-border)' }}>
-                <button onClick={() => setViewMode('tree')}
-                  className={cn('h-9 px-4 text-xs inline-flex items-center gap-1.5 transition-all')}
-                  style={{
-                    background: viewMode === 'tree' ? 'var(--si-accent-soft)' : 'transparent',
-                    color: viewMode === 'tree' ? 'var(--si-accent)' : 'var(--si-text-dim)',
-                    fontWeight: viewMode === 'tree' ? 600 : 400,
-                  }}>
-                  <Network className="h-3 w-3" /> Tree
-                </button>
-                <button onClick={() => setViewMode('flat')}
-                  className={cn('h-9 px-4 text-xs inline-flex items-center gap-1.5 transition-all')}
-                  style={{
-                    background: viewMode === 'flat' ? 'var(--si-accent-soft)' : 'transparent',
-                    color: viewMode === 'flat' ? 'var(--si-accent)' : 'var(--si-text-dim)',
-                    borderLeft: '1px solid var(--si-border)',
-                    fontWeight: viewMode === 'flat' ? 600 : 400,
-                  }}>
-                  <Table2 className="h-3 w-3" /> Table
-                </button>
-              </div>
-            </div>
-
-            {viewMode === 'tree' ? (
-              <div className="rounded-2xl overflow-hidden"
-                style={{ background: 'var(--si-panel)', border: '1px solid var(--si-border)',
-                  boxShadow: '0 8px 24px rgba(0,0,0,0.3)' }}>
-                {/* Column header */}
-                <div className="flex items-center gap-2 px-4 py-2 text-[9px] font-bold uppercase tracking-[0.14em]"
-                  style={{ background: 'var(--si-panel-2)', borderBottom: '1px solid var(--si-border-strong)',
-                    color: 'var(--si-text-mute)', paddingLeft: 60 }}>
-                  <span className="flex-1">Segment</span>
-                  <span className="w-7 text-right">N</span>
-                  <span className="w-[72px] text-right">Spend</span>
-                  <span className="w-px" />
-                  <span className="w-[100px] text-right">Headline</span>
-                  <span className="w-[68px] text-right">CTR</span>
-                  <span className="w-14 text-right">Flag</span>
-                  {compareBaseline && hasBaseline && <span className="w-[72px] text-right">Δ Base</span>}
-                </div>
-
-                <div className="overflow-y-auto" style={{ maxHeight: 700 }}>
-                  {tree.map(node => (
-                    <TreeNode key={node.key} node={node} depth={0}
-                      showBaseline={compareBaseline && hasBaseline} maxSpend={maxSpend} />
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <FlatTable rows={flatRows} />
-            )}
-
-            {compareBaseline && hasBaseline && (
-              <p className="text-[10px] text-center mt-3 font-mono" style={{ color: 'var(--si-text-mute)' }}>
-                Benchmark: {baselinePeriod?.replace('..', ' – ') || 'frozen baseline'} · Range: {startDate} → {endDate}
+      ) : viewMode === 'funnel' ? (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-7">
+          {tree.map(line => <BusinessLinePanel key={line.key} node={line} />)}
+          {tree.length === 0 && !hasConfig && (
+            <div className="col-span-full rounded-2xl p-12 text-center"
+              style={{ background: 'var(--panel)', border: '1px dashed var(--line)' }}>
+              <p style={{ ...monoFont, fontSize: 12, color: 'var(--mute)' }}>
+                No segmentation data parsed for this account yet.
               </p>
-            )}
-          </section>
+            </div>
+          )}
         </div>
+      ) : (
+        <FlatTable rows={flatRows} />
       )}
-    </div>
+
+      {/* Footer */}
+      <div className="mt-12 pt-5" style={{ ...monoFont, fontSize: 12, color: 'var(--dim)', borderTop: '1px solid var(--line)', lineHeight: 1.7 }}>
+        Range: {startDate} → {endDate}
+        {compareBaseline && hasBaseline && baselinePeriod && (
+          <span className="ml-4">· Benchmark: {baselinePeriod.replace('..', ' – ')}</span>
+        )}
+        {!hasConfig && tree.length > 0 && (
+          <span className="ml-4">· Using generic parser (no custom config for this account)</span>
+        )}
+      </div>
+    </Shell>
   );
+}
+
+// Small primitives for legend chips
+function Chip({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full"
+      style={{ border: '1px solid var(--line)', background: 'var(--panel)' }}>
+      {children}
+    </span>
+  );
+}
+function Dot({ color }: { color: string }) {
+  return <span className="w-2 h-2 rounded-full" style={{ background: color }} />;
 }
