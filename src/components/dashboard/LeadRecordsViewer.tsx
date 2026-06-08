@@ -526,18 +526,15 @@ export function LeadRecordsViewer({ accessToken, selectedAccount }: LeadRecordsV
                   <TableHead className="text-xs font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap py-2.5">
                     Submitted
                   </TableHead>
-                  {customKeys.map((key) => (
+                  {CUSTOM_COLUMN_LABELS.map((label) => (
                     <TableHead
-                      key={key}
+                      key={label}
                       className="px-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap py-2.5 max-w-[220px] truncate"
-                      title={key}
+                      title={label}
                     >
-                      {key}
+                      {label}
                     </TableHead>
                   ))}
-                  <TableHead className="text-center text-xs font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap py-2.5 w-[64px]">
-                    Status
-                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -545,7 +542,6 @@ export function LeadRecordsViewer({ accessToken, selectedAccount }: LeadRecordsV
                   <LeadRow
                     key={lead.leadUrn || idx}
                     lead={lead}
-                    customKeys={customKeys}
                   />
                 ))}
               </TableBody>
