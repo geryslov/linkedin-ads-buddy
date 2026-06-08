@@ -50,6 +50,88 @@ const PERIOD_OPTIONS = [
   { value: '365', label: 'Last 12 months' },
 ];
 
+const CUSTOM_COLUMN_LABELS = Array.from({ length: 26 }, (_, i) => `Custom ${i + 1}`);
+
+interface NormalizedLeadRecord extends LeadFormResponse {
+  displayName: string;
+  displayCompany: string;
+  displayEmail: string;
+  customValues: string[];
+}
+
+function cleanValue(value?: string | null) {
+  return String(value || '').trim();
+}
+
+function looksLikeEmail(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
+function looksLikeNamePart(value: string) {
+  const cleaned = value.trim();
+  if (!cleaned || looksLikeEmail(cleaned) || cleaned.length > 60) return false;
+  return cleaned.split(/\s+/).length <= 3 && !/[,@]/.test(cleaned);
+}
+
+function normalizeLeadRecord(lead: LeadFormResponse): NormalizedLeadRecord {
+  const entries = Object.entries(lead.customAnswers || {}).map(([key, value]) => ({
+    key,
+    value: cleanValue(value),
+  }));
+  const consumedKeys = new Set<string>();
+
+  let firstName = cleanValue(lead.firstName);
+  let lastName = cleanValue(lead.lastName);
+  let email = cleanValue(lead.email);
+  let company = cleanValue(lead.company);
+
+  const emailEntry = entries.find((entry) => looksLikeEmail(entry.value));
+  if (!email && emailEntry) {
+    email = emailEntry.value;
+  }
+  if (emailEntry) consumedKeys.add(emailEntry.key);
+
+  const emailIndex = emailEntry ? entries.findIndex((entry) => entry.key === emailEntry.key) : -1;
+  const firstNameEntry = emailIndex >= 0 ? entries[emailIndex + 1] : undefined;
+  const lastNameEntry = emailIndex >= 0 ? entries[emailIndex + 2] : undefined;
+  const companyEntry = emailIndex >= 0 ? entries[emailIndex + 4] : undefined;
+
+  if (!firstName && firstNameEntry && looksLikeNamePart(firstNameEntry.value)) {
+    firstName = firstNameEntry.value;
+    consumedKeys.add(firstNameEntry.key);
+  }
+  if (!lastName && lastNameEntry && looksLikeNamePart(lastNameEntry.value)) {
+    lastName = lastNameEntry.value;
+    consumedKeys.add(lastNameEntry.key);
+  }
+  if (!company && companyEntry?.value && !looksLikeEmail(companyEntry.value)) {
+    company = companyEntry.value;
+    consumedKeys.add(companyEntry.key);
+  }
+
+  entries.forEach((entry) => {
+    if (
+      entry.value === firstName ||
+      entry.value === lastName ||
+      entry.value === email ||
+      entry.value === company
+    ) {
+      consumedKeys.add(entry.key);
+    }
+  });
+
+  return {
+    ...lead,
+    displayName: [firstName, lastName].filter(Boolean).join(' '),
+    displayCompany: company,
+    displayEmail: email,
+    customValues: entries
+      .filter((entry) => entry.value && !consumedKeys.has(entry.key))
+      .map((entry) => entry.value)
+      .slice(0, CUSTOM_COLUMN_LABELS.length),
+  };
+}
+
 function formatLocalDate(date: Date): string {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -96,10 +178,8 @@ function CopyButton({ text }: { text: string }) {
 // ── Individual lead row ────────────────────────────────────────────────────────
 function LeadRow({
   lead,
-  customKeys,
 }: {
-  lead: LeadFormResponse;
-  customKeys: string[];
+  lead: NormalizedLeadRecord;
 }) {
   return (
     <TableRow
@@ -111,16 +191,16 @@ function LeadRow({
     >
       {/* Name */}
       <TableCell className="px-4 py-2.5 font-medium text-sm whitespace-nowrap">
-        {[lead.firstName, lead.lastName].filter(Boolean).join(' ') || '—'}
+        {lead.displayName || '—'}
       </TableCell>
 
       {/* Company */}
       <TableCell className="px-4 py-2.5">
         <div className="group/cell flex items-center min-w-0">
           <span className="text-sm text-foreground/80 truncate max-w-[180px]">
-            {lead.company || '—'}
+            {lead.displayCompany || '—'}
           </span>
-          {lead.company && <CopyButton text={lead.company} />}
+          {lead.displayCompany && <CopyButton text={lead.displayCompany} />}
         </div>
       </TableCell>
 
@@ -128,9 +208,9 @@ function LeadRow({
       <TableCell className="px-4 py-2.5">
         <div className="group/cell flex items-center gap-0.5">
           <span className="text-sm text-muted-foreground font-mono whitespace-nowrap truncate max-w-[220px]">
-            {lead.email || '—'}
+            {lead.displayEmail || '—'}
           </span>
-          {lead.email && <CopyButton text={lead.email} />}
+          {lead.displayEmail && <CopyButton text={lead.displayEmail} />}
         </div>
       </TableCell>
 
@@ -146,29 +226,16 @@ function LeadRow({
       </TableCell>
 
       {/* Custom field columns */}
-      {customKeys.map((key) => {
-        const val = lead.customAnswers[key];
+      {CUSTOM_COLUMN_LABELS.map((label, index) => {
+        const val = lead.customValues[index];
         return (
-          <TableCell key={key} className="px-4 py-2.5 text-sm text-foreground/80 align-middle">
+          <TableCell key={label} className="px-4 py-2.5 text-sm text-foreground/80 align-middle">
             <div className="max-w-[220px] truncate" title={val || ''}>
               {val || '—'}
             </div>
           </TableCell>
         );
       })}
-
-      {/* Status badge */}
-      <TableCell className="px-4 py-2.5 w-[64px] text-center">
-        {lead.testLead ? (
-          <span className="inline-flex items-center rounded-md bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 ring-1 ring-inset ring-amber-500/20">
-            test
-          </span>
-        ) : (
-          <span className="inline-flex items-center rounded-md bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600 ring-1 ring-inset ring-emerald-500/20">
-            real
-          </span>
-        )}
-      </TableCell>
     </TableRow>
   );
 }
