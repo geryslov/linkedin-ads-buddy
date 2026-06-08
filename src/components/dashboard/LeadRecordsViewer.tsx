@@ -50,6 +50,88 @@ const PERIOD_OPTIONS = [
   { value: '365', label: 'Last 12 months' },
 ];
 
+const CUSTOM_COLUMN_LABELS = Array.from({ length: 26 }, (_, i) => `Custom ${i + 1}`);
+
+interface NormalizedLeadRecord extends LeadFormResponse {
+  displayName: string;
+  displayCompany: string;
+  displayEmail: string;
+  customValues: string[];
+}
+
+function cleanValue(value?: string | null) {
+  return String(value || '').trim();
+}
+
+function looksLikeEmail(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
+function looksLikeNamePart(value: string) {
+  const cleaned = value.trim();
+  if (!cleaned || looksLikeEmail(cleaned) || cleaned.length > 60) return false;
+  return cleaned.split(/\s+/).length <= 3 && !/[,@]/.test(cleaned);
+}
+
+function normalizeLeadRecord(lead: LeadFormResponse): NormalizedLeadRecord {
+  const entries = Object.entries(lead.customAnswers || {}).map(([key, value]) => ({
+    key,
+    value: cleanValue(value),
+  }));
+  const consumedKeys = new Set<string>();
+
+  let firstName = cleanValue(lead.firstName);
+  let lastName = cleanValue(lead.lastName);
+  let email = cleanValue(lead.email);
+  let company = cleanValue(lead.company);
+
+  const emailEntry = entries.find((entry) => looksLikeEmail(entry.value));
+  if (!email && emailEntry) {
+    email = emailEntry.value;
+  }
+  if (emailEntry) consumedKeys.add(emailEntry.key);
+
+  const emailIndex = emailEntry ? entries.findIndex((entry) => entry.key === emailEntry.key) : -1;
+  const firstNameEntry = emailIndex >= 0 ? entries[emailIndex + 1] : undefined;
+  const lastNameEntry = emailIndex >= 0 ? entries[emailIndex + 2] : undefined;
+  const companyEntry = emailIndex >= 0 ? entries[emailIndex + 4] : undefined;
+
+  if (!firstName && firstNameEntry && looksLikeNamePart(firstNameEntry.value)) {
+    firstName = firstNameEntry.value;
+    consumedKeys.add(firstNameEntry.key);
+  }
+  if (!lastName && lastNameEntry && looksLikeNamePart(lastNameEntry.value)) {
+    lastName = lastNameEntry.value;
+    consumedKeys.add(lastNameEntry.key);
+  }
+  if (!company && companyEntry?.value && !looksLikeEmail(companyEntry.value)) {
+    company = companyEntry.value;
+    consumedKeys.add(companyEntry.key);
+  }
+
+  entries.forEach((entry) => {
+    if (
+      entry.value === firstName ||
+      entry.value === lastName ||
+      entry.value === email ||
+      entry.value === company
+    ) {
+      consumedKeys.add(entry.key);
+    }
+  });
+
+  return {
+    ...lead,
+    displayName: [firstName, lastName].filter(Boolean).join(' '),
+    displayCompany: company,
+    displayEmail: email,
+    customValues: entries
+      .filter((entry) => entry.value && !consumedKeys.has(entry.key))
+      .map((entry) => entry.value)
+      .slice(0, CUSTOM_COLUMN_LABELS.length),
+  };
+}
+
 function formatLocalDate(date: Date): string {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -96,10 +178,8 @@ function CopyButton({ text }: { text: string }) {
 // ── Individual lead row ────────────────────────────────────────────────────────
 function LeadRow({
   lead,
-  customKeys,
 }: {
-  lead: LeadFormResponse;
-  customKeys: string[];
+  lead: NormalizedLeadRecord;
 }) {
   return (
     <TableRow
@@ -111,16 +191,16 @@ function LeadRow({
     >
       {/* Name */}
       <TableCell className="px-4 py-2.5 font-medium text-sm whitespace-nowrap">
-        {[lead.firstName, lead.lastName].filter(Boolean).join(' ') || '—'}
+        {lead.displayName || '—'}
       </TableCell>
 
       {/* Company */}
       <TableCell className="px-4 py-2.5">
         <div className="group/cell flex items-center min-w-0">
           <span className="text-sm text-foreground/80 truncate max-w-[180px]">
-            {lead.company || '—'}
+            {lead.displayCompany || '—'}
           </span>
-          {lead.company && <CopyButton text={lead.company} />}
+          {lead.displayCompany && <CopyButton text={lead.displayCompany} />}
         </div>
       </TableCell>
 
@@ -128,9 +208,9 @@ function LeadRow({
       <TableCell className="px-4 py-2.5">
         <div className="group/cell flex items-center gap-0.5">
           <span className="text-sm text-muted-foreground font-mono whitespace-nowrap truncate max-w-[220px]">
-            {lead.email || '—'}
+            {lead.displayEmail || '—'}
           </span>
-          {lead.email && <CopyButton text={lead.email} />}
+          {lead.displayEmail && <CopyButton text={lead.displayEmail} />}
         </div>
       </TableCell>
 
@@ -146,29 +226,16 @@ function LeadRow({
       </TableCell>
 
       {/* Custom field columns */}
-      {customKeys.map((key) => {
-        const val = lead.customAnswers[key];
+      {CUSTOM_COLUMN_LABELS.map((label, index) => {
+        const val = lead.customValues[index];
         return (
-          <TableCell key={key} className="px-4 py-2.5 text-sm text-foreground/80 align-middle">
+          <TableCell key={label} className="px-4 py-2.5 text-sm text-foreground/80 align-middle">
             <div className="max-w-[220px] truncate" title={val || ''}>
               {val || '—'}
             </div>
           </TableCell>
         );
       })}
-
-      {/* Status badge */}
-      <TableCell className="px-4 py-2.5 w-[64px] text-center">
-        {lead.testLead ? (
-          <span className="inline-flex items-center rounded-md bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 ring-1 ring-inset ring-amber-500/20">
-            test
-          </span>
-        ) : (
-          <span className="inline-flex items-center rounded-md bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600 ring-1 ring-inset ring-emerald-500/20">
-            real
-          </span>
-        )}
-      </TableCell>
     </TableRow>
   );
 }
@@ -229,8 +296,13 @@ export function LeadRecordsViewer({ accessToken, selectedAccount }: LeadRecordsV
     fetchLeads(selectedAccount);
   }, [selectedAccount, clearLeads, fetchLeads]);
 
+  const normalizedLeads = useMemo(
+    () => leads.map((lead) => normalizeLeadRecord(lead)),
+    [leads],
+  );
+
   const filteredLeads = useMemo(() => {
-    let result = leads;
+    let result = normalizedLeads;
     if (!showTestLeads) {
       result = result.filter((l) => !l.testLead);
     }
@@ -238,34 +310,29 @@ export function LeadRecordsViewer({ accessToken, selectedAccount }: LeadRecordsV
       const q = searchQuery.toLowerCase();
       result = result.filter(
         (l) =>
-          l.firstName.toLowerCase().includes(q) ||
-          l.lastName.toLowerCase().includes(q) ||
-          l.email.toLowerCase().includes(q) ||
-          l.company.toLowerCase().includes(q),
+          l.displayName.toLowerCase().includes(q) ||
+          l.displayEmail.toLowerCase().includes(q) ||
+          l.displayCompany.toLowerCase().includes(q) ||
+          l.customValues.some((value) => value.toLowerCase().includes(q)),
       );
     }
     return result;
-  }, [leads, showTestLeads, searchQuery]);
-
-  // Collect unique custom field keys from all loaded leads (stable order)
-  const customKeys = useMemo(() => {
-    const keys = new Set<string>();
-    leads.forEach(l => Object.keys(l.customAnswers).forEach(k => keys.add(k)));
-    return Array.from(keys);
-  }, [leads]);
+  }, [normalizedLeads, showTestLeads, searchQuery]);
 
   const handleExport = useCallback(() => {
     if (!filteredLeads.length) return;
-    const rows = filteredLeads.map((l) => ({
-      'First Name': l.firstName,
-      'Last Name': l.lastName,
-      Email: l.email,
-      Company: l.company,
-      'Submitted At': l.submittedAt ? new Date(l.submittedAt).toLocaleString() : '',
-      'Test Lead': l.testLead ? 'Yes' : 'No',
-      'Form URN': l.formUrn,
-      ...l.customAnswers,
-    }));
+    const rows = filteredLeads.map((l) => {
+      const row: Record<string, string> = {
+        Name: l.displayName,
+        Company: l.displayCompany,
+        Email: l.displayEmail,
+        Submitted: l.submittedAt ? new Date(l.submittedAt).toLocaleString() : '',
+      };
+      CUSTOM_COLUMN_LABELS.forEach((label, index) => {
+        row[label] = l.customValues[index] || '';
+      });
+      return row;
+    });
     exportToCSV(rows, `lead-records-${dateRange.start}-to-${dateRange.end}`);
     toast({ title: 'Exported', description: `${rows.length} leads exported to CSV` });
   }, [filteredLeads, dateRange, toast]);
@@ -459,18 +526,15 @@ export function LeadRecordsViewer({ accessToken, selectedAccount }: LeadRecordsV
                   <TableHead className="text-xs font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap py-2.5">
                     Submitted
                   </TableHead>
-                  {customKeys.map((key) => (
+                  {CUSTOM_COLUMN_LABELS.map((label) => (
                     <TableHead
-                      key={key}
+                      key={label}
                       className="px-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap py-2.5 max-w-[220px] truncate"
-                      title={key}
+                      title={label}
                     >
-                      {key}
+                      {label}
                     </TableHead>
                   ))}
-                  <TableHead className="text-center text-xs font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap py-2.5 w-[64px]">
-                    Status
-                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -478,7 +542,6 @@ export function LeadRecordsViewer({ accessToken, selectedAccount }: LeadRecordsV
                   <LeadRow
                     key={lead.leadUrn || idx}
                     lead={lead}
-                    customKeys={customKeys}
                   />
                 ))}
               </TableBody>
