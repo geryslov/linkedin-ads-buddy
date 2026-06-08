@@ -146,11 +146,16 @@ function LeadRow({
       </TableCell>
 
       {/* Custom field columns */}
-      {customKeys.map((key) => (
-        <TableCell key={key} className="px-4 py-2.5 text-sm text-foreground/80 max-w-[200px] truncate">
-          {lead.customAnswers[key] || '—'}
-        </TableCell>
-      ))}
+      {customKeys.map((key) => {
+        const val = lead.customAnswers[key];
+        return (
+          <TableCell key={key} className="px-4 py-2.5 text-sm text-foreground/80 align-middle">
+            <div className="max-w-[220px] truncate" title={val || ''}>
+              {val || '—'}
+            </div>
+          </TableCell>
+        );
+      })}
 
       {/* Status badge */}
       <TableCell className="px-4 py-2.5 w-[64px] text-center">
@@ -454,12 +459,13 @@ export function LeadRecordsViewer({ accessToken, selectedAccount }: LeadRecordsV
                   <TableHead className="text-xs font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap py-2.5">
                     Submitted
                   </TableHead>
-                  {customKeys.map((_, i) => (
+                  {customKeys.map((key) => (
                     <TableHead
-                      key={i}
-                      className="text-xs font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap py-2.5"
+                      key={key}
+                      className="px-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap py-2.5 max-w-[220px] truncate"
+                      title={key}
                     >
-                      Custom {i + 1}
+                      {key}
                     </TableHead>
                   ))}
                   <TableHead className="text-center text-xs font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap py-2.5 w-[64px]">
