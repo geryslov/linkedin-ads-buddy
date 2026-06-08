@@ -94,7 +94,7 @@ function ScorecardCard({ item }: { item: ScorecardItem }) {
       <div className="px-4 py-3.5">
         <div className="flex items-center justify-between mb-2">
           <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{item.label}</span>
-          <BenchBadge flag={item.flag} />
+          <BenchBadge flag={item.flag === 'N/A' ? null : item.flag} />
         </div>
         <p className={cn('text-2xl font-bold tabular-nums', cfg.color)}>
           {item.currentValue != null ? isCpl ? '$' + Math.round(item.currentValue) : fmtPct(item.currentValue) : '—'}
