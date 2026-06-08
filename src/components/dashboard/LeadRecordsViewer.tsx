@@ -146,11 +146,16 @@ function LeadRow({
       </TableCell>
 
       {/* Custom field columns */}
-      {customKeys.map((key) => (
-        <TableCell key={key} className="px-4 py-2.5 text-sm text-foreground/80 max-w-[200px] truncate">
-          {lead.customAnswers[key] || '—'}
-        </TableCell>
-      ))}
+      {customKeys.map((key) => {
+        const val = lead.customAnswers[key];
+        return (
+          <TableCell key={key} className="px-4 py-2.5 text-sm text-foreground/80 align-middle">
+            <div className="max-w-[220px] truncate" title={val || ''}>
+              {val || '—'}
+            </div>
+          </TableCell>
+        );
+      })}
 
       {/* Status badge */}
       <TableCell className="px-4 py-2.5 w-[64px] text-center">
