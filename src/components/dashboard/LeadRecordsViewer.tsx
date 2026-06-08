@@ -296,8 +296,13 @@ export function LeadRecordsViewer({ accessToken, selectedAccount }: LeadRecordsV
     fetchLeads(selectedAccount);
   }, [selectedAccount, clearLeads, fetchLeads]);
 
+  const normalizedLeads = useMemo(
+    () => leads.map((lead) => normalizeLeadRecord(lead)),
+    [leads],
+  );
+
   const filteredLeads = useMemo(() => {
-    let result = leads;
+    let result = normalizedLeads;
     if (!showTestLeads) {
       result = result.filter((l) => !l.testLead);
     }
@@ -305,34 +310,29 @@ export function LeadRecordsViewer({ accessToken, selectedAccount }: LeadRecordsV
       const q = searchQuery.toLowerCase();
       result = result.filter(
         (l) =>
-          l.firstName.toLowerCase().includes(q) ||
-          l.lastName.toLowerCase().includes(q) ||
-          l.email.toLowerCase().includes(q) ||
-          l.company.toLowerCase().includes(q),
+          l.displayName.toLowerCase().includes(q) ||
+          l.displayEmail.toLowerCase().includes(q) ||
+          l.displayCompany.toLowerCase().includes(q) ||
+          l.customValues.some((value) => value.toLowerCase().includes(q)),
       );
     }
     return result;
-  }, [leads, showTestLeads, searchQuery]);
-
-  // Collect unique custom field keys from all loaded leads (stable order)
-  const customKeys = useMemo(() => {
-    const keys = new Set<string>();
-    leads.forEach(l => Object.keys(l.customAnswers).forEach(k => keys.add(k)));
-    return Array.from(keys);
-  }, [leads]);
+  }, [normalizedLeads, showTestLeads, searchQuery]);
 
   const handleExport = useCallback(() => {
     if (!filteredLeads.length) return;
-    const rows = filteredLeads.map((l) => ({
-      'First Name': l.firstName,
-      'Last Name': l.lastName,
-      Email: l.email,
-      Company: l.company,
-      'Submitted At': l.submittedAt ? new Date(l.submittedAt).toLocaleString() : '',
-      'Test Lead': l.testLead ? 'Yes' : 'No',
-      'Form URN': l.formUrn,
-      ...l.customAnswers,
-    }));
+    const rows = filteredLeads.map((l) => {
+      const row: Record<string, string> = {
+        Name: l.displayName,
+        Company: l.displayCompany,
+        Email: l.displayEmail,
+        Submitted: l.submittedAt ? new Date(l.submittedAt).toLocaleString() : '',
+      };
+      CUSTOM_COLUMN_LABELS.forEach((label, index) => {
+        row[label] = l.customValues[index] || '';
+      });
+      return row;
+    });
     exportToCSV(rows, `lead-records-${dateRange.start}-to-${dateRange.end}`);
     toast({ title: 'Exported', description: `${rows.length} leads exported to CSV` });
   }, [filteredLeads, dateRange, toast]);
