@@ -110,12 +110,12 @@ function LeadRow({
       )}
     >
       {/* Name */}
-      <TableCell className="py-2.5 font-medium text-sm whitespace-nowrap">
+      <TableCell className="px-4 py-2.5 font-medium text-sm whitespace-nowrap">
         {[lead.firstName, lead.lastName].filter(Boolean).join(' ') || '—'}
       </TableCell>
 
       {/* Company */}
-      <TableCell className="py-2.5">
+      <TableCell className="px-4 py-2.5">
         <div className="group/cell flex items-center min-w-0">
           <span className="text-sm text-foreground/80 truncate max-w-[180px]">
             {lead.company || '—'}
@@ -125,7 +125,7 @@ function LeadRow({
       </TableCell>
 
       {/* Email */}
-      <TableCell className="py-2.5">
+      <TableCell className="px-4 py-2.5">
         <div className="group/cell flex items-center gap-0.5">
           <span className="text-sm text-muted-foreground font-mono whitespace-nowrap truncate max-w-[220px]">
             {lead.email || '—'}
@@ -135,7 +135,7 @@ function LeadRow({
       </TableCell>
 
       {/* Submitted date */}
-      <TableCell className="py-2.5 text-xs text-muted-foreground tabular-nums whitespace-nowrap">
+      <TableCell className="px-4 py-2.5 text-xs text-muted-foreground tabular-nums whitespace-nowrap">
         {lead.submittedAt
           ? new Date(lead.submittedAt).toLocaleDateString('en-US', {
               month: 'short',
@@ -147,13 +147,13 @@ function LeadRow({
 
       {/* Custom field columns */}
       {customKeys.map((key) => (
-        <TableCell key={key} className="py-2.5 text-sm text-foreground/80 max-w-[200px] truncate">
+        <TableCell key={key} className="px-4 py-2.5 text-sm text-foreground/80 max-w-[200px] truncate">
           {lead.customAnswers[key] || '—'}
         </TableCell>
       ))}
 
       {/* Status badge */}
-      <TableCell className="py-2.5 w-[64px] text-center">
+      <TableCell className="px-4 py-2.5 w-[64px] text-center">
         {lead.testLead ? (
           <span className="inline-flex items-center rounded-md bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 ring-1 ring-inset ring-amber-500/20">
             test
