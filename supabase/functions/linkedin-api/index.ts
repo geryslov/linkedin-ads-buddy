@@ -11522,17 +11522,30 @@ serve(async (req) => {
               const form = await r.json();
               const byId = new Map<string, string>();
               const ordered: string[] = [];
-              const questions = form.questions || form.fields || [];
+              const questions =
+                form.questions ||
+                form.fields ||
+                form.content?.questions ||
+                form.formQuestions ||
+                form.questionDetails ||
+                [];
               for (const q of questions) {
-                const qid = String(q.id ?? q.questionId ?? '').trim();
+                const qid = String(q.id ?? q.questionId ?? q.fieldId ?? '').trim();
                 const label =
                   extractLocalized(q.name) ||
                   extractLocalized(q.question) ||
+                  extractLocalized(q.questionText) ||
                   extractLocalized(q.questionDetails?.question) ||
+                  extractLocalized(q.questionDetails?.questionText) ||
                   extractLocalized(q.questionDetails?.text) ||
-                  extractLocalized(q.text) || '';
+                  extractLocalized(q.text) ||
+                  extractLocalized(q.label) ||
+                  extractLocalized(q.title) || '';
                 if (qid) byId.set(qid, label);
                 ordered.push(label);
+              }
+              if (ordered.length === 0) {
+                console.log(`[get_lead_form_responses] Form ${formId} keys:`, Object.keys(form).join(','), '— sample:', JSON.stringify(form).substring(0, 500));
               }
               formQuestionMap.set(formId, { byId, ordered });
             } catch (e) {
