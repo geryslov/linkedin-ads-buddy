@@ -483,14 +483,33 @@ export function LeadRecordsViewer({ accessToken, selectedAccount }: LeadRecordsV
             <Table className="w-auto">
               <TableHeader>
                 <TableRow className="bg-muted/30 hover:bg-muted/30">
-                  {visibleCoreCols.map((k) => (
-                    <TableHead
-                      key={k}
-                      className="px-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap py-2.5"
-                    >
-                      {coreHeader(k)}
-                    </TableHead>
-                  ))}
+                  {visibleCoreCols.map((k) => {
+                    const sortable = k === 'submitted' || k === 'campaign';
+                    const active = sortable && sortKey === k;
+                    const SortIcon = !sortable
+                      ? null
+                      : active
+                        ? (sortDir === 'asc' ? ArrowUp : ArrowDown)
+                        : ArrowUpDown;
+                    return (
+                      <TableHead
+                        key={k}
+                        className={cn(
+                          'px-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap py-2.5',
+                          sortable && 'cursor-pointer select-none hover:text-foreground transition-colors',
+                        )}
+                        onClick={sortable ? () => toggleSort(k as 'submitted' | 'campaign') : undefined}
+                        aria-sort={!sortable ? undefined : active ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
+                      >
+                        <span className="inline-flex items-center gap-1.5">
+                          {coreHeader(k)}
+                          {SortIcon && (
+                            <SortIcon className={cn('h-3 w-3', active ? 'text-foreground' : 'text-muted-foreground/50')} />
+                          )}
+                        </span>
+                      </TableHead>
+                    );
+                  })}
                   {visibleCustomCols.map((label) => (
                     <TableHead
                       key={label}
