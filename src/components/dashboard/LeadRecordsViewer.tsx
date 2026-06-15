@@ -157,8 +157,19 @@ export function LeadRecordsViewer({ accessToken, selectedAccount }: LeadRecordsV
   const [period, setPeriod] = useState('90');
   const [searchQuery, setSearchQuery] = useState('');
   const [showTestLeads, setShowTestLeads] = useState(false);
+  const [sortKey, setSortKey] = useState<'submitted' | 'campaign'>('submitted');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
-  const dateRange = useMemo(() => getDateRange(Number(period)), [period]);
+  const toggleSort = useCallback((key: 'submitted' | 'campaign') => {
+    setSortKey((prev) => {
+      if (prev === key) {
+        setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+        return prev;
+      }
+      setSortDir(key === 'submitted' ? 'desc' : 'asc');
+      return key;
+    });
+  }, []);
 
   const {
     leads,
