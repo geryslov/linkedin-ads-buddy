@@ -11481,10 +11481,73 @@ serve(async (req) => {
           }
         }
 
+        // Resolve real question labels from each unique lead-gen form definition
+        const extractLocalized = (field: any): string => {
+          if (!field) return '';
+          if (typeof field === 'string') return field;
+          if (field.localized) {
+            const pref = field.preferredLocale;
+            const key = pref ? `${pref.language}_${pref.country}` : null;
+            if (key && field.localized[key]) return field.localized[key];
+            for (const v of Object.values(field.localized)) {
+              if (typeof v === 'string') return v as string;
+            }
+          }
+          return '';
+        };
+        const extractFormId = (urn: string): string => {
+          if (!urn) return '';
+          const m1 = urn.match(/(?:adForm|leadGenForm|leadForm):\((\d+),\d+\)/);
+          if (m1) return m1[1];
+          const m2 = urn.match(/(?:adForm|leadGenForm|leadForm):(\d+)/);
+          if (m2) return m2[1];
+          return urn.split(':').pop() || '';
+        };
+
+        const formQuestionMap = new Map<string, { byId: Map<string, string>; ordered: string[] }>();
+        const uniqueFormIds = Array.from(
+          new Set(filteredElements.map((el: any) => extractFormId(el.versionedLeadGenFormUrn || '')).filter(Boolean))
+        );
+        for (let i = 0; i < uniqueFormIds.length; i += 5) {
+          await Promise.all(uniqueFormIds.slice(i, i + 5).map(async (formId) => {
+            try {
+              const r = await fetch(`https://api.linkedin.com/rest/leadForms/${formId}`, {
+                headers: {
+                  'Authorization': `Bearer ${accessToken}`,
+                  'LinkedIn-Version': '202511',
+                  'X-Restli-Protocol-Version': '2.0.0',
+                },
+              });
+              if (!r.ok) return;
+              const form = await r.json();
+              const byId = new Map<string, string>();
+              const ordered: string[] = [];
+              const questions = form.questions || form.fields || [];
+              for (const q of questions) {
+                const qid = String(q.id ?? q.questionId ?? '').trim();
+                const label =
+                  extractLocalized(q.name) ||
+                  extractLocalized(q.question) ||
+                  extractLocalized(q.questionDetails?.question) ||
+                  extractLocalized(q.questionDetails?.text) ||
+                  extractLocalized(q.text) || '';
+                if (qid) byId.set(qid, label);
+                ordered.push(label);
+              }
+              formQuestionMap.set(formId, { byId, ordered });
+            } catch (e) {
+              console.error('[get_lead_form_responses] Form question lookup failed:', e);
+            }
+          }));
+        }
+
         const leads = filteredElements.map((el: any) => {
           const fieldMap: Record<string, string> = {};
           const customAnswers: Record<string, string> = {};
           const answers: Array<{ label: string; value: string; predefinedField?: string; questionId?: string }> = [];
+
+          const formId = extractFormId(el.versionedLeadGenFormUrn || '');
+          const fq = formQuestionMap.get(formId);
 
           // Parse answers — each answer may have predefinedField or be custom
           for (const [answerIndex, answer] of (el.formResponse?.answers || []).entries()) {
@@ -11492,14 +11555,19 @@ serve(async (req) => {
               answer.answerDetails?.textQuestionAnswer?.answer ||
               (answer.answerDetails?.multipleChoiceAnswer?.options || []).join(', ') ||
               '';
+            const qid = String(answer.questionId ?? '').trim();
+            const resolvedLabel =
+              (qid && fq?.byId.get(qid)) ||
+              fq?.ordered[answerIndex] ||
+              '';
             if (answer.predefinedField) {
               fieldMap[String(answer.predefinedField).toUpperCase()] = value;
             } else {
-              const label = `Custom ${answerIndex + 1}`;
+              const label = resolvedLabel || `Custom ${answerIndex + 1}`;
               customAnswers[label] = value;
             }
             answers.push({
-              label: answer.predefinedField || `Custom ${answerIndex + 1}`,
+              label: resolvedLabel || answer.predefinedField || `Custom ${answerIndex + 1}`,
               value,
               predefinedField: answer.predefinedField,
               questionId: answer.questionId,
