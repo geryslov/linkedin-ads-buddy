@@ -72,13 +72,8 @@ function campaignFallbackLabel(lead: LeadFormResponse) {
 }
 
 function normalizeLeadRecord(lead: LeadFormResponse): NormalizedLeadRecord {
-  const customValues = Object.entries(lead.customAnswers || {})
-    .sort(([a], [b]) => {
-      const aIndex = Number(a.match(/\d+/)?.[0] || Number.MAX_SAFE_INTEGER);
-      const bIndex = Number(b.match(/\d+/)?.[0] || Number.MAX_SAFE_INTEGER);
-      return aIndex - bIndex;
-    })
-    .map(([, value]) => cleanValue(value))
+  const customValues = Object.values(lead.customAnswers || {})
+    .map((value) => cleanValue(value))
     .slice(0, CUSTOM_COLUMN_LABELS.length);
 
   return {
