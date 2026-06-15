@@ -5,6 +5,9 @@ export interface LeadFormResponse {
   leadUrn: string;
   formUrn: string;
   campaignUrn: string;
+  campaignName?: string;
+  creativeUrn?: string;
+  creativeName?: string;
   firstName: string;
   lastName: string;
   email: string;
@@ -12,6 +15,12 @@ export interface LeadFormResponse {
   submittedAt: number;
   testLead: boolean;
   customAnswers: Record<string, string>;
+  answers?: Array<{
+    label: string;
+    value: string;
+    predefinedField?: string;
+    questionId?: string;
+  }>;
 }
 
 export function useLeadFormResponses(
