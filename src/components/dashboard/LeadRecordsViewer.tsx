@@ -171,6 +171,10 @@ export function LeadRecordsViewer({ accessToken, selectedAccount }: LeadRecordsV
     });
   }, []);
 
+  const dateRange = useMemo(() => getDateRange(Number(period)), [period]);
+
+
+
   const {
     leads,
     isLoading,
