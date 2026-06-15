@@ -289,6 +289,8 @@ export function LeadRecordsViewer({ accessToken, selectedAccount }: LeadRecordsV
           l.displayName.toLowerCase().includes(q) ||
           l.displayEmail.toLowerCase().includes(q) ||
           l.displayCompany.toLowerCase().includes(q) ||
+          l.displayCampaign.toLowerCase().includes(q) ||
+          cleanValue(l.creativeName).toLowerCase().includes(q) ||
           l.customValues.some((value) => value.toLowerCase().includes(q)),
       );
     }
@@ -303,6 +305,8 @@ export function LeadRecordsViewer({ accessToken, selectedAccount }: LeadRecordsV
         Company: l.displayCompany,
         Email: l.displayEmail,
         Submitted: l.submittedAt ? new Date(l.submittedAt).toLocaleString() : '',
+        Campaign: l.displayCampaign,
+        Creative: l.creativeName || '',
       };
       CUSTOM_COLUMN_LABELS.forEach((label, index) => {
         row[label] = l.customValues[index] || '';
@@ -481,7 +485,7 @@ export function LeadRecordsViewer({ accessToken, selectedAccount }: LeadRecordsV
       {filteredLeads.length > 0 && (
         <div className="rounded-xl border border-border/60 overflow-hidden">
           <div className="overflow-x-auto">
-            <Table className="min-w-[680px]">
+            <Table className="min-w-[4200px] table-fixed">
               <TableHeader>
                 <TableRow className="bg-muted/30 hover:bg-muted/30">
                   <TableHead className="text-xs font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap py-2.5">
@@ -501,6 +505,9 @@ export function LeadRecordsViewer({ accessToken, selectedAccount }: LeadRecordsV
                   </TableHead>
                   <TableHead className="text-xs font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap py-2.5">
                     Submitted
+                  </TableHead>
+                  <TableHead className="text-xs font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap py-2.5">
+                    Campaign
                   </TableHead>
                   {CUSTOM_COLUMN_LABELS.map((label) => (
                     <TableHead
