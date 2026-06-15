@@ -56,6 +56,7 @@ interface NormalizedLeadRecord extends LeadFormResponse {
   displayName: string;
   displayCompany: string;
   displayEmail: string;
+  displayCampaign: string;
   customValues: string[];
 }
 
@@ -63,72 +64,30 @@ function cleanValue(value?: string | null) {
   return String(value || '').trim();
 }
 
-function looksLikeEmail(value: string) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
-}
-
-function looksLikeNamePart(value: string) {
-  const cleaned = value.trim();
-  if (!cleaned || looksLikeEmail(cleaned) || cleaned.length > 60) return false;
-  return cleaned.split(/\s+/).length <= 3 && !/[,@]/.test(cleaned);
+function campaignFallbackLabel(lead: LeadFormResponse) {
+  const campaignId = cleanValue(lead.campaignUrn).split(':').pop() || '';
+  if (campaignId) return `Campaign ${campaignId}`;
+  const creativeId = cleanValue(lead.creativeUrn).split(':').pop() || '';
+  return creativeId ? `Creative ${creativeId}` : '';
 }
 
 function normalizeLeadRecord(lead: LeadFormResponse): NormalizedLeadRecord {
-  const entries = Object.entries(lead.customAnswers || {}).map(([key, value]) => ({
-    key,
-    value: cleanValue(value),
-  }));
-  const consumedKeys = new Set<string>();
-
-  let firstName = cleanValue(lead.firstName);
-  let lastName = cleanValue(lead.lastName);
-  let email = cleanValue(lead.email);
-  let company = cleanValue(lead.company);
-
-  const emailEntry = entries.find((entry) => looksLikeEmail(entry.value));
-  if (!email && emailEntry) {
-    email = emailEntry.value;
-  }
-  if (emailEntry) consumedKeys.add(emailEntry.key);
-
-  const emailIndex = emailEntry ? entries.findIndex((entry) => entry.key === emailEntry.key) : -1;
-  const firstNameEntry = emailIndex >= 0 ? entries[emailIndex + 1] : undefined;
-  const lastNameEntry = emailIndex >= 0 ? entries[emailIndex + 2] : undefined;
-  const companyEntry = emailIndex >= 0 ? entries[emailIndex + 4] : undefined;
-
-  if (!firstName && firstNameEntry && looksLikeNamePart(firstNameEntry.value)) {
-    firstName = firstNameEntry.value;
-    consumedKeys.add(firstNameEntry.key);
-  }
-  if (!lastName && lastNameEntry && looksLikeNamePart(lastNameEntry.value)) {
-    lastName = lastNameEntry.value;
-    consumedKeys.add(lastNameEntry.key);
-  }
-  if (!company && companyEntry?.value && !looksLikeEmail(companyEntry.value)) {
-    company = companyEntry.value;
-    consumedKeys.add(companyEntry.key);
-  }
-
-  entries.forEach((entry) => {
-    if (
-      entry.value === firstName ||
-      entry.value === lastName ||
-      entry.value === email ||
-      entry.value === company
-    ) {
-      consumedKeys.add(entry.key);
-    }
-  });
+  const customValues = Object.entries(lead.customAnswers || {})
+    .sort(([a], [b]) => {
+      const aIndex = Number(a.match(/\d+/)?.[0] || Number.MAX_SAFE_INTEGER);
+      const bIndex = Number(b.match(/\d+/)?.[0] || Number.MAX_SAFE_INTEGER);
+      return aIndex - bIndex;
+    })
+    .map(([, value]) => cleanValue(value))
+    .slice(0, CUSTOM_COLUMN_LABELS.length);
 
   return {
     ...lead,
-    displayName: [firstName, lastName].filter(Boolean).join(' '),
-    displayCompany: company,
-    displayEmail: email,
-    customValues: entries
-      .filter((entry) => entry.value && !consumedKeys.has(entry.key))
-      .map((entry) => entry.value)
-      .slice(0, CUSTOM_COLUMN_LABELS.length),
+    displayName: [cleanValue(lead.firstName), cleanValue(lead.lastName)].filter(Boolean).join(' '),
+    displayCompany: cleanValue(lead.company),
+    displayEmail: cleanValue(lead.email),
+    displayCampaign: cleanValue(lead.campaignName) || campaignFallbackLabel(lead),
+    customValues,
   };
 }
 
