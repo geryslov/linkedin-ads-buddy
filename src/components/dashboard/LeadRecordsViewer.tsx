@@ -184,6 +184,23 @@ function LeadRow({
           : '—'}
       </TableCell>
 
+      {/* Campaign attribution */}
+      <TableCell className="px-4 py-2.5">
+        <div className="group/cell flex min-w-0 flex-col gap-0.5">
+          <div className="flex min-w-0 items-center">
+            <span className="max-w-[260px] truncate text-sm font-medium text-foreground/85" title={lead.displayCampaign || ''}>
+              {lead.displayCampaign || '—'}
+            </span>
+            {lead.displayCampaign && <CopyButton text={lead.displayCampaign} />}
+          </div>
+          {lead.creativeName && (
+            <span className="max-w-[260px] truncate text-[11px] text-muted-foreground" title={lead.creativeName}>
+              {lead.creativeName}
+            </span>
+          )}
+        </div>
+      </TableCell>
+
       {/* Custom field columns */}
       {CUSTOM_COLUMN_LABELS.map((label, index) => {
         const val = lead.customValues[index];
