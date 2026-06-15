@@ -486,6 +486,16 @@ export function LeadRecordsViewer({ accessToken, selectedAccount }: LeadRecordsV
         <div className="rounded-xl border border-border/60 overflow-hidden">
           <div className="overflow-x-auto">
             <Table className="min-w-[4200px] table-fixed">
+              <colgroup>
+                <col className="w-[180px]" />
+                <col className="w-[190px]" />
+                <col className="w-[240px]" />
+                <col className="w-[140px]" />
+                <col className="w-[280px]" />
+                {CUSTOM_COLUMN_LABELS.map((label) => (
+                  <col key={label} className="w-[140px]" />
+                ))}
+              </colgroup>
               <TableHeader>
                 <TableRow className="bg-muted/30 hover:bg-muted/30">
                   <TableHead className="text-xs font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap py-2.5">
