@@ -32,6 +32,9 @@ import {
   X,
   AlertCircle,
   Inbox,
+  ArrowUp,
+  ArrowDown,
+  ArrowUpDown,
 } from 'lucide-react';
 import { useLeadFormResponses, LeadFormResponse } from '@/hooks/useLeadFormResponses';
 import { exportToCSV } from '@/lib/exportUtils';
