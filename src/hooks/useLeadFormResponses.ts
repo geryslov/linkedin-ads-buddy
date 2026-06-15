@@ -5,6 +5,9 @@ export interface LeadFormResponse {
   leadUrn: string;
   formUrn: string;
   campaignUrn: string;
+  campaignName?: string;
+  creativeUrn?: string;
+  creativeName?: string;
   firstName: string;
   lastName: string;
   email: string;
@@ -12,6 +15,12 @@ export interface LeadFormResponse {
   submittedAt: number;
   testLead: boolean;
   customAnswers: Record<string, string>;
+  answers?: Array<{
+    label: string;
+    value: string;
+    predefinedField?: string;
+    questionId?: string;
+  }>;
 }
 
 export function useLeadFormResponses(
@@ -59,8 +68,8 @@ export function useLeadFormResponses(
       setTotal(data?.total ?? 0);
       setHasMore(data?.hasMore ?? false);
       setOffset(100);
-    } catch (err: any) {
-      setError(err.message || 'Failed to fetch leads');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch leads');
     } finally {
       setIsLoading(false);
     }
@@ -93,8 +102,8 @@ export function useLeadFormResponses(
       setTotal(data?.total ?? total);
       setHasMore(data?.hasMore ?? false);
       setOffset(prev => prev + 100);
-    } catch (err: any) {
-      setError(err.message || 'Failed to fetch more leads');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch more leads');
     } finally {
       setIsLoading(false);
     }

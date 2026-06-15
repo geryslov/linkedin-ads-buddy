@@ -56,6 +56,7 @@ interface NormalizedLeadRecord extends LeadFormResponse {
   displayName: string;
   displayCompany: string;
   displayEmail: string;
+  displayCampaign: string;
   customValues: string[];
 }
 
@@ -63,72 +64,25 @@ function cleanValue(value?: string | null) {
   return String(value || '').trim();
 }
 
-function looksLikeEmail(value: string) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
-}
-
-function looksLikeNamePart(value: string) {
-  const cleaned = value.trim();
-  if (!cleaned || looksLikeEmail(cleaned) || cleaned.length > 60) return false;
-  return cleaned.split(/\s+/).length <= 3 && !/[,@]/.test(cleaned);
+function campaignFallbackLabel(lead: LeadFormResponse) {
+  const campaignId = cleanValue(lead.campaignUrn).split(':').pop() || '';
+  if (campaignId) return `Campaign ${campaignId}`;
+  const creativeId = cleanValue(lead.creativeUrn).split(':').pop() || '';
+  return creativeId ? `Creative ${creativeId}` : '';
 }
 
 function normalizeLeadRecord(lead: LeadFormResponse): NormalizedLeadRecord {
-  const entries = Object.entries(lead.customAnswers || {}).map(([key, value]) => ({
-    key,
-    value: cleanValue(value),
-  }));
-  const consumedKeys = new Set<string>();
-
-  let firstName = cleanValue(lead.firstName);
-  let lastName = cleanValue(lead.lastName);
-  let email = cleanValue(lead.email);
-  let company = cleanValue(lead.company);
-
-  const emailEntry = entries.find((entry) => looksLikeEmail(entry.value));
-  if (!email && emailEntry) {
-    email = emailEntry.value;
-  }
-  if (emailEntry) consumedKeys.add(emailEntry.key);
-
-  const emailIndex = emailEntry ? entries.findIndex((entry) => entry.key === emailEntry.key) : -1;
-  const firstNameEntry = emailIndex >= 0 ? entries[emailIndex + 1] : undefined;
-  const lastNameEntry = emailIndex >= 0 ? entries[emailIndex + 2] : undefined;
-  const companyEntry = emailIndex >= 0 ? entries[emailIndex + 4] : undefined;
-
-  if (!firstName && firstNameEntry && looksLikeNamePart(firstNameEntry.value)) {
-    firstName = firstNameEntry.value;
-    consumedKeys.add(firstNameEntry.key);
-  }
-  if (!lastName && lastNameEntry && looksLikeNamePart(lastNameEntry.value)) {
-    lastName = lastNameEntry.value;
-    consumedKeys.add(lastNameEntry.key);
-  }
-  if (!company && companyEntry?.value && !looksLikeEmail(companyEntry.value)) {
-    company = companyEntry.value;
-    consumedKeys.add(companyEntry.key);
-  }
-
-  entries.forEach((entry) => {
-    if (
-      entry.value === firstName ||
-      entry.value === lastName ||
-      entry.value === email ||
-      entry.value === company
-    ) {
-      consumedKeys.add(entry.key);
-    }
-  });
+  const customValues = Object.values(lead.customAnswers || {})
+    .map((value) => cleanValue(value))
+    .slice(0, CUSTOM_COLUMN_LABELS.length);
 
   return {
     ...lead,
-    displayName: [firstName, lastName].filter(Boolean).join(' '),
-    displayCompany: company,
-    displayEmail: email,
-    customValues: entries
-      .filter((entry) => entry.value && !consumedKeys.has(entry.key))
-      .map((entry) => entry.value)
-      .slice(0, CUSTOM_COLUMN_LABELS.length),
+    displayName: [cleanValue(lead.firstName), cleanValue(lead.lastName)].filter(Boolean).join(' '),
+    displayCompany: cleanValue(lead.company),
+    displayEmail: cleanValue(lead.email),
+    displayCampaign: cleanValue(lead.campaignName) || campaignFallbackLabel(lead),
+    customValues,
   };
 }
 
@@ -225,6 +179,23 @@ function LeadRow({
           : '—'}
       </TableCell>
 
+      {/* Campaign attribution */}
+      <TableCell className="px-4 py-2.5">
+        <div className="group/cell flex min-w-0 flex-col gap-0.5">
+          <div className="flex min-w-0 items-center">
+            <span className="max-w-[260px] truncate text-sm font-medium text-foreground/85" title={lead.displayCampaign || ''}>
+              {lead.displayCampaign || '—'}
+            </span>
+            {lead.displayCampaign && <CopyButton text={lead.displayCampaign} />}
+          </div>
+          {lead.creativeName && (
+            <span className="max-w-[260px] truncate text-[11px] text-muted-foreground" title={lead.creativeName}>
+              {lead.creativeName}
+            </span>
+          )}
+        </div>
+      </TableCell>
+
       {/* Custom field columns */}
       {CUSTOM_COLUMN_LABELS.map((label, index) => {
         const val = lead.customValues[index];
@@ -313,6 +284,8 @@ export function LeadRecordsViewer({ accessToken, selectedAccount }: LeadRecordsV
           l.displayName.toLowerCase().includes(q) ||
           l.displayEmail.toLowerCase().includes(q) ||
           l.displayCompany.toLowerCase().includes(q) ||
+          l.displayCampaign.toLowerCase().includes(q) ||
+          cleanValue(l.creativeName).toLowerCase().includes(q) ||
           l.customValues.some((value) => value.toLowerCase().includes(q)),
       );
     }
@@ -327,6 +300,8 @@ export function LeadRecordsViewer({ accessToken, selectedAccount }: LeadRecordsV
         Company: l.displayCompany,
         Email: l.displayEmail,
         Submitted: l.submittedAt ? new Date(l.submittedAt).toLocaleString() : '',
+        Campaign: l.displayCampaign,
+        Creative: l.creativeName || '',
       };
       CUSTOM_COLUMN_LABELS.forEach((label, index) => {
         row[label] = l.customValues[index] || '';
@@ -505,7 +480,17 @@ export function LeadRecordsViewer({ accessToken, selectedAccount }: LeadRecordsV
       {filteredLeads.length > 0 && (
         <div className="rounded-xl border border-border/60 overflow-hidden">
           <div className="overflow-x-auto">
-            <Table className="min-w-[680px]">
+            <Table className="min-w-[4200px] table-fixed">
+              <colgroup>
+                <col className="w-[180px]" />
+                <col className="w-[190px]" />
+                <col className="w-[240px]" />
+                <col className="w-[140px]" />
+                <col className="w-[280px]" />
+                {CUSTOM_COLUMN_LABELS.map((label) => (
+                  <col key={label} className="w-[140px]" />
+                ))}
+              </colgroup>
               <TableHeader>
                 <TableRow className="bg-muted/30 hover:bg-muted/30">
                   <TableHead className="text-xs font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap py-2.5">
@@ -525,6 +510,9 @@ export function LeadRecordsViewer({ accessToken, selectedAccount }: LeadRecordsV
                   </TableHead>
                   <TableHead className="text-xs font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap py-2.5">
                     Submitted
+                  </TableHead>
+                  <TableHead className="text-xs font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap py-2.5">
+                    Campaign
                   </TableHead>
                   {CUSTOM_COLUMN_LABELS.map((label) => (
                     <TableHead

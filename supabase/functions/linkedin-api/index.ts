@@ -11424,23 +11424,92 @@ serve(async (req) => {
           return el.submittedAt >= leadsStartMs && el.submittedAt <= leadsEndMs;
         });
 
+        const associatedCreativeUrn = (el: any): string => {
+          const entity = el.associatedEntity;
+          if (!entity) return '';
+          if (typeof entity === 'string') return entity.includes('sponsoredCreative') ? entity : '';
+          return entity.associatedCreative || entity.creative || '';
+        };
+
+        const creativeMetadata = new Map<string, { creativeName: string; campaignUrn: string }>();
+        const campaignNames = new Map<string, string>();
+        const creativeUrns = Array.from(new Set(filteredElements.map(associatedCreativeUrn).filter(Boolean)));
+
+        if (creativeUrns.length > 0) {
+          const batchSize = 10;
+          for (let i = 0; i < creativeUrns.length; i += batchSize) {
+            const batch = creativeUrns.slice(i, i + batchSize);
+            await Promise.all(batch.map(async (creativeUrn) => {
+              try {
+                const creativeResp = await fetch(`https://api.linkedin.com/rest/adAccounts/${accountId}/creatives/${encodeURIComponent(creativeUrn)}`, {
+                  headers: {
+                    'Authorization': `Bearer ${accessToken}`,
+                    'LinkedIn-Version': '202511',
+                    'X-Restli-Protocol-Version': '2.0.0',
+                  },
+                });
+                if (!creativeResp.ok) return;
+                const creative = await creativeResp.json();
+                creativeMetadata.set(creativeUrn, {
+                  creativeName: creative.name || creative.creativeDscName || '',
+                  campaignUrn: creative.campaign || '',
+                });
+              } catch (e) {
+                console.error('[get_lead_form_responses] Creative attribution lookup failed:', e);
+              }
+            }));
+          }
+
+          const campaignUrns = Array.from(new Set(Array.from(creativeMetadata.values()).map((meta) => meta.campaignUrn).filter(Boolean)));
+          if (campaignUrns.length > 0) {
+            try {
+              const campaignsResp = await fetch(`https://api.linkedin.com/v2/adCampaignsV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=500&fields=id,name`, {
+                headers: { 'Authorization': `Bearer ${accessToken}` },
+              });
+              if (campaignsResp.ok) {
+                const campaignsData = await campaignsResp.json();
+                for (const campaign of (campaignsData.elements || [])) {
+                  const campaignId = campaign.id?.toString() || '';
+                  const campaignUrn = campaignId ? `urn:li:sponsoredCampaign:${campaignId}` : '';
+                  if (campaignId) campaignNames.set(campaignId, campaign.name || `Campaign ${campaignId}`);
+                  if (campaignUrn) campaignNames.set(campaignUrn, campaign.name || `Campaign ${campaignId}`);
+                }
+              }
+            } catch (e) {
+              console.error('[get_lead_form_responses] Campaign attribution lookup failed:', e);
+            }
+          }
+        }
+
         const leads = filteredElements.map((el: any) => {
           const fieldMap: Record<string, string> = {};
           const customAnswers: Record<string, string> = {};
+          const answers: Array<{ label: string; value: string; predefinedField?: string; questionId?: string }> = [];
 
           // Parse answers — each answer may have predefinedField or be custom
-          for (const answer of (el.formResponse?.answers || [])) {
+          for (const [answerIndex, answer] of (el.formResponse?.answers || []).entries()) {
             const value =
               answer.answerDetails?.textQuestionAnswer?.answer ||
               (answer.answerDetails?.multipleChoiceAnswer?.options || []).join(', ') ||
               '';
             if (answer.predefinedField) {
-              fieldMap[answer.predefinedField] = value;
+              fieldMap[String(answer.predefinedField).toUpperCase()] = value;
             } else {
-              const label = `q${answer.questionId ?? 'unknown'}`;
+              const label = `Custom ${answerIndex + 1}`;
               customAnswers[label] = value;
             }
+            answers.push({
+              label: answer.predefinedField || `Custom ${answerIndex + 1}`,
+              value,
+              predefinedField: answer.predefinedField,
+              questionId: answer.questionId,
+            });
           }
+
+          const creativeUrn = associatedCreativeUrn(el);
+          const creativeMeta = creativeMetadata.get(creativeUrn);
+          const campaignUrn = creativeMeta?.campaignUrn || '';
+          const campaignId = campaignUrn.split(':').pop() || '';
 
           // Also try leadMetadata fields as fallback
           if (!fieldMap['FIRST_NAME'] && el.leadMetadata?.firstName) fieldMap['FIRST_NAME'] = el.leadMetadata.firstName;
@@ -11451,7 +11520,10 @@ serve(async (req) => {
           return {
             leadUrn: el.id || '',
             formUrn: el.versionedLeadGenFormUrn || '',
-            campaignUrn: el.associatedEntity?.associatedCreative || el.associatedEntity || '',
+            campaignUrn,
+            campaignName: campaignNames.get(campaignUrn) || campaignNames.get(campaignId) || '',
+            creativeUrn,
+            creativeName: creativeMeta?.creativeName || '',
             firstName: fieldMap['FIRST_NAME'] || '',
             lastName: fieldMap['LAST_NAME'] || '',
             email: fieldMap['EMAIL'] || '',
@@ -11459,6 +11531,7 @@ serve(async (req) => {
             submittedAt: el.submittedAt || 0,
             testLead: el.testLead || false,
             customAnswers,
+            answers,
           };
         });
 
