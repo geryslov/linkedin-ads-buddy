@@ -11462,8 +11462,9 @@ serve(async (req) => {
 
           const campaignUrns = Array.from(new Set(Array.from(creativeMetadata.values()).map((meta) => meta.campaignUrn).filter(Boolean)));
           if (campaignUrns.length > 0) {
+            // Bulk search (limited to 1000 per account, may miss archived/cross-account)
             try {
-              const campaignsResp = await fetch(`https://api.linkedin.com/v2/adCampaignsV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=500&fields=id,name`, {
+              const campaignsResp = await fetch(`https://api.linkedin.com/v2/adCampaignsV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=1000&fields=id,name`, {
                 headers: { 'Authorization': `Bearer ${accessToken}` },
               });
               if (campaignsResp.ok) {
@@ -11476,7 +11477,48 @@ serve(async (req) => {
                 }
               }
             } catch (e) {
-              console.error('[get_lead_form_responses] Campaign attribution lookup failed:', e);
+              console.error('[get_lead_form_responses] Campaign bulk lookup failed:', e);
+            }
+
+            // Fallback: fetch any unresolved campaigns individually
+            const unresolved = campaignUrns.filter((urn) => {
+              const id = urn.split(':').pop() || '';
+              return !campaignNames.has(id) && !campaignNames.has(urn);
+            });
+            if (unresolved.length > 0) {
+              console.log(`[get_lead_form_responses] Resolving ${unresolved.length} campaign names individually`);
+              for (let i = 0; i < unresolved.length; i += 10) {
+                const batch = unresolved.slice(i, i + 10);
+                await Promise.all(batch.map(async (campaignUrn) => {
+                  const campaignId = campaignUrn.split(':').pop() || '';
+                  if (!campaignId) return;
+                  const endpoints = [
+                    `https://api.linkedin.com/rest/adAccounts/${accountId}/adCampaigns/${campaignId}`,
+                    `https://api.linkedin.com/v2/adCampaignsV2/${campaignId}`,
+                  ];
+                  for (const url of endpoints) {
+                    try {
+                      const r = await fetch(url, {
+                        headers: {
+                          'Authorization': `Bearer ${accessToken}`,
+                          'LinkedIn-Version': '202511',
+                          'X-Restli-Protocol-Version': '2.0.0',
+                        },
+                      });
+                      if (!r.ok) continue;
+                      const c = await r.json();
+                      const name = c.name || '';
+                      if (name) {
+                        campaignNames.set(campaignId, name);
+                        campaignNames.set(campaignUrn, name);
+                        return;
+                      }
+                    } catch (e) {
+                      console.error(`[get_lead_form_responses] Direct campaign lookup failed for ${campaignId}:`, e);
+                    }
+                  }
+                }));
+              }
             }
           }
         }
