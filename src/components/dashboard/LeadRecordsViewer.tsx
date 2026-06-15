@@ -209,8 +209,15 @@ export function LeadRecordsViewer({ accessToken, selectedAccount }: LeadRecordsV
           Object.values(l.customMap).some((v) => v.toLowerCase().includes(q)),
       );
     }
-    return result;
-  }, [normalizedLeads, showTestLeads, searchQuery]);
+    const dir = sortDir === 'asc' ? 1 : -1;
+    const sorted = [...result].sort((a, b) => {
+      if (sortKey === 'submitted') {
+        return ((a.submittedAt || 0) - (b.submittedAt || 0)) * dir;
+      }
+      return a.displayCampaign.localeCompare(b.displayCampaign, undefined, { sensitivity: 'base' }) * dir;
+    });
+    return sorted;
+  }, [normalizedLeads, showTestLeads, searchQuery, sortKey, sortDir]);
 
   // ── Discover which columns actually have data ─────────────────────────
   const visibleCoreCols = useMemo(() => {
