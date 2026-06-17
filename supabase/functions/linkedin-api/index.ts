@@ -3119,6 +3119,23 @@ serve(async (req) => {
         
         const [startYear, startMonth, startDay] = startDate.split('-').map(Number);
         const [endYear, endMonth, endDay] = endDate.split('-').map(Number);
+        const campaignBreakdownFields = 'impressions,clicks,landingPageClicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions,totalEngagements,likes,comments,reactions,shares,pivotValue';
+        const buildCampaignBreakdownQuery = (campaignId: string, pageSize: number, pageStart: number) => [
+          'q=analytics',
+          `dateRange.start.day=${startDay}`,
+          `dateRange.start.month=${startMonth}`,
+          `dateRange.start.year=${startYear}`,
+          `dateRange.end.day=${endDay}`,
+          `dateRange.end.month=${endMonth}`,
+          `dateRange.end.year=${endYear}`,
+          'timeGranularity=ALL',
+          'pivot=MEMBER_COMPANY',
+          `accounts[0]=urn:li:sponsoredAccount:${accountId}`,
+          `campaigns[0]=urn:li:sponsoredCampaign:${campaignId}`,
+          `fields=${campaignBreakdownFields}`,
+          `count=${pageSize}`,
+          `start=${pageStart}`,
+        ].join('&');
         
         console.log(`[get_company_campaign_breakdown] Starting for ${objCampaignIds?.length || 0} campaigns`);
         
@@ -3144,19 +3161,7 @@ serve(async (req) => {
               let hasMorePages = true;
 
               while (hasMorePages && pageStart <= 250000) {
-                const url = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
-                  `dateRange.start.day=${startDay}&` +
-                  `dateRange.start.month=${startMonth}&` +
-                  `dateRange.start.year=${startYear}&` +
-                  `dateRange.end.day=${endDay}&` +
-                  `dateRange.end.month=${endMonth}&` +
-                  `dateRange.end.year=${endYear}&` +
-                  `timeGranularity=ALL&` +
-                  `pivot=MEMBER_COMPANY&` +
-                  `accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
-                  `campaigns[0]=urn:li:sponsoredCampaign:${campaignId}&` +
-                  `fields=impressions,clicks,landingPageClicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions,totalEngagements,likes,comments,reactions,shares,pivotValue&` +
-                  `count=${pageSize}&start=${pageStart}`;
+                const url = `https://api.linkedin.com/v2/adAnalyticsV2?${buildCampaignBreakdownQuery(campaignId, pageSize, pageStart)}`;
 
                 const response = await fetch(url, {
                   headers: { 'Authorization': `Bearer ${accessToken}` },
