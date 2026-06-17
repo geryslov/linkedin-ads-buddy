@@ -453,7 +453,15 @@ export function CompanyDemographicTable({ data, isLoading, isLoadingMore, totalC
                       className={cn('transition-colors duration-150 cursor-pointer', isCompanyExpanded ? 'bg-primary/[0.05] hover:bg-primary/[0.07]' : 'hover:bg-muted/30')}
                       onClick={() => toggleCompany(item.entityUrn)}
                     >
+                      <TableCell className="w-[40px]" onClick={(e) => e.stopPropagation()}>
+                        <Checkbox
+                          checked={selectedUrns.has(item.entityUrn)}
+                          onCheckedChange={() => toggleSelected(item.entityUrn)}
+                          aria-label={`Select ${item.entityName}`}
+                        />
+                      </TableCell>
                       <TableCell className="font-medium min-w-[200px] max-w-[280px]">
+
                         <div className="flex items-center gap-2">
                           {isLoadingThisCompany ? (
                             <Loader2 className="h-4 w-4 text-muted-foreground flex-shrink-0 animate-spin" />
