@@ -394,6 +394,23 @@ export function CompanyDemographicTable({ data, isLoading, isLoadingMore, totalC
         <Table className="w-full">
           <TableHeader>
             <TableRow className="bg-muted/50 hover:bg-muted/50 border-b-2 border-border">
+              <TableHead className="w-[40px]">
+                <Checkbox
+                  checked={filteredAndSortedData.length > 0 && filteredAndSortedData.every(c => selectedUrns.has(c.entityUrn))}
+                  onCheckedChange={(checked) => {
+                    if (checked) {
+                      const next = new Set(selectedUrns);
+                      filteredAndSortedData.forEach(c => next.add(c.entityUrn));
+                      setSelectedUrns(next);
+                    } else {
+                      const next = new Set(selectedUrns);
+                      filteredAndSortedData.forEach(c => next.delete(c.entityUrn));
+                      setSelectedUrns(next);
+                    }
+                  }}
+                  aria-label="Select all companies"
+                />
+              </TableHead>
               <TableHead className="min-w-[200px] max-w-[280px]"><SortButton field="entityName">Company</SortButton></TableHead>
               {isColumnVisible('website') && <TableHead className="max-w-[200px]"><SortButton field="enrichmentStatus">Website</SortButton></TableHead>}
               {isColumnVisible('impressions') && <TableHead className="text-right"><SortButton field="impressions">Impressions</SortButton></TableHead>}
