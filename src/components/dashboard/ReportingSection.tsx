@@ -1014,6 +1014,8 @@ export function ReportingSection({ accessToken, selectedAccount, canWrite = fals
                 }}
                 objectiveBreakdownCache={companyDemographic.objectiveBreakdownCache}
                 isLoadingObjectiveBreakdowns={companyDemographic.isLoadingObjectiveBreakdowns}
+                selectedUrns={selectedCompanyUrns}
+                onSelectionChange={setSelectedCompanyUrns}
               />
             </CardContent>
           </Card>
