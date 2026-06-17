@@ -2741,8 +2741,10 @@ serve(async (req) => {
             const objective = campaign.objectiveType || campaign.type || 'UNCLASSIFIED';
             const campaignName = campaign.name || `Campaign ${campaignId}`;
             if (filteredCampaignSet && !filteredCampaignSet.has(campaignId)) continue;
-            // Skip campaigns with no deliveries in the selected time frame
-            if (campaignsActiveInRange.size > 0 && !campaignsActiveInRange.has(campaignId)) continue;
+            // NOTE: do NOT filter by campaignsActiveInRange here — the activity probe can
+            // miss campaigns due to paging/limits, which would drop their companies (e.g. US NAVY)
+            // from the breakdown even though they appear in the main demographic query.
+            // We still use the probe below to backfill deleted/archived orphan campaigns.
             campaignNameMap.set(campaignId, campaignName);
             seenCampaignIds.add(campaignId);
             const existing = objectiveToCampaigns.get(objective) || [];
