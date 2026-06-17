@@ -82,6 +82,176 @@ export function ReportingSection({ accessToken, selectedAccount, canWrite = fals
     return { ...counts, total: companyDemographic.companyData.length };
   }, [companyDemographic.companyData]);
 
+  const OBJECTIVE_LABEL_MAP: Record<string, string> = {
+    LEAD_GENERATION: 'Lead Generation',
+    ENGAGEMENT: 'Engagement',
+    BRAND_AWARENESS: 'Brand Awareness',
+    WEBSITE_VISITS: 'Website Visits',
+    VIDEO_VIEWS: 'Video Views',
+    JOB_APPLICANTS: 'Job Applicants',
+    WEBSITE_CONVERSIONS: 'Website Conversions',
+  };
+  const formatObjective = (o: string) => OBJECTIVE_LABEL_MAP[o] || o.replace(/_/g, ' ');
+
+  const exportCompanyDemographicWithBreakdown = async () => {
+    if (!selectedAccount) {
+      toast({ title: 'No account selected', variant: 'destructive' });
+      return;
+    }
+
+    const allActive = companyDemographic.companyData.filter(item =>
+      item.impressions > 0 || item.clicks > 0 || item.spent > 0 || item.leads > 0
+    );
+    const targets = selectedCompanyUrns.size > 0
+      ? allActive.filter(c => selectedCompanyUrns.has(c.entityUrn))
+      : allActive;
+
+    if (targets.length === 0) {
+      toast({ title: 'No data to export', variant: 'destructive' });
+      return;
+    }
+
+    setIsExportingBreakdown(true);
+    try {
+      // Ensure objective breakdowns are loaded for all targets
+      const missingObjUrns = targets
+        .map(t => t.entityUrn)
+        .filter(urn => !companyDemographic.objectiveBreakdownCache.has(urn));
+      if (missingObjUrns.length > 0) {
+        // Fetch in chunks to avoid huge requests
+        const CHUNK = 50;
+        for (let i = 0; i < missingObjUrns.length; i += CHUNK) {
+          await companyDemographic.fetchObjectiveBreakdowns(selectedAccount, missingObjUrns.slice(i, i + CHUNK), true);
+        }
+      }
+
+      // Collect required (entityUrn, objective) pairs needing campaign breakdowns
+      const campaignFetches: Array<{ entityUrn: string; objective: string; campaignIds: string[]; campaignNames: Record<string, string> }> = [];
+      for (const t of targets) {
+        const breakdowns = companyDemographic.objectiveBreakdownCache.get(t.entityUrn) || t.objectiveBreakdown || [];
+        for (const b of breakdowns) {
+          const ids = b.campaignIds || [];
+          if (ids.length === 0) continue;
+          const cacheKey = `${t.entityUrn}::${b.objective}`;
+          if (!companyDemographic.campaignBreakdownCache.has(cacheKey)) {
+            campaignFetches.push({
+              entityUrn: t.entityUrn,
+              objective: b.objective,
+              campaignIds: ids,
+              campaignNames: b.campaignNames || {},
+            });
+          }
+        }
+      }
+
+      // Fetch campaign breakdowns sequentially in small parallel batches
+      const PARALLEL = 4;
+      for (let i = 0; i < campaignFetches.length; i += PARALLEL) {
+        const batch = campaignFetches.slice(i, i + PARALLEL);
+        await Promise.all(batch.map(f =>
+          companyDemographic.fetchCampaignBreakdown(selectedAccount, f.entityUrn, f.objective, f.campaignIds, f.campaignNames)
+        ));
+      }
+
+      // Build hierarchical rows
+      const rows: Record<string, any>[] = [];
+      for (const t of targets) {
+        rows.push({
+          type: 'Company',
+          companyName: t.entityName,
+          objective: '',
+          campaignName: '',
+          website: t.website || '',
+          impressions: t.impressions,
+          clicks: t.clicks,
+          landingPageClicks: t.landingPageClicks,
+          spent: t.spent.toFixed(2),
+          leads: t.leads,
+          engagements: t.engagements,
+          ctr: t.ctr.toFixed(2),
+          cpc: t.cpc.toFixed(2),
+          cpm: t.cpm.toFixed(2),
+        });
+
+        const breakdowns = companyDemographic.objectiveBreakdownCache.get(t.entityUrn) || t.objectiveBreakdown || [];
+        for (const b of breakdowns) {
+          rows.push({
+            type: 'Objective',
+            companyName: t.entityName,
+            objective: formatObjective(b.objective),
+            campaignName: '',
+            website: '',
+            impressions: b.impressions,
+            clicks: b.clicks,
+            landingPageClicks: b.landingPageClicks,
+            spent: b.spent.toFixed(2),
+            leads: b.leads,
+            engagements: b.engagements,
+            ctr: b.ctr.toFixed(2),
+            cpc: b.cpc.toFixed(2),
+            cpm: b.cpm.toFixed(2),
+          });
+
+          const cacheKey = `${t.entityUrn}::${b.objective}`;
+          const campaigns = companyDemographic.campaignBreakdownCache.get(cacheKey) || [];
+          for (const c of campaigns) {
+            rows.push({
+              type: 'Campaign',
+              companyName: t.entityName,
+              objective: formatObjective(b.objective),
+              campaignName: c.campaignName,
+              website: '',
+              impressions: c.impressions,
+              clicks: c.clicks,
+              landingPageClicks: c.landingPageClicks,
+              spent: c.spent.toFixed(2),
+              leads: c.leads,
+              engagements: c.engagements,
+              ctr: c.ctr.toFixed(2),
+              cpc: c.cpc.toFixed(2),
+              cpm: c.cpm.toFixed(2),
+            });
+          }
+        }
+      }
+
+      const cols = [
+        { key: 'type', label: 'Type' },
+        { key: 'companyName', label: 'Company' },
+        { key: 'objective', label: 'Objective' },
+        { key: 'campaignName', label: 'Campaign' },
+        { key: 'website', label: 'Website' },
+        { key: 'impressions', label: 'Impressions' },
+        { key: 'clicks', label: 'Clicks' },
+        { key: 'landingPageClicks', label: 'LP Clicks' },
+        { key: 'spent', label: 'Spent' },
+        { key: 'leads', label: 'Leads' },
+        { key: 'engagements', label: 'Engagements' },
+        { key: 'ctr', label: 'CTR %' },
+        { key: 'cpc', label: 'CPC' },
+        { key: 'cpm', label: 'CPM' },
+      ];
+
+      const filename = selectedCompanyUrns.size > 0
+        ? `company_demographic_breakdown_selected`
+        : `company_demographic_breakdown_all`;
+      exportToCSV(rows, filename, cols);
+      toast({
+        title: 'Export successful',
+        description: `${targets.length} companies, ${rows.length} rows exported`,
+      });
+    } catch (err: any) {
+      console.error('Export with breakdown failed:', err);
+      toast({
+        title: 'Export failed',
+        description: err?.message || 'Could not load breakdown data',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsExportingBreakdown(false);
+    }
+  };
+
   const handleExportCSV = () => {
     let data: Record<string, any>[] = [];
     let filename = '';
@@ -99,12 +269,9 @@ export function ReportingSection({ accessToken, selectedAccount, canWrite = fals
         columns = demographicReportColumns;
         break;
       case 'company_demo':
-        data = companyDemographic.companyData.filter(item => 
-          item.impressions > 0 || item.clicks > 0 || item.spent > 0 || item.leads > 0
-        );
-        filename = 'company_demographic';
-        columns = companyDemographicColumns;
-        break;
+        // Use async export that includes objective + campaign breakdowns
+        exportCompanyDemographicWithBreakdown();
+        return;
       case 'job_seniority':
         if (jobSeniorityMatrix.matrixData) {
           data = Array.from(jobSeniorityMatrix.matrixData.cells.values());
