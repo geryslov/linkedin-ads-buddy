@@ -3138,7 +3138,9 @@ serve(async (req) => {
           });
         }
         
-        // Query each campaign individually with MEMBER_COMPANY pivot, in batches of 5
+        // Query each campaign individually with MEMBER_COMPANY pivot, in batches of 5.
+        // Paginate every campaign so low-volume companies are not dropped after the
+        // first 10k rows.
         const BATCH_SIZE = 5;
         const allResults: Array<{ campaignId: string; elements: any[] }> = [];
         
@@ -3146,27 +3148,43 @@ serve(async (req) => {
           const batch = objCampaignIds.slice(i, i + BATCH_SIZE);
           const promises = batch.map(async (campaignId: string) => {
             try {
-              const url = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
-                `dateRange.start.day=${startDay}&` +
-                `dateRange.start.month=${startMonth}&` +
-                `dateRange.start.year=${startYear}&` +
-                `dateRange.end.day=${endDay}&` +
-                `dateRange.end.month=${endMonth}&` +
-                `dateRange.end.year=${endYear}&` +
-                `timeGranularity=ALL&` +
-                `pivot=MEMBER_COMPANY&` +
-                `accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
-                `campaigns[0]=urn:li:sponsoredCampaign:${campaignId}&` +
-                `fields=impressions,clicks,landingPageClicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions,totalEngagements,likes,comments,reactions,shares,pivotValue&` +
-                `count=10000`;
-              
-              const response = await fetch(url, {
-                headers: { 'Authorization': `Bearer ${accessToken}` },
-              });
-              
-              if (!response.ok) return { campaignId, elements: [] };
-              const data = await response.json();
-              return { campaignId, elements: data.elements || [] };
+              const elements: any[] = [];
+              const pageSize = 10000;
+              let pageStart = 0;
+              let hasMorePages = true;
+
+              while (hasMorePages && pageStart <= 250000) {
+                const url = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
+                  `dateRange.start.day=${startDay}&` +
+                  `dateRange.start.month=${startMonth}&` +
+                  `dateRange.start.year=${startYear}&` +
+                  `dateRange.end.day=${endDay}&` +
+                  `dateRange.end.month=${endMonth}&` +
+                  `dateRange.end.year=${endYear}&` +
+                  `timeGranularity=ALL&` +
+                  `pivot=MEMBER_COMPANY&` +
+                  `accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
+                  `campaigns[0]=urn:li:sponsoredCampaign:${campaignId}&` +
+                  `fields=impressions,clicks,landingPageClicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions,totalEngagements,likes,comments,reactions,shares,pivotValue&` +
+                  `count=${pageSize}&start=${pageStart}`;
+
+                const response = await fetch(url, {
+                  headers: { 'Authorization': `Bearer ${accessToken}` },
+                });
+
+                if (!response.ok) break;
+                const data = await response.json();
+                const pageElements = data.elements || [];
+                elements.push(...pageElements);
+
+                const paging = data.paging;
+                if (pageElements.length === 0) hasMorePages = false;
+                else if (paging?.total && (pageStart + pageElements.length) < paging.total) pageStart += pageElements.length;
+                else if (!paging?.total && pageElements.length >= pageSize) pageStart += pageElements.length;
+                else hasMorePages = false;
+              }
+
+              return { campaignId, elements };
             } catch (e) {
               return { campaignId, elements: [] };
             }
