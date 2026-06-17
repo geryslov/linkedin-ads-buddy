@@ -369,6 +369,7 @@ export function CompanyDemographicTable({ data, isLoading, isLoadingMore, totalC
           </PopoverContent>
         </Popover>
         <span className="text-sm text-muted-foreground ml-auto">
+          {selectedUrns.size > 0 && <span className="mr-2 text-primary font-medium">{selectedUrns.size} selected</span>}
           {filteredAndSortedData.length} companies
           {isLoadingMore && totalCompanies ? ` (loading… ${loadedCount || 0} of ~${totalCompanies})` : ''}
         </span>
