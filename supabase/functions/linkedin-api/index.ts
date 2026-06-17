@@ -2882,45 +2882,71 @@ serve(async (req) => {
             objectiveCampaignInfo[objective] = { campaignIds: campIds, campaignNames: names };
           }
 
-          // Run all objective queries concurrently
+          // Run all objective queries concurrently. Each objective can return more than
+          // one LinkedIn page; paginate so large accounts don't miss companies that fall
+          // beyond the first 10k rows (which caused blank objective drill-downs).
           const objectiveResults = await Promise.all(objectivesWithCampaigns.map(async ({ objective, campIds }) => {
             try {
-              const qParams = new URLSearchParams();
-              qParams.set('q', 'analytics');
-              qParams.set('dateRange.start.day', String(startDay));
-              qParams.set('dateRange.start.month', String(startMonth));
-              qParams.set('dateRange.start.year', String(startYear));
-              qParams.set('dateRange.end.day', String(endDay));
-              qParams.set('dateRange.end.month', String(endMonth));
-              qParams.set('dateRange.end.year', String(endYear));
-              qParams.set('timeGranularity', 'ALL');
-              qParams.set('pivot', 'MEMBER_COMPANY');
-              qParams.set('accounts[0]', `urn:li:sponsoredAccount:${accountId}`);
-              qParams.set('fields', 'impressions,clicks,landingPageClicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions,totalEngagements,likes,comments,reactions,shares,pivotValue');
-              qParams.set('count', '10000');
-              campIds.forEach((id, idx) => { qParams.set(`campaigns[${idx}]`, `urn:li:sponsoredCampaign:${id}`); });
-
-              const queryString = qParams.toString();
               const baseUrl = 'https://api.linkedin.com/v2/adAnalyticsV2';
-              const fullUrl = `${baseUrl}?${queryString}`;
+              const pageSize = 10000;
+              const allElements: any[] = [];
+              let pageStart = 0;
+              let hasMorePages = true;
+              const requestedUrns = companyUrnSet ? new Set(companyUrnSet) : null;
 
-              let response: Response;
-              if (fullUrl.length > 4000) {
-                response = await fetch(baseUrl, {
-                  method: 'POST',
-                  headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/x-www-form-urlencoded', 'X-HTTP-Method-Override': 'GET' },
-                  body: queryString,
-                });
-              } else {
-                response = await fetch(fullUrl, { headers: { 'Authorization': `Bearer ${accessToken}` } });
+              while (hasMorePages && pageStart <= 250000) {
+                const qParams = new URLSearchParams();
+                qParams.set('q', 'analytics');
+                qParams.set('dateRange.start.day', String(startDay));
+                qParams.set('dateRange.start.month', String(startMonth));
+                qParams.set('dateRange.start.year', String(startYear));
+                qParams.set('dateRange.end.day', String(endDay));
+                qParams.set('dateRange.end.month', String(endMonth));
+                qParams.set('dateRange.end.year', String(endYear));
+                qParams.set('timeGranularity', 'ALL');
+                qParams.set('pivot', 'MEMBER_COMPANY');
+                qParams.set('accounts[0]', `urn:li:sponsoredAccount:${accountId}`);
+                qParams.set('fields', 'impressions,clicks,landingPageClicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions,totalEngagements,likes,comments,reactions,shares,pivotValue');
+                qParams.set('count', String(pageSize));
+                qParams.set('start', String(pageStart));
+                campIds.forEach((id, idx) => { qParams.set(`campaigns[${idx}]`, `urn:li:sponsoredCampaign:${id}`); });
+
+                const queryString = qParams.toString();
+                const fullUrl = `${baseUrl}?${queryString}`;
+
+                let response: Response;
+                if (fullUrl.length > 4000) {
+                  response = await fetch(baseUrl, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/x-www-form-urlencoded', 'X-HTTP-Method-Override': 'GET' },
+                    body: queryString,
+                  });
+                } else {
+                  response = await fetch(fullUrl, { headers: { 'Authorization': `Bearer ${accessToken}` } });
+                }
+
+                if (!response.ok) {
+                  console.log(`[get_objective_breakdowns] Objective ${objective} failed: ${response.status}`);
+                  break;
+                }
+
+                const data = await response.json();
+                const pageElements = data.elements || [];
+                allElements.push(...pageElements);
+
+                if (requestedUrns) {
+                  for (const el of pageElements) requestedUrns.delete(el.pivotValue || '');
+                  if (requestedUrns.size === 0) break;
+                }
+
+                const paging = data.paging;
+                if (pageElements.length === 0) hasMorePages = false;
+                else if (paging?.total && (pageStart + pageElements.length) < paging.total) pageStart += pageElements.length;
+                else if (!paging?.total && pageElements.length >= pageSize) pageStart += pageElements.length;
+                else hasMorePages = false;
               }
 
-              if (!response.ok) {
-                console.log(`[get_objective_breakdowns] Objective ${objective} failed: ${response.status}`);
-                return { objective, elements: [] as any[] };
-              }
-              const data = await response.json();
-              return { objective, elements: data.elements || [] };
+              return { objective, elements: allElements };
             } catch (e) {
               console.log(`[get_objective_breakdowns] Objective ${objective} error:`, e);
               return { objective, elements: [] as any[] };
@@ -3112,7 +3138,9 @@ serve(async (req) => {
           });
         }
         
-        // Query each campaign individually with MEMBER_COMPANY pivot, in batches of 5
+        // Query each campaign individually with MEMBER_COMPANY pivot, in batches of 5.
+        // Paginate every campaign so low-volume companies are not dropped after the
+        // first 10k rows.
         const BATCH_SIZE = 5;
         const allResults: Array<{ campaignId: string; elements: any[] }> = [];
         
@@ -3120,27 +3148,43 @@ serve(async (req) => {
           const batch = objCampaignIds.slice(i, i + BATCH_SIZE);
           const promises = batch.map(async (campaignId: string) => {
             try {
-              const url = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
-                `dateRange.start.day=${startDay}&` +
-                `dateRange.start.month=${startMonth}&` +
-                `dateRange.start.year=${startYear}&` +
-                `dateRange.end.day=${endDay}&` +
-                `dateRange.end.month=${endMonth}&` +
-                `dateRange.end.year=${endYear}&` +
-                `timeGranularity=ALL&` +
-                `pivot=MEMBER_COMPANY&` +
-                `accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
-                `campaigns[0]=urn:li:sponsoredCampaign:${campaignId}&` +
-                `fields=impressions,clicks,landingPageClicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions,totalEngagements,likes,comments,reactions,shares,pivotValue&` +
-                `count=10000`;
-              
-              const response = await fetch(url, {
-                headers: { 'Authorization': `Bearer ${accessToken}` },
-              });
-              
-              if (!response.ok) return { campaignId, elements: [] };
-              const data = await response.json();
-              return { campaignId, elements: data.elements || [] };
+              const elements: any[] = [];
+              const pageSize = 10000;
+              let pageStart = 0;
+              let hasMorePages = true;
+
+              while (hasMorePages && pageStart <= 250000) {
+                const url = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
+                  `dateRange.start.day=${startDay}&` +
+                  `dateRange.start.month=${startMonth}&` +
+                  `dateRange.start.year=${startYear}&` +
+                  `dateRange.end.day=${endDay}&` +
+                  `dateRange.end.month=${endMonth}&` +
+                  `dateRange.end.year=${endYear}&` +
+                  `timeGranularity=ALL&` +
+                  `pivot=MEMBER_COMPANY&` +
+                  `accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
+                  `campaigns[0]=urn:li:sponsoredCampaign:${campaignId}&` +
+                  `fields=impressions,clicks,landingPageClicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions,totalEngagements,likes,comments,reactions,shares,pivotValue&` +
+                  `count=${pageSize}&start=${pageStart}`;
+
+                const response = await fetch(url, {
+                  headers: { 'Authorization': `Bearer ${accessToken}` },
+                });
+
+                if (!response.ok) break;
+                const data = await response.json();
+                const pageElements = data.elements || [];
+                elements.push(...pageElements);
+
+                const paging = data.paging;
+                if (pageElements.length === 0) hasMorePages = false;
+                else if (paging?.total && (pageStart + pageElements.length) < paging.total) pageStart += pageElements.length;
+                else if (!paging?.total && pageElements.length >= pageSize) pageStart += pageElements.length;
+                else hasMorePages = false;
+              }
+
+              return { campaignId, elements };
             } catch (e) {
               return { campaignId, elements: [] };
             }

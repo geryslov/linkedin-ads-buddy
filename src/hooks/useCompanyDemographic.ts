@@ -446,7 +446,14 @@ export function useCompanyDemographic(accessToken: string | null) {
         })));
       }
       
-      setObjectiveBreakdownCache(cache);
+      setObjectiveBreakdownCache(prev => {
+        if (!companyUrns || companyUrns.length === 0) return cache;
+
+        const next = new Map(prev);
+        for (const urn of companyUrns) next.delete(urn);
+        for (const [urn, items] of cache.entries()) next.set(urn, items);
+        return next;
+      });
       setObjectiveBreakdownsFetched(true);
       console.log(`Objective breakdowns loaded for ${cache.size} companies`);
     } catch (err: any) {
