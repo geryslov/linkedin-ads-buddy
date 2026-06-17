@@ -1007,9 +1007,9 @@ export function ReportingSection({ accessToken, selectedAccount, canWrite = fals
                 }}
                 campaignBreakdownCache={companyDemographic.campaignBreakdownCache}
                 loadingObjectives={companyDemographic.loadingObjectives}
-                onExpandCompany={() => {
+                onExpandCompany={(entityUrn) => {
                   if (selectedAccount) {
-                    companyDemographic.fetchObjectiveBreakdowns(selectedAccount);
+                    companyDemographic.fetchObjectiveBreakdowns(selectedAccount, [entityUrn], true);
                   }
                 }}
                 objectiveBreakdownCache={companyDemographic.objectiveBreakdownCache}
