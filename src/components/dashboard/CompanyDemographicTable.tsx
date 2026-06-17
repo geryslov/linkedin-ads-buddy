@@ -26,6 +26,8 @@ interface CompanyDemographicTableProps {
   onExpandCompany?: (entityUrn: string) => void;
   objectiveBreakdownCache?: Map<string, ObjectiveBreakdownItem[]>;
   isLoadingObjectiveBreakdowns?: boolean;
+  selectedUrns?: Set<string>;
+  onSelectionChange?: (urns: Set<string>) => void;
 }
 
 type SortField = 'entityName' | 'impressions' | 'clicks' | 'landingPageClicks' | 'spent' | 'leads' | 'engagements' | 'ctr' | 'cpc' | 'cpm' | 'enrichmentStatus';
@@ -124,7 +126,7 @@ function EngagementBreakdownPopover({ engagements, likes, comments, reactions, s
   );
 }
 
-export function CompanyDemographicTable({ data, isLoading, isLoadingMore, totalCompanies, loadedCount, onExpandObjective, campaignBreakdownCache, loadingObjectives, onExpandCompany, objectiveBreakdownCache, isLoadingObjectiveBreakdowns }: CompanyDemographicTableProps) {
+export function CompanyDemographicTable({ data, isLoading, isLoadingMore, totalCompanies, loadedCount, onExpandObjective, campaignBreakdownCache, loadingObjectives, onExpandCompany, objectiveBreakdownCache, isLoadingObjectiveBreakdowns, selectedUrns: selectedUrnsProp, onSelectionChange }: CompanyDemographicTableProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [sortField, setSortField] = useState<SortField>('impressions');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
@@ -133,6 +135,12 @@ export function CompanyDemographicTable({ data, isLoading, isLoadingMore, totalC
   const [enrichmentFilter, setEnrichmentFilter] = useState<string>('all');
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(25);
+  const [internalSelected, setInternalSelected] = useState<Set<string>>(new Set());
+  const selectedUrns = selectedUrnsProp ?? internalSelected;
+  const setSelectedUrns = (next: Set<string>) => {
+    setInternalSelected(next);
+    onSelectionChange?.(next);
+  };
   const [visibleColumns, setVisibleColumns] = useState<Set<ColumnKey>>(
     new Set(['website', 'impressions', 'clicks', 'landingPageClicks', 'spent', 'leads', 'engagements', 'ctr', 'cpc', 'cpm'])
   );
@@ -151,8 +159,14 @@ export function CompanyDemographicTable({ data, isLoading, isLoadingMore, totalC
     });
   };
 
-  // The dynamic colSpan for expanded/empty rows: always 1 (Company) + visible columns count
-  const dynamicColSpan = 1 + visibleColumns.size;
+  const toggleSelected = (urn: string) => {
+    const next = new Set(selectedUrns);
+    if (next.has(urn)) next.delete(urn); else next.add(urn);
+    setSelectedUrns(next);
+  };
+
+  // The dynamic colSpan for expanded/empty rows: selection + Company + visible columns count
+  const dynamicColSpan = 2 + visibleColumns.size;
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -355,6 +369,7 @@ export function CompanyDemographicTable({ data, isLoading, isLoadingMore, totalC
           </PopoverContent>
         </Popover>
         <span className="text-sm text-muted-foreground ml-auto">
+          {selectedUrns.size > 0 && <span className="mr-2 text-primary font-medium">{selectedUrns.size} selected</span>}
           {filteredAndSortedData.length} companies
           {isLoadingMore && totalCompanies ? ` (loading… ${loadedCount || 0} of ~${totalCompanies})` : ''}
         </span>
@@ -380,6 +395,23 @@ export function CompanyDemographicTable({ data, isLoading, isLoadingMore, totalC
         <Table className="w-full">
           <TableHeader>
             <TableRow className="bg-muted/50 hover:bg-muted/50 border-b-2 border-border">
+              <TableHead className="w-[40px]">
+                <Checkbox
+                  checked={filteredAndSortedData.length > 0 && filteredAndSortedData.every(c => selectedUrns.has(c.entityUrn))}
+                  onCheckedChange={(checked) => {
+                    if (checked) {
+                      const next = new Set(selectedUrns);
+                      filteredAndSortedData.forEach(c => next.add(c.entityUrn));
+                      setSelectedUrns(next);
+                    } else {
+                      const next = new Set(selectedUrns);
+                      filteredAndSortedData.forEach(c => next.delete(c.entityUrn));
+                      setSelectedUrns(next);
+                    }
+                  }}
+                  aria-label="Select all companies"
+                />
+              </TableHead>
               <TableHead className="min-w-[200px] max-w-[280px]"><SortButton field="entityName">Company</SortButton></TableHead>
               {isColumnVisible('website') && <TableHead className="max-w-[200px]"><SortButton field="enrichmentStatus">Website</SortButton></TableHead>}
               {isColumnVisible('impressions') && <TableHead className="text-right"><SortButton field="impressions">Impressions</SortButton></TableHead>}
@@ -422,7 +454,15 @@ export function CompanyDemographicTable({ data, isLoading, isLoadingMore, totalC
                       className={cn('transition-colors duration-150 cursor-pointer', isCompanyExpanded ? 'bg-primary/[0.05] hover:bg-primary/[0.07]' : 'hover:bg-muted/30')}
                       onClick={() => toggleCompany(item.entityUrn)}
                     >
+                      <TableCell className="w-[40px]" onClick={(e) => e.stopPropagation()}>
+                        <Checkbox
+                          checked={selectedUrns.has(item.entityUrn)}
+                          onCheckedChange={() => toggleSelected(item.entityUrn)}
+                          aria-label={`Select ${item.entityName}`}
+                        />
+                      </TableCell>
                       <TableCell className="font-medium min-w-[200px] max-w-[280px]">
+
                         <div className="flex items-center gap-2">
                           {isLoadingThisCompany ? (
                             <Loader2 className="h-4 w-4 text-muted-foreground flex-shrink-0 animate-spin" />
@@ -519,7 +559,7 @@ export function CompanyDemographicTable({ data, isLoading, isLoadingMore, totalC
                       const objectiveColor = OBJECTIVE_COLORS[breakdown.objective] || 'bg-muted-foreground';
 
                       // How many columns the "label" cell spans: Company + (website if visible)
-                      const labelColSpan = 1 + (isColumnVisible('website') ? 1 : 0);
+                      const labelColSpan = 2 + (isColumnVisible('website') ? 1 : 0);
 
                       return (
                         <>
@@ -638,6 +678,7 @@ export function CompanyDemographicTable({ data, isLoading, isLoadingMore, totalC
           {filteredAndSortedData.length > 0 && (
             <TableFooter>
               <TableRow className="bg-muted/60 font-semibold border-t-2 border-border">
+                <TableCell></TableCell>
                 <TableCell>Total ({filteredAndSortedData.length} companies)</TableCell>
                 {isColumnVisible('website') && <TableCell></TableCell>}
                 {isColumnVisible('impressions') && <TableCell className="text-right tabular-nums">{totals.impressions.toLocaleString()}</TableCell>}
