@@ -2788,21 +2788,14 @@ serve(async (req) => {
             let crStart = 0;
             let crHasMore = true;
             while (crHasMore && crStart <= 100000) {
-              const crQp = new URLSearchParams();
-              crQp.set('q', 'analytics');
-              crQp.set('dateRange.start.day', String(startDay));
-              crQp.set('dateRange.start.month', String(startMonth));
-              crQp.set('dateRange.start.year', String(startYear));
-              crQp.set('dateRange.end.day', String(endDay));
-              crQp.set('dateRange.end.month', String(endMonth));
-              crQp.set('dateRange.end.year', String(endYear));
-              crQp.set('timeGranularity', 'ALL');
-              crQp.set('pivot', 'CREATIVE');
-              crQp.set('accounts[0]', `urn:li:sponsoredAccount:${accountId}`);
-              crQp.set('fields', 'pivotValue,impressions');
-              crQp.set('count', String(crPageSize));
-              crQp.set('start', String(crStart));
-              const crResp = await fetch(`https://api.linkedin.com/v2/adAnalyticsV2?${crQp.toString()}`, {
+              const crQuery = buildAnalyticsQuery([
+                'pivot=CREATIVE',
+                `accounts[0]=urn:li:sponsoredAccount:${accountId}`,
+                'fields=pivotValue,impressions',
+                `count=${crPageSize}`,
+                `start=${crStart}`,
+              ]);
+              const crResp = await fetch(`https://api.linkedin.com/v2/adAnalyticsV2?${crQuery}`, {
                 headers: { 'Authorization': `Bearer ${accessToken}` },
               });
               if (!crResp.ok) { crHasMore = false; break; }
@@ -2900,23 +2893,15 @@ serve(async (req) => {
               const requestedUrns = companyUrnSet ? new Set(companyUrnSet) : null;
 
               while (hasMorePages && pageStart <= 250000) {
-                const qParams = new URLSearchParams();
-                qParams.set('q', 'analytics');
-                qParams.set('dateRange.start.day', String(startDay));
-                qParams.set('dateRange.start.month', String(startMonth));
-                qParams.set('dateRange.start.year', String(startYear));
-                qParams.set('dateRange.end.day', String(endDay));
-                qParams.set('dateRange.end.month', String(endMonth));
-                qParams.set('dateRange.end.year', String(endYear));
-                qParams.set('timeGranularity', 'ALL');
-                qParams.set('pivot', 'MEMBER_COMPANY');
-                qParams.set('accounts[0]', `urn:li:sponsoredAccount:${accountId}`);
-                qParams.set('fields', 'impressions,clicks,landingPageClicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions,totalEngagements,likes,comments,reactions,shares,pivotValue');
-                qParams.set('count', String(pageSize));
-                qParams.set('start', String(pageStart));
-                campIds.forEach((id, idx) => { qParams.set(`campaigns[${idx}]`, `urn:li:sponsoredCampaign:${id}`); });
-
-                const queryString = qParams.toString();
+                const campaignParams = campIds.map((id, idx) => `campaigns[${idx}]=urn:li:sponsoredCampaign:${id}`);
+                const queryString = buildAnalyticsQuery([
+                  'pivot=MEMBER_COMPANY',
+                  `accounts[0]=urn:li:sponsoredAccount:${accountId}`,
+                  `fields=${analyticsFields}`,
+                  `count=${pageSize}`,
+                  `start=${pageStart}`,
+                  ...campaignParams,
+                ]);
                 const fullUrl = `${baseUrl}?${queryString}`;
 
                 let response: Response;
