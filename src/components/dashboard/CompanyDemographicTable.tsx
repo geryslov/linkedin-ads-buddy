@@ -126,7 +126,7 @@ function EngagementBreakdownPopover({ engagements, likes, comments, reactions, s
   );
 }
 
-export function CompanyDemographicTable({ data, isLoading, isLoadingMore, totalCompanies, loadedCount, onExpandObjective, campaignBreakdownCache, loadingObjectives, onExpandCompany, objectiveBreakdownCache, isLoadingObjectiveBreakdowns }: CompanyDemographicTableProps) {
+export function CompanyDemographicTable({ data, isLoading, isLoadingMore, totalCompanies, loadedCount, onExpandObjective, campaignBreakdownCache, loadingObjectives, onExpandCompany, objectiveBreakdownCache, isLoadingObjectiveBreakdowns, selectedUrns: selectedUrnsProp, onSelectionChange }: CompanyDemographicTableProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [sortField, setSortField] = useState<SortField>('impressions');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
@@ -135,6 +135,12 @@ export function CompanyDemographicTable({ data, isLoading, isLoadingMore, totalC
   const [enrichmentFilter, setEnrichmentFilter] = useState<string>('all');
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(25);
+  const [internalSelected, setInternalSelected] = useState<Set<string>>(new Set());
+  const selectedUrns = selectedUrnsProp ?? internalSelected;
+  const setSelectedUrns = (next: Set<string>) => {
+    setInternalSelected(next);
+    onSelectionChange?.(next);
+  };
   const [visibleColumns, setVisibleColumns] = useState<Set<ColumnKey>>(
     new Set(['website', 'impressions', 'clicks', 'landingPageClicks', 'spent', 'leads', 'engagements', 'ctr', 'cpc', 'cpm'])
   );
@@ -153,8 +159,14 @@ export function CompanyDemographicTable({ data, isLoading, isLoadingMore, totalC
     });
   };
 
-  // The dynamic colSpan for expanded/empty rows: always 1 (Company) + visible columns count
-  const dynamicColSpan = 1 + visibleColumns.size;
+  const toggleSelected = (urn: string) => {
+    const next = new Set(selectedUrns);
+    if (next.has(urn)) next.delete(urn); else next.add(urn);
+    setSelectedUrns(next);
+  };
+
+  // The dynamic colSpan for expanded/empty rows: selection + Company + visible columns count
+  const dynamicColSpan = 2 + visibleColumns.size;
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
