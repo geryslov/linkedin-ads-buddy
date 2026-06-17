@@ -558,7 +558,7 @@ export function CompanyDemographicTable({ data, isLoading, isLoadingMore, totalC
                       const objectiveColor = OBJECTIVE_COLORS[breakdown.objective] || 'bg-muted-foreground';
 
                       // How many columns the "label" cell spans: Company + (website if visible)
-                      const labelColSpan = 1 + (isColumnVisible('website') ? 1 : 0);
+                      const labelColSpan = 2 + (isColumnVisible('website') ? 1 : 0);
 
                       return (
                         <>
