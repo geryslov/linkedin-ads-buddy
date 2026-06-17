@@ -63,6 +63,8 @@ export function ReportingSection({ accessToken, selectedAccount, canWrite = fals
 
   const [selectedTimeFrame, setSelectedTimeFrame] = useState('last_7_days');
   const [reportType, setReportType] = useState('campaigns');
+  const [selectedCompanyUrns, setSelectedCompanyUrns] = useState<Set<string>>(new Set());
+  const [isExportingBreakdown, setIsExportingBreakdown] = useState(false);
   
   // Titles API status
   const [titlesApiStatus, setTitlesApiStatus] = useState<'unknown' | 'enabled' | 'disabled'>('unknown');
