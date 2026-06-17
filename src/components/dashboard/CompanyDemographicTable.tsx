@@ -26,6 +26,8 @@ interface CompanyDemographicTableProps {
   onExpandCompany?: (entityUrn: string) => void;
   objectiveBreakdownCache?: Map<string, ObjectiveBreakdownItem[]>;
   isLoadingObjectiveBreakdowns?: boolean;
+  selectedUrns?: Set<string>;
+  onSelectionChange?: (urns: Set<string>) => void;
 }
 
 type SortField = 'entityName' | 'impressions' | 'clicks' | 'landingPageClicks' | 'spent' | 'leads' | 'engagements' | 'ctr' | 'cpc' | 'cpm' | 'enrichmentStatus';
