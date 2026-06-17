@@ -677,6 +677,7 @@ export function CompanyDemographicTable({ data, isLoading, isLoadingMore, totalC
           {filteredAndSortedData.length > 0 && (
             <TableFooter>
               <TableRow className="bg-muted/60 font-semibold border-t-2 border-border">
+                <TableCell></TableCell>
                 <TableCell>Total ({filteredAndSortedData.length} companies)</TableCell>
                 {isColumnVisible('website') && <TableCell></TableCell>}
                 {isColumnVisible('impressions') && <TableCell className="text-right tabular-nums">{totals.impressions.toLocaleString()}</TableCell>}
