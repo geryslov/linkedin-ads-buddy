@@ -614,10 +614,20 @@ export function ReportingSection({ accessToken, selectedAccount, canWrite = fals
             variant="outline"
             size="sm"
             onClick={handleExportCSV}
-            disabled={isLoading}
+            disabled={isLoading || isExportingBreakdown}
           >
-            <Download className="mr-2 h-4 w-4" />
-            Export CSV
+            {isExportingBreakdown ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Download className="mr-2 h-4 w-4" />
+            )}
+            {reportType === 'company_demo'
+              ? (isExportingBreakdown
+                  ? 'Preparing breakdown…'
+                  : selectedCompanyUrns.size > 0
+                    ? `Export ${selectedCompanyUrns.size} selected (with breakdown)`
+                    : 'Export all (with breakdown)')
+              : 'Export CSV'}
           </Button>
           <Button
             variant="outline"
