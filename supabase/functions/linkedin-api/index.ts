@@ -2664,6 +2664,18 @@ serve(async (req) => {
         const endDate = dateRange?.end || new Date().toISOString().split('T')[0];
         const [startYear, startMonth, startDay] = startDate.split('-').map(Number);
         const [endYear, endMonth, endDay] = endDate.split('-').map(Number);
+        const analyticsFields = 'impressions,clicks,landingPageClicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions,totalEngagements,likes,comments,reactions,shares,pivotValue';
+        const buildAnalyticsQuery = (extraParams: string[]) => [
+          'q=analytics',
+          `dateRange.start.day=${startDay}`,
+          `dateRange.start.month=${startMonth}`,
+          `dateRange.start.year=${startYear}`,
+          `dateRange.end.day=${endDay}`,
+          `dateRange.end.month=${endMonth}`,
+          `dateRange.end.year=${endYear}`,
+          'timeGranularity=ALL',
+          ...extraParams,
+        ].join('&');
 
         console.log(`[get_objective_breakdowns] Starting for account ${accountId}`);
 
@@ -2691,21 +2703,14 @@ serve(async (req) => {
             let actStart = 0;
             let actHasMore = true;
             while (actHasMore && actStart <= 100000) {
-              const actQp = new URLSearchParams();
-              actQp.set('q', 'analytics');
-              actQp.set('dateRange.start.day', String(startDay));
-              actQp.set('dateRange.start.month', String(startMonth));
-              actQp.set('dateRange.start.year', String(startYear));
-              actQp.set('dateRange.end.day', String(endDay));
-              actQp.set('dateRange.end.month', String(endMonth));
-              actQp.set('dateRange.end.year', String(endYear));
-              actQp.set('timeGranularity', 'ALL');
-              actQp.set('pivot', 'CAMPAIGN');
-              actQp.set('accounts[0]', `urn:li:sponsoredAccount:${accountId}`);
-              actQp.set('fields', 'pivotValue,impressions');
-              actQp.set('count', String(actPageSize));
-              actQp.set('start', String(actStart));
-              const actResp = await fetch(`https://api.linkedin.com/v2/adAnalyticsV2?${actQp.toString()}`, {
+              const actQuery = buildAnalyticsQuery([
+                'pivot=CAMPAIGN',
+                `accounts[0]=urn:li:sponsoredAccount:${accountId}`,
+                'fields=pivotValue,impressions',
+                `count=${actPageSize}`,
+                `start=${actStart}`,
+              ]);
+              const actResp = await fetch(`https://api.linkedin.com/v2/adAnalyticsV2?${actQuery}`, {
                 headers: { 'Authorization': `Bearer ${accessToken}` },
               });
               if (!actResp.ok) { actHasMore = false; break; }
