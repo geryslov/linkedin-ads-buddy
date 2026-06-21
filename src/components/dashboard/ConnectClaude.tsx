@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Check, Copy, Bot, ExternalLink, RefreshCw } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
 
 interface ConnectClaudeProps {
   open: boolean;
@@ -19,8 +20,21 @@ export function ConnectClaude({ open, onOpenChange, accessToken }: ConnectClaude
   const [apiKey, setApiKey] = useState<string | null>(null);
 
   useEffect(() => {
-    setApiKey(localStorage.getItem(MCP_API_KEY_STORAGE));
-  }, [open]);
+    if (!open) return;
+    let key = localStorage.getItem(MCP_API_KEY_STORAGE);
+
+    // First-time setup: user was already logged in before this feature shipped
+    if (!key && accessToken) {
+      key = crypto.randomUUID();
+      localStorage.setItem(MCP_API_KEY_STORAGE, key);
+      supabase.from('mcp_api_keys').upsert(
+        { api_key: key, linkedin_token: accessToken, updated_at: new Date().toISOString() },
+        { onConflict: 'api_key' }
+      );
+    }
+
+    setApiKey(key);
+  }, [open, accessToken]);
 
   const configSnippet = JSON.stringify(
     {
