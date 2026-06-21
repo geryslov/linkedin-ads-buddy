@@ -21,6 +21,8 @@ app.use((req, res, next) => {
 const sessionTokens = new Map<string, string>();
 // Auth codes: code → { linkedinToken, redirectUri, expiresAt }
 const authCodes = new Map<string, { linkedinToken: string; redirectUri: string; expiresAt: number }>();
+// Registered OAuth clients (dynamic registration)
+const registeredClients = new Map<string, { redirectUris: string[]; clientSecret: string }>();
 // MCP sessions
 const mcpSessions = new Map<string, { transport: StreamableHTTPServerTransport }>();
 
@@ -36,9 +38,32 @@ app.get("/.well-known/oauth-authorization-server", (req, res) => {
     issuer: base,
     authorization_endpoint: `${base}/oauth/authorize`,
     token_endpoint: `${base}/oauth/token`,
+    registration_endpoint: `${base}/oauth/register`,
     response_types_supported: ["code"],
     grant_types_supported: ["authorization_code"],
     code_challenge_methods_supported: ["S256"],
+  });
+});
+
+// ── Dynamic client registration (RFC 7591) ────────────────────────────────────
+
+app.post("/oauth/register", (req, res) => {
+  const { redirect_uris, client_name } = req.body as Record<string, any>;
+  if (!redirect_uris || !Array.isArray(redirect_uris)) {
+    res.status(400).json({ error: "invalid_client_metadata", error_description: "redirect_uris required" });
+    return;
+  }
+  const clientId = randomUUID();
+  const clientSecret = randomUUID();
+  registeredClients.set(clientId, { redirectUris: redirect_uris, clientSecret });
+  res.status(201).json({
+    client_id: clientId,
+    client_secret: clientSecret,
+    client_name: client_name || "Claude",
+    redirect_uris,
+    grant_types: ["authorization_code"],
+    response_types: ["code"],
+    token_endpoint_auth_method: "client_secret_post",
   });
 });
 
