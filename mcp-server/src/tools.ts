@@ -201,5 +201,23 @@ export function createLinkedInAdsServer(getToken: () => string): McpServer {
     }
   );
 
+  // Generic passthrough — full access to all 74+ edge function actions
+  server.tool(
+    "call_linkedin_action",
+    `Call any LinkedIn Ads action directly. Use this for anything not covered by the other tools.
+
+Available actions include: get_account_structure, get_objective_breakdowns, get_creative_report,
+get_campaign_report, get_weekly_report, get_company_intelligence, get_company_demographic,
+get_creative_company_breakdown, get_company_campaign_breakdown, get_creative_names_report,
+get_campaign_performance_report, get_job_seniority_matrix, get_job_titles_index,
+get_form_creative_analytics, update_campaign_targeting, exclude_companies_from_campaigns,
+get_lead_gen_forms, get_ad_analytics, sync_ad_accounts, and more.`,
+    {
+      action: z.string().describe("Edge function action name (e.g. 'get_account_structure')"),
+      params: z.record(z.unknown()).optional().describe("Parameters for the action (accountId, dateRange, etc.)"),
+    },
+    async ({ action, params }) => ok(await callEdge(action, (params as Record<string, unknown>) || {}))
+  );
+
   return server;
 }
