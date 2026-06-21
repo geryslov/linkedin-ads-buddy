@@ -33,7 +33,9 @@ export function ConnectClaude({ open, onOpenChange, accessToken }: ConnectClaude
       supabase.from('mcp_api_keys').upsert(
         { api_key: key, linkedin_token: accessToken, updated_at: new Date().toISOString() },
         { onConflict: 'api_key' }
-      );
+      ).then(({ error }) => {
+        if (error) console.error('[MCP sync] upsert failed:', error);
+      });
     }
 
     setApiKey(key);
