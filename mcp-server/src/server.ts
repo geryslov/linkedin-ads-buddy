@@ -21,8 +21,10 @@ app.use((req, res, next) => {
 const sessionTokens = new Map<string, string>();
 // Auth codes: code → { linkedinToken, redirectUri, expiresAt }
 const authCodes = new Map<string, { linkedinToken: string; redirectUri: string; expiresAt: number }>();
-// Registered OAuth clients (dynamic registration)
+// Registered OAuth clients — pre-seed fixed client ID + support dynamic registration
+export const CLAUDE_CLIENT_ID = "linkedin-ads-buddy";
 const registeredClients = new Map<string, { redirectUris: string[]; clientSecret: string }>();
+registeredClients.set(CLAUDE_CLIENT_ID, { redirectUris: ["*"], clientSecret: "not-used" });
 // MCP sessions
 const mcpSessions = new Map<string, { transport: StreamableHTTPServerTransport }>();
 
@@ -234,10 +236,14 @@ app.delete("/mcp", (req, res) => {
   res.status(200).end();
 });
 
-// ── Health ────────────────────────────────────────────────────────────────────
+// ── Health + client ID ────────────────────────────────────────────────────────
 
 app.get("/health", (_req, res) => {
-  res.json({ status: "ok", sessions: mcpSessions.size });
+  res.json({ status: "ok", sessions: mcpSessions.size, clientId: CLAUDE_CLIENT_ID });
+});
+
+app.get("/client-id", (_req, res) => {
+  res.json({ client_id: CLAUDE_CLIENT_ID });
 });
 
 // ── Start ─────────────────────────────────────────────────────────────────────

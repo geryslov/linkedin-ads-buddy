@@ -9,7 +9,8 @@ interface ConnectClaudeProps {
   accessToken: string | null;
 }
 
-const MCP_SERVER_URL = import.meta.env.VITE_MCP_SERVER_URL || "https://linkedin-ads-mcp.up.railway.app";
+const MCP_SERVER_URL = import.meta.env.VITE_MCP_SERVER_URL || "https://linkedin-ads-buddy-production.up.railway.app";
+const MCP_CLIENT_ID = "linkedin-ads-buddy";
 
 export function ConnectClaude({ open, onOpenChange, accessToken }: ConnectClaudeProps) {
   const [copied, setCopied] = useState(false);
@@ -89,6 +90,20 @@ export function ConnectClaude({ open, onOpenChange, accessToken }: ConnectClaude
               Connect your LinkedIn account first — the snippet will include your token automatically.
             </p>
           )}
+
+          <div className="rounded-md border border-border bg-muted/40 p-3 space-y-1.5">
+            <p className="text-xs font-medium text-foreground">Claude web (claude.ai)</p>
+            <p className="text-xs text-muted-foreground">
+              Add <code className="bg-muted px-1 rounded text-[11px]">{MCP_SERVER_URL}/mcp</code> as a connector.
+              If asked for an OAuth Client ID, enter:
+            </p>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 bg-background border border-border rounded px-2 py-1 text-[11px] font-mono">{MCP_CLIENT_ID}</code>
+              <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => navigator.clipboard.writeText(MCP_CLIENT_ID)}>
+                <Copy className="h-3 w-3" />
+              </Button>
+            </div>
+          </div>
 
           <div className="flex items-center justify-between border-t border-border pt-3">
             <p className="text-xs text-muted-foreground">Token refreshes when you re-authenticate</p>
