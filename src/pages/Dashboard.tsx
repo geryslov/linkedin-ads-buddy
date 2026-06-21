@@ -30,6 +30,7 @@ import { LeadGenAnalyzer } from "@/components/dashboard/LeadGenAnalyzer";
 import { AgenticChatDrawer } from "@/components/dashboard/AgenticChatDrawer";
 import { AccountHealthCheck } from "@/components/dashboard/AccountHealthCheck";
 import { PerformanceSegmentation } from "@/components/dashboard/PerformanceSegmentation";
+import { ConnectClaude } from "@/components/dashboard/ConnectClaude";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -95,6 +96,7 @@ export default function Dashboard() {
 
   const [activeTab, setActiveTab] = useState("overview");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [connectClaudeOpen, setConnectClaudeOpen] = useState(false);
 
   useEffect(() => {
     if (accessToken) {
@@ -163,6 +165,12 @@ export default function Dashboard() {
         isAdmin={isAdmin}
         collapsed={sidebarCollapsed}
         onCollapsedChange={setSidebarCollapsed}
+        onConnectClaude={() => setConnectClaudeOpen(true)}
+      />
+      <ConnectClaude
+        open={connectClaudeOpen}
+        onOpenChange={setConnectClaudeOpen}
+        accessToken={accessToken}
       />
 
       <main className={cn("transition-all duration-300 min-h-screen", sidebarCollapsed ? "ml-16" : "ml-64")}>

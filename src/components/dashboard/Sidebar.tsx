@@ -30,6 +30,7 @@ import {
   Sparkles,
   Target,
   Layers,
+  Bot,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -40,6 +41,7 @@ interface SidebarProps {
   isAdmin?: boolean;
   collapsed?: boolean;
   onCollapsedChange?: (collapsed: boolean) => void;
+  onConnectClaude?: () => void;
 }
 
 interface NavItem {
@@ -132,6 +134,7 @@ export function Sidebar({
   isAdmin,
   collapsed = false,
   onCollapsedChange,
+  onConnectClaude,
 }: SidebarProps) {
   const navigate = useNavigate();
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
@@ -308,6 +311,21 @@ export function Sidebar({
             <p className="text-[11px] text-muted-foreground">Connected as</p>
             <p className="text-xs font-medium truncate">{profileName}</p>
           </div>
+        )}
+
+        {onConnectClaude && (
+          <Button
+            variant="ghost"
+            title={collapsed ? "Connect to Claude" : undefined}
+            className={cn(
+              "w-full text-xs text-muted-foreground hover:text-foreground",
+              collapsed ? "justify-center px-0 h-8" : "justify-start gap-2.5 h-8"
+            )}
+            onClick={onConnectClaude}
+          >
+            <Bot className="h-4 w-4 shrink-0" />
+            {!collapsed && "Connect to Claude"}
+          </Button>
         )}
 
         <Button
