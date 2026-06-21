@@ -12,6 +12,24 @@ const ACCESS_TOKEN_KEY = 'linkedin_access_token';
 const OAUTH_STATE_KEY = 'linkedin_oauth_state';
 const TOKEN_SCOPE_VERSION_KEY = 'linkedin_token_scope_version';
 const REQUIRED_SCOPE_VERSION = '2026-03-10-leadgen-scope-v2';
+const MCP_API_KEY_STORAGE = 'linkedin_mcp_api_key';
+
+// Upsert the latest LinkedIn token into Supabase so the MCP server always has a fresh copy.
+async function syncMcpToken(linkedinToken: string): Promise<void> {
+  try {
+    let apiKey = localStorage.getItem(MCP_API_KEY_STORAGE);
+    if (!apiKey) {
+      apiKey = crypto.randomUUID();
+      localStorage.setItem(MCP_API_KEY_STORAGE, apiKey);
+    }
+    await supabase.from('mcp_api_keys').upsert(
+      { api_key: apiKey, linkedin_token: linkedinToken, updated_at: new Date().toISOString() },
+      { onConflict: 'api_key' }
+    );
+  } catch {
+    // Non-critical — MCP sync failure doesn't block the user
+  }
+}
 
 export function useLinkedInAuth() {
   const [accessToken, setAccessToken] = useState<string | null>(() => {
@@ -63,6 +81,7 @@ export function useLinkedInAuth() {
               setAccessToken(token);
               localStorage.setItem(ACCESS_TOKEN_KEY, token);
               localStorage.setItem(TOKEN_SCOPE_VERSION_KEY, REQUIRED_SCOPE_VERSION);
+              syncMcpToken(token);
               toast({
                 title: 'Connected!',
                 description: 'Successfully connected to LinkedIn Ads',
@@ -106,6 +125,7 @@ export function useLinkedInAuth() {
       setAccessToken(token);
       localStorage.setItem(ACCESS_TOKEN_KEY, token);
       localStorage.setItem(TOKEN_SCOPE_VERSION_KEY, REQUIRED_SCOPE_VERSION);
+      syncMcpToken(token);
       
       toast({
         title: 'Connected!',

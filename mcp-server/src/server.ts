@@ -148,8 +148,8 @@ app.get("/oauth/authorize", (req, res) => {
     <form method="POST" action="/oauth/authorize">
       <input type="hidden" name="redirect_uri" value="${redirect_uri || ""}" />
       <input type="hidden" name="state" value="${state || ""}" />
-      <label for="token">LinkedIn access token</label>
-      <input type="text" id="token" name="token" placeholder="AQV..." required autocomplete="off" />
+      <label for="token">MCP API key</label>
+      <input type="text" id="token" name="token" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" required autocomplete="off" />
       <p class="hint">Find this in LinkedIn Ads Buddy → sidebar → "Connect to Claude"</p>
       <button type="submit">Connect</button>
     </form>
@@ -196,13 +196,34 @@ app.post("/oauth/token", (req, res) => {
 
 // ── Token resolution ──────────────────────────────────────────────────────────
 
-function resolveToken(req: express.Request): string | null {
-  const bearer = (req.headers["authorization"] as string)?.replace(/^Bearer\s+/i, "");
-  if (bearer) {
-    // Could be a session token (OAuth flow) or raw LinkedIn token (Desktop/direct)
-    return sessionTokens.get(bearer) ?? bearer;
+const SUPABASE_URL = "https://bxoxefmenvlxiubynuay.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJ4b3hlZm1lbnZseGl1YnludWF5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU0NTUzMzQsImV4cCI6MjA4MTAzMTMzNH0.ox7oP80ZqfgC5wuEJbtiMTiB-XxmCzrN2ZlZ9tpo8QI";
+
+async function lookupLinkedInToken(apiKey: string): Promise<string | null> {
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/mcp_api_keys?api_key=eq.${encodeURIComponent(apiKey)}&select=linkedin_token&limit=1`,
+      { headers: { "apikey": SUPABASE_ANON_KEY, "Authorization": `Bearer ${SUPABASE_ANON_KEY}` } }
+    );
+    if (!res.ok) return null;
+    const rows = await res.json() as Array<{ linkedin_token: string }>;
+    return rows[0]?.linkedin_token ?? null;
+  } catch {
+    return null;
   }
-  return (req.headers["x-linkedin-token"] as string) ?? null;
+}
+
+async function resolveToken(req: express.Request): Promise<string | null> {
+  const bearer = (req.headers["authorization"] as string)?.replace(/^Bearer\s+/i, "");
+  const raw = bearer ?? (req.headers["x-linkedin-token"] as string) ?? null;
+  if (!raw) return null;
+
+  // Try Supabase lookup first (stable MCP API key → fresh LinkedIn token)
+  const fromDb = await lookupLinkedInToken(raw);
+  if (fromDb) return fromDb;
+
+  // Fall back: treat the value as a raw LinkedIn token (Desktop config / direct)
+  return raw;
 }
 
 // ── MCP endpoint ──────────────────────────────────────────────────────────────
@@ -216,7 +237,7 @@ app.post("/mcp", async (req, res) => {
     return;
   }
 
-  const token = resolveToken(req);
+  const token = await resolveToken(req);
   if (!token) {
     res.status(401).json({ error: "unauthorized" });
     return;
