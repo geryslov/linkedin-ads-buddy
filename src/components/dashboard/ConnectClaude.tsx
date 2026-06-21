@@ -28,12 +28,11 @@ export function ConnectClaude({ open, onOpenChange, accessToken }: ConnectClaude
       localStorage.setItem(MCP_API_KEY_STORAGE, key);
     }
 
-    // Always sync on modal open — ensures the row exists even if a prior upsert failed
+    // Always sync on modal open via edge function (service role — no RLS issues)
     if (key && accessToken) {
-      supabase.from('mcp_api_keys').upsert(
-        { api_key: key, linkedin_token: accessToken, updated_at: new Date().toISOString() },
-        { onConflict: 'api_key' }
-      ).then(({ error }) => {
+      supabase.functions.invoke('linkedin-api', {
+        body: { action: 'sync_mcp_token', params: { apiKey: key, linkedinToken: accessToken } },
+      }).then(({ error }) => {
         if (error) console.error('[MCP sync] upsert failed:', error);
       });
     }

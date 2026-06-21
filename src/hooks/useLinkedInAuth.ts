@@ -14,7 +14,7 @@ const TOKEN_SCOPE_VERSION_KEY = 'linkedin_token_scope_version';
 const REQUIRED_SCOPE_VERSION = '2026-03-10-leadgen-scope-v2';
 const MCP_API_KEY_STORAGE = 'linkedin_mcp_api_key';
 
-// Upsert the latest LinkedIn token into Supabase so the MCP server always has a fresh copy.
+// Upsert the latest LinkedIn token via edge function (service role — no RLS issues).
 async function syncMcpToken(linkedinToken: string): Promise<void> {
   try {
     let apiKey = localStorage.getItem(MCP_API_KEY_STORAGE);
@@ -22,10 +22,9 @@ async function syncMcpToken(linkedinToken: string): Promise<void> {
       apiKey = crypto.randomUUID();
       localStorage.setItem(MCP_API_KEY_STORAGE, apiKey);
     }
-    await supabase.from('mcp_api_keys').upsert(
-      { api_key: apiKey, linkedin_token: linkedinToken, updated_at: new Date().toISOString() },
-      { onConflict: 'api_key' }
-    );
+    await supabase.functions.invoke('linkedin-api', {
+      body: { action: 'sync_mcp_token', params: { apiKey, linkedinToken } },
+    });
   } catch {
     // Non-critical — MCP sync failure doesn't block the user
   }

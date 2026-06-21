@@ -636,12 +636,36 @@ serve(async (req) => {
         });
       }
 
+      case 'sync_mcp_token': {
+        const { apiKey, linkedinToken } = params || {};
+        if (!apiKey || !linkedinToken) {
+          return new Response(JSON.stringify({ error: 'apiKey and linkedinToken required' }), {
+            status: 400,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+        const { error } = await supabaseClient.from('mcp_api_keys').upsert(
+          { api_key: apiKey, linkedin_token: linkedinToken, updated_at: new Date().toISOString() },
+          { onConflict: 'api_key' }
+        );
+        if (error) {
+          console.error('MCP token sync failed:', error);
+          return new Response(JSON.stringify({ error: error.message }), {
+            status: 500,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
       case 'get_profile': {
         const profileResponse = await fetch('https://api.linkedin.com/v2/me', {
           headers: { 'Authorization': `Bearer ${accessToken}` },
         });
         const profile = await profileResponse.json();
-        
+
         return new Response(JSON.stringify(profile), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
