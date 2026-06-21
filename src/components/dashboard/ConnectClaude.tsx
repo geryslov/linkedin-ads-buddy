@@ -23,10 +23,13 @@ export function ConnectClaude({ open, onOpenChange, accessToken }: ConnectClaude
     if (!open) return;
     let key = localStorage.getItem(MCP_API_KEY_STORAGE);
 
-    // First-time setup: user was already logged in before this feature shipped
-    if (!key && accessToken) {
+    if (!key) {
       key = crypto.randomUUID();
       localStorage.setItem(MCP_API_KEY_STORAGE, key);
+    }
+
+    // Always sync on modal open — ensures the row exists even if a prior upsert failed
+    if (key && accessToken) {
       supabase.from('mcp_api_keys').upsert(
         { api_key: key, linkedin_token: accessToken, updated_at: new Date().toISOString() },
         { onConflict: 'api_key' }
