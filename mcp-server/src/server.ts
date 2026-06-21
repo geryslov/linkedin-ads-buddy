@@ -190,9 +190,8 @@ app.post("/oauth/token", (req, res) => {
     return;
   }
   authCodes.delete(code);
-  const accessToken = randomUUID();
-  sessionTokens.set(accessToken, data.linkedinToken);
-  res.json({ access_token: accessToken, token_type: "bearer", expires_in: 60 * 24 * 3600 });
+  // Return the LinkedIn token directly — no in-memory mapping, survives server restarts
+  res.json({ access_token: data.linkedinToken, token_type: "bearer", expires_in: 60 * 24 * 3600 });
 });
 
 // ── Token resolution ──────────────────────────────────────────────────────────
