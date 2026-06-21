@@ -191,6 +191,24 @@ export type Database = {
         }
         Relationships: []
       }
+      mcp_api_keys: {
+        Row: {
+          api_key: string
+          linkedin_token: string
+          updated_at: string
+        }
+        Insert: {
+          api_key: string
+          linkedin_token: string
+          updated_at?: string
+        }
+        Update: {
+          api_key?: string
+          linkedin_token?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       naming_conventions: {
         Row: {
           account_id: string
