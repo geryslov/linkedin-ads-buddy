@@ -674,21 +674,36 @@ serve(async (req) => {
       case 'get_ad_accounts': {
         const accountsMap = new Map<string, any>();
         const userRoles = new Map<string, { role: string; accessSource: string }>();
+        let adAccountUsersOk = false;
         
         // Step 1: Try REST adAccountUsers?q=authenticatedUser (includes Business Manager accounts)
+        // Retry on 429 with backoff so rate limiting doesn't strip write access from every account.
+        const fetchAdAccountUsers = async (): Promise<Response> => {
+          const delays = [0, 600, 1500, 3000];
+          let last: Response | null = null;
+          for (const d of delays) {
+            if (d) await new Promise(r => setTimeout(r, d));
+            last = await fetch(
+              'https://api.linkedin.com/rest/adAccountUsers?q=authenticatedUser',
+              {
+                headers: {
+                  'Authorization': `Bearer ${accessToken}`,
+                  'LinkedIn-Version': '202511',
+                  'X-Restli-Protocol-Version': '2.0.0',
+                },
+              }
+            );
+            if (last.status !== 429) return last;
+            console.log(`[get_ad_accounts] adAccountUsers 429, retrying after ${d}ms backoff...`);
+          }
+          return last as Response;
+        };
+
         try {
-          const usersResponse = await fetch(
-            'https://api.linkedin.com/rest/adAccountUsers?q=authenticatedUser',
-            {
-              headers: {
-                'Authorization': `Bearer ${accessToken}`,
-                'LinkedIn-Version': '202511',
-                'X-Restli-Protocol-Version': '2.0.0',
-              },
-            }
-          );
+          const usersResponse = await fetchAdAccountUsers();
           
           if (usersResponse.ok) {
+            adAccountUsersOk = true;
             const usersData = await usersResponse.json();
             const userElements = usersData?.elements || [];
             console.log(`[get_ad_accounts] adAccountUsers returned ${userElements.length} account-user mappings`);
@@ -702,7 +717,7 @@ serve(async (req) => {
               }
             }
           } else {
-            console.log(`[get_ad_accounts] adAccountUsers failed: ${usersResponse.status}`);
+            console.log(`[get_ad_accounts] adAccountUsers failed after retries: ${usersResponse.status}`);
           }
         } catch (err) {
           console.error('[get_ad_accounts] Error fetching adAccountUsers:', err);
@@ -768,20 +783,29 @@ serve(async (req) => {
         // Combine and filter for ACTIVE status, add canWrite, accountUrn, and type
         const allAccounts = Array.from(accountsMap.values())
           .filter((acc: any) => acc.status === 'ACTIVE')
-          .map((acc: any) => ({
-            id: String(acc.id),
-            accountUrn: `urn:li:sponsoredAccount:${acc.id}`,
-            name: acc.name || `Account ${acc.id}`,
-            currency: acc.currency || 'USD',
-            status: acc.status,
-            type: acc.type || 'UNKNOWN', // BUSINESS, ENTERPRISE, etc.
-            userRole: acc.userRole || 'UNKNOWN',
-            accessSource: acc.accessSource || 'unknown',
-            canWrite: writeCapableRoles.includes(acc.userRole || ''),
-          }));
+          .map((acc: any) => {
+            const role = acc.userRole || 'UNKNOWN';
+            // If adAccountUsers failed (rate limit, etc), we can't verify role. Fall back to
+            // optimistic canWrite=true for accounts found via search — LinkedIn will reject
+            // the actual write call if the user lacks permission. Better than blocking everyone.
+            const canWrite = writeCapableRoles.includes(role) || (!adAccountUsersOk && role === 'DIRECT_ACCESS');
+            return {
+              id: String(acc.id),
+              accountUrn: `urn:li:sponsoredAccount:${acc.id}`,
+              name: acc.name || `Account ${acc.id}`,
+              currency: acc.currency || 'USD',
+              status: acc.status,
+              type: acc.type || 'UNKNOWN',
+              userRole: role,
+              accessSource: acc.accessSource || 'unknown',
+              canWrite,
+            };
+          });
         
+        console.log(`[get_ad_accounts] adAccountUsers ok: ${adAccountUsersOk}`);
         console.log(`[get_ad_accounts] Total unique accounts: ${allAccounts.length}`);
         console.log(`[get_ad_accounts] Accounts with write access: ${allAccounts.filter(a => a.canWrite).length}`);
+
         
         return new Response(JSON.stringify({ elements: allAccounts }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
