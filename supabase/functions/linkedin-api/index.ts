@@ -788,7 +788,7 @@ serve(async (req) => {
             // If adAccountUsers failed (rate limit, etc), we can't verify role. Fall back to
             // optimistic canWrite=true for accounts found via search — LinkedIn will reject
             // the actual write call if the user lacks permission. Better than blocking everyone.
-            const canWrite = writeCapableRoles.includes(role) || (!adAccountUsersOk && role === 'DIRECT_ACCESS');
+            const canWrite = writeCapableRoles.includes(role) || role === 'DIRECT_ACCESS';
             return {
               id: String(acc.id),
               accountUrn: `urn:li:sponsoredAccount:${acc.id}`,
