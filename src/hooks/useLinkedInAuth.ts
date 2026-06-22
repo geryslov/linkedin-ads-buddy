@@ -16,20 +16,25 @@ const MCP_API_KEY_STORAGE = 'linkedin_mcp_api_key';
 
 // Upsert the latest LinkedIn token so the MCP server always has a fresh copy.
 async function syncMcpToken(linkedinToken: string): Promise<void> {
-  try {
-    let apiKey = localStorage.getItem(MCP_API_KEY_STORAGE);
-    if (!apiKey) {
-      apiKey = crypto.randomUUID();
-      localStorage.setItem(MCP_API_KEY_STORAGE, apiKey);
-    }
-    const { error } = await supabase.from('mcp_api_keys').upsert(
-      { api_key: apiKey, linkedin_token: linkedinToken, updated_at: new Date().toISOString() },
-      { onConflict: 'api_key' }
-    );
-    if (error) console.error('[MCP sync] failed:', error);
-  } catch (e) {
-    console.error('[MCP sync] exception:', e);
+  let apiKey = localStorage.getItem(MCP_API_KEY_STORAGE);
+  if (!apiKey) {
+    apiKey = crypto.randomUUID();
+    localStorage.setItem(MCP_API_KEY_STORAGE, apiKey);
   }
+
+  const { data, error } = await supabase.functions.invoke('linkedin-api', {
+    body: { action: 'sync_mcp_token', params: { apiKey, linkedinToken } },
+  });
+
+  if (error || data?.error) {
+    throw new Error(error?.message || data?.error || 'Failed to sync LinkedIn token');
+  }
+}
+
+function clearLinkedInAuthStorage() {
+  localStorage.removeItem(ACCESS_TOKEN_KEY);
+  localStorage.removeItem(OAUTH_STATE_KEY);
+  localStorage.removeItem(TOKEN_SCOPE_VERSION_KEY);
 }
 
 export function useLinkedInAuth() {
@@ -51,6 +56,10 @@ export function useLinkedInAuth() {
   const initiateAuth = useCallback(async () => {
     setIsLoading(true);
     try {
+      clearLinkedInAuthStorage();
+      setAccessToken(null);
+      setProfile(null);
+
       const redirectUri = `${window.location.origin}/callback`;
       const { data, error } = await supabase.functions.invoke('linkedin-api', {
         body: { action: 'get_auth_url', params: { redirectUri } }
@@ -73,16 +82,16 @@ export function useLinkedInAuth() {
           return;
         }
         // Listen for completion message from popup callback page
-        const messageHandler = (event: MessageEvent) => {
+        const messageHandler = async (event: MessageEvent) => {
           if (event.origin === window.location.origin && event.data?.type === 'linkedin-oauth-complete') {
             popup?.close();
             window.removeEventListener('message', messageHandler);
             const token = event.data.token;
             if (token) {
+              await syncMcpToken(token);
               setAccessToken(token);
               localStorage.setItem(ACCESS_TOKEN_KEY, token);
               localStorage.setItem(TOKEN_SCOPE_VERSION_KEY, REQUIRED_SCOPE_VERSION);
-              syncMcpToken(token);
               toast({
                 title: 'Connected!',
                 description: 'Successfully connected to LinkedIn Ads',
@@ -123,10 +132,10 @@ export function useLinkedInAuth() {
       if (data.error) throw new Error(data.error_description || data.error);
 
       const token = data.access_token;
+      await syncMcpToken(token);
       setAccessToken(token);
       localStorage.setItem(ACCESS_TOKEN_KEY, token);
       localStorage.setItem(TOKEN_SCOPE_VERSION_KEY, REQUIRED_SCOPE_VERSION);
-      syncMcpToken(token);
       
       toast({
         title: 'Connected!',
@@ -179,9 +188,7 @@ export function useLinkedInAuth() {
   const logout = useCallback(() => {
     setAccessToken(null);
     setProfile(null);
-    localStorage.removeItem(ACCESS_TOKEN_KEY);
-    localStorage.removeItem(OAUTH_STATE_KEY);
-    localStorage.removeItem(TOKEN_SCOPE_VERSION_KEY);
+    clearLinkedInAuthStorage();
     toast({
       title: 'Disconnected',
       description: 'Successfully disconnected from LinkedIn',
@@ -193,7 +200,7 @@ export function useLinkedInAuth() {
       fetchProfile();
       // Safety net: ensure the MCP row always reflects the current LinkedIn token,
       // even if it was set outside of the OAuth callback (other tab, manual set, etc.)
-      syncMcpToken(accessToken);
+      syncMcpToken(accessToken).catch((error) => console.error('[MCP sync] failed:', error));
     }
   }, [accessToken, fetchProfile]);
 
@@ -203,7 +210,7 @@ export function useLinkedInAuth() {
     const handleStorage = (e: StorageEvent) => {
       if (e.key === ACCESS_TOKEN_KEY && e.newValue && e.newValue !== accessToken) {
         setAccessToken(e.newValue);
-        syncMcpToken(e.newValue);
+        syncMcpToken(e.newValue).catch((error) => console.error('[MCP sync] failed:', error));
       }
     };
     window.addEventListener('storage', handleStorage);
