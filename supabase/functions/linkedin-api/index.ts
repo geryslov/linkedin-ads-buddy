@@ -4592,8 +4592,8 @@ serve(async (req) => {
         for (const [campaignId, info] of campaignInfoMap) {
           const metrics = campaignMetrics.get(campaignId) || { impressions: 0, clicks: 0, spent: 0, leads: 0, lgfFormOpens: 0 };
           
-          // Skip campaigns with no data if there's analytics data available
-          if (allAnalytics.length > 0 && metrics.impressions === 0 && metrics.spent === 0) continue;
+          // Include all campaigns (even newly-launched ones with no analytics yet)
+          // so they appear in pickers like the Campaign Editor.
           
           const ctr = metrics.impressions > 0 ? (metrics.clicks / metrics.impressions) * 100 : 0;
           const cpc = metrics.clicks > 0 ? metrics.spent / metrics.clicks : 0;
