@@ -788,7 +788,7 @@ serve(async (req) => {
             // If adAccountUsers failed (rate limit, etc), we can't verify role. Fall back to
             // optimistic canWrite=true for accounts found via search — LinkedIn will reject
             // the actual write call if the user lacks permission. Better than blocking everyone.
-            const canWrite = writeCapableRoles.includes(role) || (!adAccountUsersOk && role === 'DIRECT_ACCESS');
+            const canWrite = writeCapableRoles.includes(role) || role === 'DIRECT_ACCESS';
             return {
               id: String(acc.id),
               accountUrn: `urn:li:sponsoredAccount:${acc.id}`,
@@ -8055,8 +8055,8 @@ serve(async (req) => {
               }
             }
             
-            // Step 4: Gate on can_write - don't even attempt PATCH if false
-            if (!accRow.can_write) {
+            // Step 4: Gate on can_write - but allow DIRECT_ACCESS (role unknown — let LinkedIn decide)
+            if (!accRow.can_write && accRow.user_role !== 'DIRECT_ACCESS') {
               console.log(`[update_campaign_targeting] User lacks write permission on account ${derivedAccountId} (role: ${accRow.user_role})`);
               results.push({
                 campaignId: currentCampaignId,
