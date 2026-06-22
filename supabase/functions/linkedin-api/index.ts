@@ -8055,8 +8055,8 @@ serve(async (req) => {
               }
             }
             
-            // Step 4: Gate on can_write - don't even attempt PATCH if false
-            if (!accRow.can_write) {
+            // Step 4: Gate on can_write - but allow DIRECT_ACCESS (role unknown — let LinkedIn decide)
+            if (!accRow.can_write && accRow.user_role !== 'DIRECT_ACCESS') {
               console.log(`[update_campaign_targeting] User lacks write permission on account ${derivedAccountId} (role: ${accRow.user_role})`);
               results.push({
                 campaignId: currentCampaignId,
