@@ -7191,6 +7191,8 @@ serve(async (req) => {
         const accountsMap = new Map<string, any>();
         const userRoles = new Map<string, { role: string; accessSource: string }>();
         
+        let adAccountUsersOk = false;
+
         // Step 1: Try REST adAccountUsers
         try {
           const usersResponse = await fetch(
@@ -7205,6 +7207,7 @@ serve(async (req) => {
           );
           
           if (usersResponse.ok) {
+            adAccountUsersOk = true;
             const usersData = await usersResponse.json();
             for (const el of (usersData?.elements || [])) {
               const accountUrn = el.account || '';
@@ -7213,6 +7216,8 @@ serve(async (req) => {
                 userRoles.set(accountId, { role: el.role || 'UNKNOWN', accessSource: 'authenticatedUser' });
               }
             }
+          } else {
+            console.log(`[sync_ad_accounts] adAccountUsers failed: ${usersResponse.status}`);
           }
         } catch (err) {
           console.error('[sync_ad_accounts] Error fetching adAccountUsers:', err);
@@ -7275,9 +7280,9 @@ serve(async (req) => {
             currency: acc.currency || 'USD',
             status: acc.status,
             type: acc.type || 'UNKNOWN',
-            userRole: acc.userRole || 'UNKNOWN',
+            userRole: acc.userRole || 'DIRECT_ACCESS',
             accessSource: acc.accessSource || 'unknown',
-            canWrite: writeCapableRoles.includes(acc.userRole || ''),
+            canWrite: adAccountUsersOk ? writeCapableRoles.includes(acc.userRole || '') : true,
           }));
         
         console.log(`[sync_ad_accounts] Discovered ${allAccounts.length} accounts`);
