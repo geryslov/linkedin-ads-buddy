@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLinkedInAuth } from "@/hooks/useLinkedInAuth";
 import { useLinkedInAds } from "@/hooks/useLinkedInAds";
 import { useAuth } from "@/hooks/useAuth";
@@ -97,9 +97,16 @@ export default function Dashboard() {
   const [activeTab, setActiveTab] = useState("overview");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [connectClaudeOpen, setConnectClaudeOpen] = useState(false);
+  const lastFetchedAccountsTokenRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (accessToken) {
+    if (!accessToken) {
+      lastFetchedAccountsTokenRef.current = null;
+      return;
+    }
+
+    if (lastFetchedAccountsTokenRef.current !== accessToken) {
+      lastFetchedAccountsTokenRef.current = accessToken;
       fetchAdAccounts();
     }
   }, [accessToken, fetchAdAccounts]);

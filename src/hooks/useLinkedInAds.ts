@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 
@@ -55,6 +55,8 @@ export function useLinkedInAds(accessToken: string | null) {
   const [isLoadingDefault, setIsLoadingDefault] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
+  const accountFetchInFlightRef = useRef(false);
+  const lastAccountFetchRef = useRef<{ token: string; at: number } | null>(null);
   const { toast } = useToast();
 
   // Load default account from database on mount
@@ -155,6 +157,11 @@ export function useLinkedInAds(accessToken: string | null) {
 
   const fetchAdAccounts = useCallback(async () => {
     if (!accessToken) return;
+    const lastFetch = lastAccountFetchRef.current;
+    if (accountFetchInFlightRef.current || (lastFetch?.token === accessToken && Date.now() - lastFetch.at < 60_000)) {
+      return;
+    }
+    accountFetchInFlightRef.current = true;
     setIsLoading(true);
     
     try {
@@ -166,6 +173,7 @@ export function useLinkedInAds(accessToken: string | null) {
       });
 
       if (error) throw error;
+      lastAccountFetchRef.current = { token: accessToken, at: Date.now() };
       
       const accounts: AdAccount[] = (data.elements || []).map((el: any) => ({
         id: el.id.toString(),
@@ -203,6 +211,7 @@ export function useLinkedInAds(accessToken: string | null) {
         variant: 'destructive',
       });
     } finally {
+      accountFetchInFlightRef.current = false;
       setIsLoading(false);
     }
   }, [accessToken, loadDefaultAccount, setDefaultAccount, toast]);
