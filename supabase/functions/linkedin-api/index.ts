@@ -814,21 +814,34 @@ serve(async (req) => {
 
       case 'get_campaigns': {
         const { accountId, status } = params || {};
-        let url = `https://api.linkedin.com/v2/adCampaignsV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}`;
-        if (status) {
-          url += `&search.status.values[0]=${status}`;
+        const baseUrl = `https://api.linkedin.com/v2/adCampaignsV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}` +
+          (status ? `&search.status.values[0]=${status}` : '');
+
+        // Paginate — LinkedIn defaults to 10 per page, so newly launched campaigns
+        // on accounts with >10 campaigns won't show up without explicit pagination.
+        const pageSize = 100;
+        let start = 0;
+        const allElements: any[] = [];
+        let lastPayload: any = null;
+        for (let i = 0; i < 50; i++) { // hard cap = 5000 campaigns
+          const pageUrl = `${baseUrl}&start=${start}&count=${pageSize}`;
+          const resp = await fetch(pageUrl, {
+            headers: { 'Authorization': `Bearer ${accessToken}` },
+          });
+          const payload = await resp.json();
+          lastPayload = payload;
+          const els = payload?.elements || [];
+          allElements.push(...els);
+          if (els.length < pageSize) break;
+          start += pageSize;
         }
-        
-        const campaignsResponse = await fetch(url, {
-          headers: { 'Authorization': `Bearer ${accessToken}` },
-        });
-        const campaigns = await campaignsResponse.json();
-        console.log('Campaigns fetched:', campaigns.elements?.length || 0);
-        
-        return new Response(JSON.stringify(campaigns), {
+        console.log(`Campaigns fetched: ${allElements.length} (paginated)`);
+
+        return new Response(JSON.stringify({ ...lastPayload, elements: allElements }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
+
 
       case 'get_analytics': {
         const { accountId, campaignIds, dateRange } = params || {};
