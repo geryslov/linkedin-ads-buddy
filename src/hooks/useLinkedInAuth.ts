@@ -191,8 +191,24 @@ export function useLinkedInAuth() {
   useEffect(() => {
     if (accessToken) {
       fetchProfile();
+      // Safety net: ensure the MCP row always reflects the current LinkedIn token,
+      // even if it was set outside of the OAuth callback (other tab, manual set, etc.)
+      syncMcpToken(accessToken);
     }
   }, [accessToken, fetchProfile]);
+
+  // Cross-tab sync: if another tab updates the LinkedIn token, pick it up here
+  // and push it to the MCP row so rotations propagate everywhere.
+  useEffect(() => {
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === ACCESS_TOKEN_KEY && e.newValue && e.newValue !== accessToken) {
+        setAccessToken(e.newValue);
+        syncMcpToken(e.newValue);
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }, [accessToken]);
 
   return {
     accessToken,
