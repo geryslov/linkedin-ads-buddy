@@ -16,20 +16,25 @@ const MCP_API_KEY_STORAGE = 'linkedin_mcp_api_key';
 
 // Upsert the latest LinkedIn token so the MCP server always has a fresh copy.
 async function syncMcpToken(linkedinToken: string): Promise<void> {
-  try {
-    let apiKey = localStorage.getItem(MCP_API_KEY_STORAGE);
-    if (!apiKey) {
-      apiKey = crypto.randomUUID();
-      localStorage.setItem(MCP_API_KEY_STORAGE, apiKey);
-    }
-    const { error } = await supabase.from('mcp_api_keys').upsert(
-      { api_key: apiKey, linkedin_token: linkedinToken, updated_at: new Date().toISOString() },
-      { onConflict: 'api_key' }
-    );
-    if (error) console.error('[MCP sync] failed:', error);
-  } catch (e) {
-    console.error('[MCP sync] exception:', e);
+  let apiKey = localStorage.getItem(MCP_API_KEY_STORAGE);
+  if (!apiKey) {
+    apiKey = crypto.randomUUID();
+    localStorage.setItem(MCP_API_KEY_STORAGE, apiKey);
   }
+
+  const { data, error } = await supabase.functions.invoke('linkedin-api', {
+    body: { action: 'sync_mcp_token', params: { apiKey, linkedinToken } },
+  });
+
+  if (error || data?.error) {
+    throw new Error(error?.message || data?.error || 'Failed to sync LinkedIn token');
+  }
+}
+
+function clearLinkedInAuthStorage() {
+  localStorage.removeItem(ACCESS_TOKEN_KEY);
+  localStorage.removeItem(OAUTH_STATE_KEY);
+  localStorage.removeItem(TOKEN_SCOPE_VERSION_KEY);
 }
 
 export function useLinkedInAuth() {
