@@ -56,6 +56,10 @@ export function useLinkedInAuth() {
   const initiateAuth = useCallback(async () => {
     setIsLoading(true);
     try {
+      clearLinkedInAuthStorage();
+      setAccessToken(null);
+      setProfile(null);
+
       const redirectUri = `${window.location.origin}/callback`;
       const { data, error } = await supabase.functions.invoke('linkedin-api', {
         body: { action: 'get_auth_url', params: { redirectUri } }
@@ -84,10 +88,10 @@ export function useLinkedInAuth() {
             window.removeEventListener('message', messageHandler);
             const token = event.data.token;
             if (token) {
+              await syncMcpToken(token);
               setAccessToken(token);
               localStorage.setItem(ACCESS_TOKEN_KEY, token);
               localStorage.setItem(TOKEN_SCOPE_VERSION_KEY, REQUIRED_SCOPE_VERSION);
-              syncMcpToken(token);
               toast({
                 title: 'Connected!',
                 description: 'Successfully connected to LinkedIn Ads',
@@ -128,10 +132,10 @@ export function useLinkedInAuth() {
       if (data.error) throw new Error(data.error_description || data.error);
 
       const token = data.access_token;
+      await syncMcpToken(token);
       setAccessToken(token);
       localStorage.setItem(ACCESS_TOKEN_KEY, token);
       localStorage.setItem(TOKEN_SCOPE_VERSION_KEY, REQUIRED_SCOPE_VERSION);
-      syncMcpToken(token);
       
       toast({
         title: 'Connected!',
@@ -184,9 +188,7 @@ export function useLinkedInAuth() {
   const logout = useCallback(() => {
     setAccessToken(null);
     setProfile(null);
-    localStorage.removeItem(ACCESS_TOKEN_KEY);
-    localStorage.removeItem(OAUTH_STATE_KEY);
-    localStorage.removeItem(TOKEN_SCOPE_VERSION_KEY);
+    clearLinkedInAuthStorage();
     toast({
       title: 'Disconnected',
       description: 'Successfully disconnected from LinkedIn',
