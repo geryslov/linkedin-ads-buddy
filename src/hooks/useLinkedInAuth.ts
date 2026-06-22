@@ -82,7 +82,7 @@ export function useLinkedInAuth() {
           return;
         }
         // Listen for completion message from popup callback page
-        const messageHandler = (event: MessageEvent) => {
+        const messageHandler = async (event: MessageEvent) => {
           if (event.origin === window.location.origin && event.data?.type === 'linkedin-oauth-complete') {
             popup?.close();
             window.removeEventListener('message', messageHandler);
@@ -200,7 +200,7 @@ export function useLinkedInAuth() {
       fetchProfile();
       // Safety net: ensure the MCP row always reflects the current LinkedIn token,
       // even if it was set outside of the OAuth callback (other tab, manual set, etc.)
-      syncMcpToken(accessToken);
+      syncMcpToken(accessToken).catch((error) => console.error('[MCP sync] failed:', error));
     }
   }, [accessToken, fetchProfile]);
 
@@ -210,7 +210,7 @@ export function useLinkedInAuth() {
     const handleStorage = (e: StorageEvent) => {
       if (e.key === ACCESS_TOKEN_KEY && e.newValue && e.newValue !== accessToken) {
         setAccessToken(e.newValue);
-        syncMcpToken(e.newValue);
+        syncMcpToken(e.newValue).catch((error) => console.error('[MCP sync] failed:', error));
       }
     };
     window.addEventListener('storage', handleStorage);
