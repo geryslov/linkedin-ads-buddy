@@ -7874,7 +7874,10 @@ serve(async (req) => {
       case 'update_campaign_targeting': {
         // Support both single campaignId and array of campaignIds
         // NOTE: accountId is no longer required - derived from campaign
-        const { campaignId, campaignIds, titleUrns, skillUrns, mode } = params;
+        let { campaignId, campaignIds, titleUrns, skillUrns, mode } = params;
+        // Dedupe URNs — LinkedIn rejects targeting facets with duplicate values (INVALID_VALUE_DUPLICATE_EXIST)
+        if (Array.isArray(titleUrns)) titleUrns = Array.from(new Set(titleUrns));
+        if (Array.isArray(skillUrns)) skillUrns = Array.from(new Set(skillUrns));
         
         // Normalize to array
         const idsToUpdate: string[] = campaignIds && Array.isArray(campaignIds) 
