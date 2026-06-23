@@ -8077,47 +8077,37 @@ serve(async (req) => {
             let targetingCriteria: any;
             
             if (mode === 'replace') {
+              // Preserve ALL existing facets except the ones we're explicitly replacing.
+              // Previous logic dropped any clause that wasn't a "required" facet, which broke
+              // Message/Conversation Ads campaigns that require industries/seniorities/etc to stay.
               const existingAndClauses: any[] = existingTargeting?.include?.and || [];
-              
-              const requiredFacetPrefixes = [
-                'urn:li:adTargetingFacet:locations',
-                'urn:li:adTargetingFacet:profileLocations', 
-                'urn:li:adTargetingFacet:ipLocations',
-                'urn:li:adTargetingFacet:interfaceLocales',
-                'urn:li:adTargetingFacet:locales',
-              ];
-              
+
               const replacedFacets = [
-                'urn:li:adTargetingFacet:titles',
-                'urn:li:adTargetingFacet:skills',
+                ...(titleUrns ? ['urn:li:adTargetingFacet:titles'] : []),
+                ...(skillUrns ? ['urn:li:adTargetingFacet:skills'] : []),
               ];
-              
+
               const preservedClauses = existingAndClauses.filter((clause: any) => {
                 if (!clause.or) return true;
                 const facetKeys = Object.keys(clause.or);
-                const hasRequiredFacet = facetKeys.some(key => 
-                  requiredFacetPrefixes.some(prefix => key.startsWith(prefix))
-                );
-                const hasReplacedFacet = facetKeys.some(key =>
-                  replacedFacets.includes(key)
-                );
-                return hasRequiredFacet || !hasReplacedFacet;
+                // Drop only the facets we're replacing; keep everything else intact.
+                return !facetKeys.some(key => replacedFacets.includes(key));
               });
-              
+
               const newAndClauses = [...preservedClauses];
-              
+
               if (titleUrns && titleUrns.length > 0) {
                 newAndClauses.push({
                   or: { 'urn:li:adTargetingFacet:titles': titleUrns }
                 });
               }
-              
+
               if (skillUrns && skillUrns.length > 0) {
                 newAndClauses.push({
                   or: { 'urn:li:adTargetingFacet:skills': skillUrns }
                 });
               }
-              
+
               targetingCriteria = {
                 include: { and: newAndClauses },
                 exclude: existingTargeting?.exclude || {}
@@ -8214,8 +8204,21 @@ serve(async (req) => {
                   errorCode = 'FORBIDDEN';
                 }
               } else if (updateResponse.status === 400 || updateResponse.status === 404) {
-                errorMessage = 'Invalid account or campaign ID. The resource may have been deleted.';
-                errorCode = 'INVALID_RESOURCE';
+                // Surface LinkedIn's actual reason instead of a generic message.
+                let liMsg = '';
+                try {
+                  const errorJson = JSON.parse(errorText);
+                  liMsg = errorJson.message || errorJson.error || '';
+                } catch {}
+                if (updateResponse.status === 404) {
+                  errorMessage = `Campaign not found (404)${liMsg ? `: ${liMsg}` : ''}`;
+                  errorCode = 'INVALID_RESOURCE';
+                } else {
+                  errorMessage = liMsg
+                    ? `LinkedIn rejected the update (400): ${liMsg}`
+                    : `LinkedIn rejected the update (400). Raw: ${errorText.slice(0, 300)}`;
+                  errorCode = 'BAD_REQUEST';
+                }
               } else {
                 try {
                   const errorJson = JSON.parse(errorText);
