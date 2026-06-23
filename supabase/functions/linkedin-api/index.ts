@@ -861,7 +861,7 @@ serve(async (req) => {
           `dateRange.end.year=${endYear}&` +
           `timeGranularity=DAILY&` +
           `accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
-          `fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads`;
+          `fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,oneClickLeadFormOpens`;
         
         if (campaignIds?.length) {
           campaignIds.forEach((id: string, i: number) => {
@@ -947,7 +947,7 @@ serve(async (req) => {
           `dateRange.end.year=${endYear}&` +
           `timeGranularity=${granularity}&` +
           `pivot=CREATIVE&` +
-          `fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,dateRange,pivotValue`;
+          `fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,oneClickLeadFormOpens,dateRange,pivotValue`;
 
         // Add campaigns to query (required for CREATIVE pivot)
         campaigns.slice(0, 20).forEach((id: string, i: number) => {
@@ -1511,32 +1511,34 @@ serve(async (req) => {
           `timeGranularity=${granularity}&` +
           `pivot=CREATIVE&` +
           `accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
-          `fields=impressions,clicks,costInLocalCurrency,costInUsd,oneClickLeads,externalWebsiteConversions,pivotValue&` +
+          `fields=impressions,clicks,costInLocalCurrency,costInUsd,oneClickLeads,oneClickLeadFormOpens,externalWebsiteConversions,pivotValue&` +
           `count=10000`;
-        
+
         console.log(`[Step 3] Analytics URL: ${analyticsUrl}`);
 
         const analyticsResponse = await fetch(analyticsUrl, {
           headers: { 'Authorization': `Bearer ${accessToken}` },
         });
-        
+
         const analyticsData = analyticsResponse.ok ? await analyticsResponse.json() : { elements: [] };
         console.log(`[Step 3] Received ${analyticsData.elements?.length || 0} analytics records`);
 
         // Step 4: Aggregate analytics by creative ID
-        const analyticsMap = new Map<string, { impressions: number; clicks: number; spent: number; spentUsd: number; leads: number }>();
-        
+        const analyticsMap = new Map<string, { impressions: number; clicks: number; spent: number; spentUsd: number; leads: number; conversions: number; formOpens: number }>();
+
         (analyticsData.elements || []).forEach((el: any) => {
           const pivotValue = el.pivotValue || '';
           if (pivotValue) {
             const creativeId = pivotValue.split(':').pop() || pivotValue;
-            const existing = analyticsMap.get(creativeId) || { impressions: 0, clicks: 0, spent: 0, spentUsd: 0, leads: 0 };
+            const existing = analyticsMap.get(creativeId) || { impressions: 0, clicks: 0, spent: 0, spentUsd: 0, leads: 0, conversions: 0, formOpens: 0 };
             analyticsMap.set(creativeId, {
               impressions: existing.impressions + (el.impressions || 0),
               clicks: existing.clicks + (el.clicks || 0),
               spent: existing.spent + parseFloat(el.costInLocalCurrency || '0'),
               spentUsd: existing.spentUsd + parseFloat(el.costInUsd || '0'),
-              leads: existing.leads + (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0),
+              leads: existing.leads + (el.oneClickLeads || 0),
+              conversions: existing.conversions + (el.externalWebsiteConversions || 0),
+              formOpens: existing.formOpens + (el.oneClickLeadFormOpens || 0),
             });
           }
         });
@@ -1599,12 +1601,12 @@ serve(async (req) => {
           }
           
           const campaignName = campaignMap.get(meta.campaignId) || 'Unknown Campaign';
-          const metrics = analyticsMap.get(creativeId) || { impressions: 0, clicks: 0, spent: 0, spentUsd: 0, leads: 0 };
-          
+          const metrics = analyticsMap.get(creativeId) || { impressions: 0, clicks: 0, spent: 0, spentUsd: 0, leads: 0, conversions: 0, formOpens: 0 };
+
           const ctr = metrics.impressions > 0 ? (metrics.clicks / metrics.impressions) * 100 : 0;
           const cpc = metrics.clicks > 0 ? metrics.spent / metrics.clicks : 0;
           const cpm = metrics.impressions > 0 ? (metrics.spent / metrics.impressions) * 1000 : 0;
-          
+
           reportElements.push({
             creativeId,
             creativeName,
@@ -1617,6 +1619,8 @@ serve(async (req) => {
             costInLocalCurrency: metrics.spent.toFixed(2),
             costInUsd: metrics.spentUsd.toFixed(2),
             leads: metrics.leads,
+            conversions: metrics.conversions,
+            formOpens: metrics.formOpens,
             ctr: ctr.toFixed(2),
             cpc: cpc.toFixed(2),
             cpm: cpm.toFixed(2),
@@ -1702,7 +1706,7 @@ serve(async (req) => {
           `timeGranularity=${granularity === 'ALL' ? 'ALL' : granularity}&` +
           `pivot=CREATIVE&` +
           `accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
-          `fields=impressions,clicks,costInLocalCurrency,costInUsd,externalWebsiteConversions,oneClickLeads,pivotValue&` +
+          `fields=impressions,clicks,costInLocalCurrency,costInUsd,externalWebsiteConversions,oneClickLeads,oneClickLeadFormOpens,pivotValue&` +
           `count=500&` +
           campaignIds.slice(0, 20).map((id: string, i: number) => `campaigns[${i}]=urn:li:sponsoredCampaign:${id}`).join('&');
 
@@ -1710,30 +1714,32 @@ serve(async (req) => {
         const analyticsResponse = await fetch(analyticsUrl, {
           headers: { 'Authorization': `Bearer ${accessToken}` },
         });
-        
+
         if (!analyticsResponse.ok) {
           const errorText = await analyticsResponse.text();
           console.error('[Error] Failed to fetch analytics:', analyticsResponse.status, errorText);
           throw new Error(`Failed to fetch analytics: ${analyticsResponse.status}`);
         }
-        
+
         const analyticsData = await analyticsResponse.json();
         console.log(`[Step 1] Received ${analyticsData.elements?.length || 0} analytics records`);
 
         // Aggregate analytics by creative URN
-        const analyticsMap = new Map<string, { impressions: number; clicks: number; spent: number; spentUsd: number; leads: number }>();
+        const analyticsMap = new Map<string, { impressions: number; clicks: number; spent: number; spentUsd: number; leads: number; conversions: number; formOpens: number }>();
         (analyticsData.elements || []).forEach((el: any) => {
           const creativeUrn = el.pivotValue || '';
           const creativeId = creativeUrn.split(':').pop() || '';
           if (!creativeId) return;
-          
-          const existing = analyticsMap.get(creativeId) || { impressions: 0, clicks: 0, spent: 0, spentUsd: 0, leads: 0 };
+
+          const existing = analyticsMap.get(creativeId) || { impressions: 0, clicks: 0, spent: 0, spentUsd: 0, leads: 0, conversions: 0, formOpens: 0 };
           analyticsMap.set(creativeId, {
             impressions: existing.impressions + (el.impressions || 0),
             clicks: existing.clicks + (el.clicks || 0),
             spent: existing.spent + parseFloat(el.costInLocalCurrency || '0'),
             spentUsd: existing.spentUsd + parseFloat(el.costInUsd || '0'),
-            leads: existing.leads + (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0),
+            leads: existing.leads + (el.oneClickLeads || 0),
+            conversions: existing.conversions + (el.externalWebsiteConversions || 0),
+            formOpens: existing.formOpens + (el.oneClickLeadFormOpens || 0),
           });
         });
         console.log(`[Step 1] Aggregated analytics for ${analyticsMap.size} unique creatives`);
@@ -1987,6 +1993,8 @@ serve(async (req) => {
             costInLocalCurrency: metrics.spent.toFixed(2),
             costInUsd: metrics.spentUsd.toFixed(2),
             leads: metrics.leads,
+            conversions: metrics.conversions,
+            formOpens: metrics.formOpens,
             ctr: ctr.toFixed(2),
             cpc: cpc.toFixed(2),
             cpm: cpm.toFixed(2),
@@ -2008,6 +2016,8 @@ serve(async (req) => {
               costInLocalCurrency: '0.00',
               costInUsd: '0.00',
               leads: 0,
+              conversions: 0,
+              formOpens: 0,
               ctr: '0.00',
               cpc: '0.00',
               cpm: '0.00',
@@ -2085,7 +2095,7 @@ serve(async (req) => {
           `pivot=${selectedPivot}&` +
           `${campaignParams}` +
           `accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
-          `fields=impressions,clicks,costInLocalCurrency,costInUsd,externalWebsiteConversions,oneClickLeads,pivotValue&` +
+          `fields=impressions,clicks,costInLocalCurrency,costInUsd,externalWebsiteConversions,oneClickLeads,oneClickLeadFormOpens,pivotValue&` +
           `count=10000`;
 
         console.log(`[get_demographic_analytics] Fetching analytics with pivot=${selectedPivot}...`);
@@ -2148,26 +2158,30 @@ serve(async (req) => {
         console.log(`[get_demographic_analytics] Total received: ${allElements.length} demographic records`);
 
         // Aggregate by pivot value
-        const entityMap = new Map<string, { 
+        const entityMap = new Map<string, {
           entityUrn: string;
-          impressions: number; 
-          clicks: number; 
-          spent: number; 
-          spentUsd: number; 
+          impressions: number;
+          clicks: number;
+          spent: number;
+          spentUsd: number;
           leads: number;
+          conversions: number;
+          formOpens: number;
         }>();
-        
+
         allElements.forEach((el: any) => {
           const entityUrn = el.pivotValue || '';
           if (!entityUrn) return;
-          
-          const existing = entityMap.get(entityUrn) || { 
+
+          const existing = entityMap.get(entityUrn) || {
             entityUrn,
-            impressions: 0, 
-            clicks: 0, 
-            spent: 0, 
-            spentUsd: 0, 
-            leads: 0 
+            impressions: 0,
+            clicks: 0,
+            spent: 0,
+            spentUsd: 0,
+            leads: 0,
+            conversions: 0,
+            formOpens: 0,
           };
           entityMap.set(entityUrn, {
             entityUrn,
@@ -2175,7 +2189,9 @@ serve(async (req) => {
             clicks: existing.clicks + (el.clicks || 0),
             spent: existing.spent + parseFloat(el.costInLocalCurrency || '0'),
             spentUsd: existing.spentUsd + parseFloat(el.costInUsd || '0'),
-            leads: existing.leads + (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0),
+            leads: existing.leads + (el.oneClickLeads || 0),
+            conversions: existing.conversions + (el.externalWebsiteConversions || 0),
+            formOpens: existing.formOpens + (el.oneClickLeadFormOpens || 0),
           });
         });
 
@@ -2309,6 +2325,8 @@ serve(async (req) => {
             costInLocalCurrency: metrics.spent.toFixed(2),
             costInUsd: metrics.spentUsd.toFixed(2),
             leads: metrics.leads,
+            conversions: metrics.conversions,
+            formOpens: metrics.formOpens,
             ctr: ctr.toFixed(2),
             cpc: cpc.toFixed(2),
             cpm: cpm.toFixed(2),
@@ -2447,9 +2465,9 @@ serve(async (req) => {
           `timeGranularity=${granularity === 'ALL' ? 'ALL' : granularity}&` +
           `pivot=MEMBER_COMPANY&` +
           `accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
-          `fields=impressions,clicks,landingPageClicks,costInLocalCurrency,costInUsd,externalWebsiteConversions,oneClickLeads,totalEngagements,likes,comments,reactions,shares,pivotValue&` +
+          `fields=impressions,clicks,landingPageClicks,costInLocalCurrency,costInUsd,externalWebsiteConversions,oneClickLeads,oneClickLeadFormOpens,totalEngagements,likes,comments,reactions,shares,pivotValue&` +
           `count=10000`;
-        
+
         if (campaignIds && campaignIds.length > 0) {
           campaignIds.forEach((id: string, i: number) => {
             analyticsUrl += `&campaigns[${i}]=urn:li:sponsoredCampaign:${id}`;
@@ -2457,15 +2475,17 @@ serve(async (req) => {
         }
 
         console.log('[get_company_demographic] Step 1: Fetching company demographic analytics...');
-        
+
         // Aggregate by company URN directly during pagination to reduce peak memory
-        const companyMap = new Map<string, { 
+        const companyMap = new Map<string, {
           entityUrn: string;
-          impressions: number; 
-          clicks: number; 
-          spent: number; 
-          spentUsd: number; 
+          impressions: number;
+          clicks: number;
+          spent: number;
+          spentUsd: number;
           leads: number;
+          conversions: number;
+          formOpens: number;
           engagements: number;
           landingPageClicks: number;
           likes: number;
@@ -2513,7 +2533,9 @@ serve(async (req) => {
               existing.clicks += (el.clicks || 0);
               existing.spent += parseFloat(el.costInLocalCurrency || '0');
               existing.spentUsd += parseFloat(el.costInUsd || '0');
-              existing.leads += (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
+              existing.leads += (el.oneClickLeads || 0);
+              existing.conversions += (el.externalWebsiteConversions || 0);
+              existing.formOpens += (el.oneClickLeadFormOpens || 0);
               existing.landingPageClicks += (el.landingPageClicks || 0);
               existing.engagements += (el.totalEngagements || 0);
               existing.likes += (el.likes || 0);
@@ -2527,7 +2549,9 @@ serve(async (req) => {
                 clicks: el.clicks || 0,
                 spent: parseFloat(el.costInLocalCurrency || '0'),
                 spentUsd: parseFloat(el.costInUsd || '0'),
-                leads: (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0),
+                leads: el.oneClickLeads || 0,
+                conversions: el.externalWebsiteConversions || 0,
+                formOpens: el.oneClickLeadFormOpens || 0,
                 landingPageClicks: el.landingPageClicks || 0,
                 engagements: el.totalEngagements || 0,
                 likes: el.likes || 0,
@@ -2683,6 +2707,8 @@ serve(async (req) => {
             costInLocalCurrency: metrics.spent.toFixed(2),
             costInUsd: metrics.spentUsd.toFixed(2),
             leads: metrics.leads,
+            conversions: metrics.conversions,
+            formOpens: metrics.formOpens,
             engagements: metrics.engagements,
             likes: metrics.likes,
             comments: metrics.comments,
@@ -2725,7 +2751,7 @@ serve(async (req) => {
         const endDate = dateRange?.end || new Date().toISOString().split('T')[0];
         const [startYear, startMonth, startDay] = startDate.split('-').map(Number);
         const [endYear, endMonth, endDay] = endDate.split('-').map(Number);
-        const analyticsFields = 'impressions,clicks,landingPageClicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions,totalEngagements,likes,comments,reactions,shares,pivotValue';
+        const analyticsFields = 'impressions,clicks,landingPageClicks,costInLocalCurrency,oneClickLeads,oneClickLeadFormOpens,externalWebsiteConversions,totalEngagements,likes,comments,reactions,shares,pivotValue';
         const buildAnalyticsQuery = (extraParams: string[]) => [
           'q=analytics',
           `dateRange.start.day=${startDay}`,
@@ -3011,24 +3037,27 @@ serve(async (req) => {
               const impressions = el.impressions || 0;
               const clicks = el.clicks || 0;
               const spent = parseFloat(el.costInLocalCurrency || '0');
-              const leads = (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
+              const leads = el.oneClickLeads || 0;
+              const conversions = el.externalWebsiteConversions || 0;
+              const formOpens = el.oneClickLeadFormOpens || 0;
               const landingPageClicks = el.landingPageClicks || 0;
               const engagements = el.totalEngagements || 0;
               const likes = el.likes || 0;
               const comments = el.comments || 0;
               const reactions = el.reactions || 0;
               const shares = el.shares || 0;
-              if (impressions === 0 && clicks === 0 && spent === 0 && leads === 0 && engagements === 0 && landingPageClicks === 0) continue;
+              if (impressions === 0 && clicks === 0 && spent === 0 && leads === 0 && conversions === 0 && engagements === 0 && landingPageClicks === 0) continue;
 
               if (!result[entityUrn]) result[entityUrn] = [];
               const existing = result[entityUrn].find((e: any) => e.objective === objective);
               if (existing) {
                 existing.impressions += impressions; existing.clicks += clicks; existing.spent += spent;
-                existing.leads += leads; existing.landingPageClicks += landingPageClicks;
+                existing.leads += leads; existing.conversions += conversions; existing.formOpens += formOpens;
+                existing.landingPageClicks += landingPageClicks;
                 existing.engagements += engagements; existing.likes += likes;
                 existing.comments += comments; existing.reactions += reactions; existing.shares += shares;
               } else {
-                result[entityUrn].push({ objective, impressions, clicks, spent: parseFloat(spent.toFixed(2)), leads, landingPageClicks, engagements, likes, comments, reactions, shares });
+                result[entityUrn].push({ objective, impressions, clicks, spent: parseFloat(spent.toFixed(2)), leads, conversions, formOpens, landingPageClicks, engagements, likes, comments, reactions, shares });
               }
             }
             console.log(`[get_objective_breakdowns] Objective ${objective}: processed ${elements.length} elements`);
@@ -3109,7 +3138,7 @@ serve(async (req) => {
               qp.set('pivot', 'MEMBER_COMPANY');
               qp.set('accounts[0]', `urn:li:sponsoredAccount:${accountId}`);
               qp.set('creatives[0]', `urn:li:sponsoredCreative:${creativeId}`);
-              qp.set('fields', 'pivotValue,impressions,clicks,landingPageClicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions,totalEngagements');
+              qp.set('fields', 'pivotValue,impressions,clicks,landingPageClicks,costInLocalCurrency,oneClickLeads,oneClickLeadFormOpens,externalWebsiteConversions,totalEngagements');
               qp.set('count', String(pageSize));
               qp.set('start', String(start));
               const resp = await fetch(`https://api.linkedin.com/v2/adAnalyticsV2?${qp.toString()}`, {
@@ -3129,8 +3158,10 @@ serve(async (req) => {
                 const impressions = el.impressions || 0;
                 const clicks = el.clicks || 0;
                 const spent = parseFloat(el.costInLocalCurrency || '0');
-                const leads = (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
-                if (impressions === 0 && clicks === 0 && spent === 0 && leads === 0) continue;
+                const leads = el.oneClickLeads || 0;
+                const conversions = el.externalWebsiteConversions || 0;
+                const formOpens = el.oneClickLeadFormOpens || 0;
+                if (impressions === 0 && clicks === 0 && spent === 0 && leads === 0 && conversions === 0) continue;
                 if (!result[companyUrn]) result[companyUrn] = {};
                 result[companyUrn][creativeId] = {
                   impressions,
@@ -3138,6 +3169,8 @@ serve(async (req) => {
                   landingPageClicks: el.landingPageClicks || 0,
                   spent: parseFloat(spent.toFixed(2)),
                   leads,
+                  conversions,
+                  formOpens,
                   engagements: el.totalEngagements || 0,
                   ctr: impressions > 0 ? parseFloat(((clicks / impressions) * 100).toFixed(2)) : 0,
                   cpc: clicks > 0 ? parseFloat((spent / clicks).toFixed(2)) : 0,
@@ -3180,7 +3213,7 @@ serve(async (req) => {
         
         const [startYear, startMonth, startDay] = startDate.split('-').map(Number);
         const [endYear, endMonth, endDay] = endDate.split('-').map(Number);
-        const campaignBreakdownFields = 'impressions,clicks,landingPageClicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions,totalEngagements,likes,comments,reactions,shares,pivotValue';
+        const campaignBreakdownFields = 'impressions,clicks,landingPageClicks,costInLocalCurrency,oneClickLeads,oneClickLeadFormOpens,externalWebsiteConversions,totalEngagements,likes,comments,reactions,shares,pivotValue';
         const buildCampaignBreakdownQuery = (campaignId: string, pageSize: number, pageStart: number) => [
           'q=analytics',
           `dateRange.start.day=${startDay}`,
@@ -3253,7 +3286,7 @@ serve(async (req) => {
         console.log(`[get_company_campaign_breakdown] Completed ${allResults.length} campaign queries`);
         
         // Build breakdowns: companyUrn -> [{ campaignId, campaignName, metrics }]
-        const breakdowns: Record<string, Array<{ campaignId: string; campaignName: string; impressions: number; clicks: number; landingPageClicks: number; spent: number; leads: number; engagements: number; likes: number; comments: number; reactions: number; shares: number; ctr: number; cpc: number; cpm: number }>> = {};
+        const breakdowns: Record<string, Array<{ campaignId: string; campaignName: string; impressions: number; clicks: number; landingPageClicks: number; spent: number; leads: number; conversions: number; formOpens: number; engagements: number; likes: number; comments: number; reactions: number; shares: number; ctr: number; cpc: number; cpm: number }>> = {};
         const nameMap = objCampaignNames || {};
         
         for (const { campaignId, elements } of allResults) {
@@ -3266,24 +3299,28 @@ serve(async (req) => {
             const impressions = el.impressions || 0;
             const clicks = el.clicks || 0;
             const spent = parseFloat(el.costInLocalCurrency || '0');
-            const leads = (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
+            const leads = el.oneClickLeads || 0;
+            const conversions = el.externalWebsiteConversions || 0;
+            const formOpens = el.oneClickLeadFormOpens || 0;
             const landingPageClicks = el.landingPageClicks || 0;
             const engagements = el.totalEngagements || 0;
             const likes = el.likes || 0;
             const comments = el.comments || 0;
             const reactions = el.reactions || 0;
             const shares = el.shares || 0;
-            
-            if (impressions === 0 && clicks === 0 && spent === 0 && leads === 0 && engagements === 0 && landingPageClicks === 0) continue;
-            
+
+            if (impressions === 0 && clicks === 0 && spent === 0 && leads === 0 && conversions === 0 && engagements === 0 && landingPageClicks === 0) continue;
+
             if (!breakdowns[entityUrn]) breakdowns[entityUrn] = [];
-            
+
             const existing = breakdowns[entityUrn].find(e => e.campaignId === campaignId);
             if (existing) {
               existing.impressions += impressions;
               existing.clicks += clicks;
               existing.spent += spent;
               existing.leads += leads;
+              existing.conversions += conversions;
+              existing.formOpens += formOpens;
               existing.landingPageClicks += landingPageClicks;
               existing.engagements += engagements;
               existing.likes += likes;
@@ -3302,6 +3339,8 @@ serve(async (req) => {
                 landingPageClicks,
                 spent: parseFloat(spent.toFixed(2)),
                 leads,
+                conversions,
+                formOpens,
                 engagements,
                 likes,
                 comments,
@@ -3394,7 +3433,7 @@ serve(async (req) => {
         console.log(`[Step 2] Analytics URL:`, analyticsUrl);
         
         // Aggregate analytics by creative
-        const creativeMetrics = new Map<string, { impressions: number; clicks: number; spent: number; leads: number; lgfFormOpens: number }>();
+        const creativeMetrics = new Map<string, { impressions: number; clicks: number; spent: number; leads: number; conversions: number; lgfFormOpens: number }>();
         const creativeIdsWithData = new Set<string>();
         let totalAnalyticsRows = 0;
         
@@ -3416,11 +3455,12 @@ serve(async (req) => {
               if (!creativeId) continue;
               
               creativeIdsWithData.add(creativeId);
-              const existing = creativeMetrics.get(creativeId) || { impressions: 0, clicks: 0, spent: 0, leads: 0, lgfFormOpens: 0 };
+              const existing = creativeMetrics.get(creativeId) || { impressions: 0, clicks: 0, spent: 0, leads: 0, conversions: 0, lgfFormOpens: 0 };
               existing.impressions += element.impressions || 0;
               existing.clicks += element.clicks || 0;
               existing.spent += parseFloat(element.costInLocalCurrency || '0');
-              existing.leads += (element.oneClickLeads || 0) + (element.externalWebsiteConversions || 0);
+              existing.leads += element.oneClickLeads || 0;
+              existing.conversions += element.externalWebsiteConversions || 0;
               existing.lgfFormOpens += element.oneClickLeadFormOpens || 0;
               creativeMetrics.set(creativeId, existing);
             }
@@ -3614,16 +3654,16 @@ serve(async (req) => {
         const reportElements: any[] = [];
         
         for (const [creativeId, info] of creativeInfoMap) {
-          const metrics = creativeMetrics.get(creativeId) || { impressions: 0, clicks: 0, spent: 0, leads: 0, lgfFormOpens: 0 };
-          
+          const metrics = creativeMetrics.get(creativeId) || { impressions: 0, clicks: 0, spent: 0, leads: 0, conversions: 0, lgfFormOpens: 0 };
+
           const ctr = metrics.impressions > 0 ? (metrics.clicks / metrics.impressions) * 100 : 0;
           const cpc = metrics.clicks > 0 ? metrics.spent / metrics.clicks : 0;
           const cpm = metrics.impressions > 0 ? (metrics.spent / metrics.impressions) * 1000 : 0;
           const costPerLead = metrics.leads > 0 ? metrics.spent / metrics.leads : 0;
           const lgfCompletionRate = metrics.lgfFormOpens > 0 ? (metrics.leads / metrics.lgfFormOpens) * 100 : 0;
-          
+
           const imageUrl = info.reference ? (referenceImageCache.get(info.reference) || '') : '';
-          
+
           reportElements.push({
             creativeId,
             creativeName: info.name || 'Sponsored Image Ad',
@@ -3635,6 +3675,8 @@ serve(async (req) => {
             clicks: metrics.clicks,
             spent: metrics.spent.toFixed(2),
             leads: metrics.leads,
+            conversions: metrics.conversions,
+            formOpens: metrics.lgfFormOpens,
             lgfFormOpens: metrics.lgfFormOpens,
             lgfCompletionRate: lgfCompletionRate.toFixed(2),
             ctr: ctr.toFixed(2),
@@ -3742,7 +3784,7 @@ serve(async (req) => {
             ex.impressions += el.impressions || 0;
             ex.clicks += el.clicks || 0;
             ex.spent += parseFloat(el.costInLocalCurrency || '0');
-            ex.leads += (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
+            ex.leads += (el.oneClickLeads || 0);
             metricsMap.set(cid, ex);
           }
           periodMetrics.set(pr.key, metricsMap);
@@ -4056,7 +4098,7 @@ serve(async (req) => {
             ex.impressions += el.impressions || 0;
             ex.clicks += el.clicks || 0;
             ex.spent += parseFloat(el.costInLocalCurrency || '0');
-            ex.leads += (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
+            ex.leads += (el.oneClickLeads || 0);
             m.set(cid, ex);
           }
           campPerfMetrics.set(pr.key, m);
@@ -4075,7 +4117,7 @@ serve(async (req) => {
             ex.impressions += el.impressions || 0;
             ex.clicks += el.clicks || 0;
             ex.spent += parseFloat(el.costInLocalCurrency || '0');
-            ex.leads += (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
+            ex.leads += (el.oneClickLeads || 0);
             m.set(cid, ex);
           }
           campCreativeMetrics.set(pr.key, m);
@@ -4534,7 +4576,7 @@ serve(async (req) => {
             const info = campaignInfoMap.get(campaignId) || {};
             const spent = parseFloat(row.costInLocalCurrency || '0');
             const isLeadGen = (info.objectiveType === 'LEAD_GENERATION');
-            const leads = isLeadGen ? (row.oneClickLeads || 0) + (row.externalWebsiteConversions || 0) : 0;
+            const leads = isLeadGen ? (row.oneClickLeads || 0) : 0;
             
             dailyElements.push({
               campaignId,
@@ -4568,29 +4610,30 @@ serve(async (req) => {
         }
         
         // For ALL granularity, aggregate by campaign
-        const campaignMetrics = new Map<string, { impressions: number; clicks: number; spent: number; leads: number; lgfFormOpens: number }>();
-        
+        const campaignMetrics = new Map<string, { impressions: number; clicks: number; spent: number; leads: number; conversions: number; lgfFormOpens: number }>();
+
         for (const row of allAnalytics) {
           const pivotValue = row.pivotValue || '';
           const campaignId = pivotValue.split(':').pop() || '';
           if (!campaignId) continue;
-          
-          const existing = campaignMetrics.get(campaignId) || { impressions: 0, clicks: 0, spent: 0, leads: 0, lgfFormOpens: 0 };
+
+          const existing = campaignMetrics.get(campaignId) || { impressions: 0, clicks: 0, spent: 0, leads: 0, conversions: 0, lgfFormOpens: 0 };
           existing.impressions += row.impressions || 0;
           existing.clicks += row.clicks || 0;
           existing.spent += parseFloat(row.costInLocalCurrency || '0');
           const info = campaignInfoMap.get(campaignId) || {};
           const isLeadGen = (info.objectiveType === 'LEAD_GENERATION');
-          existing.leads += isLeadGen ? (row.oneClickLeads || 0) + (row.externalWebsiteConversions || 0) : 0;
+          existing.leads += isLeadGen ? (row.oneClickLeads || 0) : 0;
+          existing.conversions += row.externalWebsiteConversions || 0;
           existing.lgfFormOpens += isLeadGen ? (row.oneClickLeadFormOpens || 0) : 0;
           campaignMetrics.set(campaignId, existing);
         }
-        
+
         // Step 4: Build final report
         const reportElements: any[] = [];
-        
+
         for (const [campaignId, info] of campaignInfoMap) {
-          const metrics = campaignMetrics.get(campaignId) || { impressions: 0, clicks: 0, spent: 0, leads: 0, lgfFormOpens: 0 };
+          const metrics = campaignMetrics.get(campaignId) || { impressions: 0, clicks: 0, spent: 0, leads: 0, conversions: 0, lgfFormOpens: 0 };
           
           // Include all campaigns (even newly-launched ones with no analytics yet)
           // so they appear in pickers like the Campaign Editor.
@@ -4613,6 +4656,8 @@ serve(async (req) => {
             clicks: metrics.clicks,
             costInLocalCurrency: metrics.spent.toFixed(2),
             leads: metrics.leads,
+            conversions: metrics.conversions,
+            formOpens: metrics.lgfFormOpens,
             lgfFormOpens: metrics.lgfFormOpens,
             lgfCompletionRate: lgfCompletionRate.toFixed(2),
             ctr: ctr.toFixed(2),
@@ -4621,7 +4666,7 @@ serve(async (req) => {
             costPerLead: costPerLead.toFixed(2),
           });
         }
-        
+
         // Sort by impressions descending
         reportElements.sort((a, b) => b.impressions - a.impressions);
         
@@ -4717,7 +4762,7 @@ serve(async (req) => {
           const impressions = row.impressions || 0;
           const clicks = row.clicks || 0;
           const spent = parseFloat(row.costInLocalCurrency || '0');
-          const leads = (row.oneClickLeads || 0) + (row.externalWebsiteConversions || 0);
+          const leads = (row.oneClickLeads || 0);
           
           totalImpressions += impressions;
           jobFunctionMetrics[jobFunction] = { impressions, clicks, spent, leads, urn: pivotValue };
@@ -4733,7 +4778,7 @@ serve(async (req) => {
           const impressions = row.impressions || 0;
           const clicks = row.clicks || 0;
           const spent = parseFloat(row.costInLocalCurrency || '0');
-          const leads = (row.oneClickLeads || 0) + (row.externalWebsiteConversions || 0);
+          const leads = (row.oneClickLeads || 0);
           
           seniorityMetrics[seniority] = { impressions, clicks, spent, leads };
         }
@@ -4872,7 +4917,7 @@ serve(async (req) => {
           const impressions = row.impressions || 0;
           const clicks = row.clicks || 0;
           const spent = Number(row.costInLocalCurrency || 0);
-          const leads = (row.oneClickLeads || 0) + (row.externalWebsiteConversions || 0);
+          const leads = (row.oneClickLeads || 0);
           
           // Skip rows with no activity
           if (impressions === 0 && spent === 0) continue;
@@ -5337,7 +5382,7 @@ serve(async (req) => {
             
             for (const el of elements) {
               const pivotValue = el.pivotValue || '';
-              const leads = (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
+              const leads = (el.oneClickLeads || 0);
               
               lgfCreativeAnalytics.set(pivotValue, {
                 creativeUrn: pivotValue,
@@ -6121,7 +6166,7 @@ serve(async (req) => {
                 impressions: el.impressions || 0,
                 clicks: el.clicks || 0,
                 spent: parseFloat(el.costInLocalCurrency || '0'),
-                leads: (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0),
+                leads: (el.oneClickLeads || 0),
                 formOpens: el.oneClickLeadFormOpens || 0,
                 videoViews: el.videoViews || 0,
                 videoCompletions: el.videoCompletions || 0,
@@ -8423,7 +8468,7 @@ serve(async (req) => {
                   spend: parseFloat(el.costInLocalCurrency || '0'),
                   impressions: el.impressions || 0,
                   clicks: el.clicks || 0,
-                  leads: (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0),
+                  leads: (el.oneClickLeads || 0),
                 });
               }
             }
@@ -8613,7 +8658,7 @@ serve(async (req) => {
                 impressions: el.impressions || 0,
                 clicks: el.clicks || 0,
                 spend: parseFloat(el.costInLocalCurrency || '0'),
-                leads: (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0),
+                leads: (el.oneClickLeads || 0),
                 formOpens: el.oneClickLeadFormOpens || 0,
               });
             }
@@ -9269,7 +9314,7 @@ serve(async (req) => {
               const impressions = el.impressions || 0;
               const clicks = el.clicks || 0;
               const spend = parseFloat(el.costInLocalCurrency || '0');
-              const leads = (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
+              const leads = (el.oneClickLeads || 0);
 
               titlePerformance.push({
                 titleUrn,
@@ -9304,7 +9349,7 @@ serve(async (req) => {
           if (response.ok) {
             const data = await response.json();
             for (const el of (data.elements || [])) {
-              const leads = (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
+              const leads = (el.oneClickLeads || 0);
               const spend = parseFloat(el.costInLocalCurrency || '0');
               if (leads > 0) {
                 topFunctions.push({
@@ -9634,7 +9679,7 @@ serve(async (req) => {
               const impressions = el.impressions || 0;
               const clicks = el.clicks || 0;
               const spend = parseFloat(el.costInLocalCurrency || '0');
-              const leads = (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
+              const leads = (el.oneClickLeads || 0);
               const formOpens = el.oneClickLeadFormOpens || 0;
 
               let company = companyData.get(companyUrn);
@@ -9861,7 +9906,7 @@ serve(async (req) => {
                   const impressions = el.impressions || 0;
                   const clicks = el.clicks || 0;
                   const spend = parseFloat(el.costInLocalCurrency || '0');
-                  const leads = (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
+                  const leads = (el.oneClickLeads || 0);
 
                   if (existing) {
                     existing.impressions += impressions;
@@ -10116,7 +10161,7 @@ serve(async (req) => {
           const impressions = el.impressions || 0;
           const clicks = el.clicks || 0;
           const spend = parseFloat(el.costInLocalCurrency || '0');
-          const leads = (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0);
+          const leads = (el.oneClickLeads || 0);
 
           // Update daily data
           if (!dailyData.has(dateKey)) {
@@ -10509,7 +10554,7 @@ serve(async (req) => {
             impressions: existing.impressions + (el.impressions || 0),
             clicks: existing.clicks + (el.clicks || 0),
             spend: existing.spend + parseFloat(el.costInLocalCurrency || '0'),
-            leads: existing.leads + (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0),
+            leads: existing.leads + (el.oneClickLeads || 0),
             formOpens: existing.formOpens + (el.oneClickLeadFormOpens || 0),
           });
         });
@@ -12037,7 +12082,7 @@ serve(async (req) => {
             impressions: el.impressions || 0,
             clicks: el.clicks || 0,
             spent: parseFloat(el.costInLocalCurrency || '0'),
-            leads: (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0),
+            leads: (el.oneClickLeads || 0),
           };
         }
 
@@ -12068,7 +12113,7 @@ serve(async (req) => {
             date,
             spent: parseFloat(el.costInLocalCurrency || '0'),
             clicks: el.clicks || 0,
-            leads: (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0),
+            leads: (el.oneClickLeads || 0),
             impressions: el.impressions || 0,
           });
         }
@@ -12350,7 +12395,7 @@ serve(async (req) => {
               impressions: el.impressions || 0,
               clicks: el.clicks || 0,
               spent: parseFloat(el.costInLocalCurrency || '0'),
-              leads: (el.oneClickLeads || 0) + (el.externalWebsiteConversions || 0),
+              leads: (el.oneClickLeads || 0),
             };
           }).sort((a, b) => b.impressions - a.impressions).slice(0, 20);
         }
