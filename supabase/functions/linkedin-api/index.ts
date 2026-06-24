@@ -1301,8 +1301,19 @@ serve(async (req) => {
 
           console.log(`[Share API] Fetching content for ${shareUrns.length} shares...`);
 
+          // URN type breakdown
+          const ugcCount = shareUrns.filter(u => u.includes('ugcPost')).length;
+          const shareCount = shareUrns.filter(u => u.includes(':share:')).length;
+          const otherCount = shareUrns.length - ugcCount - shareCount;
+          console.log(`[Share API] URN breakdown: ugcPost=${ugcCount}, share=${shareCount}, other=${otherCount}; sample=${JSON.stringify(shareUrns.slice(0, 3))}`);
+
           // Track URNs that have a media ID but no direct URL, for batch resolution later
           const unresolvedMediaIds = new Map<string, string>(); // shareUrn -> imageUrn
+
+          let postsFirstFailureLogged = false;
+          let v2FirstFailureLogged = false;
+          let postsOkCount = 0;
+          let v2OkCount = 0;
 
           for (const urn of shareUrns.slice(0, 100)) { // Limit to first 100
             try {
@@ -1321,9 +1332,17 @@ serve(async (req) => {
                 if (postsResp.ok) {
                   data = await postsResp.json();
                   usedPostsApi = true;
+                  postsOkCount++;
+                } else if (!postsFirstFailureLogged) {
+                  const errText = await postsResp.text().catch(() => '');
+                  console.log(`[Share API] /rest/posts first failure: urn=${urn} status=${postsResp.status} body=${errText.substring(0, 300)}`);
+                  postsFirstFailureLogged = true;
                 }
               } catch (e) {
-                // /rest/posts failed, will fall back to v2 below
+                if (!postsFirstFailureLogged) {
+                  console.log(`[Share API] /rest/posts first failure (throw): urn=${urn} err=${(e as Error).message}`);
+                  postsFirstFailureLogged = true;
+                }
               }
 
               // Fallback: v2 shares/ugcPosts API
@@ -1339,10 +1358,16 @@ serve(async (req) => {
 
                 if (response.ok) {
                   data = await response.json();
+                  v2OkCount++;
+                } else if (!v2FirstFailureLogged) {
+                  const errText = await response.text().catch(() => '');
+                  console.log(`[Share API] v2 first failure: urn=${urn} endpoint=${isUgc ? 'ugcPosts' : 'shares'} status=${response.status} body=${errText.substring(0, 300)}`);
+                  v2FirstFailureLogged = true;
                 }
               }
 
               if (!data) continue;
+
 
               // Debug: log first share response structure
               if (shareData.size === 0) {
@@ -1424,6 +1449,9 @@ serve(async (req) => {
               console.error(`[Share API] Error fetching ${urn}:`, err);
             }
           }
+
+          console.log(`[Share API] Fetch summary: /rest/posts ok=${postsOkCount}, v2 fallback ok=${v2OkCount}, total attempted=${Math.min(shareUrns.length, 100)}`);
+
 
           // Batch resolve all unresolved media IDs via /rest/images API
           if (unresolvedMediaIds.size > 0) {
