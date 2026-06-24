@@ -1450,6 +1450,9 @@ serve(async (req) => {
             }
           }
 
+          console.log(`[Share API] Fetch summary: /rest/posts ok=${postsOkCount}, v2 fallback ok=${v2OkCount}, total attempted=${Math.min(shareUrns.length, 100)}`);
+
+
           // Batch resolve all unresolved media IDs via /rest/images API
           if (unresolvedMediaIds.size > 0) {
             console.log(`[Share API] Batch resolving ${unresolvedMediaIds.size} unresolved media IDs via /rest/images...`);
