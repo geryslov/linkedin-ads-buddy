@@ -2262,65 +2262,89 @@ serve(async (req) => {
             }
           }
         } else if (selectedPivot === 'MEMBER_JOB_TITLE') {
-          // Resolve job title URNs using LinkedIn Titles API
-          // Format: urn:li:title:X -> call /v2/titles/{X}?locale=en_US
+          // Resolve job title URNs using LinkedIn Standardized Titles batch API + DB cache
+          // Format: urn:li:title:X -> /v2/standardizedTitles?ids=List(X,Y,...)
           const titleIds: string[] = [];
           entityUrns.forEach(urn => {
             const match = urn.match(/^urn:li:title:(\d+)$/);
             if (match) {
               titleIds.push(match[1]);
             } else {
-              // Plain text or unknown format - use as-is
               entityNames.set(urn, urn || 'Unknown Job Title');
             }
           });
-          
+
           console.log(`[get_demographic_analytics] Resolving ${titleIds.length} job title URNs`);
-          
-          // Batch lookup titles (LinkedIn doesn't have a batch endpoint, so we parallelize)
-          const batchSize = 20;
-          for (let i = 0; i < titleIds.length; i += batchSize) {
-            const batch = titleIds.slice(i, i + batchSize);
-            
-            const titlePromises = batch.map(async (titleId) => {
+
+          // 1) DB cache lookup (30-day TTL)
+          const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+          const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+          const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+          const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
+          const resolvedNames = new Map<string, string>();
+
+          if (titleIds.length > 0) {
+            const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+            const { data: cachedRows } = await supabaseAdmin
+              .from('title_metadata_cache')
+              .select('title_id, name')
+              .in('title_id', titleIds)
+              .gte('updated_at', thirtyDaysAgo);
+            for (const row of (cachedRows || [])) {
+              if (row.name) resolvedNames.set(row.title_id, row.name);
+            }
+            console.log(`[get_demographic_analytics] Title cache hits: ${resolvedNames.size}/${titleIds.length}`);
+
+            // 2) Fetch uncached via batch standardizedTitles
+            const uncachedIds = titleIds.filter(id => !resolvedNames.has(id));
+            const newMetadata: any[] = [];
+            const batchSize = 50;
+            for (let i = 0; i < uncachedIds.length; i += batchSize) {
+              const batchIds = uncachedIds.slice(i, i + batchSize);
+              const url = `https://api.linkedin.com/v2/standardizedTitles?ids=List(${batchIds.join(',')})`;
               try {
-              const titleResponse = await fetch(
-                  `https://api.linkedin.com/v2/titles/${titleId}?locale=en_US`,
-                  { headers: { 'Authorization': `Bearer ${accessToken}` } }
-                );
-                
-                if (titleResponse.ok) {
-                  const titleData = await titleResponse.json();
-                  // Extract localized name: name.localized.en_US
-                  let localizedName: string | null = null;
-                  if (titleData?.name?.localized?.en_US) {
-                    localizedName = titleData.name.localized.en_US;
-                  } else if (titleData?.name?.localized) {
-                    // Try first available locale
-                    const locales = Object.values(titleData.name.localized);
-                    if (locales.length > 0 && typeof locales[0] === 'string') {
-                      localizedName = locales[0];
-                    }
+                const resp = await fetch(url, {
+                  headers: {
+                    'Authorization': `Bearer ${accessToken}`,
+                    'X-Restli-Protocol-Version': '2.0.0',
+                  },
+                });
+                if (!resp.ok) {
+                  const errText = await resp.text();
+                  console.error(`[get_demographic_analytics] standardizedTitles ${resp.status}: ${errText.slice(0, 200)}`);
+                  continue;
+                }
+                const data = await resp.json();
+                const results = data.results || {};
+                for (const [titleId, info] of Object.entries(results)) {
+                  if (!info) continue;
+                  const i2 = info as any;
+                  const name = i2.name?.localized?.en_US || i2.name?.preferredLocale?.name || null;
+                  if (name) {
+                    resolvedNames.set(titleId, name);
+                    newMetadata.push({
+                      title_id: titleId,
+                      name,
+                      function_urn: i2.jobFunction || null,
+                      super_title_urn: i2.superTitle || null,
+                    });
                   }
-                  return { 
-                    urn: `urn:li:title:${titleId}`, 
-                    name: localizedName || `Title ${titleId}` 
-                  };
-                } else {
-                  console.log(`[Warning] Title lookup failed for ${titleId}: ${titleResponse.status}`);
-                  return { urn: `urn:li:title:${titleId}`, name: `Title ${titleId}` };
                 }
               } catch (e) {
-                console.log(`[Warning] Title lookup error for ${titleId}:`, e);
-                return { urn: `urn:li:title:${titleId}`, name: `Title ${titleId}` };
+                console.error(`[get_demographic_analytics] standardizedTitles fetch error:`, e);
               }
-            });
-            
-            const results = await Promise.all(titlePromises);
-            results.forEach((result) => {
-              entityNames.set(result.urn, result.name);
-            });
+            }
+
+            if (newMetadata.length > 0) {
+              await supabaseAdmin
+                .from('title_metadata_cache')
+                .upsert(newMetadata, { onConflict: 'title_id' });
+            }
           }
+
+          titleIds.forEach(id => {
+            entityNames.set(`urn:li:title:${id}`, resolvedNames.get(id) || `Title ${id}`);
+          });
         } else {
           // For other pivots, extract human-readable name from URN or use as-is
           entityUrns.forEach(urn => {
