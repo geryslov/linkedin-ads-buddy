@@ -660,6 +660,115 @@ serve(async (req) => {
         });
       }
 
+      case 'publish_weekly_report': {
+        const authHeader = req.headers.get('Authorization') || '';
+        const jwt = authHeader.replace(/^Bearer\s+/i, '');
+        const { data: userData, error: authErr } = await supabaseClient.auth.getUser(jwt);
+        if (authErr || !userData?.user) {
+          return new Response(JSON.stringify({ error: 'Not authenticated' }), {
+            status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+        const {
+          accountId, clientName, weekStart, weekEnd,
+          narrativeMarkdown, kpiSnapshot, rawData,
+        } = params || {};
+        if (!accountId || !clientName || !weekStart || !weekEnd || !narrativeMarkdown || !kpiSnapshot) {
+          return new Response(JSON.stringify({ error: 'Missing required fields' }), {
+            status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+        const shareToken = crypto.randomUUID().replace(/-/g, '');
+        const { data: inserted, error } = await supabaseClient
+          .from('published_reports')
+          .insert({
+            share_token: shareToken,
+            user_id: userData.user.id,
+            account_id: accountId,
+            client_name: clientName,
+            week_start: weekStart,
+            week_end: weekEnd,
+            narrative_markdown: narrativeMarkdown,
+            kpi_snapshot: kpiSnapshot,
+            raw_data: rawData || null,
+          })
+          .select('id, share_token, published_at')
+          .single();
+        if (error) {
+          console.error('publish_weekly_report insert failed:', error);
+          return new Response(JSON.stringify({ error: error.message }), {
+            status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+        const origin = req.headers.get('origin') || '';
+        return new Response(JSON.stringify({
+          id: inserted.id,
+          shareToken: inserted.share_token,
+          publishedAt: inserted.published_at,
+          publicUrl: origin ? `${origin}/report/${inserted.share_token}` : `/report/${inserted.share_token}`,
+        }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      case 'list_published_reports': {
+        const authHeader = req.headers.get('Authorization') || '';
+        const jwt = authHeader.replace(/^Bearer\s+/i, '');
+        const { data: userData, error: authErr } = await supabaseClient.auth.getUser(jwt);
+        if (authErr || !userData?.user) {
+          return new Response(JSON.stringify({ error: 'Not authenticated' }), {
+            status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+        const { accountId } = params || {};
+        let query = supabaseClient
+          .from('published_reports')
+          .select('id, share_token, account_id, client_name, week_start, week_end, published_at, revoked_at')
+          .eq('user_id', userData.user.id)
+          .order('published_at', { ascending: false })
+          .limit(50);
+        if (accountId) query = query.eq('account_id', accountId);
+        const { data, error } = await query;
+        if (error) {
+          console.error('list_published_reports failed:', error);
+          return new Response(JSON.stringify({ error: error.message }), {
+            status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+        return new Response(JSON.stringify({ reports: data || [] }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      case 'revoke_published_report': {
+        const authHeader = req.headers.get('Authorization') || '';
+        const jwt = authHeader.replace(/^Bearer\s+/i, '');
+        const { data: userData, error: authErr } = await supabaseClient.auth.getUser(jwt);
+        if (authErr || !userData?.user) {
+          return new Response(JSON.stringify({ error: 'Not authenticated' }), {
+            status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+        const { reportId } = params || {};
+        if (!reportId) {
+          return new Response(JSON.stringify({ error: 'reportId required' }), {
+            status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+        const { error } = await supabaseClient
+          .from('published_reports')
+          .update({ revoked_at: new Date().toISOString() })
+          .eq('id', reportId)
+          .eq('user_id', userData.user.id);
+        if (error) {
+          console.error('revoke_published_report failed:', error);
+          return new Response(JSON.stringify({ error: error.message }), {
+            status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
       case 'get_profile': {
         const profileResponse = await fetch('https://api.linkedin.com/v2/me', {
           headers: { 'Authorization': `Bearer ${accessToken}` },

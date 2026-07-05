@@ -6,9 +6,16 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const MODEL = "claude-sonnet-4-20250514";
+const DEFAULT_MODEL = "claude-sonnet-4-20250514";
+const MODEL_BY_REPORT_TYPE: Record<string, string> = {
+  client_weekly_report: "claude-sonnet-4-6",
+};
 const MAX_TOKENS = 4096;
 const MAX_TOOL_ITERATIONS = 5;
+
+function modelFor(reportType?: string): string {
+  return (reportType && MODEL_BY_REPORT_TYPE[reportType]) || DEFAULT_MODEL;
+}
 
 // ---------------------------------------------------------------------------
 // System prompts
@@ -182,6 +189,30 @@ Only if demographic data reveals something actionable: top-converting job title,
 - Include week date range at the top
 - Treat this as copy the user will SEND — not an internal analysis
 - End with a forward-looking sentence about next week's focus`,
+
+  client_weekly_report: `You are a senior LinkedIn Ads consultant briefing a client on their week. The user provides structured performance data. Write a client-facing weekly report as markdown.
+
+Structure (use these exact headings):
+
+## TL;DR
+2-3 sentences. Lead with the biggest number and the one thing that mattered most this week.
+
+## What Happened This Week
+Cover spend, impressions, clicks, and leads with actual numbers. Compare week-over-week where the data supports it. Highlight anything unusual.
+
+## What's Working
+Name specific campaigns or creatives that performed well. Explain WHY — audience, format, message angle, timing. Reference concrete metrics.
+
+## What's Not Working
+Same treatment for underperformers. Be honest but constructive — no vague "we should optimize."
+
+## Actions This Week
+3-6 numbered actions the agency is taking or recommends. Specific, not generic. If a creative should be paused, name it. If budget should shift, say from-what to-what.
+
+## Looking Ahead
+1-2 sentences on next week's priorities.
+
+Voice: confident, plain-English, no jargon dumps. Assume the client is smart but not in-the-weeds daily. Length: 400-600 words. Do not add any preamble like "Here is your report" — start directly with the "## TL;DR" heading.`,
 
   agentic: `You are a senior LinkedIn Ads strategist with direct access to real-time account data via tools.
 
@@ -428,7 +459,7 @@ async function handleAgentic(
               "Content-Type": "application/json",
             },
             body: JSON.stringify({
-              model: MODEL,
+              model: DEFAULT_MODEL,
               system: systemPrompts.agentic,
               messages,
               tools: agenticTools,
@@ -537,7 +568,7 @@ Question: ${question}`;
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: MODEL,
+        model: modelFor(reportType),
         system: systemPrompt,
         messages: [{ role: "user", content: userContent }],
         max_tokens: MAX_TOKENS,

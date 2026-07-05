@@ -44,9 +44,11 @@ import {
   Check,
   Loader2,
   Send,
+  Share2,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { LineChart, Line, ResponsiveContainer } from 'recharts';
+import { GenerateClientReportDialog } from './GenerateClientReportDialog';
 
 interface Props {
   accessToken: string | null;
@@ -475,6 +477,7 @@ export function WeeklyReport({ accessToken, selectedAccount }: Props) {
   const [objectiveFilter, setObjectiveFilter] = useState<ObjectiveFilter>('all');
   const [copied, setCopied] = useState(false);
   const [digestInput, setDigestInput] = useState('');
+  const [publishOpen, setPublishOpen] = useState(false);
   const digestEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -698,8 +701,27 @@ export function WeeklyReport({ accessToken, selectedAccount }: Props) {
             <RefreshCw className="h-3.5 w-3.5" />
             Refresh
           </Button>
+          <Button
+            variant="default"
+            size="sm"
+            onClick={() => setPublishOpen(true)}
+            disabled={!data || !selectedAccount}
+            className="gap-1.5"
+          >
+            <Share2 className="h-3.5 w-3.5" />
+            Publish for client
+          </Button>
         </div>
       </div>
+
+      {data && selectedAccount && (
+        <GenerateClientReportDialog
+          open={publishOpen}
+          onOpenChange={setPublishOpen}
+          data={data}
+          accountId={selectedAccount}
+        />
+      )}
 
       {/* KPI summary bar */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">

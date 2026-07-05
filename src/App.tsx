@@ -10,6 +10,7 @@ import Auth from "./pages/Auth";
 import Admin from "./pages/Admin";
 import SocialListener from "./pages/SocialListener";
 import EdgeFunctionStatus from "./pages/EdgeFunctionStatus";
+import PublishedReport from "./pages/PublishedReport";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -28,6 +29,7 @@ const App = () => (
           <Route path="/admin" element={<Admin />} />
           <Route path="/social-listener" element={<SocialListener />} />
           <Route path="/edge-status" element={<EdgeFunctionStatus />} />
+          <Route path="/report/:token" element={<PublishedReport />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>
