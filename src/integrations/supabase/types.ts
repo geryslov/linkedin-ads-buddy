@@ -275,6 +275,51 @@ export type Database = {
         }
         Relationships: []
       }
+      published_reports: {
+        Row: {
+          account_id: string
+          client_name: string
+          id: string
+          kpi_snapshot: Json
+          narrative_markdown: string
+          published_at: string
+          raw_data: Json | null
+          revoked_at: string | null
+          share_token: string
+          user_id: string
+          week_end: string
+          week_start: string
+        }
+        Insert: {
+          account_id: string
+          client_name: string
+          id?: string
+          kpi_snapshot: Json
+          narrative_markdown: string
+          published_at?: string
+          raw_data?: Json | null
+          revoked_at?: string | null
+          share_token: string
+          user_id: string
+          week_end: string
+          week_start: string
+        }
+        Update: {
+          account_id?: string
+          client_name?: string
+          id?: string
+          kpi_snapshot?: Json
+          narrative_markdown?: string
+          published_at?: string
+          raw_data?: Json | null
+          revoked_at?: string | null
+          share_token?: string
+          user_id?: string
+          week_end?: string
+          week_start?: string
+        }
+        Relationships: []
+      }
       saved_targeting_audiences: {
         Row: {
           account_id: string
@@ -439,6 +484,29 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      get_published_report: {
+        Args: { token: string }
+        Returns: {
+          account_id: string
+          client_name: string
+          id: string
+          kpi_snapshot: Json
+          narrative_markdown: string
+          published_at: string
+          raw_data: Json | null
+          revoked_at: string | null
+          share_token: string
+          user_id: string
+          week_end: string
+          week_start: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "published_reports"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
