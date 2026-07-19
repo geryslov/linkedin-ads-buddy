@@ -19,10 +19,12 @@ Both are kept current by a Stop hook ([.claude/hooks/docs-freshness.sh](.claude/
 |---|---|---|
 | Frontend | `src/` | Yes — Lovable on push to `main` |
 | MCP server | `mcp-server/` | Yes — Railway on push to `main` |
-| Edge functions | `supabase/functions/**` | Yes — GitHub Actions on push to `main` ([deploy-functions.yml](.github/workflows/deploy-functions.yml)) |
+| Edge functions | `supabase/functions/**` | Workflow exists but is **currently failing** — treat as manual |
 | DB migrations | `supabase/migrations/` | **No — manual via SQL Editor** |
 
-The workflow deploys both `linkedin-api` and `analyze-data`, triggers on `supabase/functions/**`, and also supports `workflow_dispatch`. It needs the `SUPABASE_ACCESS_TOKEN` repo secret — if a deploy seems to have no effect, check the Actions tab first. To deploy manually:
+[deploy-functions.yml](.github/workflows/deploy-functions.yml) triggers on push to `main` touching `supabase/functions/**` (plus `workflow_dispatch`) and deploys `linkedin-api` then `analyze-data`. **It has failed on every run since at least 2026-06-29**, dying at the "Deploy linkedin-api function" step — most likely a missing or expired `SUPABASE_ACCESS_TOKEN` repo secret, though the logs need admin rights to confirm.
+
+Until that secret is fixed, pushing to `main` does NOT deploy your edge function changes. Verify at https://github.com/geryslov/linkedin-ads-buddy/actions after any push, or deploy manually:
 ```bash
 SUPABASE_ACCESS_TOKEN=<token> npx supabase functions deploy linkedin-api --project-ref bxoxefmenvlxiubynuay
 ```
