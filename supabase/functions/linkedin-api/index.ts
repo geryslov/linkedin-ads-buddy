@@ -13089,6 +13089,303 @@ serve(async (req) => {
         }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
+      // ─────────────────────────────────────────────────────────────────────
+      // probe_creative_create — DIAGNOSTIC ONLY, not a product surface.
+      //
+      // Answers one question before any bulk-copy feature gets built: can this
+      // app create a creative at all, or is it blocked by LinkedIn Marketing
+      // Developer Platform Partner status (the same wall that makes
+      // GET /rest/posts/{urn} return 403 partnerApiPostsExternal)?
+      //
+      // Creates ONE creative as DRAFT (never serves, never spends), reports
+      // verbose diagnostics, then tries to archive it again. Delete when the
+      // verdict is known.
+      // ─────────────────────────────────────────────────────────────────────
+      case 'probe_creative_create': {
+        const { accountId: probeAccountId, sourceCreativeId, targetCampaignId } = params;
+
+        if (!probeAccountId || !sourceCreativeId || !targetCampaignId) {
+          return new Response(JSON.stringify({
+            error: 'accountId, sourceCreativeId and targetCampaignId are required',
+          }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        // ---- JWT gate. Also what keeps MCP out: mcp-server sends the anon key,
+        // ---- so auth.getUser() fails there and this action 401s by construction.
+        const probeAuthHeader = req.headers.get('Authorization');
+        const PROBE_SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
+        const PROBE_SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!;
+        const { createClient: createProbeClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+
+        const probeSupabase = createProbeClient(PROBE_SUPABASE_URL, PROBE_SUPABASE_ANON_KEY, {
+          global: { headers: { Authorization: probeAuthHeader || '' } },
+        });
+
+        const { data: { user: probeUser }, error: probeUserError } = await probeSupabase.auth.getUser();
+        if (probeUserError || !probeUser) {
+          return new Response(JSON.stringify({
+            ok: false,
+            verdict: 'AUTH_REQUIRED',
+            message: 'Authentication required. This action is platform-only and not reachable from MCP.',
+          }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        // ---- can_write gate, mirroring update_campaign_targeting (:8177-8283),
+        // ---- including the self-healing discovery when the account isn't cached.
+        let { data: probeAccRow } = await probeSupabase
+          .from('linkedin_ad_accounts')
+          .select('can_write, user_role')
+          .eq('user_id', probeUser.id)
+          .eq('account_id', probeAccountId)
+          .maybeSingle();
+
+        if (!probeAccRow) {
+          console.log(`[probe_creative_create] Account ${probeAccountId} not cached, discovering...`);
+          try {
+            const accResp = await fetch(
+              `https://api.linkedin.com/v2/adAccountsV2/${probeAccountId}`,
+              { headers: { 'Authorization': `Bearer ${accessToken}` } }
+            );
+            if (accResp.ok) {
+              const accData = await accResp.json();
+              let probeRole = 'UNKNOWN';
+              try {
+                const usersResp = await fetch(
+                  'https://api.linkedin.com/rest/adAccountUsers?q=authenticatedUser',
+                  { headers: {
+                      'Authorization': `Bearer ${accessToken}`,
+                      'LinkedIn-Version': '202511',
+                      'X-Restli-Protocol-Version': '2.0.0',
+                  } }
+                );
+                if (usersResp.ok) {
+                  const usersData = await usersResp.json();
+                  for (const el of (usersData?.elements || [])) {
+                    if ((el.account || '').split(':').pop() === String(probeAccountId)) {
+                      probeRole = el.role || 'UNKNOWN';
+                      break;
+                    }
+                  }
+                }
+              } catch (e) {
+                console.log('[probe_creative_create] Could not fetch user role:', e);
+              }
+
+              const probeWriteRoles = ['ACCOUNT_MANAGER', 'CAMPAIGN_MANAGER', 'CREATIVE_MANAGER'];
+              await probeSupabase.from('linkedin_ad_accounts').upsert({
+                user_id: probeUser.id,
+                account_id: probeAccountId,
+                account_urn: `urn:li:sponsoredAccount:${probeAccountId}`,
+                name: accData.name || `Account ${probeAccountId}`,
+                status: accData.status || 'ACTIVE',
+                type: accData.type || 'UNKNOWN',
+                currency: accData.currency || 'USD',
+                user_role: probeRole,
+                can_write: probeWriteRoles.includes(probeRole),
+                last_synced_at: new Date().toISOString(),
+              }, { onConflict: 'user_id,account_id' });
+
+              const { data: probeAccRow2 } = await probeSupabase
+                .from('linkedin_ad_accounts')
+                .select('can_write, user_role')
+                .eq('user_id', probeUser.id)
+                .eq('account_id', probeAccountId)
+                .maybeSingle();
+              probeAccRow = probeAccRow2;
+            }
+          } catch (e) {
+            console.error('[probe_creative_create] Discovery failed:', e);
+          }
+        }
+
+        if (!probeAccRow) {
+          return new Response(JSON.stringify({
+            ok: false,
+            verdict: 'ACCOUNT_NOT_ACCESSIBLE',
+            message: 'This ad account is not accessible in this app.',
+          }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        // DIRECT_ACCESS means the role is unknown — let LinkedIn be the judge.
+        if (!probeAccRow.can_write && probeAccRow.user_role !== 'DIRECT_ACCESS') {
+          return new Response(JSON.stringify({
+            ok: false,
+            verdict: 'ROLE_INSUFFICIENT',
+            message: `No write-capable role on this account (role: ${probeAccRow.user_role || 'UNKNOWN'}). Needs Account/Campaign/Creative Manager.`,
+          }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        // ---- Step 1: read the source creative to get its content reference.
+        const probeSrcUrn = encodeURIComponent(`urn:li:sponsoredCreative:${sourceCreativeId}`);
+        const probeSrcUrl = `https://api.linkedin.com/rest/adAccounts/${probeAccountId}/creatives/${probeSrcUrn}`;
+        const probeSrcResp = await fetch(probeSrcUrl, {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'LinkedIn-Version': '202511',
+            'X-Restli-Protocol-Version': '2.0.0',
+          },
+        });
+
+        if (!probeSrcResp.ok) {
+          const srcErr = await probeSrcResp.text();
+          return new Response(JSON.stringify({
+            ok: false,
+            verdict: 'SOURCE_FETCH_FAILED',
+            httpStatus: probeSrcResp.status,
+            bodyText: srcErr.slice(0, 1200),
+          }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        const probeSrc = await probeSrcResp.json();
+        // content is sometimes a bare string, sometimes an object (see :3985).
+        const probeContent = probeSrc.content;
+        const probeReference = (typeof probeContent === 'string' ? probeContent : probeContent?.reference) || '';
+
+        // Reject before spending a write call.
+        if (!probeReference) {
+          return new Response(JSON.stringify({
+            ok: false,
+            verdict: 'NO_REFERENCE',
+            message: 'Source creative has no content reference — it is inline content (text/spotlight/follower ad) and cannot be copied by reference.',
+            sourceContent: probeContent ?? null,
+          }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+        if (probeReference.includes('adInMailContent')) {
+          return new Response(JSON.stringify({
+            ok: false,
+            verdict: 'UNSUPPORTED_REFERENCE',
+            message: 'Message/InMail ads reference adInMailContent URNs, which never resolve. Not copyable.',
+            reference: probeReference,
+          }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+        if (!probeReference.includes('ugcPost') && !probeReference.includes('share')) {
+          return new Response(JSON.stringify({
+            ok: false,
+            verdict: 'UNSUPPORTED_REFERENCE',
+            message: `Reference is neither ugcPost nor share: ${probeReference}`,
+            reference: probeReference,
+          }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        // ---- Step 2: the actual probe. Plain POST — no X-RestLi-Method; `create`
+        // ---- is not canonical for Rest.li creates and nothing else here uses it.
+        const probeCreateUrl = `https://api.linkedin.com/rest/adAccounts/${probeAccountId}/creatives`;
+        const probeBody = {
+          campaign: `urn:li:sponsoredCampaign:${targetCampaignId}`,
+          content: { reference: probeReference },
+          intendedStatus: 'DRAFT',
+        };
+
+        console.log(`[probe_creative_create] POST ${probeCreateUrl} ref=${probeReference} -> campaign ${targetCampaignId}`);
+
+        const probeResp = await fetch(probeCreateUrl, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+            'LinkedIn-Version': '202511',
+            'X-Restli-Protocol-Version': '2.0.0',
+          },
+          body: JSON.stringify(probeBody),
+        });
+
+        const probeBodyText = await probeResp.text();
+        let probeBodyJson: any = null;
+        try { probeBodyJson = JSON.parse(probeBodyText); } catch { /* keep raw */ }
+
+        // The new URN comes back in a HEADER, not the body. Nothing else in this
+        // file reads response headers, so try every known spelling then fall back.
+        const probeHeaderRestli = probeResp.headers.get('x-restli-id');
+        const probeHeaderLinkedIn = probeResp.headers.get('x-linkedin-id');
+        const probeHeaderLocation = probeResp.headers.get('location');
+
+        let createdUrn: string | null = null;
+        let headerSource: string | null = null;
+        if (probeHeaderRestli) { createdUrn = probeHeaderRestli; headerSource = 'x-restli-id'; }
+        else if (probeHeaderLinkedIn) { createdUrn = probeHeaderLinkedIn; headerSource = 'x-linkedin-id'; }
+        else if (probeHeaderLocation) { createdUrn = probeHeaderLocation.split('/').pop() || null; headerSource = 'location'; }
+        else if (probeBodyJson?.id || probeBodyJson?.['$URN']) {
+          createdUrn = probeBodyJson.id || probeBodyJson['$URN'];
+          headerSource = 'body';
+        }
+
+        // Don't hard-match 201 — some LinkedIn creates return 200.
+        const probeOk = probeResp.ok && !!createdUrn;
+        const probeErrText = probeBodyText.toLowerCase();
+
+        let verdict: string;
+        if (probeOk) {
+          verdict = 'GO';
+        } else if (probeResp.ok && !createdUrn) {
+          verdict = 'CREATED_BUT_NO_URN';
+        } else if (probeResp.status === 401) {
+          verdict = 'TOKEN_EXPIRED';
+        } else if (probeResp.status === 403) {
+          verdict = (probeErrText.includes('partnerapi') || probeErrText.includes('marketing developer') || probeErrText.includes('partner'))
+            ? 'PARTNER_GATED'
+            : 'ROLE_INSUFFICIENT';
+        } else if (probeResp.status === 422) {
+          verdict = 'INCOMPATIBLE_CONTENT';
+        } else if (probeResp.status === 429) {
+          verdict = 'RATE_LIMITED';
+        } else if (probeResp.status === 400) {
+          verdict = 'PAYLOAD_SHAPE';
+        } else {
+          verdict = 'UNKNOWN';
+        }
+
+        // ---- Step 3: try to archive what we just made. The real feature needs
+        // ---- this rollback path anyway; this is the cheapest place to learn it.
+        let archiveAttempted = false;
+        let archiveOk = false;
+        let archiveStatus: number | null = null;
+        let archiveBody: string | null = null;
+
+        if (createdUrn) {
+          archiveAttempted = true;
+          try {
+            const archiveUrl = `https://api.linkedin.com/rest/adAccounts/${probeAccountId}/creatives/${encodeURIComponent(createdUrn)}`;
+            const archiveResp = await fetch(archiveUrl, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'Content-Type': 'application/json',
+                'X-Restli-Method': 'partial_update',
+                'LinkedIn-Version': '202511',
+                'X-Restli-Protocol-Version': '2.0.0',
+              },
+              body: JSON.stringify({ patch: { $set: { intendedStatus: 'ARCHIVED' } } }),
+            });
+            archiveStatus = archiveResp.status;
+            archiveOk = archiveResp.ok;
+            archiveBody = (await archiveResp.text()).slice(0, 600);
+          } catch (e) {
+            archiveBody = `archive threw: ${e instanceof Error ? e.message : String(e)}`;
+          }
+        }
+
+        console.log(`[probe_creative_create] verdict=${verdict} status=${probeResp.status} urn=${createdUrn || 'none'} archived=${archiveOk}`);
+
+        return new Response(JSON.stringify({
+          ok: probeOk,
+          verdict,
+          httpStatus: probeResp.status,
+          createdUrn,
+          headerSource,
+          sourceReference: probeReference,
+          requestBody: probeBody,
+          rawHeaders: {
+            'x-restli-id': probeHeaderRestli,
+            'x-linkedin-id': probeHeaderLinkedIn,
+            'location': probeHeaderLocation,
+          },
+          serviceErrorCode: probeBodyJson?.serviceErrorCode ?? null,
+          linkedInMessage: probeBodyJson?.message ?? null,
+          bodyText: probeBodyText.slice(0, 1200),
+          cleanup: { archiveAttempted, archiveOk, archiveStatus, archiveBody },
+        }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
       default:
         return new Response(JSON.stringify({ error: 'Unknown action' }), {
           status: 400,
