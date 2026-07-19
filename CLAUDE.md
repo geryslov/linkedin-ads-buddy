@@ -2,6 +2,10 @@
 
 LinkedIn Ads Manager dashboard — React + Vite frontend, Supabase edge function backend, and an MCP server for Claude integration.
 
+Companion docs: [FEATURES.md](FEATURES.md) — what exists and where. [HISTORY.md](HISTORY.md) — how it got built.
+
+Both are kept current by a Stop hook ([.claude/hooks/docs-freshness.sh](.claude/hooks/docs-freshness.sh)): if `src/`, `supabase/`, or `mcp-server/` changed in a session and neither doc was touched, it blocks once and asks for an update. Update them in the same session as the code — don't let them drift.
+
 ## Stack
 
 - Frontend: React + Vite + TypeScript + Tailwind + shadcn/ui
@@ -15,10 +19,10 @@ LinkedIn Ads Manager dashboard — React + Vite frontend, Supabase edge function
 |---|---|---|
 | Frontend | `src/` | Yes — Lovable on push to `main` |
 | MCP server | `mcp-server/` | Yes — Railway on push to `main` |
-| Edge function | `supabase/functions/linkedin-api/index.ts` | **No — manual only** |
+| Edge functions | `supabase/functions/**` | Yes — GitHub Actions on push to `main` ([deploy-functions.yml](.github/workflows/deploy-functions.yml)) |
 | DB migrations | `supabase/migrations/` | **No — manual via SQL Editor** |
 
-Deploy edge function via Lovable prompt, or:
+The workflow deploys both `linkedin-api` and `analyze-data`, triggers on `supabase/functions/**`, and also supports `workflow_dispatch`. It needs the `SUPABASE_ACCESS_TOKEN` repo secret — if a deploy seems to have no effect, check the Actions tab first. To deploy manually:
 ```bash
 SUPABASE_ACCESS_TOKEN=<token> npx supabase functions deploy linkedin-api --project-ref bxoxefmenvlxiubynuay
 ```
