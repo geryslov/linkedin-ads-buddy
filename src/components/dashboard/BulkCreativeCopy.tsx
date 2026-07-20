@@ -476,7 +476,6 @@ function CreativeRow({
               {creative.status}
             </Badge>
           )}
-          <span className="text-xs text-muted-foreground truncate">{creative.campaignName}</span>
         </div>
       </div>
     </button>
