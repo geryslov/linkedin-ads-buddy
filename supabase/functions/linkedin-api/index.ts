@@ -1028,7 +1028,22 @@ serve(async (req) => {
         }
         console.log(`Creatives fetched: ${allElements.length} (paginated)`);
 
-        return new Response(JSON.stringify({ ...lastPayload, elements: allElements }), {
+        // Attach a normalized content reference (ugcPost/share/activity URN) to each
+        // creative. The frontend uses this to let creatives that share content — e.g.
+        // a copy and its source — share a display name, so drafts with no analytics
+        // name can inherit their source's resolved name instead of showing an ID.
+        const extractRef = (c: any): string => {
+          if (typeof c?.reference === 'string' && c.reference) return c.reference;
+          if (c?.content && typeof c.content === 'object' && typeof c.content.reference === 'string') return c.content.reference;
+          try {
+            const m = JSON.stringify(c ?? {}).match(/urn:li:(?:ugcPost|share|activity):[0-9]+/);
+            if (m) return m[0];
+          } catch { /* ignore */ }
+          return '';
+        };
+        const enriched = allElements.map((c) => ({ ...c, reference: extractRef(c) }));
+
+        return new Response(JSON.stringify({ ...lastPayload, elements: enriched }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }

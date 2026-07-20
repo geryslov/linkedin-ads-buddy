@@ -140,10 +140,23 @@ export function useBulkCreativeCopy(accessToken: string | null) {
         });
       }
 
+      const rawElements = (rawRes.data?.elements || []) as Record<string, unknown>[];
+
+      // Names: analytics report gives real names but only for creatives with data.
+      // Creatives sharing the same content reference share a name (a copy and its
+      // source point at the same post), so map reference -> name using the report's
+      // resolved names, then let unnamed creatives (e.g. fresh drafts) inherit it.
+      const nameByReference = new Map<string, string>();
+      for (const el of rawElements) {
+        const id = (el.id ?? '').toString();
+        const ref = (el.reference as string) || '';
+        const rep = reportById.get(id);
+        if (ref && rep?.name && !nameByReference.has(ref)) nameByReference.set(ref, rep.name);
+      }
+
       // Build the source list from raw creatives (full list incl. drafts), overlaying
       // resolved names/campaigns from the report. Fall back to the report list alone
       // if the raw endpoint failed for some reason.
-      const rawElements = (rawRes.data?.elements || []) as Record<string, unknown>[];
       const seen = new Set<string>();
       const creativeList: SourceCreative[] = [];
 
@@ -153,6 +166,7 @@ export function useBulkCreativeCopy(accessToken: string | null) {
         seen.add(creativeId);
         const rep = reportById.get(creativeId);
         const campaignId = String(el.campaign ?? '').split(':').pop() || '';
+        const reference = (el.reference as string) || '';
         const variables = (el.variables ?? {}) as Record<string, unknown>;
         creativeList.push({
           creativeId,
@@ -160,6 +174,7 @@ export function useBulkCreativeCopy(accessToken: string | null) {
             rep?.name ||
             (el.name as string) ||
             (el.creativeDscName as string) ||
+            (reference ? nameByReference.get(reference) : undefined) ||
             `Creative ${creativeId}`,
           campaignName: rep?.campaignName || campaignNameById.get(campaignId) || 'Unknown Campaign',
           type: (el.type as string) || (variables.type as string) || rep?.type || 'UNKNOWN',
