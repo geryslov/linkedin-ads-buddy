@@ -49,6 +49,27 @@ export function isCopyableType(type: string): boolean {
   return !NON_COPYABLE_TYPES.has((type || '').toUpperCase());
 }
 
+// supabase-js reports a failed edge function as a generic "Edge Function returned
+// a non-2xx status code" and hides the body. FunctionsHttpError exposes the raw
+// Response on `.context`; pull the real { error, errorCode } out of it.
+async function extractInvokeError(error: unknown): Promise<string> {
+  const fallback = error instanceof Error ? error.message : 'The request failed.';
+  const ctx = (error as { context?: unknown })?.context;
+  if (ctx && typeof (ctx as Response).json === 'function') {
+    try {
+      const body = await (ctx as Response).clone().json();
+      if (body?.error) return body.errorCode ? `${body.error} (${body.errorCode})` : body.error;
+      if (body?.message) return body.message;
+    } catch {
+      try {
+        const text = await (ctx as Response).clone().text();
+        if (text) return text.slice(0, 300);
+      } catch { /* ignore */ }
+    }
+  }
+  return fallback;
+}
+
 export function useBulkCreativeCopy(accessToken: string | null) {
   const [sources, setSources] = useState<SourceCreative[]>([]);
   const [campaigns, setCampaigns] = useState<TargetCampaign[]>([]);
@@ -87,8 +108,8 @@ export function useBulkCreativeCopy(accessToken: string | null) {
         }),
       ]);
 
-      if (creativesRes.error) throw creativesRes.error;
-      if (campaignsRes.error) throw campaignsRes.error;
+      if (creativesRes.error) throw new Error(await extractInvokeError(creativesRes.error));
+      if (campaignsRes.error) throw new Error(await extractInvokeError(campaignsRes.error));
 
       const creativeList: SourceCreative[] = (creativesRes.data?.elements || [])
         .map((el: Record<string, unknown>) => ({
@@ -144,9 +165,20 @@ export function useBulkCreativeCopy(accessToken: string | null) {
         },
       });
 
-      if (error) throw error;
+      if (error) {
+        // supabase-js hides the real body behind a generic "non-2xx status code".
+        // FunctionsHttpError carries the Response on .context — read it so the user
+        // sees the actual reason (Unknown action / AUTH_REQUIRED / ROLE_INSUFFICIENT).
+        const detail = await extractInvokeError(error);
+        toast({ title: 'Bulk copy failed', description: detail, variant: 'destructive' });
+        return false;
+      }
       if (data?.error) {
-        toast({ title: 'Bulk copy failed', description: data.error, variant: 'destructive' });
+        toast({
+          title: 'Bulk copy failed',
+          description: data.errorCode ? `${data.error} (${data.errorCode})` : data.error,
+          variant: 'destructive',
+        });
         return false;
       }
 
