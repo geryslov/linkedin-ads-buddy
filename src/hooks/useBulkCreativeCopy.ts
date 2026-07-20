@@ -79,8 +79,14 @@ export function useBulkCreativeCopy(accessToken: string | null) {
   const [summary, setSummary] = useState<CopySummary | null>(null);
   const { toast } = useToast();
 
-  const loadData = useCallback(async (accountId: string, opts?: { keepResults?: boolean }) => {
+  const loadData = useCallback(async (
+    accountId: string,
+    opts?: { keepResults?: boolean; status?: string },
+  ) => {
     if (!accessToken || !accountId) return;
+    // 'ALL' (or empty) loads every status; a specific status (default ACTIVE) makes
+    // the raw fetch far smaller and the list load much faster on big accounts.
+    const status = opts?.status && opts.status !== 'ALL' ? opts.status : '';
     setIsLoading(true);
     if (!opts?.keepResults) {
       setResults([]);
@@ -103,7 +109,7 @@ export function useBulkCreativeCopy(accessToken: string | null) {
       //  - get_campaigns: campaign id -> name, and the target list.
       const [rawRes, reportRes, campaignsRes] = await Promise.all([
         supabase.functions.invoke('linkedin-api', {
-          body: { action: 'get_creatives', accessToken, params: { accountId } },
+          body: { action: 'get_creatives', accessToken, params: { accountId, status } },
         }),
         supabase.functions.invoke('linkedin-api', {
           body: {
@@ -182,10 +188,12 @@ export function useBulkCreativeCopy(accessToken: string | null) {
         });
       }
 
-      // Safety net: if the raw list returned nothing (or omitted a creative the report
-      // knows about), fold in report-only rows so nothing that used to show disappears.
+      // Safety net: if the raw list omitted a creative the report knows about, fold it
+      // in so nothing that used to show disappears. Respect the status filter so we
+      // don't re-add creatives the user filtered out (e.g. non-active ads).
       for (const [id, rep] of reportById) {
         if (seen.has(id)) continue;
+        if (status && rep.status && rep.status !== status) continue;
         seen.add(id);
         creativeList.push({
           creativeId: id,

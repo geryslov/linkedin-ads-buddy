@@ -1004,8 +1004,11 @@ serve(async (req) => {
       }
 
       case 'get_creatives': {
-        const { accountId } = params || {};
-        const baseUrl = `https://api.linkedin.com/v2/adCreativesV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}`;
+        const { accountId, status } = params || {};
+        // Optional status filter (e.g. ACTIVE) — dramatically fewer pages on large
+        // accounts, so the source list loads much faster than pulling every status.
+        const baseUrl = `https://api.linkedin.com/v2/adCreativesV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}` +
+          (status ? `&search.status.values[0]=${status}` : '');
 
         // Paginate — with no count LinkedIn returns only 10, so newly created and
         // recent creatives on any account with >10 creatives are invisible.

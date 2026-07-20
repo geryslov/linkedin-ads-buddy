@@ -14,6 +14,13 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import {
   Search,
@@ -58,14 +65,17 @@ export function BulkCreativeCopy({ accessToken, selectedAccount }: BulkCreativeC
   const [selectedCreatives, setSelectedCreatives] = useState<Set<string>>(new Set());
   const [selectedCampaigns, setSelectedCampaigns] = useState<Set<string>>(new Set());
   const [intendedStatus, setIntendedStatus] = useState<'DRAFT' | 'ACTIVE'>('DRAFT');
+  // Which source ads to load. ACTIVE by default so the list loads fast; switch to
+  // ALL/DRAFT to see copies and paused/draft ads (slower on large accounts).
+  const [creativeStatus, setCreativeStatus] = useState('ACTIVE');
 
   useEffect(() => {
     if (selectedAccount) {
       setSelectedCreatives(new Set());
       setSelectedCampaigns(new Set());
-      loadData(selectedAccount);
+      loadData(selectedAccount, { status: creativeStatus });
     }
-  }, [selectedAccount, loadData]);
+  }, [selectedAccount, creativeStatus, loadData]);
 
   const filteredCreatives = useMemo(() => {
     const q = creativeSearch.trim().toLowerCase();
@@ -117,7 +127,7 @@ export function BulkCreativeCopy({ accessToken, selectedAccount }: BulkCreativeC
     if (ok) {
       // Reload so the newly created drafts appear in the source list (they have no
       // analytics yet). keepResults preserves the results table the user just got.
-      loadData(selectedAccount, { keepResults: true });
+      loadData(selectedAccount, { keepResults: true, status: creativeStatus });
     }
   };
 
@@ -139,17 +149,31 @@ export function BulkCreativeCopy({ accessToken, selectedAccount }: BulkCreativeC
           campaign that reuses the source ad's content. New ads are created as
           <strong> Draft</strong> by default so nothing spends until you activate them.
           Text, Spotlight, Follower and Message/InMail ads can't be copied this way.
+          The source list shows <strong>Active</strong> ads by default for speed — switch
+          the status filter to <strong>Draft</strong> or <strong>All</strong> to see copies.
         </p>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => selectedAccount && loadData(selectedAccount)}
-          disabled={isLoading}
-          className="shrink-0"
-        >
-          <RefreshCw className={cn('h-3.5 w-3.5 mr-2', isLoading && 'animate-spin')} />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2 shrink-0">
+          <Select value={creativeStatus} onValueChange={setCreativeStatus}>
+            <SelectTrigger className="w-[130px] h-8 text-sm">
+              <SelectValue placeholder="Status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="ACTIVE">Active</SelectItem>
+              <SelectItem value="PAUSED">Paused</SelectItem>
+              <SelectItem value="DRAFT">Draft</SelectItem>
+              <SelectItem value="ALL">All statuses</SelectItem>
+            </SelectContent>
+          </Select>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => selectedAccount && loadData(selectedAccount, { status: creativeStatus })}
+            disabled={isLoading}
+          >
+            <RefreshCw className={cn('h-3.5 w-3.5 mr-2', isLoading && 'animate-spin')} />
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {/* Selection grid */}
