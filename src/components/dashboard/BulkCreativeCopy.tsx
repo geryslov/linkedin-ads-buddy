@@ -10,6 +10,13 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import {
   Search,
@@ -49,10 +56,30 @@ const STATUS_OPTIONS = [
   { value: 'ALL', label: 'All' },
 ];
 
+// Common LinkedIn lead gen CTA labels. LinkedIn validates on save; an unsupported
+// combo surfaces as a per-ad error, so the copy itself still succeeds.
+const CTA_OPTIONS = [
+  { value: 'DOWNLOAD', label: 'Download' },
+  { value: 'LEARN_MORE', label: 'Learn more' },
+  { value: 'SIGN_UP', label: 'Sign up' },
+  { value: 'SUBSCRIBE', label: 'Subscribe' },
+  { value: 'REGISTER', label: 'Register' },
+  { value: 'REQUEST_DEMO', label: 'Request demo' },
+  { value: 'GET_QUOTE', label: 'Get quote' },
+  { value: 'APPLY', label: 'Apply' },
+  { value: 'JOIN', label: 'Join' },
+  { value: 'ATTEND', label: 'Attend' },
+  { value: 'CONTACT_US', label: 'Contact us' },
+];
+
+// Radix Select can't use an empty-string value, so use a sentinel for "keep original".
+const KEEP = '__KEEP__';
+
 export function BulkCreativeCopy({ accessToken, selectedAccount }: BulkCreativeCopyProps) {
   const {
     sources,
     campaigns,
+    forms,
     isLoading,
     isRunning,
     results,
@@ -69,6 +96,10 @@ export function BulkCreativeCopy({ accessToken, selectedAccount }: BulkCreativeC
   // Which source ads to load. ACTIVE by default so the list loads fast; switch to
   // ALL/DRAFT to see copies and paused/draft ads (slower on large accounts).
   const [creativeStatus, setCreativeStatus] = useState('ACTIVE');
+  // Optional lead gen form + CTA to assign to lead-gen copies (KEEP = leave as-is).
+  const [formId, setFormId] = useState<string>(KEEP);
+  const [ctaLabel, setCtaLabel] = useState<string>(KEEP);
+  const leadgenAssigned = formId !== KEEP || ctaLabel !== KEEP;
 
   useEffect(() => {
     if (selectedAccount) {
@@ -115,6 +146,10 @@ export function BulkCreativeCopy({ accessToken, selectedAccount }: BulkCreativeC
       Array.from(selectedCreatives),
       Array.from(selectedCampaigns),
       intendedStatus,
+      {
+        adFormId: formId !== KEEP ? formId : undefined,
+        ctaLabel: ctaLabel !== KEEP ? ctaLabel : undefined,
+      },
     );
     if (ok) {
       // Reload so the newly created drafts appear in the source list (they have no
@@ -229,6 +264,46 @@ export function BulkCreativeCopy({ accessToken, selectedAccount }: BulkCreativeC
         never edit the source ad.
       </p>
 
+      {/* Lead gen form + CTA (optional; only applies to lead gen ads) */}
+      {forms.length > 0 && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-border bg-card px-4 py-3">
+          <span className="text-xs font-medium text-muted-foreground">
+            Lead gen form <span className="font-normal">(optional)</span>
+          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">Form</span>
+            <Select value={formId} onValueChange={setFormId}>
+              <SelectTrigger className="h-8 w-[220px] text-sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={KEEP}>Keep original form</SelectItem>
+                {forms.map((f) => (
+                  <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">CTA</span>
+            <Select value={ctaLabel} onValueChange={setCtaLabel}>
+              <SelectTrigger className="h-8 w-[160px] text-sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={KEEP}>Keep original CTA</SelectItem>
+                {CTA_OPTIONS.map((o) => (
+                  <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <span className="text-[11px] text-muted-foreground/80">
+            Applies to lead gen ads only. These copies are created as Draft so the form can be set.
+          </span>
+        </div>
+      )}
+
       {/* Results */}
       {summary && (
         <div className="rounded-xl border border-border bg-card overflow-hidden">
@@ -265,6 +340,10 @@ export function BulkCreativeCopy({ accessToken, selectedAccount }: BulkCreativeC
                       {r.ok ? (
                         <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-500">
                           <CheckCircle2 className="h-3.5 w-3.5" /> Created
+                          {r.formApplied && <span className="text-muted-foreground">· form set</span>}
+                          {r.isLeadGen && !r.formApplied && r.message && (
+                            <span className="text-amber-600 dark:text-amber-500" title={r.message}>· form not set</span>
+                          )}
                         </span>
                       ) : (
                         <span className="flex items-center gap-1.5 text-destructive">
@@ -338,6 +417,14 @@ export function BulkCreativeCopy({ accessToken, selectedAccount }: BulkCreativeC
                         <p className="flex items-start gap-1.5 text-amber-600 dark:text-amber-500">
                           <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
                           Prefer Draft if you want to review before they go live.
+                        </p>
+                      )}
+                      {leadgenAssigned && (
+                        <p className="text-muted-foreground">
+                          Lead gen ads will get the selected
+                          {formId !== KEEP ? ' form' : ''}
+                          {formId !== KEEP && ctaLabel !== KEEP ? ' and' : ''}
+                          {ctaLabel !== KEEP ? ' CTA' : ''}. Non–lead-gen ads are unaffected.
                         </p>
                       )}
                     </div>

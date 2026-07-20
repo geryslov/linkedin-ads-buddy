@@ -13503,6 +13503,58 @@ serve(async (req) => {
         }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
+      case 'list_lead_forms': {
+        // Lightweight list of lead gen forms for an account, for the copy-with-form
+        // picker. Reuses the Lead Sync finder that get_lead_gen_forms relies on.
+        const { accountId: lfAccountId } = params || {};
+        if (!lfAccountId) {
+          return new Response(JSON.stringify({ error: 'accountId is required' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+        const lfOwner = `(sponsoredAccount:urn%3Ali%3AsponsoredAccount%3A${lfAccountId})`;
+        const lfUrl = `https://api.linkedin.com/rest/leadForms?q=owner&owner=${lfOwner}&count=500`;
+
+        const lfName = (form: any): string | null => {
+          const n = form?.name;
+          if (typeof n === 'string' && n.trim()) return n.trim();
+          if (n && typeof n === 'object') {
+            const loc = n.localized || n;
+            for (const v of Object.values(loc)) if (typeof v === 'string' && v.trim()) return v.trim();
+          }
+          const h = form?.headline;
+          if (typeof h === 'string' && h.trim()) return h.trim();
+          return null;
+        };
+
+        const lfForms: any[] = [];
+        try {
+          const resp = await fetch(lfUrl, {
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+              'X-Restli-Protocol-Version': '2.0.0',
+              'LinkedIn-Version': '202511',
+            },
+          });
+          if (resp.ok) {
+            const data = await resp.json();
+            for (const form of (data?.elements || [])) {
+              const rawId = String(form.id ?? '').trim();
+              const vMatch = rawId.match(/^\((\d+),\d+\)$/);
+              const formId = vMatch ? vMatch[1] : (rawId || String(form.entityUrn || form['$URN'] || '').split(':').pop() || '');
+              if (!formId) continue;
+              lfForms.push({ id: formId, name: lfName(form) || `Form ${formId}`, status: form.status || 'UNKNOWN' });
+            }
+          } else {
+            console.log(`[list_lead_forms] HTTP ${resp.status}`);
+          }
+        } catch (e) {
+          console.error('[list_lead_forms] error:', e);
+        }
+        console.log(`[list_lead_forms] ${lfForms.length} forms for account ${lfAccountId}`);
+        return new Response(JSON.stringify({ forms: lfForms }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
       case 'bulk_copy_creatives': {
         // Bulk "add existing ads to other campaigns". A LinkedIn creative is bound
         // to one campaign, so there is no move/share — we CREATE a new creative in
@@ -13514,9 +13566,17 @@ serve(async (req) => {
           sourceCreativeIds,
           targetCampaignIds,
           intendedStatus: bulkIntendedStatus,
+          adFormId,          // optional: override lead gen form on lead-gen copies
+          ctaLabel,          // optional: override the CTA label (e.g. DOWNLOAD)
         } = params || {};
 
         const bulkStatus = bulkIntendedStatus === 'ACTIVE' ? 'ACTIVE' : 'DRAFT';
+        // A lead gen form/CTA can only be set while a creative is DRAFT. When the
+        // caller asks to assign one, create as DRAFT, set it, then activate if they
+        // chose Active. Destination is an adForm URN.
+        const wantLeadgen = !!(adFormId || ctaLabel);
+        const overrideDestination = adFormId ? `urn:li:adForm:${String(adFormId).replace(/\D/g, '')}` : null;
+        const overrideLabel = ctaLabel ? String(ctaLabel) : null;
 
         if (!bulkAccountId || !Array.isArray(sourceCreativeIds) || !Array.isArray(targetCampaignIds)
             || sourceCreativeIds.length === 0 || targetCampaignIds.length === 0) {
@@ -13629,7 +13689,10 @@ serve(async (req) => {
 
         // ---- Step 1: resolve each source creative's content reference ONCE. ----
         // A source with no usable reference fails all its targets with one reason.
-        const sourceRefs: Record<string, { reference: string | null; error: string | null; name: string | null }> = {};
+        const sourceRefs: Record<string, {
+          reference: string | null; error: string | null; name: string | null;
+          leadgen: { destination: string; label: string } | null;
+        }> = {};
         for (const rawId of sourceCreativeIds) {
           const sId = String(rawId);
           const srcUrn = encodeURIComponent(`urn:li:sponsoredCreative:${sId}`);
@@ -13640,7 +13703,7 @@ serve(async (req) => {
             );
             if (!srcResp.ok) {
               const t = await srcResp.text();
-              sourceRefs[sId] = { reference: null, name: null,
+              sourceRefs[sId] = { reference: null, name: null, leadgen: null,
                 error: `Could not read source creative (HTTP ${srcResp.status}). ${t.slice(0, 200)}` };
               continue;
             }
@@ -13648,21 +13711,27 @@ serve(async (req) => {
             const content = src.content;
             const reference = (typeof content === 'string' ? content : content?.reference) || '';
             const name = src.name || src.creativeDscName || null;
+            // Present only on lead gen ads; used to know the ad is lead gen and to
+            // keep its existing form/label when the caller overrides only one of them.
+            const lg = src.leadgenCallToAction;
+            const leadgen = (lg && lg.destination)
+              ? { destination: String(lg.destination), label: String(lg.label || '') }
+              : null;
 
             if (!reference) {
-              sourceRefs[sId] = { reference: null, name,
+              sourceRefs[sId] = { reference: null, name, leadgen,
                 error: 'Inline content (text/spotlight/follower ad) has no shareable reference and cannot be copied.' };
             } else if (reference.includes('adInMailContent')) {
-              sourceRefs[sId] = { reference: null, name,
+              sourceRefs[sId] = { reference: null, name, leadgen,
                 error: 'Message/InMail ads reference adInMailContent URNs, which are not copyable.' };
             } else if (!reference.includes('ugcPost') && !reference.includes('share')) {
-              sourceRefs[sId] = { reference: null, name,
+              sourceRefs[sId] = { reference: null, name, leadgen,
                 error: `Unsupported content reference (${reference}).` };
             } else {
-              sourceRefs[sId] = { reference, name, error: null };
+              sourceRefs[sId] = { reference, name, leadgen, error: null };
             }
           } catch (e) {
-            sourceRefs[sId] = { reference: null, name: null,
+            sourceRefs[sId] = { reference: null, name: null, leadgen: null,
               error: `Failed to read source creative: ${e instanceof Error ? e.message : String(e)}` };
           }
           await sleep(80);
@@ -13692,6 +13761,11 @@ serve(async (req) => {
               continue;
             }
 
+            // Assign a form/CTA only to lead-gen sources when requested. Such copies
+            // must be created DRAFT (the field is read-only once non-draft).
+            const applyLeadgen = wantLeadgen && !!srcInfo.leadgen;
+            const createStatus = applyLeadgen ? 'DRAFT' : bulkStatus;
+
             try {
               const createResp = await fetch(createUrl, {
                 method: 'POST',
@@ -13699,7 +13773,7 @@ serve(async (req) => {
                 body: JSON.stringify({
                   campaign: `urn:li:sponsoredCampaign:${cId}`,
                   content: { reference: srcInfo.reference },
-                  intendedStatus: bulkStatus,
+                  intendedStatus: createStatus,
                 }),
               });
 
@@ -13743,6 +13817,44 @@ serve(async (req) => {
                 message = bodyJson?.message || bodyText.slice(0, 200);
               }
 
+              // ---- Assign lead gen form / CTA on the new DRAFT creative. ----
+              let formApplied = false;
+              let formNote: string | null = null;
+              if (ok && createdUrn && wantLeadgen) {
+                if (!srcInfo.leadgen) {
+                  formNote = 'Not a lead gen ad — form/CTA skipped.';
+                } else {
+                  const destination = overrideDestination || srcInfo.leadgen.destination;
+                  const label = overrideLabel || srcInfo.leadgen.label;
+                  try {
+                    const patchResp = await fetch(
+                      `${createUrl}/${encodeURIComponent(createdUrn)}`,
+                      {
+                        method: 'POST',
+                        headers: { ...bulkVersionHeaders, 'Content-Type': 'application/json', 'X-Restli-Method': 'partial_update' },
+                        body: JSON.stringify({ patch: { $set: { leadgenCallToAction: { destination, label } } } }),
+                      },
+                    );
+                    if (patchResp.ok) {
+                      formApplied = true;
+                      // Honor an Active choice now that the form is set.
+                      if (bulkStatus === 'ACTIVE') {
+                        await fetch(`${createUrl}/${encodeURIComponent(createdUrn)}`, {
+                          method: 'POST',
+                          headers: { ...bulkVersionHeaders, 'Content-Type': 'application/json', 'X-Restli-Method': 'partial_update' },
+                          body: JSON.stringify({ patch: { $set: { intendedStatus: 'ACTIVE' } } }),
+                        });
+                      }
+                    } else {
+                      const pt = await patchResp.text();
+                      formNote = `Copied, but form/CTA not applied (HTTP ${patchResp.status}). ${pt.slice(0, 160)}`;
+                    }
+                  } catch (pe) {
+                    formNote = `Copied, but form/CTA not applied: ${pe instanceof Error ? pe.message : String(pe)}`;
+                  }
+                }
+              }
+
               bulkResults.push({
                 sourceCreativeId: sId,
                 sourceCreativeName: srcInfo.name,
@@ -13751,7 +13863,9 @@ serve(async (req) => {
                 verdict,
                 createdUrn,
                 httpStatus: createResp.status,
-                message,
+                message: message || formNote,
+                isLeadGen: !!srcInfo.leadgen,
+                formApplied,
               });
             } catch (e) {
               bulkResults.push({
@@ -13762,6 +13876,8 @@ serve(async (req) => {
                 verdict: 'REQUEST_FAILED',
                 createdUrn: null,
                 message: e instanceof Error ? e.message : String(e),
+                isLeadGen: !!srcInfo?.leadgen,
+                formApplied: false,
               });
             }
             await sleep(120); // be gentle on the write rate limit
@@ -13769,12 +13885,18 @@ serve(async (req) => {
         }
 
         const successCount = bulkResults.filter((r) => r.ok).length;
-        console.log(`[bulk_copy_creatives] ${successCount}/${bulkResults.length} copies created as ${bulkStatus}`);
+        const formsAppliedCount = bulkResults.filter((r) => r.formApplied).length;
+        console.log(`[bulk_copy_creatives] ${successCount}/${bulkResults.length} copies created as ${bulkStatus}; forms applied: ${formsAppliedCount}`);
 
         return new Response(JSON.stringify({
           ok: successCount > 0,
           intendedStatus: bulkStatus,
-          summary: { attempted: bulkResults.length, succeeded: successCount, failed: bulkResults.length - successCount },
+          summary: {
+            attempted: bulkResults.length,
+            succeeded: successCount,
+            failed: bulkResults.length - successCount,
+            formsApplied: formsAppliedCount,
+          },
           results: bulkResults,
         }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
