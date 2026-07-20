@@ -115,7 +115,9 @@ export function BulkCreativeCopy({ accessToken, selectedAccount }: BulkCreativeC
       intendedStatus,
     );
     if (ok) {
-      // Keep selections visible so the user can see what was copied against results.
+      // Reload so the newly created drafts appear in the source list (they have no
+      // analytics yet). keepResults preserves the results table the user just got.
+      loadData(selectedAccount, { keepResults: true });
     }
   };
 
@@ -438,6 +440,17 @@ function CreativeRow({
         </div>
         <div className="flex items-center gap-2 mt-0.5">
           <CreativeTypeBadge type={creative.type} />
+          {creative.status && creative.status !== 'ACTIVE' && (
+            <Badge
+              variant="outline"
+              className={cn(
+                'text-[10px] shrink-0',
+                creative.status === 'DRAFT' && 'text-blue-600 border-blue-300',
+              )}
+            >
+              {creative.status}
+            </Badge>
+          )}
           <span className="text-xs text-muted-foreground truncate">{creative.campaignName}</span>
         </div>
       </div>
