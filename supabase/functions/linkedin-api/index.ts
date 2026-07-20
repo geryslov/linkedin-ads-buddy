@@ -1087,6 +1087,48 @@ serve(async (req) => {
           console.error('[get_creatives] name resolution error:', e);
         }
 
+        // Second pass: many sponsored ads have no `name` set — their real label is the
+        // underlying post's text. Resolve it via /v2/ugcPosts (the non-partner-gated
+        // endpoint), bounded + concurrency-limited so big accounts stay responsive.
+        try {
+          const needText = enriched.filter(
+            (c) => !c.name && typeof c.reference === 'string' &&
+              (c.reference.includes('ugcPost') || c.reference.includes('share')),
+          );
+          const MAX_TEXT = 200;
+          const CONCURRENCY = 8;
+          const targets = needText.slice(0, MAX_TEXT);
+          const textByRef = new Map<string, string>();
+
+          for (let i = 0; i < targets.length; i += CONCURRENCY) {
+            const chunk = targets.slice(i, i + CONCURRENCY);
+            await Promise.all(chunk.map(async (c) => {
+              const ref: string = c.reference;
+              if (textByRef.has(ref)) { c.name = textByRef.get(ref)!; return; }
+              const isUgc = ref.includes('ugcPost');
+              const url = isUgc
+                ? `https://api.linkedin.com/v2/ugcPosts/${encodeURIComponent(ref)}`
+                : `https://api.linkedin.com/v2/shares/${encodeURIComponent(ref)}`;
+              try {
+                const r = await fetch(url, { headers: { 'Authorization': `Bearer ${accessToken}` } });
+                if (!r.ok) return;
+                const d = await r.json();
+                const raw = d?.specificContent?.['com.linkedin.ugc.ShareContent']?.shareCommentary?.text
+                  || d?.text?.text || d?.commentary || '';
+                const text = String(raw).replace(/\s+/g, ' ').trim();
+                if (text) {
+                  const label = text.length > 80 ? `${text.slice(0, 80)}…` : text;
+                  textByRef.set(ref, label);
+                  c.name = label;
+                }
+              } catch { /* leave unnamed */ }
+            }));
+          }
+          console.log(`[get_creatives] resolved ${textByRef.size} post-text names (of ${needText.length} needed)`);
+        } catch (e) {
+          console.error('[get_creatives] post-text resolution error:', e);
+        }
+
         return new Response(JSON.stringify({ ...lastPayload, elements: enriched }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
