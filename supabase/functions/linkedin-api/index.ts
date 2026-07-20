@@ -1005,14 +1005,30 @@ serve(async (req) => {
 
       case 'get_creatives': {
         const { accountId } = params || {};
-        const creativesResponse = await fetch(
-          `https://api.linkedin.com/v2/adCreativesV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}`,
-          { headers: { 'Authorization': `Bearer ${accessToken}` } }
-        );
-        const creatives = await creativesResponse.json();
-        console.log('Creatives fetched:', creatives.elements?.length || 0);
-        
-        return new Response(JSON.stringify(creatives), {
+        const baseUrl = `https://api.linkedin.com/v2/adCreativesV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}`;
+
+        // Paginate — with no count LinkedIn returns only 10, so newly created and
+        // recent creatives on any account with >10 creatives are invisible.
+        // Mirror get_campaigns: page through everything with start/count.
+        const pageSize = 100;
+        let start = 0;
+        const allElements: any[] = [];
+        let lastPayload: any = null;
+        for (let i = 0; i < 100; i++) { // hard cap = 10,000 creatives
+          const pageUrl = `${baseUrl}&start=${start}&count=${pageSize}`;
+          const resp = await fetch(pageUrl, {
+            headers: { 'Authorization': `Bearer ${accessToken}` },
+          });
+          const payload = await resp.json();
+          lastPayload = payload;
+          const els = payload?.elements || [];
+          allElements.push(...els);
+          if (els.length < pageSize) break;
+          start += pageSize;
+        }
+        console.log(`Creatives fetched: ${allElements.length} (paginated)`);
+
+        return new Response(JSON.stringify({ ...lastPayload, elements: allElements }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
