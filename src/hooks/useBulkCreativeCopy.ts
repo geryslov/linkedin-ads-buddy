@@ -170,11 +170,17 @@ export function useBulkCreativeCopy(accessToken: string | null) {
       for (const el of rawElements) {
         const creativeId = (el.id ?? '').toString();
         if (!creativeId || seen.has(creativeId)) continue;
-        seen.add(creativeId);
         const rep = reportById.get(creativeId);
         const campaignId = String(el.campaign ?? '').split(':').pop() || '';
         const reference = (el.reference as string) || '';
         const variables = (el.variables ?? {}) as Record<string, unknown>;
+        const type = (el.type as string) || (variables.type as string) || rep?.type || 'UNKNOWN';
+        // Only load ads that can actually be duplicated: they must reuse a shareable
+        // content post (a ugcPost/share reference). A reference is the true signal;
+        // a known copyable type is a backstop when the raw element hid the reference.
+        // This drops Text/Spotlight/Follower/Message/InMail and dynamic ads.
+        if (!reference && !(isCopyableType(type) && type.toUpperCase() !== 'UNKNOWN')) continue;
+        seen.add(creativeId);
         creativeList.push({
           creativeId,
           creativeName:
@@ -184,7 +190,7 @@ export function useBulkCreativeCopy(accessToken: string | null) {
             (reference ? nameByReference.get(reference) : undefined) ||
             `Creative ${creativeId}`,
           campaignName: rep?.campaignName || campaignNameById.get(campaignId) || 'Unknown Campaign',
-          type: (el.type as string) || (variables.type as string) || rep?.type || 'UNKNOWN',
+          type,
           status: (el.status as string) || (el.intendedStatus as string) || rep?.status || 'UNKNOWN',
         });
       }
@@ -195,6 +201,7 @@ export function useBulkCreativeCopy(accessToken: string | null) {
       for (const [id, rep] of reportById) {
         if (seen.has(id)) continue;
         if (status && rep.status && rep.status !== status) continue;
+        if (!isCopyableType(rep.type || 'UNKNOWN')) continue; // duplicable types only
         seen.add(id);
         creativeList.push({
           creativeId: id,

@@ -148,9 +148,10 @@ export function BulkCreativeCopy({ accessToken, selectedAccount }: BulkCreativeC
           campaign, so this creates a <strong>new ad</strong> in every selected target
           campaign that reuses the source ad's content. New ads are created as
           <strong> Draft</strong> by default so nothing spends until you activate them.
-          Text, Spotlight, Follower and Message/InMail ads can't be copied this way.
-          The source list shows <strong>Active</strong> ads by default for speed — switch
-          the status filter to <strong>Draft</strong> or <strong>All</strong> to see copies.
+          Only ad types that can be duplicated are listed (sponsored content) — Text,
+          Spotlight, Follower, Message/InMail and dynamic ads are hidden. The list shows
+          <strong> Active</strong> ads by default for speed — switch the status filter to
+          <strong> Draft</strong> or <strong>All</strong> to see copies.
         </p>
         <div className="flex items-center gap-2 shrink-0">
           <Select value={creativeStatus} onValueChange={setCreativeStatus}>
