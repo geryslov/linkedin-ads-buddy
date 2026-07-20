@@ -205,7 +205,7 @@ export function useBulkCreativeCopy(accessToken: string | null) {
         seen.add(id);
         creativeList.push({
           creativeId: id,
-          creativeName: rep.name || `Creative ${id}`,
+          creativeName: rep.name || 'Unnamed ad',
           campaignName: rep.campaignName || 'Unknown Campaign',
           type: rep.type || 'UNKNOWN',
           status: rep.status || 'UNKNOWN',
