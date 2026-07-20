@@ -79,14 +79,13 @@ export function useBulkCreativeCopy(accessToken: string | null) {
   const [summary, setSummary] = useState<CopySummary | null>(null);
   const { toast } = useToast();
 
-  // Wide default window so the source list is as complete as possible. Creatives
-  // with zero data in this window won't appear (get_creative_report is analytics
-  // based) — acceptable for a "copy a proven ad" workflow.
-  const loadData = useCallback(async (accountId: string) => {
+  const loadData = useCallback(async (accountId: string, opts?: { keepResults?: boolean }) => {
     if (!accessToken || !accountId) return;
     setIsLoading(true);
-    setResults([]);
-    setSummary(null);
+    if (!opts?.keepResults) {
+      setResults([]);
+      setSummary(null);
+    }
     try {
       const end = new Date();
       const start = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000);
@@ -95,7 +94,17 @@ export function useBulkCreativeCopy(accessToken: string | null) {
         end: end.toISOString().split('T')[0],
       };
 
-      const [creativesRes, campaignsRes] = await Promise.all([
+      // Three sources:
+      //  - get_creatives (raw adCreativesV2): the authoritative full list. Includes
+      //    brand-new DRAFT creatives, which have no analytics and are therefore
+      //    invisible to get_creative_report — this is what makes freshly copied ads
+      //    show up here.
+      //  - get_creative_report (analytics): nicer resolved names + campaign names.
+      //  - get_campaigns: campaign id -> name, and the target list.
+      const [rawRes, reportRes, campaignsRes] = await Promise.all([
+        supabase.functions.invoke('linkedin-api', {
+          body: { action: 'get_creatives', accessToken, params: { accountId } },
+        }),
         supabase.functions.invoke('linkedin-api', {
           body: {
             action: 'get_creative_report',
@@ -108,21 +117,7 @@ export function useBulkCreativeCopy(accessToken: string | null) {
         }),
       ]);
 
-      if (creativesRes.error) throw new Error(await extractInvokeError(creativesRes.error));
       if (campaignsRes.error) throw new Error(await extractInvokeError(campaignsRes.error));
-
-      const creativeList: SourceCreative[] = (creativesRes.data?.elements || [])
-        .map((el: Record<string, unknown>) => ({
-          creativeId: (el.creativeId ?? '').toString(),
-          creativeName: (el.creativeName as string) || `Creative ${el.creativeId ?? 'Unknown'}`,
-          campaignName: (el.campaignName as string) || 'Unknown Campaign',
-          type: (el.type as string) || 'UNKNOWN',
-          status: (el.status as string) || 'UNKNOWN',
-        }))
-        .filter((c: SourceCreative) => c.creativeId)
-        // de-dupe: get_creative_report can list a creative once per time bucket
-        .filter((c: SourceCreative, i: number, arr: SourceCreative[]) =>
-          arr.findIndex((x) => x.creativeId === c.creativeId) === i);
 
       const campaignList: TargetCampaign[] = (campaignsRes.data?.elements || [])
         .map((el: Record<string, unknown>) => ({
@@ -131,6 +126,63 @@ export function useBulkCreativeCopy(accessToken: string | null) {
           status: (el.status as string) || 'UNKNOWN',
           type: (el.type as string) || 'UNKNOWN',
         }));
+      const campaignNameById = new Map(campaignList.map((c) => [c.id, c.name]));
+
+      // Analytics report → enrichment map keyed by creativeId.
+      const reportById = new Map<string, { name?: string; campaignName?: string; type?: string; status?: string }>();
+      for (const el of (reportRes.data?.elements || []) as Record<string, unknown>[]) {
+        const id = (el.creativeId ?? '').toString();
+        if (id) reportById.set(id, {
+          name: el.creativeName as string,
+          campaignName: el.campaignName as string,
+          type: el.type as string,
+          status: el.status as string,
+        });
+      }
+
+      // Build the source list from raw creatives (full list incl. drafts), overlaying
+      // resolved names/campaigns from the report. Fall back to the report list alone
+      // if the raw endpoint failed for some reason.
+      const rawElements = (rawRes.data?.elements || []) as Record<string, unknown>[];
+      const seen = new Set<string>();
+      const creativeList: SourceCreative[] = [];
+
+      for (const el of rawElements) {
+        const creativeId = (el.id ?? '').toString();
+        if (!creativeId || seen.has(creativeId)) continue;
+        seen.add(creativeId);
+        const rep = reportById.get(creativeId);
+        const campaignId = String(el.campaign ?? '').split(':').pop() || '';
+        const variables = (el.variables ?? {}) as Record<string, unknown>;
+        creativeList.push({
+          creativeId,
+          creativeName:
+            rep?.name ||
+            (el.name as string) ||
+            (el.creativeDscName as string) ||
+            `Creative ${creativeId}`,
+          campaignName: rep?.campaignName || campaignNameById.get(campaignId) || 'Unknown Campaign',
+          type: (el.type as string) || (variables.type as string) || rep?.type || 'UNKNOWN',
+          status: (el.status as string) || (el.intendedStatus as string) || rep?.status || 'UNKNOWN',
+        });
+      }
+
+      // Safety net: if the raw list returned nothing (or omitted a creative the report
+      // knows about), fold in report-only rows so nothing that used to show disappears.
+      for (const [id, rep] of reportById) {
+        if (seen.has(id)) continue;
+        seen.add(id);
+        creativeList.push({
+          creativeId: id,
+          creativeName: rep.name || `Creative ${id}`,
+          campaignName: rep.campaignName || 'Unknown Campaign',
+          type: rep.type || 'UNKNOWN',
+          status: rep.status || 'UNKNOWN',
+        });
+      }
+
+      // Newest LinkedIn creative IDs sort highest — surface just-created ads at the top.
+      creativeList.sort((a, b) => Number(b.creativeId) - Number(a.creativeId));
 
       setSources(creativeList);
       setCampaigns(campaignList);
