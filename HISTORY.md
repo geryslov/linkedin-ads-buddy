@@ -75,9 +75,19 @@ A single concentrated push (Apr 12) building the weekly report suite: Sun–Sat 
 
 **Jun 23–29**: safe LinkedIn retry, deduped title URNs, batch job-titles fix, and a metrics correctness fix — `leads` now means `oneClickLeads` only, with conversions and formOpens exposed separately (`0f82140`).
 
-## Jul 2026 — Client-facing reports
+## Jul 2026 — Client-facing reports, then docs and a deploy discovery
 
-`ab22e39` (Jul 5) — client-accessible weekly reports. Claude-generated narrative published to a shareable public URL via the `published_reports` table and a `SECURITY DEFINER` RPC. Current HEAD.
+`ab22e39` (Jul 5) — client-accessible weekly reports. Claude-generated narrative published to a shareable public URL via the `published_reports` table and a `SECURITY DEFINER` RPC.
+
+**Jul 19–20** — documentation and groundwork for bulk ad copying:
+
+- `5ccf3ef` — added FEATURES.md and HISTORY.md, plus a Stop hook (`.claude/hooks/docs-freshness.sh`) that blocks once per session if `src/`, `supabase/`, or `mcp-server/` changed without either doc being updated.
+- `655d9c9` — `probe_creative_create`, Stage 0 of bulk ad copying. Before building anything, this answers whether the app can create a LinkedIn creative at all or is blocked by Marketing Developer Platform Partner status — the same wall that already breaks creative thumbnails. It's the first code here to POST to a LinkedIn create endpoint, the first to read a response header, and the first to touch `intendedStatus`.
+- `9e74e87` — **discovered the edge function CI deploy has been failing since at least Jun 24.** The workflow exists and triggers correctly, so CLAUDE.md was briefly "corrected" to claim auto-deploy works; checking actual run history showed four consecutive failures at the deploy step, most likely a stale `SUPABASE_ACCESS_TOKEN` secret. The doc now says the opposite. Worth remembering: a workflow file existing is not evidence it runs.
+
+The probe was deployed out-of-band (via Lovable, not CI) and verified live — `probe_creative_create` returns its validation error while an unknown action returns `Unknown action`. Its MCP exclusion was also confirmed empirically: calling with the anon key returns `401 AUTH_REQUIRED`, because `mcp-server` never sends a user JWT and `mcp_api_keys` has no `user_id` to resolve one from.
+
+Stages 1–3 of the feature (compatibility rules, `copy_creatives_to_campaigns`, and a "Bulk Editing" section under Creatives) are deliberately blocked on the probe's verdict. Full plan: `~/.claude/plans/analyze-the-api-and-twinkly-papert.md`.
 
 ---
 
