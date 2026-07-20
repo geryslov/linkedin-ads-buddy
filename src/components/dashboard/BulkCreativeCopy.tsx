@@ -1,26 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   useBulkCreativeCopy,
-  isCopyableType,
   SourceCreative,
   TargetCampaign,
 } from '@/hooks/useBulkCreativeCopy';
-import { CreativeTypeBadge } from './CreativeTypeBadge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { Label } from '@/components/ui/label';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { cn } from '@/lib/utils';
 import {
   Search,
@@ -30,6 +19,11 @@ import {
   CheckCircle2,
   XCircle,
   AlertTriangle,
+  Info,
+  Video,
+  Image as ImageIcon,
+  FileText,
+  GalleryHorizontalEnd,
 } from 'lucide-react';
 import {
   AlertDialog,
@@ -47,6 +41,13 @@ interface BulkCreativeCopyProps {
   accessToken: string | null;
   selectedAccount: string | null;
 }
+
+const STATUS_OPTIONS = [
+  { value: 'ACTIVE', label: 'Active' },
+  { value: 'PAUSED', label: 'Paused' },
+  { value: 'DRAFT', label: 'Draft' },
+  { value: 'ALL', label: 'All' },
+];
 
 export function BulkCreativeCopy({ accessToken, selectedAccount }: BulkCreativeCopyProps) {
   const {
@@ -103,15 +104,6 @@ export function BulkCreativeCopy({ accessToken, selectedAccount }: BulkCreativeC
     return next;
   };
 
-  const nonCopyableSelected = useMemo(
-    () =>
-      Array.from(selectedCreatives).filter((id) => {
-        const c = sources.find((s) => s.creativeId === id);
-        return c && !isCopyableType(c.type);
-      }).length,
-    [selectedCreatives, sources],
-  );
-
   const totalCopies = selectedCreatives.size * selectedCampaigns.size;
   const campaignNameById = (id: string) =>
     campaigns.find((c) => c.id === id)?.name || id;
@@ -140,50 +132,50 @@ export function BulkCreativeCopy({ accessToken, selectedAccount }: BulkCreativeC
   }
 
   return (
-    <div className="space-y-5">
-      {/* Intro / how it works */}
-      <div className="flex items-start justify-between gap-4">
-        <p className="text-sm text-muted-foreground max-w-3xl">
-          Copy existing ads into other campaigns. LinkedIn binds each ad to a single
-          campaign, so this creates a <strong>new ad</strong> in every selected target
-          campaign that reuses the source ad's content. New ads are created as
-          <strong> Draft</strong> by default so nothing spends until you activate them.
-          Only ad types that can be duplicated are listed (sponsored content) — Text,
-          Spotlight, Follower, Message/InMail and dynamic ads are hidden. The list shows
-          <strong> Active</strong> ads by default for speed — switch the status filter to
-          <strong> Draft</strong> or <strong>All</strong> to see copies.
+    <div className="space-y-4 pb-24">
+      {/* Toolbar: helper + status segmented control + refresh */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-muted-foreground">
+          Copy proven ads into other campaigns. New ads land as drafts — nothing spends
+          until you activate them.
         </p>
         <div className="flex items-center gap-2 shrink-0">
-          <Select value={creativeStatus} onValueChange={setCreativeStatus}>
-            <SelectTrigger className="w-[130px] h-8 text-sm">
-              <SelectValue placeholder="Status" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="ACTIVE">Active</SelectItem>
-              <SelectItem value="PAUSED">Paused</SelectItem>
-              <SelectItem value="DRAFT">Draft</SelectItem>
-              <SelectItem value="ALL">All statuses</SelectItem>
-            </SelectContent>
-          </Select>
+          <ToggleGroup
+            type="single"
+            value={creativeStatus}
+            onValueChange={(v) => v && setCreativeStatus(v)}
+            className="rounded-lg border border-border bg-muted/50 p-0.5"
+          >
+            {STATUS_OPTIONS.map((o) => (
+              <ToggleGroupItem
+                key={o.value}
+                value={o.value}
+                className="h-7 px-3 text-xs data-[state=on]:bg-background data-[state=on]:shadow-sm"
+              >
+                {o.label}
+              </ToggleGroupItem>
+            ))}
+          </ToggleGroup>
           <Button
             variant="outline"
-            size="sm"
+            size="icon"
+            className="h-8 w-8"
             onClick={() => selectedAccount && loadData(selectedAccount, { status: creativeStatus })}
             disabled={isLoading}
+            title="Refresh"
           >
-            <RefreshCw className={cn('h-3.5 w-3.5 mr-2', isLoading && 'animate-spin')} />
-            Refresh
+            <RefreshCw className={cn('h-3.5 w-3.5', isLoading && 'animate-spin')} />
           </Button>
         </div>
       </div>
 
       {/* Selection grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        {/* Source ads */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <SelectionPanel
-          title="Source ads"
-          subtitle="Pick the ads to copy"
+          step={1}
+          title="Choose ads"
           count={selectedCreatives.size}
+          searchPlaceholder="Search ads…"
           search={creativeSearch}
           onSearch={setCreativeSearch}
           onSelectAll={() =>
@@ -192,7 +184,7 @@ export function BulkCreativeCopy({ accessToken, selectedAccount }: BulkCreativeC
           onClear={() => setSelectedCreatives(new Set())}
           isLoading={isLoading}
           isEmpty={filteredCreatives.length === 0}
-          emptyLabel="No ads with data in the last 12 months."
+          emptyLabel="No duplicable ads for this status."
         >
           {filteredCreatives.map((c) => (
             <CreativeRow
@@ -204,11 +196,11 @@ export function BulkCreativeCopy({ accessToken, selectedAccount }: BulkCreativeC
           ))}
         </SelectionPanel>
 
-        {/* Target campaigns */}
         <SelectionPanel
-          title="Target campaigns"
-          subtitle="Copy the ads into these"
+          step={2}
+          title="Choose campaigns"
           count={selectedCampaigns.size}
+          searchPlaceholder="Search campaigns…"
           search={campaignSearch}
           onSearch={setCampaignSearch}
           onSelectAll={() =>
@@ -230,78 +222,12 @@ export function BulkCreativeCopy({ accessToken, selectedAccount }: BulkCreativeC
         </SelectionPanel>
       </div>
 
-      {/* Action bar */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 rounded-xl border border-border bg-card p-4">
-        <div className="flex items-center gap-6">
-          <div className="flex items-center gap-3 text-sm">
-            <span className="font-medium">{selectedCreatives.size}</span>
-            <span className="text-muted-foreground">ads</span>
-            <ArrowRight className="h-4 w-4 text-muted-foreground" />
-            <span className="font-medium">{selectedCampaigns.size}</span>
-            <span className="text-muted-foreground">campaigns</span>
-            <span className="text-muted-foreground">=</span>
-            <span className="font-semibold text-primary">{totalCopies}</span>
-            <span className="text-muted-foreground">new ad(s)</span>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <span className="text-xs text-muted-foreground">Create as</span>
-            <RadioGroup
-              value={intendedStatus}
-              onValueChange={(v) => setIntendedStatus(v as 'DRAFT' | 'ACTIVE')}
-              className="flex items-center gap-3"
-            >
-              <div className="flex items-center gap-1.5">
-                <RadioGroupItem value="DRAFT" id="status-draft" />
-                <Label htmlFor="status-draft" className="text-xs cursor-pointer">Draft</Label>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <RadioGroupItem value="ACTIVE" id="status-active" />
-                <Label htmlFor="status-active" className="text-xs cursor-pointer">Active</Label>
-              </div>
-            </RadioGroup>
-          </div>
-        </div>
-
-        <AlertDialog>
-          <AlertDialogTrigger asChild>
-            <Button disabled={totalCopies === 0 || isRunning}>
-              <Copy className={cn('h-4 w-4 mr-2', isRunning && 'animate-pulse')} />
-              {isRunning ? 'Copying…' : `Copy ${totalCopies || ''} ad(s)`}
-            </Button>
-          </AlertDialogTrigger>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Copy {totalCopies} ad(s)?</AlertDialogTitle>
-              <AlertDialogDescription asChild>
-                <div className="space-y-2 text-sm">
-                  <p>
-                    This creates <strong>{totalCopies}</strong> new ad(s) across{' '}
-                    <strong>{selectedCampaigns.size}</strong> campaign(s), set to{' '}
-                    <strong>{intendedStatus === 'ACTIVE' ? 'Active' : 'Draft'}</strong>.
-                    {intendedStatus === 'ACTIVE' && (
-                      <span className="text-amber-600 dark:text-amber-500">
-                        {' '}Active ads can begin serving and spending immediately.
-                      </span>
-                    )}
-                  </p>
-                  {nonCopyableSelected > 0 && (
-                    <p className="flex items-start gap-1.5 text-amber-600 dark:text-amber-500">
-                      <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
-                      {nonCopyableSelected} selected ad(s) are a type LinkedIn can't copy
-                      (Text/Spotlight/Follower/Message) and will be skipped.
-                    </p>
-                  )}
-                </div>
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction onClick={handleRun}>Copy ads</AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-      </div>
+      {/* Hint */}
+      <p className="flex items-center gap-2 text-xs text-muted-foreground">
+        <Info className="h-3.5 w-3.5 shrink-0 text-muted-foreground/70" />
+        Only ad types that can be duplicated are shown. Copies reuse the original post and
+        never edit the source ad.
+      </p>
 
       {/* Results */}
       {summary && (
@@ -338,7 +264,7 @@ export function BulkCreativeCopy({ accessToken, selectedAccount }: BulkCreativeC
                     <td className="px-4 py-2">
                       {r.ok ? (
                         <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-500">
-                          <CheckCircle2 className="h-3.5 w-3.5" /> Created (Draft/Active per choice)
+                          <CheckCircle2 className="h-3.5 w-3.5" /> Created
                         </span>
                       ) : (
                         <span className="flex items-center gap-1.5 text-destructive">
@@ -354,6 +280,78 @@ export function BulkCreativeCopy({ accessToken, selectedAccount }: BulkCreativeC
           </ScrollArea>
         </div>
       )}
+
+      {/* Sticky action bar */}
+      <div className="sticky bottom-4 z-10">
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-3 rounded-2xl border border-border bg-card/95 backdrop-blur-sm px-4 py-3 shadow-lg">
+          <div className="flex items-center gap-2.5 text-sm tabular-nums">
+            <span className="font-semibold">{selectedCreatives.size}</span>
+            <span className="text-muted-foreground">ads</span>
+            <ArrowRight className="h-3.5 w-3.5 text-muted-foreground/60" />
+            <span className="font-semibold">{selectedCampaigns.size}</span>
+            <span className="text-muted-foreground">campaigns</span>
+            <span className="ml-2 flex items-baseline gap-1.5 border-l border-border pl-3">
+              <span className="text-base font-bold text-primary">{totalCopies}</span>
+              <span className="text-muted-foreground">new drafts</span>
+            </span>
+          </div>
+
+          <div className="ml-auto flex items-center gap-3">
+            <span className="text-xs text-muted-foreground">Create as</span>
+            <ToggleGroup
+              type="single"
+              value={intendedStatus}
+              onValueChange={(v) => v && setIntendedStatus(v as 'DRAFT' | 'ACTIVE')}
+              className="rounded-lg border border-border bg-muted/50 p-0.5"
+            >
+              <ToggleGroupItem value="DRAFT" className="h-7 px-3 text-xs data-[state=on]:bg-background data-[state=on]:shadow-sm">
+                Draft
+              </ToggleGroupItem>
+              <ToggleGroupItem value="ACTIVE" className="h-7 px-3 text-xs data-[state=on]:bg-background data-[state=on]:shadow-sm">
+                Active
+              </ToggleGroupItem>
+            </ToggleGroup>
+
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button disabled={totalCopies === 0 || isRunning}>
+                  <Copy className={cn('h-4 w-4 mr-2', isRunning && 'animate-pulse')} />
+                  {isRunning ? 'Copying…' : `Copy ${totalCopies || ''} ad(s)`}
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Copy {totalCopies} ad(s)?</AlertDialogTitle>
+                  <AlertDialogDescription asChild>
+                    <div className="space-y-2 text-sm">
+                      <p>
+                        This creates <strong>{totalCopies}</strong> new ad(s) across{' '}
+                        <strong>{selectedCampaigns.size}</strong> campaign(s), set to{' '}
+                        <strong>{intendedStatus === 'ACTIVE' ? 'Active' : 'Draft'}</strong>.
+                        {intendedStatus === 'ACTIVE' && (
+                          <span className="text-amber-600 dark:text-amber-500">
+                            {' '}Active ads can begin serving and spending immediately.
+                          </span>
+                        )}
+                      </p>
+                      {intendedStatus === 'ACTIVE' && (
+                        <p className="flex items-start gap-1.5 text-amber-600 dark:text-amber-500">
+                          <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+                          Prefer Draft if you want to review before they go live.
+                        </p>
+                      )}
+                    </div>
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={handleRun}>Copy ads</AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -361,10 +359,11 @@ export function BulkCreativeCopy({ accessToken, selectedAccount }: BulkCreativeC
 // ── Sub-components ───────────────────────────────────────────────────────────
 
 interface SelectionPanelProps {
+  step: number;
   title: string;
-  subtitle: string;
   count: number;
   search: string;
+  searchPlaceholder: string;
   onSearch: (v: string) => void;
   onSelectAll: () => void;
   onClear: () => void;
@@ -375,10 +374,11 @@ interface SelectionPanelProps {
 }
 
 function SelectionPanel({
+  step,
   title,
-  subtitle,
   count,
   search,
+  searchPlaceholder,
   onSearch,
   onSelectAll,
   onClear,
@@ -388,49 +388,114 @@ function SelectionPanel({
   children,
 }: SelectionPanelProps) {
   return (
-    <div className="rounded-xl border border-border bg-card flex flex-col">
-      <div className="px-4 py-3 border-b border-border">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-sm font-semibold">{title}</h3>
-            <p className="text-xs text-muted-foreground">{subtitle}</p>
-          </div>
-          {count > 0 && <Badge variant="secondary">{count} selected</Badge>}
+    <div className="rounded-xl border border-border bg-card flex flex-col overflow-hidden">
+      <div className="px-4 pt-3.5 pb-3 border-b border-border">
+        <div className="flex items-center gap-2.5">
+          <span className="grid h-5 w-5 place-items-center rounded-md bg-primary/10 text-[11px] font-bold text-primary">
+            {step}
+          </span>
+          <h3 className="text-sm font-semibold">{title}</h3>
+          <span
+            className={cn(
+              'ml-auto rounded-full px-2.5 py-0.5 text-[11px] font-semibold tabular-nums',
+              count > 0 ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground',
+            )}
+          >
+            {count} selected
+          </span>
         </div>
         <div className="mt-3 flex items-center gap-2">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
             <Input
-              placeholder="Search…"
+              placeholder={searchPlaceholder}
               value={search}
               onChange={(e) => onSearch(e.target.value)}
-              className="pl-9 h-8 text-sm"
+              className="pl-9 h-8 text-sm bg-muted/40"
             />
           </div>
-          <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={onSelectAll}>
+          <Button variant="ghost" size="sm" className="h-8 px-2.5 text-xs" onClick={onSelectAll}>
             All
           </Button>
-          <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={onClear}>
+          <Button variant="ghost" size="sm" className="h-8 px-2.5 text-xs" onClick={onClear}>
             None
           </Button>
         </div>
       </div>
-      <ScrollArea className="h-80">
-        <div className="p-2">
+      <ScrollArea className="h-[340px]">
+        <div className="p-1.5">
           {isLoading ? (
-            <div className="space-y-2 p-2">
+            <div className="space-y-1.5 p-1.5">
               {[...Array(6)].map((_, i) => (
-                <Skeleton key={i} className="h-10 rounded-md" />
+                <Skeleton key={i} className="h-12 rounded-lg" />
               ))}
             </div>
           ) : isEmpty ? (
-            <div className="text-center py-10 text-sm text-muted-foreground">{emptyLabel}</div>
+            <div className="text-center py-12 text-sm text-muted-foreground">{emptyLabel}</div>
           ) : (
             children
           )}
         </div>
       </ScrollArea>
     </div>
+  );
+}
+
+function typeIcon(type: string) {
+  const t = (type || '').toUpperCase();
+  if (t.includes('VIDEO')) return Video;
+  if (t.includes('CAROUSEL')) return GalleryHorizontalEnd;
+  if (t.includes('DOCUMENT')) return FileText;
+  return ImageIcon;
+}
+
+function shortType(type: string): string {
+  const t = (type || '').toUpperCase();
+  if (t.includes('VIDEO')) return 'VIDEO';
+  if (t.includes('CAROUSEL')) return 'CAROUSEL';
+  if (t.includes('DOCUMENT')) return 'DOCUMENT';
+  if (t.includes('STATUS_UPDATE') || t.includes('IMAGE')) return 'IMAGE';
+  if (t === 'UNKNOWN' || !t) return 'AD';
+  return t.replace(/^SPONSORED_/, '').slice(0, 12);
+}
+
+function StatusDot({ status }: { status: string }) {
+  const s = (status || '').toUpperCase();
+  const color =
+    s === 'ACTIVE'
+      ? 'bg-emerald-500'
+      : s === 'DRAFT'
+        ? 'bg-amber-500'
+        : s === 'PAUSED'
+          ? 'bg-muted-foreground/50'
+          : 'bg-muted-foreground/40';
+  return <span className={cn('h-1.5 w-1.5 rounded-full shrink-0', color)} title={s} />;
+}
+
+function Row({
+  checked,
+  onToggle,
+  children,
+}: {
+  checked: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className={cn(
+        'relative w-full flex items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors',
+        checked ? 'bg-primary/[0.06]' : 'hover:bg-muted/60',
+      )}
+    >
+      {checked && (
+        <span className="absolute left-0 top-2 bottom-2 w-[3px] rounded-full bg-primary" />
+      )}
+      <Checkbox checked={checked} className="pointer-events-none shrink-0" />
+      {children}
+    </button>
   );
 }
 
@@ -443,42 +508,23 @@ function CreativeRow({
   checked: boolean;
   onToggle: () => void;
 }) {
-  const copyable = isCopyableType(creative.type);
+  const Icon = typeIcon(creative.type);
   return (
-    <button
-      type="button"
-      onClick={onToggle}
-      className={cn(
-        'w-full flex items-center gap-3 px-2 py-2 rounded-md text-left transition-colors hover:bg-muted/60',
-        checked && 'bg-primary/5',
-      )}
-    >
-      <Checkbox checked={checked} className="pointer-events-none" />
+    <Row checked={checked} onToggle={onToggle}>
+      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
+        <Icon className="h-4 w-4" />
+      </span>
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <span className="text-sm truncate">{creative.creativeName}</span>
-          {!copyable && (
-            <Badge variant="outline" className="text-[10px] text-amber-600 border-amber-300 shrink-0">
-              not copyable
-            </Badge>
-          )}
-        </div>
-        <div className="flex items-center gap-2 mt-0.5">
-          <CreativeTypeBadge type={creative.type} />
-          {creative.status && creative.status !== 'ACTIVE' && (
-            <Badge
-              variant="outline"
-              className={cn(
-                'text-[10px] shrink-0',
-                creative.status === 'DRAFT' && 'text-blue-600 border-blue-300',
-              )}
-            >
-              {creative.status}
-            </Badge>
-          )}
+        <div className="truncate text-[13px] font-medium">{creative.creativeName}</div>
+        <div className="mt-0.5 flex items-center gap-2 text-[11.5px] text-muted-foreground">
+          <span className="rounded border border-border bg-muted/50 px-1.5 py-px text-[10px] font-semibold tracking-wide shrink-0">
+            {shortType(creative.type)}
+          </span>
+          <StatusDot status={creative.status} />
+          <span className="truncate">{creative.campaignName}</span>
         </div>
       </div>
-    </button>
+    </Row>
   );
 }
 
@@ -492,19 +538,14 @@ function CampaignRow({
   onToggle: () => void;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onToggle}
-      className={cn(
-        'w-full flex items-center gap-3 px-2 py-2 rounded-md text-left transition-colors hover:bg-muted/60',
-        checked && 'bg-primary/5',
-      )}
-    >
-      <Checkbox checked={checked} className="pointer-events-none" />
+    <Row checked={checked} onToggle={onToggle}>
       <div className="min-w-0 flex-1">
-        <span className="text-sm truncate block">{campaign.name}</span>
-        <span className="text-xs text-muted-foreground">{campaign.status}</span>
+        <div className="truncate text-[13px] font-medium">{campaign.name}</div>
+        <div className="mt-0.5 flex items-center gap-2 text-[11.5px] text-muted-foreground">
+          <StatusDot status={campaign.status} />
+          <span className="capitalize">{(campaign.status || '').toLowerCase() || 'unknown'}</span>
+        </div>
       </div>
-    </button>
+    </Row>
   );
 }
