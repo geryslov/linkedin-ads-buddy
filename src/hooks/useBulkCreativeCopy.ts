@@ -174,7 +174,7 @@ export function useBulkCreativeCopy(accessToken: string | null) {
         const id = (el.id ?? '').toString();
         const ref = (el.reference as string) || '';
         // Prefer the REST-resolved creative name (el.name), then the analytics name.
-        const resolved = (el.name as string) || reportById.get(id)?.name || '';
+        const resolved = cleanName(el.name as string) || reportById.get(id)?.name || '';
         if (ref && resolved && !nameByReference.has(ref)) nameByReference.set(ref, resolved);
       }
 
