@@ -17,7 +17,7 @@ What exists in LinkedIn Ads Buddy today. See [CLAUDE.md](CLAUDE.md) for architec
 
 ## Dashboard navigation
 
-Defined in [Sidebar.tsx](src/components/dashboard/Sidebar.tsx). Six groups:
+Defined in [Sidebar.tsx](src/components/dashboard/Sidebar.tsx). Seven groups:
 
 ### Main
 | Item | Component |
@@ -30,6 +30,13 @@ Defined in [Sidebar.tsx](src/components/dashboard/Sidebar.tsx). Six groups:
 | Campaigns | [CampaignTable](src/components/dashboard/CampaignTable.tsx) | [useLinkedInAds](src/hooks/useLinkedInAds.ts) |
 | Budget Pacing | [BudgetPacingDashboard](src/components/dashboard/BudgetPacingDashboard.tsx), [MegaBudgetPacingDashboard](src/components/dashboard/MegaBudgetPacingDashboard.tsx) | [useBudgetPacing](src/hooks/useBudgetPacing.ts), [useMegaBudgetPacing](src/hooks/useMegaBudgetPacing.ts) |
 | Creatives | [CreativeGallery](src/components/dashboard/CreativeGallery.tsx) | [useCreativeReporting](src/hooks/useCreativeReporting.ts) |
+
+### Bulk Editing
+| Item | Component | Hook |
+|---|---|---|
+| Add Ads to Campaigns | [BulkCreativeCopy](src/components/dashboard/BulkCreativeCopy.tsx) | [useBulkCreativeCopy](src/hooks/useBulkCreativeCopy.ts) |
+
+Copies existing ads into other campaigns in bulk (N sources × M campaigns → N×M new creatives). Backend `bulk_copy_creatives`; platform-only (JWT + can_write gated), creates as Draft by default. Skips inline (text/spotlight/follower) and Message/InMail content.
 
 ### Analytics
 | Item | Component | Notes |
@@ -92,16 +99,16 @@ Agency → client publishing flow.
 
 | Function | Purpose |
 |---|---|
-| `linkedin-api` | Monolith (~13.4k lines), **65 actions**. All LinkedIn API access |
+| `linkedin-api` | Monolith (~13.4k lines), **66 actions**. All LinkedIn API access |
 | `analyze-data` | Claude calls. `DEFAULT_MODEL` = `claude-sonnet-4-20250514`, overridden per report type via `MODEL_BY_REPORT_TYPE` |
 | `apify-proxy` | Apify passthrough for Social Listener. Needs `APIFY_TOKEN` |
 | `create-test-user` | Test login flow |
 
-### `linkedin-api` actions (65)
+### `linkedin-api` actions (66)
 
 **Auth & accounts** — `get_auth_url`, `exchange_token`, `get_profile`, `get_ad_accounts`, `sync_ad_accounts`, `sync_mcp_token`
 
-**Campaigns & creatives** — `get_campaigns`, `get_campaign_report`, `get_campaign_group_performance`, `get_campaign_performance_report`, `get_creatives`, `get_creative_report`, `get_creative_names_report`, `get_creative_performance_report`, `get_creative_analytics`, `get_creative_fatigue`, `get_account_structure`, `update_campaign_status`, `update_campaign_targeting`
+**Campaigns & creatives** — `get_campaigns`, `get_campaign_report`, `get_campaign_group_performance`, `get_campaign_performance_report`, `get_creatives`, `get_creative_report`, `get_creative_names_report`, `get_creative_performance_report`, `get_creative_analytics`, `get_creative_fatigue`, `get_account_structure`, `update_campaign_status`, `update_campaign_targeting`, `bulk_copy_creatives`
 
 **Analytics** — `get_analytics`, `get_ad_analytics`, `get_demographic_analytics`, `get_objective_breakdowns`, `get_form_creative_analytics`
 

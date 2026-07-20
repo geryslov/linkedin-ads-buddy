@@ -14,6 +14,7 @@ import { TitleCheckerPage } from "@/components/dashboard/TitleCheckerPage";
 import { CompanyEngagementTimeline } from "@/components/dashboard/CompanyEngagementTimeline";
 import { MegaBudgetPacingDashboard } from "@/components/dashboard/MegaBudgetPacingDashboard";
 import { CreativeGallery } from "@/components/dashboard/CreativeGallery";
+import { BulkCreativeCopy } from "@/components/dashboard/BulkCreativeCopy";
 import { CreativePerformanceReport } from "@/components/dashboard/CreativePerformanceReport";
 import { CampaignPerformanceReport } from "@/components/dashboard/CampaignPerformanceReport";
 import { CompanyInfluenceMatcher } from "@/components/dashboard/CompanyInfluenceMatcher";
@@ -50,6 +51,7 @@ const tabMeta: Record<string, { group: string; title: string; subtitle: string }
   campaigns:           { group: "Campaigns",  title: "Campaign Management",         subtitle: "Manage and monitor your active campaigns" },
   budget_pacing:       { group: "Campaigns",  title: "Budget Pacing",               subtitle: "Track budget distribution across campaigns" },
   creatives:           { group: "Campaigns",  title: "Ad Creatives",                subtitle: "Browse and analyze your creative assets" },
+  bulk_add_creatives:  { group: "Bulk Editing", title: "Add Ads to Campaigns",       subtitle: "Copy existing ads into other campaigns in bulk" },
   analytics:           { group: "Analytics",  title: "Analytics",                   subtitle: "Performance metrics and key insights" },
   campaign_reports:    { group: "Analytics",  title: "Campaign Reports",            subtitle: "Detailed campaign performance breakdown" },
   creative_reports:    { group: "Analytics",  title: "Creative Reports",            subtitle: "Creative-level performance analysis" },
@@ -343,6 +345,13 @@ export default function Dashboard() {
 
         {activeTab === "creatives" && (
           <CreativeGallery
+            accessToken={accessToken}
+            selectedAccount={selectedAccount}
+          />
+        )}
+
+        {activeTab === "bulk_add_creatives" && (
+          <BulkCreativeCopy
             accessToken={accessToken}
             selectedAccount={selectedAccount}
           />
