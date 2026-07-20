@@ -201,8 +201,8 @@ export function useBulkCreativeCopy(accessToken: string | null) {
         creativeList.push({
           creativeId,
           creativeName:
-            (el.name as string) ||
-            (el.creativeDscName as string) ||
+            cleanName(el.name as string) ||
+            cleanName(el.creativeDscName as string) ||
             rep?.name ||
             (reference ? nameByReference.get(reference) : undefined) ||
             'Unnamed ad',
