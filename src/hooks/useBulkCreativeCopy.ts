@@ -156,8 +156,9 @@ export function useBulkCreativeCopy(accessToken: string | null) {
       for (const el of rawElements) {
         const id = (el.id ?? '').toString();
         const ref = (el.reference as string) || '';
-        const rep = reportById.get(id);
-        if (ref && rep?.name && !nameByReference.has(ref)) nameByReference.set(ref, rep.name);
+        // Prefer the REST-resolved creative name (el.name), then the analytics name.
+        const resolved = (el.name as string) || reportById.get(id)?.name || '';
+        if (ref && resolved && !nameByReference.has(ref)) nameByReference.set(ref, resolved);
       }
 
       // Build the source list from raw creatives (full list incl. drafts), overlaying
@@ -177,9 +178,9 @@ export function useBulkCreativeCopy(accessToken: string | null) {
         creativeList.push({
           creativeId,
           creativeName:
-            rep?.name ||
             (el.name as string) ||
             (el.creativeDscName as string) ||
+            rep?.name ||
             (reference ? nameByReference.get(reference) : undefined) ||
             `Creative ${creativeId}`,
           campaignName: rep?.campaignName || campaignNameById.get(campaignId) || 'Unknown Campaign',

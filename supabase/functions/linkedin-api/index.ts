@@ -1046,6 +1046,47 @@ serve(async (req) => {
         };
         const enriched = allElements.map((c) => ({ ...c, reference: extractRef(c) }));
 
+        // Resolve friendly names. The legacy adCreativesV2 list does not return a
+        // usable name for sponsored content (that is why creatives showed as IDs),
+        // but the versioned REST creative object does (its `name` field — the same
+        // one the copy action reads). Batch-GET the REST creatives to pull names.
+        try {
+          const ids = enriched.map((c) => (c.id ?? '').toString()).filter(Boolean);
+          const nameById: Record<string, string> = {};
+          const restHeaders = {
+            'Authorization': `Bearer ${accessToken}`,
+            'LinkedIn-Version': '202511',
+            'X-Restli-Protocol-Version': '2.0.0',
+          };
+          for (let i = 0; i < ids.length; i += 50) {
+            const chunk = ids.slice(i, i + 50);
+            const idList = chunk
+              .map((id) => encodeURIComponent(`urn:li:sponsoredCreative:${id}`))
+              .join(',');
+            const batchUrl = `https://api.linkedin.com/rest/adAccounts/${accountId}/creatives?ids=List(${idList})`;
+            const batchResp = await fetch(batchUrl, { headers: restHeaders });
+            if (!batchResp.ok) {
+              console.log(`[get_creatives] name batch-get failed: HTTP ${batchResp.status}`);
+              continue;
+            }
+            const batchJson = await batchResp.json();
+            const results = batchJson?.results || {};
+            for (const [urn, obj] of Object.entries<any>(results)) {
+              const cid = urn.split(':').pop() || '';
+              const nm = obj?.name;
+              if (cid && typeof nm === 'string' && nm.trim()) nameById[cid] = nm.trim();
+            }
+          }
+          const resolvedCount = Object.keys(nameById).length;
+          console.log(`[get_creatives] resolved ${resolvedCount}/${ids.length} names via REST`);
+          for (const c of enriched) {
+            const nm = nameById[(c.id ?? '').toString()];
+            if (nm) c.name = nm; // overlay the friendly name onto the element
+          }
+        } catch (e) {
+          console.error('[get_creatives] name resolution error:', e);
+        }
+
         return new Response(JSON.stringify({ ...lastPayload, elements: enriched }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
