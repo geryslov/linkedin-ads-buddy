@@ -188,7 +188,7 @@ export function useBulkCreativeCopy(accessToken: string | null) {
             (el.creativeDscName as string) ||
             rep?.name ||
             (reference ? nameByReference.get(reference) : undefined) ||
-            `Creative ${creativeId}`,
+            'Unnamed ad',
           campaignName: rep?.campaignName || campaignNameById.get(campaignId) || 'Unknown Campaign',
           type,
           status: (el.status as string) || (el.intendedStatus as string) || rep?.status || 'UNKNOWN',
