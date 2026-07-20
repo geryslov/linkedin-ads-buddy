@@ -188,7 +188,7 @@ export function useBulkCreativeCopy(accessToken: string | null) {
             (el.creativeDscName as string) ||
             rep?.name ||
             (reference ? nameByReference.get(reference) : undefined) ||
-            `Creative ${creativeId}`,
+            'Unnamed ad',
           campaignName: rep?.campaignName || campaignNameById.get(campaignId) || 'Unknown Campaign',
           type,
           status: (el.status as string) || (el.intendedStatus as string) || rep?.status || 'UNKNOWN',
@@ -205,7 +205,7 @@ export function useBulkCreativeCopy(accessToken: string | null) {
         seen.add(id);
         creativeList.push({
           creativeId: id,
-          creativeName: rep.name || `Creative ${id}`,
+          creativeName: rep.name || 'Unnamed ad',
           campaignName: rep.campaignName || 'Unknown Campaign',
           type: rep.type || 'UNKNOWN',
           status: rep.status || 'UNKNOWN',
