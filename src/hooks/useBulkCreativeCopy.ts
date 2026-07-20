@@ -19,6 +19,11 @@ export interface TargetCampaign {
   type: string;
 }
 
+export interface LeadForm {
+  id: string;
+  name: string;
+}
+
 export interface CopyResult {
   sourceCreativeId: string;
   sourceCreativeName: string | null;
@@ -27,12 +32,15 @@ export interface CopyResult {
   verdict: string;
   createdUrn: string | null;
   message: string | null;
+  isLeadGen?: boolean;
+  formApplied?: boolean;
 }
 
 export interface CopySummary {
   attempted: number;
   succeeded: number;
   failed: number;
+  formsApplied?: number;
 }
 
 // Ad types LinkedIn cannot copy by reference (no shareable content URN). Used only
@@ -73,6 +81,7 @@ async function extractInvokeError(error: unknown): Promise<string> {
 export function useBulkCreativeCopy(accessToken: string | null) {
   const [sources, setSources] = useState<SourceCreative[]>([]);
   const [campaigns, setCampaigns] = useState<TargetCampaign[]>([]);
+  const [forms, setForms] = useState<LeadForm[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
   const [results, setResults] = useState<CopyResult[]>([]);
@@ -107,7 +116,7 @@ export function useBulkCreativeCopy(accessToken: string | null) {
       //    show up here.
       //  - get_creative_report (analytics): nicer resolved names + campaign names.
       //  - get_campaigns: campaign id -> name, and the target list.
-      const [rawRes, reportRes, campaignsRes] = await Promise.all([
+      const [rawRes, reportRes, campaignsRes, formsRes] = await Promise.all([
         supabase.functions.invoke('linkedin-api', {
           body: { action: 'get_creatives', accessToken, params: { accountId, status } },
         }),
@@ -121,9 +130,17 @@ export function useBulkCreativeCopy(accessToken: string | null) {
         supabase.functions.invoke('linkedin-api', {
           body: { action: 'get_campaigns', accessToken, params: { accountId } },
         }),
+        // Lead gen forms for the optional "assign form + CTA" picker. Non-fatal.
+        supabase.functions.invoke('linkedin-api', {
+          body: { action: 'list_lead_forms', accessToken, params: { accountId } },
+        }),
       ]);
 
       if (campaignsRes.error) throw new Error(await extractInvokeError(campaignsRes.error));
+
+      const formList: LeadForm[] = (formsRes.data?.forms || [])
+        .map((f: Record<string, unknown>) => ({ id: String(f.id), name: (f.name as string) || `Form ${f.id}` }));
+      setForms(formList);
 
       const campaignList: TargetCampaign[] = (campaignsRes.data?.elements || [])
         .map((el: Record<string, unknown>) => ({
@@ -251,6 +268,7 @@ export function useBulkCreativeCopy(accessToken: string | null) {
     sourceCreativeIds: string[],
     targetCampaignIds: string[],
     intendedStatus: 'DRAFT' | 'ACTIVE',
+    leadgen?: { adFormId?: string; ctaLabel?: string },
   ): Promise<boolean> => {
     if (!accessToken || !accountId) return false;
     setIsRunning(true);
@@ -261,7 +279,14 @@ export function useBulkCreativeCopy(accessToken: string | null) {
         body: {
           action: 'bulk_copy_creatives',
           accessToken,
-          params: { accountId, sourceCreativeIds, targetCampaignIds, intendedStatus },
+          params: {
+            accountId,
+            sourceCreativeIds,
+            targetCampaignIds,
+            intendedStatus,
+            adFormId: leadgen?.adFormId || undefined,
+            ctaLabel: leadgen?.ctaLabel || undefined,
+          },
         },
       });
 
@@ -325,6 +350,7 @@ export function useBulkCreativeCopy(accessToken: string | null) {
   return {
     sources,
     campaigns,
+    forms,
     isLoading,
     isRunning,
     results,
