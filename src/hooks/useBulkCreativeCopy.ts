@@ -135,11 +135,28 @@ export function useBulkCreativeCopy(accessToken: string | null) {
       const campaignNameById = new Map(campaignList.map((c) => [c.id, c.name]));
 
       // Analytics report → enrichment map keyed by creativeId.
+      // The edge function sometimes falls back to synthetic names like
+      // "<campaign> - Creative <id>" or "Ad #<id>" / "Share Ad #<id>" when it can't
+      // resolve a real ad name. Treat those as no-name so the UI shows a cleaner
+      // "Unnamed ad" instead of exposing raw IDs.
+      const isSyntheticName = (n: string | undefined): boolean => {
+        if (!n) return true;
+        const s = n.trim();
+        if (!s) return true;
+        if (/\s-\sCreative\s\d+$/i.test(s)) return true;
+        if (/^Creative\s\d+$/i.test(s)) return true;
+        if (/^(Ad|Share Ad|UGC Post Ad|Text Ad|Spotlight Ad|Follower Ad|Jobs Ad|Video Ad|Sponsored Content|Sponsored Update)\s#\d+$/i.test(s)) return true;
+        if (/^Carousel Ad\s\(\d+\scards\)\s#\d+$/i.test(s)) return true;
+        return false;
+      };
+      const cleanName = (n: string | undefined): string | undefined =>
+        isSyntheticName(n) ? undefined : n;
+
       const reportById = new Map<string, { name?: string; campaignName?: string; type?: string; status?: string }>();
       for (const el of (reportRes.data?.elements || []) as Record<string, unknown>[]) {
         const id = (el.creativeId ?? '').toString();
         if (id) reportById.set(id, {
-          name: el.creativeName as string,
+          name: cleanName(el.creativeName as string),
           campaignName: el.campaignName as string,
           type: el.type as string,
           status: el.status as string,
