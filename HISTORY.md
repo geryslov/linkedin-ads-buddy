@@ -87,7 +87,7 @@ A single concentrated push (Apr 12) building the weekly report suite: Sun–Sat 
 
 The probe was deployed out-of-band (via Lovable, not CI) and verified live — `probe_creative_create` returns its validation error while an unknown action returns `Unknown action`. Its MCP exclusion was also confirmed empirically: calling with the anon key returns `401 AUTH_REQUIRED`, because `mcp-server` never sends a user JWT and `mcp_api_keys` has no `user_id` to resolve one from.
 
-Stages 1–3 of the feature (compatibility rules, `copy_creatives_to_campaigns`, and a "Bulk Editing" section under Creatives) are deliberately blocked on the probe's verdict. Full plan: `~/.claude/plans/analyze-the-api-and-twinkly-papert.md`.
+**Jul 20 — Bulk Editing → Add Ads to Campaigns (Stages 1–3 shipped).** With the probe's verdict in hand, the real feature landed: a new **Bulk Editing** sidebar section under Creatives that copies existing ads into other campaigns in bulk. Since a LinkedIn creative is bound to one campaign, there is no move/share — the feature reads each source creative's `content.reference` (ugcPost/share URN) and creates a new creative in every selected target campaign. New action `bulk_copy_creatives` (platform-only, JWT + can_write gated, mirroring the probe; resolves each source reference once, then creates one creative per source×target as Draft by default, sequential with rate-limit backoff, per-item verdicts), hook [useBulkCreativeCopy.ts](src/hooks/useBulkCreativeCopy.ts), UI [BulkCreativeCopy.tsx](src/components/dashboard/BulkCreativeCopy.tsx). Compatibility rules (skip inline text/spotlight/follower and Message/InMail) enforced server-side and surfaced in the UI.
 
 ---
 

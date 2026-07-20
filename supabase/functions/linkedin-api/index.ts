@@ -13386,6 +13386,282 @@ serve(async (req) => {
         }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
+      case 'bulk_copy_creatives': {
+        // Bulk "add existing ads to other campaigns". A LinkedIn creative is bound
+        // to one campaign, so there is no move/share — we CREATE a new creative in
+        // each target campaign that references the same content URN as the source.
+        // Platform-only (JWT + can_write gated, exactly like probe_creative_create);
+        // MCP sends the anon key, so auth.getUser() fails there and this 401s.
+        const {
+          accountId: bulkAccountId,
+          sourceCreativeIds,
+          targetCampaignIds,
+          intendedStatus: bulkIntendedStatus,
+        } = params || {};
+
+        const bulkStatus = bulkIntendedStatus === 'ACTIVE' ? 'ACTIVE' : 'DRAFT';
+
+        if (!bulkAccountId || !Array.isArray(sourceCreativeIds) || !Array.isArray(targetCampaignIds)
+            || sourceCreativeIds.length === 0 || targetCampaignIds.length === 0) {
+          return new Response(JSON.stringify({
+            error: 'accountId, a non-empty sourceCreativeIds array, and a non-empty targetCampaignIds array are required',
+          }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        // ---- JWT gate (platform-only) ----
+        const bulkAuthHeader = req.headers.get('Authorization');
+        const BULK_SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
+        const BULK_SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!;
+        const { createClient: createBulkClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+        const bulkSupabase = createBulkClient(BULK_SUPABASE_URL, BULK_SUPABASE_ANON_KEY, {
+          global: { headers: { Authorization: bulkAuthHeader || '' } },
+        });
+
+        const { data: { user: bulkUser }, error: bulkUserError } = await bulkSupabase.auth.getUser();
+        if (bulkUserError || !bulkUser) {
+          return new Response(JSON.stringify({
+            error: 'Authentication required. This action is platform-only and not reachable from MCP.',
+            errorCode: 'AUTH_REQUIRED',
+          }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        // ---- can_write gate, mirroring probe_creative_create (self-healing discovery) ----
+        let { data: bulkAccRow } = await bulkSupabase
+          .from('linkedin_ad_accounts')
+          .select('can_write, user_role')
+          .eq('user_id', bulkUser.id)
+          .eq('account_id', bulkAccountId)
+          .maybeSingle();
+
+        if (!bulkAccRow) {
+          try {
+            const accResp = await fetch(
+              `https://api.linkedin.com/v2/adAccountsV2/${bulkAccountId}`,
+              { headers: { 'Authorization': `Bearer ${accessToken}` } }
+            );
+            if (accResp.ok) {
+              const accData = await accResp.json();
+              let bulkRole = 'UNKNOWN';
+              try {
+                const usersResp = await fetch(
+                  'https://api.linkedin.com/rest/adAccountUsers?q=authenticatedUser',
+                  { headers: {
+                      'Authorization': `Bearer ${accessToken}`,
+                      'LinkedIn-Version': '202511',
+                      'X-Restli-Protocol-Version': '2.0.0',
+                  } }
+                );
+                if (usersResp.ok) {
+                  const usersData = await usersResp.json();
+                  for (const el of (usersData?.elements || [])) {
+                    if ((el.account || '').split(':').pop() === String(bulkAccountId)) {
+                      bulkRole = el.role || 'UNKNOWN';
+                      break;
+                    }
+                  }
+                }
+              } catch (_e) { /* role stays UNKNOWN */ }
+
+              const bulkWriteRoles = ['ACCOUNT_MANAGER', 'CAMPAIGN_MANAGER', 'CREATIVE_MANAGER'];
+              await bulkSupabase.from('linkedin_ad_accounts').upsert({
+                user_id: bulkUser.id,
+                account_id: bulkAccountId,
+                account_urn: `urn:li:sponsoredAccount:${bulkAccountId}`,
+                name: accData.name || `Account ${bulkAccountId}`,
+                status: accData.status || 'ACTIVE',
+                type: accData.type || 'UNKNOWN',
+                currency: accData.currency || 'USD',
+                user_role: bulkRole,
+                can_write: bulkWriteRoles.includes(bulkRole),
+                last_synced_at: new Date().toISOString(),
+              }, { onConflict: 'user_id,account_id' });
+
+              const { data: bulkAccRow2 } = await bulkSupabase
+                .from('linkedin_ad_accounts')
+                .select('can_write, user_role')
+                .eq('user_id', bulkUser.id)
+                .eq('account_id', bulkAccountId)
+                .maybeSingle();
+              bulkAccRow = bulkAccRow2;
+            }
+          } catch (e) {
+            console.error('[bulk_copy_creatives] Discovery failed:', e);
+          }
+        }
+
+        if (!bulkAccRow) {
+          return new Response(JSON.stringify({
+            error: 'This ad account is not accessible in this app.',
+            errorCode: 'ACCOUNT_NOT_ACCESSIBLE',
+          }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+        // DIRECT_ACCESS means the role is unknown — let LinkedIn be the judge.
+        if (!bulkAccRow.can_write && bulkAccRow.user_role !== 'DIRECT_ACCESS') {
+          return new Response(JSON.stringify({
+            error: `No write-capable role on this account (role: ${bulkAccRow.user_role || 'UNKNOWN'}). Needs Account/Campaign/Creative Manager.`,
+            errorCode: 'ROLE_INSUFFICIENT',
+          }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        const bulkVersionHeaders = {
+          'Authorization': `Bearer ${accessToken}`,
+          'LinkedIn-Version': '202511',
+          'X-Restli-Protocol-Version': '2.0.0',
+        };
+        const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+        // ---- Step 1: resolve each source creative's content reference ONCE. ----
+        // A source with no usable reference fails all its targets with one reason.
+        const sourceRefs: Record<string, { reference: string | null; error: string | null; name: string | null }> = {};
+        for (const rawId of sourceCreativeIds) {
+          const sId = String(rawId);
+          const srcUrn = encodeURIComponent(`urn:li:sponsoredCreative:${sId}`);
+          try {
+            const srcResp = await fetch(
+              `https://api.linkedin.com/rest/adAccounts/${bulkAccountId}/creatives/${srcUrn}`,
+              { headers: bulkVersionHeaders }
+            );
+            if (!srcResp.ok) {
+              const t = await srcResp.text();
+              sourceRefs[sId] = { reference: null, name: null,
+                error: `Could not read source creative (HTTP ${srcResp.status}). ${t.slice(0, 200)}` };
+              continue;
+            }
+            const src = await srcResp.json();
+            const content = src.content;
+            const reference = (typeof content === 'string' ? content : content?.reference) || '';
+            const name = src.name || src.creativeDscName || null;
+
+            if (!reference) {
+              sourceRefs[sId] = { reference: null, name,
+                error: 'Inline content (text/spotlight/follower ad) has no shareable reference and cannot be copied.' };
+            } else if (reference.includes('adInMailContent')) {
+              sourceRefs[sId] = { reference: null, name,
+                error: 'Message/InMail ads reference adInMailContent URNs, which are not copyable.' };
+            } else if (!reference.includes('ugcPost') && !reference.includes('share')) {
+              sourceRefs[sId] = { reference: null, name,
+                error: `Unsupported content reference (${reference}).` };
+            } else {
+              sourceRefs[sId] = { reference, name, error: null };
+            }
+          } catch (e) {
+            sourceRefs[sId] = { reference: null, name: null,
+              error: `Failed to read source creative: ${e instanceof Error ? e.message : String(e)}` };
+          }
+          await sleep(80);
+        }
+
+        // ---- Step 2: for each (source × target), create a new creative. ----
+        const bulkResults: any[] = [];
+        const createUrl = `https://api.linkedin.com/rest/adAccounts/${bulkAccountId}/creatives`;
+
+        for (const rawSid of sourceCreativeIds) {
+          const sId = String(rawSid);
+          const srcInfo = sourceRefs[sId];
+
+          for (const rawCid of targetCampaignIds) {
+            const cId = String(rawCid);
+
+            if (!srcInfo || !srcInfo.reference) {
+              bulkResults.push({
+                sourceCreativeId: sId,
+                sourceCreativeName: srcInfo?.name || null,
+                targetCampaignId: cId,
+                ok: false,
+                verdict: 'SOURCE_UNUSABLE',
+                createdUrn: null,
+                message: srcInfo?.error || 'Source creative could not be resolved.',
+              });
+              continue;
+            }
+
+            try {
+              const createResp = await fetch(createUrl, {
+                method: 'POST',
+                headers: { ...bulkVersionHeaders, 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  campaign: `urn:li:sponsoredCampaign:${cId}`,
+                  content: { reference: srcInfo.reference },
+                  intendedStatus: bulkStatus,
+                }),
+              });
+
+              const bodyText = await createResp.text();
+              let bodyJson: any = null;
+              try { bodyJson = JSON.parse(bodyText); } catch { /* keep raw */ }
+
+              // New URN arrives in a header (id in body is unreliable for creates).
+              const createdUrn = createResp.headers.get('x-restli-id')
+                || createResp.headers.get('x-linkedin-id')
+                || (createResp.headers.get('location')?.split('/').pop() || null)
+                || bodyJson?.id || bodyJson?.['$URN'] || null;
+
+              const ok = createResp.ok && !!createdUrn;
+              const errText = bodyText.toLowerCase();
+              let verdict: string;
+              let message: string | null = null;
+              if (ok) {
+                verdict = 'CREATED';
+              } else if (createResp.ok && !createdUrn) {
+                verdict = 'CREATED_NO_URN';
+                message = 'LinkedIn accepted the create but returned no creative URN.';
+              } else if (createResp.status === 401) {
+                verdict = 'TOKEN_EXPIRED';
+                message = 'Your LinkedIn session expired. Reconnect and try again.';
+              } else if (createResp.status === 403) {
+                verdict = (errText.includes('partner') || errText.includes('marketing developer'))
+                  ? 'PARTNER_GATED' : 'ROLE_INSUFFICIENT';
+                message = bodyJson?.message || 'Permission denied by LinkedIn.';
+              } else if (createResp.status === 422) {
+                verdict = 'INCOMPATIBLE_CONTENT';
+                message = bodyJson?.message || 'Target campaign is incompatible with this content type.';
+              } else if (createResp.status === 429) {
+                verdict = 'RATE_LIMITED';
+                message = 'LinkedIn rate limit hit. Try again with fewer copies.';
+              } else if (createResp.status === 400) {
+                verdict = 'BAD_REQUEST';
+                message = bodyJson?.message || bodyText.slice(0, 200);
+              } else {
+                verdict = 'UNKNOWN';
+                message = bodyJson?.message || bodyText.slice(0, 200);
+              }
+
+              bulkResults.push({
+                sourceCreativeId: sId,
+                sourceCreativeName: srcInfo.name,
+                targetCampaignId: cId,
+                ok,
+                verdict,
+                createdUrn,
+                httpStatus: createResp.status,
+                message,
+              });
+            } catch (e) {
+              bulkResults.push({
+                sourceCreativeId: sId,
+                sourceCreativeName: srcInfo.name,
+                targetCampaignId: cId,
+                ok: false,
+                verdict: 'REQUEST_FAILED',
+                createdUrn: null,
+                message: e instanceof Error ? e.message : String(e),
+              });
+            }
+            await sleep(120); // be gentle on the write rate limit
+          }
+        }
+
+        const successCount = bulkResults.filter((r) => r.ok).length;
+        console.log(`[bulk_copy_creatives] ${successCount}/${bulkResults.length} copies created as ${bulkStatus}`);
+
+        return new Response(JSON.stringify({
+          ok: successCount > 0,
+          intendedStatus: bulkStatus,
+          summary: { attempted: bulkResults.length, succeeded: successCount, failed: bulkResults.length - successCount },
+          results: bulkResults,
+        }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
       default:
         return new Response(JSON.stringify({ error: 'Unknown action' }), {
           status: 400,

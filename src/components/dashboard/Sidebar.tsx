@@ -31,6 +31,7 @@ import {
   Target,
   Layers,
   Bot,
+  CopyPlus,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -70,6 +71,13 @@ const navGroups: NavGroup[] = [
       { id: "campaigns", label: "Campaigns", icon: Megaphone },
       { id: "budget_pacing", label: "Budget Pacing", icon: Wallet },
       { id: "creatives", label: "Creatives", icon: ImageIcon },
+    ],
+  },
+  {
+    id: "bulk_editing",
+    label: "Bulk Editing",
+    items: [
+      { id: "bulk_add_creatives", label: "Add Ads to Campaigns", icon: CopyPlus },
     ],
   },
   {
