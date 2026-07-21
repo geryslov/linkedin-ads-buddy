@@ -13824,11 +13824,13 @@ serve(async (req) => {
               let formApplied = false;
               let formNote: string | null = null;
               if (ok && createdUrn && wantLeadgen) {
-                if (!srcInfo.leadgen) {
-                  formNote = 'Not a lead gen ad — form/CTA skipped.';
+                const destination = overrideDestination || srcInfo.leadgen?.destination || null;
+                const label = overrideLabel || srcInfo.leadgen?.label || null;
+                if (!destination || !label) {
+                  formNote = !srcInfo.leadgen
+                    ? 'Source is not a lead gen ad — provide BOTH a form and a CTA to assign one.'
+                    : 'Form/CTA missing — nothing to apply.';
                 } else {
-                  const destination = overrideDestination || srcInfo.leadgen.destination;
-                  const label = overrideLabel || srcInfo.leadgen.label;
                   try {
                     const patchResp = await fetch(
                       `${createUrl}/${encodeURIComponent(createdUrn)}`,
@@ -13850,7 +13852,8 @@ serve(async (req) => {
                       }
                     } else {
                       const pt = await patchResp.text();
-                      formNote = `Copied, but form/CTA not applied (HTTP ${patchResp.status}). ${pt.slice(0, 160)}`;
+                      formNote = `Copied, but form/CTA not applied (HTTP ${patchResp.status}). ${pt.slice(0, 200)}`;
+                      console.error('[bulk_copy_creatives] leadgen patch failed', patchResp.status, pt.slice(0, 400));
                     }
                   } catch (pe) {
                     formNote = `Copied, but form/CTA not applied: ${pe instanceof Error ? pe.message : String(pe)}`;
