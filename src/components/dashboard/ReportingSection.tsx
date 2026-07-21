@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import { RefreshCw, FileBarChart, Users, Target, PieChart, Globe, List, Download, Grid3X3, Settings, CheckCircle2, XCircle, Loader2, ClipboardList, Search, Pencil, Wallet, AlertTriangle, Sparkles, Building2, Eye, MousePointerClick, DollarSign, TrendingUp, BarChart3, CheckCircle, AlertCircle, ChevronDown, ChevronRight, Trophy } from 'lucide-react';
+import { RefreshCw, FileBarChart, Users, Target, PieChart, Globe, List, Download, Grid3X3, Settings, CheckCircle2, XCircle, Loader2, ClipboardList, Search, Wallet, AlertTriangle, Sparkles, Building2, Eye, MousePointerClick, DollarSign, TrendingUp, BarChart3, CheckCircle, AlertCircle, ChevronDown, ChevronRight, Trophy } from 'lucide-react';
 import { useDemographicReporting, TimeFrameOption as DemoTimeFrameOption, TimeGranularity, DemographicPivot, DEMOGRAPHIC_PIVOT_OPTIONS } from '@/hooks/useDemographicReporting';
 import { useCompanyDemographic, TimeFrameOption as CompanyDemoTimeFrameOption } from '@/hooks/useCompanyDemographic';
 import { useCreativeNamesReport, TimeFrameOption as CreativeNamesTimeFrameOption } from '@/hooks/useCreativeNamesReport';
@@ -25,7 +25,6 @@ import { LeadGenFormsTable } from './LeadGenFormsTable';
 import { CampaignMultiSelect } from './CampaignMultiSelect';
 import { JobTitleSearch } from './JobTitleSearch';
 import { SkillSearch } from './SkillSearch';
-import { CampaignTargetingEditor } from './CampaignTargetingEditor';
 import { TimeFrameSelector } from './TimeFrameSelector';
 import { MetricCard } from './MetricCard';
 import { BudgetPacingDashboard } from './BudgetPacingDashboard';
@@ -675,10 +674,6 @@ export function ReportingSection({ accessToken, selectedAccount, canWrite = fals
           <TabsTrigger value="targeting_tools" className="gap-2">
             <Search className="h-4 w-4" />
             Targeting Tools
-          </TabsTrigger>
-          <TabsTrigger value="campaign_editor" className="gap-2">
-            <Pencil className="h-4 w-4" />
-            Campaign Editor
           </TabsTrigger>
           <TabsTrigger value="budget_pacing" className="gap-2">
             <Wallet className="h-4 w-4" />
@@ -1360,25 +1355,6 @@ export function ReportingSection({ accessToken, selectedAccount, canWrite = fals
             <JobTitleSearch accessToken={accessToken} selectedAccount={selectedAccount} />
             <SkillSearch accessToken={accessToken} selectedAccount={selectedAccount} />
           </div>
-        </TabsContent>
-
-        {/* Campaign Editor Tab */}
-        <TabsContent value="campaign_editor" className="space-y-6 mt-6">
-          <CampaignTargetingEditor
-            accessToken={accessToken}
-            selectedAccount={selectedAccount}
-            campaigns={campaignReporting.campaignData.map(c => ({
-              id: c.campaignId,
-              name: c.campaignName,
-              status: c.status,
-            }))}
-            canWrite={canWrite}
-            onRefreshCampaigns={() => {
-              if (selectedAccount) {
-                campaignReporting.fetchCampaignReport(selectedAccount);
-              }
-            }}
-          />
         </TabsContent>
 
         {/* Budget Pacing Tab */}
