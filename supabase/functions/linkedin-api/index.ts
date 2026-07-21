@@ -13761,9 +13761,12 @@ serve(async (req) => {
               continue;
             }
 
-            // Assign a form/CTA only to lead-gen sources when requested. Such copies
-            // must be created DRAFT (the field is read-only once non-draft).
-            const applyLeadgen = wantLeadgen && !!srcInfo.leadgen;
+            // Assign a form/CTA when requested. Such copies must be created DRAFT
+            // (the field is read-only once non-draft). We can apply overrides even
+            // when the source didn't have a leadgen CTA, provided the caller
+            // supplied BOTH form + label (otherwise we'd have nothing to merge with).
+            const canApplyFromOverrideOnly = !!(overrideDestination && overrideLabel);
+            const applyLeadgen = wantLeadgen && (!!srcInfo.leadgen || canApplyFromOverrideOnly);
             const createStatus = applyLeadgen ? 'DRAFT' : bulkStatus;
 
             try {
