@@ -36,10 +36,13 @@ Token from https://supabase.com/dashboard/account/tokens.
 src/
   hooks/useLinkedInAuth.ts        # LinkedIn OAuth + MCP token sync
   hooks/useCreativeReporting.ts   # Creative Gallery data hook
+  hooks/useBulkCreativeCopy.ts    # Bulk Editing data + copy hook
   components/dashboard/
     ConnectClaude.tsx             # MCP setup modal
     CreativeGallery.tsx           # Creatives tab UI
     CreativeThumbnail.tsx         # Reusable thumbnail
+    BulkCreativeCopy.tsx          # Bulk Editing → Add Ads to Campaigns
+    CampaignTargetingEditor.tsx   # Bulk Editing → Campaign Editor
   pages/Dashboard.tsx             # Tab routing
 
 mcp-server/
@@ -48,7 +51,7 @@ mcp-server/
   railway.toml
 
 supabase/
-  functions/linkedin-api/index.ts # All LinkedIn API actions (74+)
+  functions/linkedin-api/index.ts # All LinkedIn API actions (67)
   migrations/                     # Schema — includes mcp_api_keys table
 ```
 
@@ -87,6 +90,14 @@ Agency-facing feature: generate a Claude-written narrative report for a client's
 - **UI flow**: [WeeklyReport.tsx](src/components/dashboard/WeeklyReport.tsx) has a "Publish for client" button that opens [GenerateClientReportDialog](src/components/dashboard/GenerateClientReportDialog.tsx). Dialog: preview → stream from Claude → edit textarea + live preview → publish. "Past reports" tab lists prior publishes with Copy/Revoke.
 - **Public route**: `/report/:token` → [src/pages/PublishedReport.tsx](src/pages/PublishedReport.tsx) → [PublishedReportView](src/components/dashboard/PublishedReportView.tsx). No auth. Renders KPI cards + markdown narrative.
 - **Data path**: platform assembles data via [`useWeeklyReport`](src/hooks/useWeeklyReport.ts) hook, then hands compact payload to Claude via [serializeReportForClaude](src/lib/serializeReportForClaude.ts). No agentic tool loop — single Claude API call.
+
+## Bulk Editing
+
+Sidebar group with two tools. Both are **platform-only writes** (JWT + can_write gated, so they 401 from MCP by construction — the same pattern as `probe_creative_create`).
+
+- **Add Ads to Campaigns** — [BulkCreativeCopy.tsx](src/components/dashboard/BulkCreativeCopy.tsx) + [useBulkCreativeCopy.ts](src/hooks/useBulkCreativeCopy.ts). A LinkedIn creative is bound to one campaign, so there is no move/share: `bulk_copy_creatives` reads each source's `content.reference` and POSTs a new creative (`/rest/adAccounts/{acct}/creatives`) per source×target, DRAFT by default; the new URN comes back in the `x-restli-id` header. Only *duplicable* ads are listed (must have a ugcPost/share reference — no text/spotlight/follower, Message/InMail or dynamic). Names resolve REST `name` → post text (`/v2/ugcPosts`) → analytics report → id. `get_creatives` is paginated and takes an optional `status` (defaults to ACTIVE for speed).
+- **Lead gen form/CTA on copy** — `leadgenCallToAction` (`destination` = `urn:li:adForm:{id}`, `label` = CTA) is editable **only while DRAFT**. So when `bulk_copy_creatives` gets `adFormId`/`ctaLabel`, it creates the copy DRAFT, sets the field via `partial_update`, then re-activates if Active was requested. Forms come from `list_lead_forms` (`/rest/leadForms?q=owner`).
+- **Campaign Editor** — [CampaignTargetingEditor.tsx](src/components/dashboard/CampaignTargetingEditor.tsx), action `update_campaign_targeting`. Bulk append/replace of job-title + skill targeting across selected campaigns. (Moved here from the Reports section.)
 
 ## Known constraints
 

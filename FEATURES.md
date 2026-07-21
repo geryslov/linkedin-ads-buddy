@@ -35,8 +35,11 @@ Defined in [Sidebar.tsx](src/components/dashboard/Sidebar.tsx). Seven groups:
 | Item | Component | Hook |
 |---|---|---|
 | Add Ads to Campaigns | [BulkCreativeCopy](src/components/dashboard/BulkCreativeCopy.tsx) | [useBulkCreativeCopy](src/hooks/useBulkCreativeCopy.ts) |
+| Campaign Editor | [CampaignTargetingEditor](src/components/dashboard/CampaignTargetingEditor.tsx) | — |
 
-Copies existing ads into other campaigns in bulk (N sources × M campaigns → N×M new creatives). Backend `bulk_copy_creatives`; platform-only (JWT + can_write gated), creates as Draft by default. Skips inline (text/spotlight/follower) and Message/InMail content.
+**Add Ads to Campaigns** — copies existing ads into other campaigns in bulk (N sources × M campaigns → N×M new creatives). Backend `bulk_copy_creatives`; platform-only (JWT + can_write gated), creates as Draft by default. Only *duplicable* ad types are listed (skips inline text/spotlight/follower, Message/InMail and dynamic ads — no shareable content reference). Source list defaults to **Active** ads (server-side status filter) for speed, with a status selector (Active/Paused/Draft/All). Names come from the REST creative `name`, then the post's text, then the analytics report. When copying a **lead gen** ad, an optional picker assigns a form (`list_lead_forms`) + CTA to the copies — `leadgenCallToAction` is DRAFT-only, so those copies are made Draft, the form/CTA is set via `partial_update`, then activated if Active was chosen. UI is a two-panel, numbered picker with a sticky action bar.
+
+**Campaign Editor** — bulk targeting edits across multiple campaigns (append/replace job titles + skills). Backend `update_campaign_targeting`. Moved here from Reports (it is a bulk operation).
 
 ### Analytics
 | Item | Component | Notes |
@@ -78,7 +81,7 @@ Copies existing ads into other campaigns in bulk (N sources × M campaigns → N
 - **AI chat** — [AgenticChatDrawer](src/components/dashboard/AgenticChatDrawer.tsx), global drawer with tool-calling
 - **AI analysis panel** — [AIAnalysisPanel](src/components/dashboard/AIAnalysisPanel.tsx) + [useAIAnalysis](src/hooks/useAIAnalysis.ts)
 - **Custom fields** — [CustomFieldEditor](src/components/dashboard/CustomFieldEditor.tsx), per campaign / campaign group
-- **Campaign targeting editing** — [CampaignTargetingEditor](src/components/dashboard/CampaignTargetingEditor.tsx), writes targeting back to LinkedIn
+- **Campaign targeting editing** — [CampaignTargetingEditor](src/components/dashboard/CampaignTargetingEditor.tsx), writes targeting back to LinkedIn (surfaced under **Bulk Editing → Campaign Editor**)
 - **CSV export** — most report tables, via [exportUtils](src/lib/exportUtils.ts)
 - **MCP setup** — [ConnectClaude](src/components/dashboard/ConnectClaude.tsx)
 
@@ -99,16 +102,16 @@ Agency → client publishing flow.
 
 | Function | Purpose |
 |---|---|
-| `linkedin-api` | Monolith (~13.4k lines), **66 actions**. All LinkedIn API access |
+| `linkedin-api` | Monolith (~13.6k lines), **67 actions**. All LinkedIn API access |
 | `analyze-data` | Claude calls. `DEFAULT_MODEL` = `claude-sonnet-4-20250514`, overridden per report type via `MODEL_BY_REPORT_TYPE` |
 | `apify-proxy` | Apify passthrough for Social Listener. Needs `APIFY_TOKEN` |
 | `create-test-user` | Test login flow |
 
-### `linkedin-api` actions (66)
+### `linkedin-api` actions (67)
 
 **Auth & accounts** — `get_auth_url`, `exchange_token`, `get_profile`, `get_ad_accounts`, `sync_ad_accounts`, `sync_mcp_token`
 
-**Campaigns & creatives** — `get_campaigns`, `get_campaign_report`, `get_campaign_group_performance`, `get_campaign_performance_report`, `get_creatives`, `get_creative_report`, `get_creative_names_report`, `get_creative_performance_report`, `get_creative_analytics`, `get_creative_fatigue`, `get_account_structure`, `update_campaign_status`, `update_campaign_targeting`, `bulk_copy_creatives`
+**Campaigns & creatives** — `get_campaigns`, `get_campaign_report`, `get_campaign_group_performance`, `get_campaign_performance_report`, `get_creatives`, `get_creative_report`, `get_creative_names_report`, `get_creative_performance_report`, `get_creative_analytics`, `get_creative_fatigue`, `get_account_structure`, `update_campaign_status`, `update_campaign_targeting`, `bulk_copy_creatives`, `list_lead_forms`
 
 **Analytics** — `get_analytics`, `get_ad_analytics`, `get_demographic_analytics`, `get_objective_breakdowns`, `get_form_creative_analytics`
 
