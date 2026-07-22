@@ -5,6 +5,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import { Sidebar } from "@/components/dashboard/Sidebar";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AccountSelector } from "@/components/dashboard/AccountSelector";
 import { MetricCard } from "@/components/dashboard/MetricCard";
 import { CampaignTable } from "@/components/dashboard/CampaignTable";
@@ -230,6 +231,7 @@ export default function Dashboard() {
             )}
           </div>
 
+        <ErrorBoundary resetKey={activeTab} label={meta.title}>
         {activeTab === "overview" && (
           <div className="space-y-8">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -481,6 +483,7 @@ export default function Dashboard() {
             selectedAccount={selectedAccount}
           />
         )}
+        </ErrorBoundary>
         </div>{/* end p-6 content wrapper */}
       </main>
 
