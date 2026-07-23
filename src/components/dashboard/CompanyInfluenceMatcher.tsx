@@ -904,7 +904,11 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
                       <span className="text-muted-foreground">{label}:</span>
                       <Select value={value || ''} onValueChange={(v) => updateColumnMapping(type, v || null)}>
                         <SelectTrigger className="w-[130px] h-7 text-xs"><SelectValue placeholder="Select" /></SelectTrigger>
-                        <SelectContent>{csvHeaders.map(h => <SelectItem key={h} value={h}>{h}</SelectItem>)}</SelectContent>
+                        <SelectContent>
+                          {/* Drop blank/duplicate headers — a Radix SelectItem cannot have an empty value. */}
+                          {Array.from(new Set(csvHeaders.map(h => (h ?? '').trim()).filter(Boolean)))
+                            .map(h => <SelectItem key={h} value={h}>{h}</SelectItem>)}
+                        </SelectContent>
                       </Select>
                     </div>
                   ))}
