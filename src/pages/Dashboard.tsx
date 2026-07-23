@@ -187,16 +187,16 @@ export default function Dashboard() {
 
       <main className={cn("transition-all duration-300 min-h-screen", sidebarCollapsed ? "ml-16" : "ml-64")}>
         {/* ── Sticky top header bar ───────────────────────────── */}
-        <header className="sticky top-0 z-20 bg-background/95 backdrop-blur-sm border-b border-border/60 px-6 h-14 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-2 min-w-0">
+        <header className="sticky top-0 z-20 bg-background/85 backdrop-blur-md border-b border-border/60 px-6 h-14 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-1.5 min-w-0 text-[13px]">
             {/* Breadcrumb */}
             {meta.group && (
-              <div className="flex items-center gap-1 text-xs text-muted-foreground shrink-0">
-                <span className="font-medium">{meta.group}</span>
-                <ChevronRight className="h-3 w-3" />
-              </div>
+              <>
+                <span className="text-muted-foreground shrink-0">{meta.group}</span>
+                <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/50 shrink-0" />
+              </>
             )}
-            <h1 className="text-sm font-semibold truncate">{meta.title}</h1>
+            <h1 className="font-semibold truncate">{meta.title}</h1>
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <AccountSelector
@@ -222,12 +222,14 @@ export default function Dashboard() {
         </header>
 
         {/* ── Page content ────────────────────────────────────── */}
-        <div className="p-6">
-          {/* Page title + subtitle (below header bar) */}
-          <div className="mb-6">
-            <h2 className="text-xl font-bold text-foreground">{meta.title}</h2>
+        <div className="px-6 py-8 max-w-[1440px] mx-auto">
+          {/* Page title + subtitle */}
+          <div className="mb-8">
+            <h2 className="font-display text-[26px] font-semibold text-foreground leading-tight">
+              {meta.title}
+            </h2>
             {meta.subtitle && (
-              <p className="text-sm text-muted-foreground mt-0.5">{meta.subtitle}</p>
+              <p className="text-sm text-muted-foreground mt-1">{meta.subtitle}</p>
             )}
           </div>
 

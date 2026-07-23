@@ -132,11 +132,9 @@ const CHART_COLORS = [
   'hsl(var(--chart-3))',
   'hsl(var(--chart-4))',
   'hsl(var(--chart-5))',
-  '#10b981',
-  '#f59e0b',
-  '#ef4444',
-  '#8b5cf6',
-  '#ec4899',
+  'hsl(var(--chart-6))',
+  'hsl(var(--chart-7))',
+  'hsl(var(--chart-8))',
 ];
 
 export function CompanyEngagementTimeline({ accessToken, selectedAccount }: CompanyEngagementTimelineProps) {

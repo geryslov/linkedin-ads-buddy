@@ -95,6 +95,8 @@ The probe was deployed out-of-band (via Lovable, not CI) and verified live — `
 
 **Jul 21 — Campaign Editor moved to Bulk Editing.** The targeting editor (`update_campaign_targeting`) was a tab inside Reports but is a bulk operation, so it became a second **Bulk Editing** item, routed from the dashboard.
 
+**Jul 23 — platform-wide visual redesign.** Full design-system pass toward a contemporary SaaS look, done at the token level so all ~70 dashboard components inherit it: new palette (warm paper canvas, deep-ink text, electric indigo primary + violet gradient accent), Fraunces display serif for the landing hero and page titles, layered ink-tinted shadows, 10px radius. The sidebar went dark (ink gradient surface, glowing active indicator, avatar footer chip) via the `--sidebar-*` tokens and a purpose-built `NavRow`. The landing page was rebuilt (sticky glass nav, display-serif hero, faux product mockup with KPI row + bar chart, dark gradient CTA band). MetricCard became a proper stat tile. Chart colors were consolidated onto `--chart-1..8` — a CVD-validated categorical palette replacing the ad-hoc Tailwind hex scattered across AnalyticsDashboard, CompanyEngagementTimeline, CompanyDemographicCharts, WeeklyReport sparklines, CreativeAnalyzer, LeadGenAnalyzer, and the social-listener charts.
+
 ---
 
 ## Recurring themes

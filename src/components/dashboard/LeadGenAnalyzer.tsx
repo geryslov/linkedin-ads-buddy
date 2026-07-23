@@ -105,7 +105,7 @@ function CplTrendChart({ forms }: { forms: LeadGenForm[] }) {
             formatter={(v: number) => [`$${v.toFixed(2)}`, '']}
           />
           <Bar dataKey="CPL 30d" fill="hsl(var(--muted-foreground)/0.5)" radius={[3, 3, 0, 0]} barSize={14} />
-          <Bar dataKey="CPL 7d" fill="hsl(221 83% 53%)" radius={[3, 3, 0, 0]} barSize={14} />
+          <Bar dataKey="CPL 7d" fill="hsl(var(--chart-1))" radius={[3, 3, 0, 0]} barSize={14} />
         </BarChart>
       </ResponsiveContainer>
       <div className="flex gap-4 mt-2 text-[10px] text-muted-foreground">

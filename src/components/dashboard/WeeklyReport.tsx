@@ -150,7 +150,7 @@ function Sparkline({ data }: { data: { date: string; spent: number }[] }) {
   }
   return (
     <LineChart width={80} height={28} data={data}>
-      <Line type="monotone" dataKey="spent" stroke="#2563EB" strokeWidth={1.5} dot={false} isAnimationActive={false} />
+      <Line type="monotone" dataKey="spent" stroke="hsl(var(--chart-1))" strokeWidth={1.5} dot={false} isAnimationActive={false} />
     </LineChart>
   );
 }

@@ -8,14 +8,14 @@ import { PostCard } from './PostCard';
 import type { MacroStats } from '@/types/socialListener';
 
 const PLATFORM_COLORS = {
-  linkedin: '#2563EB',
+  linkedin: '#2a78d6',
   twitter: '#0EA5E9',
   instagram: '#EC4899',
 };
 
-const REACTION_COLORS = ['#2563EB', '#3B82F6', '#60A5FA', '#93C5FD', '#F97316', '#FB923C'];
+const REACTION_COLORS = ['#2a78d6', '#3B82F6', '#60A5FA', '#93C5FD', '#F97316', '#FB923C'];
 
-const CONTENT_COLORS = ['#2563EB', '#10B981', '#F59E0B', '#8B5CF6'];
+const CONTENT_COLORS = ['#2a78d6', '#10B981', '#F59E0B', '#8B5CF6'];
 
 interface KpiCardProps {
   title: string;
@@ -119,8 +119,8 @@ export function MacroView({ stats }: MacroViewProps) {
                 <AreaChart data={stats.postsOverTime}>
                   <defs>
                     <linearGradient id="gradPosts" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#2563EB" stopOpacity={0.2} />
-                      <stop offset="95%" stopColor="#2563EB" stopOpacity={0} />
+                      <stop offset="5%" stopColor="#2a78d6" stopOpacity={0.2} />
+                      <stop offset="95%" stopColor="#2a78d6" stopOpacity={0} />
                     </linearGradient>
                     <linearGradient id="gradReactions" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="#F97316" stopOpacity={0.2} />
@@ -154,7 +154,7 @@ export function MacroView({ stats }: MacroViewProps) {
                     type="monotone"
                     dataKey="count"
                     name="Posts"
-                    stroke="#2563EB"
+                    stroke="#2a78d6"
                     fill="url(#gradPosts)"
                     strokeWidth={2}
                     dot={false}
@@ -246,7 +246,7 @@ export function MacroView({ stats }: MacroViewProps) {
                       {stats.platformBreakdown.map((entry, i) => (
                         <Cell
                           key={i}
-                          fill={PLATFORM_COLORS[entry.platform] ?? '#2563EB'}
+                          fill={PLATFORM_COLORS[entry.platform] ?? '#2a78d6'}
                         />
                       ))}
                     </Bar>

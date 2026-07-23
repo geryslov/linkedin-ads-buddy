@@ -27,11 +27,12 @@ interface AnalyticsDashboardProps {
   selectedAccount: string | null;
 }
 
+// Validated categorical slots (see --chart-N in index.css) — fixed per metric
 const COLORS = {
-  impressions: '#2563eb',
-  clicks: '#7c3aed',
-  spent: '#059669',
-  leads: '#d97706',
+  impressions: '#2a78d6',
+  clicks: '#eb6834',
+  spent: '#1baf7a',
+  leads: '#eda100',
 };
 
 function ChartTooltip({ active, payload, label }: any) {

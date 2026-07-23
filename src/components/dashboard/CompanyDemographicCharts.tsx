@@ -12,8 +12,8 @@ import {
 } from 'recharts';
 import { CompanyDemographicItem } from '@/hooks/useCompanyDemographic';
 
-// Design system colors (from ui-ux-pro-max analytics dashboard palette)
-const PRIMARY = '#2563EB';
+// Chart slot 1 (validated categorical palette — see --chart-1 in index.css)
+const PRIMARY = '#2a78d6';
 
 const ENRICHMENT_COLORS: Record<string, string> = {
   resolved:   '#22c55e',

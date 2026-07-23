@@ -85,6 +85,16 @@ Defined in [Sidebar.tsx](src/components/dashboard/Sidebar.tsx). Seven groups:
 - **CSV export** — most report tables, via [exportUtils](src/lib/exportUtils.ts)
 - **MCP setup** — [ConnectClaude](src/components/dashboard/ConnectClaude.tsx)
 
+## Design system
+
+Tokens live in [src/index.css](src/index.css) (CSS variables) + [tailwind.config.ts](tailwind.config.ts); all shadcn components inherit them.
+
+- **Palette** — warm paper canvas, deep-ink text, electric indigo primary (`--primary: 231 70% 51%`) with a violet companion (`--violet`) used only in gradients. LinkedIn brand blue stays separate (`--linkedin`).
+- **Typography** — Plus Jakarta Sans for UI; **Fraunces** (`.font-display` / `font-display`) for the landing hero and dashboard page titles only. JetBrains Mono for code.
+- **Sidebar** — dark ink surface regardless of app theme, via the `--sidebar-*` token set. [Sidebar.tsx](src/components/dashboard/Sidebar.tsx) renders its own `NavRow` (not the shadcn Button, which is themed for light surfaces).
+- **Chart colors** — `--chart-1..8`, a CVD-validated categorical palette (dataviz reference set). Fixed slot order, never cycled; components reference `hsl(var(--chart-N))` or the matching hex, not ad-hoc Tailwind colors.
+- **Shadows/radius** — layered ink-tinted shadows (`--shadow-xs..lg`, `--shadow-primary` glow), 10px base radius. Utility classes: `.glass`, `.card-hover`, `.gradient-primary`, `.gradient-ink`, `.gradient-mesh`, `.text-gradient`.
+
 ## Client-facing weekly reports
 
 Agency → client publishing flow.

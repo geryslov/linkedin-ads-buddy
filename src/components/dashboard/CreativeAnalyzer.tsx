@@ -287,7 +287,7 @@ function AnalysisCharts({ rows }: { rows: CreativePerformanceRow[] }) {
                     cursor={{ fill: 'hsl(var(--muted))', fillOpacity: 0.4 }}
                   />
                   <Bar dataKey="30d" name="30d CTR" fill="hsl(var(--muted-foreground))" fillOpacity={0.2} radius={[0, 3, 3, 0]} barSize={7} />
-                  <Bar dataKey="7d" name="7d CTR" fill="hsl(221 83% 53%)" fillOpacity={0.85} radius={[0, 3, 3, 0]} barSize={7} />
+                  <Bar dataKey="7d" name="7d CTR" fill="hsl(var(--chart-1))" fillOpacity={0.85} radius={[0, 3, 3, 0]} barSize={7} />
                 </BarChart>
               </ResponsiveContainer>
               <p className="text-[9px] text-muted-foreground/50 mt-1 text-right">
@@ -327,7 +327,7 @@ function AnalysisCharts({ rows }: { rows: CreativePerformanceRow[] }) {
                   />
                   <Bar dataKey="spend" name="Spend" radius={[0, 3, 3, 0]} barSize={7}>
                     {spendData.map((_, i) => (
-                      <Cell key={i} fill={`hsl(221 83% ${Math.max(32, 62 - i * 4)}%)`} fillOpacity={0.85} />
+                      <Cell key={i} fill={`hsl(213 68% ${Math.max(30, 60 - i * 4)}%)`} fillOpacity={0.85} />
                     ))}
                   </Bar>
                 </BarChart>
