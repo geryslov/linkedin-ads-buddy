@@ -49,6 +49,9 @@ interface NavItem {
   id: string;
   label: string;
   icon: React.ElementType;
+  // Frozen: kept as a working route/tab but hidden from the sidebar and
+  // command palette. Flip to false (or remove) to bring it back.
+  hidden?: boolean;
 }
 
 interface NavGroup {
@@ -68,9 +71,9 @@ export const navGroups: NavGroup[] = [
     id: "campaigns",
     label: "Campaigns",
     items: [
-      { id: "campaigns", label: "Campaigns", icon: Megaphone },
+      { id: "campaigns", label: "Campaigns", icon: Megaphone, hidden: true },
       { id: "budget_pacing", label: "Budget Pacing", icon: Wallet },
-      { id: "creatives", label: "Creatives", icon: ImageIcon },
+      { id: "creatives", label: "Creatives", icon: ImageIcon, hidden: true },
     ],
   },
   {
@@ -90,11 +93,11 @@ export const navGroups: NavGroup[] = [
       { id: "creative_reports", label: "Creative Reports", icon: TrendingUp },
       { id: "reports", label: "Reports", icon: FileBarChart },
       { id: "weekly_report", label: "Weekly Report", icon: CalendarRange },
-      { id: "conv_breakdown", label: "Conv. Breakdown", icon: Grid3x3 },
-      { id: "activity_report", label: "Activity Report", icon: ClipboardList },
+      { id: "conv_breakdown", label: "Conv. Breakdown", icon: Grid3x3, hidden: true },
+      { id: "activity_report", label: "Activity Report", icon: ClipboardList, hidden: true },
       { id: "creative_analyzer", label: "Creative Analyzer", icon: Sparkles },
       { id: "lead_gen_analyzer", label: "Lead Gen Analyzer", icon: Target },
-      { id: "account_health", label: "Account Health", icon: Shield },
+      { id: "account_health", label: "Account Health", icon: Shield, hidden: true },
       { id: "segmentation", label: "Segmentation", icon: Layers },
     ],
   },
@@ -102,7 +105,7 @@ export const navGroups: NavGroup[] = [
     id: "audience",
     label: "Audience",
     items: [
-      { id: "audiences", label: "Audiences", icon: Users },
+      { id: "audiences", label: "Audiences", icon: Users, hidden: true },
       { id: "company_timeline", label: "Company Timeline", icon: Building2 },
       { id: "influence_matcher", label: "Influence Matcher", icon: Crosshair },
     ],
@@ -112,7 +115,7 @@ export const navGroups: NavGroup[] = [
     label: "Tools",
     items: [
       { id: "title_checker", label: "Title Checker", icon: Crown },
-      { id: "standardized_titles", label: "Titles", icon: BookOpen },
+      { id: "standardized_titles", label: "Titles", icon: BookOpen, hidden: true },
       { id: "name_report", label: "Name Report", icon: Tags },
     ],
   },
@@ -246,6 +249,10 @@ export function Sidebar({
         {navGroups.map((group, groupIdx) => {
           const isGroupCollapsed = collapsedGroups[group.id] ?? false;
           const hasLabel = !!group.label;
+          const visibleItems = group.items.filter((item) => !item.hidden);
+
+          // Whole group is frozen — render nothing (no orphan header)
+          if (visibleItems.length === 0) return null;
 
           return (
             <div key={group.id} className={groupIdx > 0 ? "mt-3" : ""}>
@@ -266,7 +273,7 @@ export function Sidebar({
 
               {(!isGroupCollapsed || collapsed) && (
                 <div className="space-y-px">
-                  {group.items.map((item) => (
+                  {visibleItems.map((item) => (
                     <NavRow
                       key={item.id}
                       icon={item.icon}

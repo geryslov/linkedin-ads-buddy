@@ -103,6 +103,8 @@ The probe was deployed out-of-band (via Lovable, not CI) and verified live — `
 
 **Jul 23 — typography swap to a four-family grotesque system.** Replaced the Plus Jakarta Sans + Fraunces pairing with **DM Sans** (body/UI), **Space Grotesk** (headings — `h1`–`h6` and a new `font-heading` token), **Bricolage Grotesque** (display: hero + page titles, where Fraunces was), keeping **JetBrains Mono** for code. One `@import` in [index.css](src/index.css) loads all four; `tailwind.config.ts` maps `font-sans`/`font-heading`/`font-display`/`font-mono`. (A report had flagged the docs as referencing Inter/IBM Plex Mono, but the repo never used those — the actual prior stack was Plus Jakarta/Fraunces; this change is the real switch to the intended grotesque stack.)
 
+**Jul 23 — froze seven unused nav tabs.** Added a `hidden?: boolean` flag to `NavItem`; the sidebar and command palette both filter it out (and skip a group that ends up with no visible items). Froze Campaigns, Creatives, Conv. Breakdown, Activity Report, Account Health, Audiences, and Titles — hidden from navigation but their Dashboard routes/tabs are untouched, so they still render via `?tab=<id>` and re-enable by removing the flag. No deletions.
+
 ---
 
 ## Recurring themes

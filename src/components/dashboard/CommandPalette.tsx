@@ -59,21 +59,25 @@ export function CommandPalette({ onNavigate, onConnectClaude, onLogout, isAdmin 
         <CommandInput placeholder="Search screens and actions…" />
         <CommandList>
           <CommandEmpty>No results found.</CommandEmpty>
-          {navGroups.map((group) => (
-            <CommandGroup key={group.id} heading={group.label ?? "General"}>
-              {group.items.map((item) => (
-                <CommandItem
-                  key={item.id}
-                  value={`${group.label ?? ""} ${item.label}`}
-                  onSelect={() => run(() => onNavigate(item.id))}
-                  className="gap-2.5"
-                >
-                  <item.icon className="h-4 w-4 text-muted-foreground" />
-                  {item.label}
-                </CommandItem>
-              ))}
-            </CommandGroup>
-          ))}
+          {navGroups.map((group) => {
+            const items = group.items.filter((item) => !item.hidden);
+            if (items.length === 0) return null;
+            return (
+              <CommandGroup key={group.id} heading={group.label ?? "General"}>
+                {items.map((item) => (
+                  <CommandItem
+                    key={item.id}
+                    value={`${group.label ?? ""} ${item.label}`}
+                    onSelect={() => run(() => onNavigate(item.id))}
+                    className="gap-2.5"
+                  >
+                    <item.icon className="h-4 w-4 text-muted-foreground" />
+                    {item.label}
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            );
+          })}
           <CommandSeparator />
           <CommandGroup heading="Actions">
             <CommandItem onSelect={() => run(() => navigate("/social-listener"))} className="gap-2.5">

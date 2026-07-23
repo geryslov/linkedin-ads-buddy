@@ -17,7 +17,11 @@ What exists in LinkedIn Ads Buddy today. See [CLAUDE.md](CLAUDE.md) for architec
 
 ## Dashboard navigation
 
-Defined in [Sidebar.tsx](src/components/dashboard/Sidebar.tsx). Seven groups:
+Defined in [Sidebar.tsx](src/components/dashboard/Sidebar.tsx). Seven groups.
+
+**Frozen items** — nav items marked `hidden: true` on their `NavItem` are filtered out of both the sidebar and the ⌘K command palette, but their routes/tabs still exist and render if reached by direct URL (`?tab=<id>`). Currently frozen: Campaigns (`campaigns`), Creatives (`creatives`), Conv. Breakdown (`conv_breakdown`), Activity Report (`activity_report`), Account Health (`account_health`), Audiences (`audiences`), Titles (`standardized_titles`). Remove the flag to bring one back. A group whose visible items all become hidden renders nothing (no orphan header).
+
+Groups and items:
 
 ### Main
 | Item | Component |
