@@ -577,7 +577,7 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
                 </div>
                 <div className="mt-2 text-xs text-muted-foreground">
                   {daysBeforeDeal !== null && daysBeforeDeal > 0 && (
-                    <span className="text-green-600 font-medium">
+                    <span className="text-success font-medium">
                       {daysBeforeDeal} days of LinkedIn exposure before deal
                     </span>
                   )}
@@ -819,7 +819,7 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
               )}
               {!isLoadingLinkedIn && companyData.length > 0 && (
                 <Badge variant="secondary" className="text-[10px]">
-                  <CheckCircle2 className="h-3 w-3 mr-1 text-green-500" />
+                  <CheckCircle2 className="h-3 w-3 mr-1 text-success" />
                   {companyData.length} companies
                 </Badge>
               )}
@@ -1052,7 +1052,7 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
                           <MetricCell value={m ? fmtNum(m.linkedin.clicks) : '—'} />
                           <td className="px-3 py-3 text-right tabular-nums text-sm font-medium">{m ? fmtCur(m.linkedin.spent) : '—'}</td>
                           <td className="px-3 py-3 text-right tabular-nums text-sm">
-                            {m ? (<span className={m.linkedin.leads > 0 ? 'text-green-600 font-medium' : ''}>{fmtNum(m.linkedin.leads)}</span>) : '—'}
+                            {m ? (<span className={m.linkedin.leads > 0 ? 'text-success font-medium' : ''}>{fmtNum(m.linkedin.leads)}</span>) : '—'}
                           </td>
                           <MetricCell value={m ? fmtNum(m.linkedin.engagements) : '—'} />
                           <MetricCell value={m ? `${m.linkedin.ctr.toFixed(2)}%` : '—'} />
