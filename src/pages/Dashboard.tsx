@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useLinkedInAuth } from "@/hooks/useLinkedInAuth";
 import { useLinkedInAds } from "@/hooks/useLinkedInAds";
 import { useAuth } from "@/hooks/useAuth";
@@ -36,15 +37,15 @@ import { PerformanceSegmentation } from "@/components/dashboard/PerformanceSegme
 import { ConnectClaude } from "@/components/dashboard/ConnectClaude";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { WidgetCard, EmptyState, StatusPill } from "@/components/dashboard/widgets";
 import {
   Eye,
   MousePointerClick,
   DollarSign,
   Target,
   RefreshCw,
-  TrendingUp,
-  Percent,
   ChevronRight,
+  Megaphone,
 } from "lucide-react";
 
 // U8 — Page metadata: group label, title, and contextual subtitle
@@ -99,7 +100,13 @@ export default function Dashboard() {
     syncAdAccounts,
   } = useLinkedInAds(accessToken);
 
-  const [activeTab, setActiveTab] = useState("overview");
+  // Tab state lives in the URL (?tab=…) so views are deep-linkable
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = searchParams.get("tab") ?? "overview";
+  const setActiveTab = useCallback(
+    (tab: string) => setSearchParams(tab === "overview" ? {} : { tab }),
+    [setSearchParams]
+  );
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [connectClaudeOpen, setConnectClaudeOpen] = useState(false);
   const lastFetchedAccountsTokenRef = useRef<string | null>(null);
@@ -235,7 +242,7 @@ export default function Dashboard() {
 
         <ErrorBoundary resetKey={activeTab} label={meta.title}>
         {activeTab === "overview" && (
-          <div className="space-y-8">
+          <div className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
               {isLoading || !analytics ? (
                 <>
@@ -273,50 +280,107 @@ export default function Dashboard() {
               )}
             </div>
 
-            <div>
-              <h3 className="text-base font-semibold mb-3 text-foreground">Recent Campaigns</h3>
-              {isLoading ? (
-                <Skeleton className="h-64 rounded-xl bg-secondary" />
-              ) : (
-                <CampaignTable 
-                  campaigns={campaigns.slice(0, 5)} 
-                  onStatusChange={updateCampaignStatus}
-                  isLoading={isLoading}
-                />
-              )}
-            </div>
+            {/* Derived efficiency strip — computed from the same aggregates */}
+            {analytics && !isLoading && (() => {
+              const spend = parseFloat(analytics.costInLocalCurrency) || 0;
+              const derived = [
+                {
+                  label: "CTR",
+                  value: analytics.impressions > 0
+                    ? `${((analytics.clicks / analytics.impressions) * 100).toFixed(2)}%`
+                    : "—",
+                },
+                {
+                  label: "CPC",
+                  value: analytics.clicks > 0 ? `$${(spend / analytics.clicks).toFixed(2)}` : "—",
+                },
+                {
+                  label: "CPM",
+                  value: analytics.impressions > 0
+                    ? `$${((spend / analytics.impressions) * 1000).toFixed(2)}`
+                    : "—",
+                },
+                {
+                  label: "Cost / conversion",
+                  value: analytics.conversions > 0 ? `$${(spend / analytics.conversions).toFixed(2)}` : "—",
+                },
+              ];
+              return (
+                <WidgetCard noPadding className="animate-slide-up">
+                  <div className="grid grid-cols-2 md:grid-cols-4 divide-x divide-border/60">
+                    {derived.map((d) => (
+                      <div key={d.label} className="px-5 py-4">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                          {d.label}
+                        </p>
+                        <p className="text-lg font-bold tabular-nums mt-1">{d.value}</p>
+                      </div>
+                    ))}
+                  </div>
+                </WidgetCard>
+              );
+            })()}
+
+            {/* Recent campaigns — light list, full table lives in the Campaigns tab */}
+            {isLoading ? (
+              <Skeleton className="h-64 rounded-xl bg-secondary" />
+            ) : (
+              <WidgetCard
+                noPadding
+                title="Recent campaigns"
+                subtitle="Latest 6 campaigns on this account"
+                toolbar={
+                  <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setActiveTab("campaigns")}>
+                    View all
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </Button>
+                }
+              >
+                {campaigns.length === 0 ? (
+                  <EmptyState
+                    icon={Megaphone}
+                    title="No campaigns yet"
+                    description="Create your first campaign in LinkedIn Campaign Manager and it will appear here automatically."
+                  />
+                ) : (
+                  <ul className="divide-y divide-border/60">
+                    {campaigns.slice(0, 6).map((c) => {
+                      const tone =
+                        c.status === "ACTIVE" ? "success"
+                        : c.status === "PAUSED" ? "warning"
+                        : c.status === "DRAFT" ? "info"
+                        : "neutral";
+                      const label = c.status.charAt(0) + c.status.slice(1).toLowerCase();
+                      return (
+                        <li key={c.id} className="flex items-center gap-3 px-5 py-3">
+                          <span className="min-w-0 flex-1 truncate text-sm font-medium" title={c.name}>
+                            {c.name}
+                          </span>
+                          <span className="hidden md:inline text-xs text-muted-foreground shrink-0">
+                            {c.type}
+                          </span>
+                          <span className="hidden sm:inline text-sm tabular-nums text-muted-foreground shrink-0 w-28 text-right">
+                            {c.dailyBudget
+                              ? `${c.dailyBudget.currencyCode} ${parseFloat(c.dailyBudget.amount).toLocaleString()}/d`
+                              : "—"}
+                          </span>
+                          <StatusPill tone={tone} label={label} className="shrink-0" />
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </WidgetCard>
+            )}
           </div>
         )}
 
         {activeTab === "campaigns" && (
-          <div className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <MetricCard
-                title="Active Campaigns"
-                value={campaigns.filter(c => c.status === "ACTIVE").length}
-                icon={TrendingUp}
-                delay={0}
-              />
-              <MetricCard
-                title="Paused Campaigns"
-                value={campaigns.filter(c => c.status === "PAUSED").length}
-                icon={Target}
-                delay={50}
-              />
-              <MetricCard
-                title="Total Campaigns"
-                value={campaigns.length}
-                icon={Percent}
-                delay={100}
-              />
-            </div>
-            
-            <CampaignTable 
-              campaigns={campaigns} 
-              onStatusChange={updateCampaignStatus}
-              isLoading={isLoading}
-            />
-          </div>
+          <CampaignTable
+            campaigns={campaigns}
+            onStatusChange={updateCampaignStatus}
+            isLoading={isLoading}
+          />
         )}
 
         {activeTab === "audiences" && (

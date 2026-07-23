@@ -22,88 +22,84 @@ interface AccountSelectorProps {
 }
 
 // Role display configuration
-const roleConfig: Record<string, { label: string; variant: "default" | "secondary" | "outline" | "destructive"; icon: typeof Shield }> = {
-  ACCOUNT_MANAGER: { label: "Account Manager", variant: "default", icon: Shield },
-  CAMPAIGN_MANAGER: { label: "Campaign Manager", variant: "default", icon: Shield },
-  CREATIVE_MANAGER: { label: "Creative Manager", variant: "default", icon: Shield },
-  VIEWER: { label: "Viewer", variant: "secondary", icon: Eye },
-  BILLING_ADMIN: { label: "Billing Admin", variant: "outline", icon: Shield },
-  DIRECT_ACCESS: { label: "Direct Access", variant: "outline", icon: Shield },
-  UNKNOWN: { label: "Unknown Role", variant: "outline", icon: AlertCircle },
+const roleConfig: Record<string, { label: string; icon: typeof Shield }> = {
+  ACCOUNT_MANAGER: { label: "Account Manager", icon: Shield },
+  CAMPAIGN_MANAGER: { label: "Campaign Manager", icon: Shield },
+  CREATIVE_MANAGER: { label: "Creative Manager", icon: Shield },
+  VIEWER: { label: "Viewer", icon: Eye },
+  BILLING_ADMIN: { label: "Billing Admin", icon: Shield },
+  DIRECT_ACCESS: { label: "Direct Access", icon: Shield },
+  UNKNOWN: { label: "Unknown Role", icon: AlertCircle },
 };
 
-export function AccountSelector({ 
-  accounts, 
-  selectedAccount, 
+export function AccountSelector({
+  accounts,
+  selectedAccount,
   onSelect,
   onSetDefault,
   onRefresh,
   isRefreshing,
   lastSyncedAt,
 }: AccountSelectorProps) {
-  // Empty state - no accounts found
+  // Empty state — compact pill that fits the header bar
   if (accounts.length === 0) {
     return (
-      <div className="flex items-center gap-3">
-        <div className="flex items-center gap-3 p-4 rounded-lg bg-secondary/50 border border-border">
-          <AlertCircle className="h-5 w-5 text-muted-foreground" />
-          <div className="text-sm">
-            <p className="font-medium">No Ad Accounts Found</p>
-            <p className="text-muted-foreground">
-              Request access from your LinkedIn Campaign Manager
-            </p>
-          </div>
+      <div className="flex items-center gap-2">
+        <div
+          className="flex items-center gap-2 h-8 px-3 rounded-full bg-warning/[0.08] text-warning text-xs font-medium"
+          title="Request access from your LinkedIn Campaign Manager, then refresh."
+        >
+          <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+          No ad accounts
         </div>
         {onRefresh && (
           <Button
             variant="outline"
             size="icon"
+            className="h-8 w-8"
             onClick={onRefresh}
             disabled={isRefreshing}
             title="Refresh accounts from LinkedIn"
           >
-            <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? "animate-spin" : ""}`} />
           </Button>
         )}
       </div>
     );
   }
 
-  const selectedAccountData = accounts.find(a => a.id === selectedAccount);
-  const roleInfo = selectedAccountData 
-    ? roleConfig[selectedAccountData.userRole] || roleConfig.UNKNOWN
-    : null;
+  const selectedAccountData = accounts.find((a) => a.id === selectedAccount);
 
   return (
-    <div className="flex items-center gap-3">
-      <div className="p-2 rounded-lg bg-secondary">
-        <Building2 className="h-4 w-4 text-muted-foreground" />
-      </div>
+    <div className="flex items-center gap-2">
       <Select value={selectedAccount || undefined} onValueChange={onSelect}>
-        <SelectTrigger className="w-[320px] bg-secondary border-border">
-          <SelectValue placeholder="Select ad account" />
+        <SelectTrigger className="h-8 w-[280px] text-sm bg-card border-border rounded-lg">
+          <div className="flex items-center gap-2 min-w-0">
+            <Building2 className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+            <SelectValue placeholder="Select ad account" />
+          </div>
         </SelectTrigger>
         <SelectContent className="bg-card border-border">
           {accounts.map((account) => {
             const accRoleInfo = roleConfig[account.userRole] || roleConfig.UNKNOWN;
             const RoleIcon = accRoleInfo.icon;
-            
+
             return (
               <SelectItem key={account.id} value={account.id}>
                 <div className="flex items-center gap-2 w-full">
                   {account.isDefault && (
-                    <Star className="h-3 w-3 text-yellow-500 fill-yellow-500 shrink-0" />
+                    <Star className="h-3 w-3 text-warning fill-current shrink-0" />
                   )}
                   <span className="truncate">{account.name}</span>
                   <span className="text-xs text-muted-foreground shrink-0">
                     ({account.currency})
                   </span>
-                  <Badge 
-                    variant={accRoleInfo.variant} 
+                  <Badge
+                    variant="outline"
                     className={`ml-auto text-xs shrink-0 ${
-                      account.canWrite 
-                        ? 'bg-green-600/20 text-green-400 border-green-600/30' 
-                        : 'bg-yellow-600/20 text-yellow-400 border-yellow-600/30'
+                      account.canWrite
+                        ? "bg-success/[0.08] text-success border-success/20"
+                        : "bg-warning/[0.08] text-warning border-warning/20"
                     }`}
                   >
                     <RoleIcon className="h-3 w-3 mr-1" />
@@ -115,47 +111,44 @@ export function AccountSelector({
           })}
         </SelectContent>
       </Select>
-      
-      {/* Set as Default Button */}
-      {selectedAccount && onSetDefault && selectedAccountData && !selectedAccountData.isDefault && (
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => onSetDefault(selectedAccount)}
-          title="Set as default account"
-          className="hover:bg-yellow-500/10"
-        >
-          <Star className="h-4 w-4 text-muted-foreground hover:text-yellow-500" />
-        </Button>
-      )}
-      
-      {/* Show filled star if current account is default */}
-      {selectedAccountData?.isDefault && (
-        <div className="p-2" title="Default account">
-          <Star className="h-4 w-4 text-yellow-500 fill-yellow-500" />
-        </div>
+
+      {/* Default star: filled if default, click to set otherwise */}
+      {selectedAccount && selectedAccountData && (
+        selectedAccountData.isDefault ? (
+          <div className="h-8 w-8 flex items-center justify-center" title="Default account">
+            <Star className="h-3.5 w-3.5 text-warning fill-current" />
+          </div>
+        ) : (
+          onSetDefault && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              onClick={() => onSetDefault(selectedAccount)}
+              title="Set as default account"
+            >
+              <Star className="h-3.5 w-3.5 text-muted-foreground hover:text-warning" />
+            </Button>
+          )
+        )
       )}
 
-      {/* Refresh Button */}
+      {/* Refresh */}
       {onRefresh && (
         <Button
           variant="outline"
           size="icon"
+          className="h-8 w-8"
           onClick={onRefresh}
           disabled={isRefreshing}
-          title={lastSyncedAt 
-            ? `Last synced ${formatDistanceToNow(new Date(lastSyncedAt))} ago. Click to refresh.` 
-            : 'Refresh accounts from LinkedIn'}
+          title={
+            lastSyncedAt
+              ? `Last synced ${formatDistanceToNow(new Date(lastSyncedAt))} ago. Click to refresh.`
+              : "Refresh accounts from LinkedIn"
+          }
         >
-          <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+          <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? "animate-spin" : ""}`} />
         </Button>
-      )}
-
-      {/* Last synced indicator */}
-      {lastSyncedAt && (
-        <span className="text-xs text-muted-foreground hidden lg:inline">
-          Synced {formatDistanceToNow(new Date(lastSyncedAt))} ago
-        </span>
       )}
     </div>
   );

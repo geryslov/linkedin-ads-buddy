@@ -94,6 +94,8 @@ Tokens live in [src/index.css](src/index.css) (CSS variables) + [tailwind.config
 - **Sidebar** — clean white surface via the `--sidebar-*` token set; active item = indigo tint pill + left accent bar. [Sidebar.tsx](src/components/dashboard/Sidebar.tsx) renders its own `NavRow` rather than the shadcn Button.
 - **Chart colors** — `--chart-1..8`, a CVD-validated categorical palette (dataviz reference set). Fixed slot order, never cycled; components reference `hsl(var(--chart-N))` or the matching hex, not ad-hoc Tailwind colors.
 - **Shadows/radius** — layered ink-tinted shadows (`--shadow-xs..lg`, `--shadow-primary` glow), 10px base radius. Utility classes: `.glass`, `.card-hover`, `.gradient-primary`, `.gradient-mesh`, `.text-gradient`.
+- **Widget kit** — [widgets.tsx](src/components/dashboard/widgets.tsx): `WidgetCard` (card shell with title/subtitle/toolbar header), `EmptyState`, `StatusPill` (semantic tones: success/warning/danger/info/neutral), `SegmentedControl`, `ChartLegend`. New/redesigned panels should build from these.
+- **Deep-linkable tabs** — dashboard tab state lives in the URL (`/dashboard?tab=campaigns`); `overview` is the bare URL.
 
 ## Client-facing weekly reports
 

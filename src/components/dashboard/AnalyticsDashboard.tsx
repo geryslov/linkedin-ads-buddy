@@ -5,9 +5,10 @@ import {
   XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
 } from 'recharts';
 import { MetricCard } from './MetricCard';
+import { WidgetCard, EmptyState, SegmentedControl } from './widgets';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
-  Eye, MousePointerClick, DollarSign, Target, TrendingUp, TrendingDown,
+  Eye, MousePointerClick, DollarSign, Target, BarChart3,
 } from 'lucide-react';
 
 interface DayMetrics {
@@ -35,22 +36,37 @@ const COLORS = {
   leads: '#eda100',
 };
 
-function ChartTooltip({ active, payload, label }: any) {
+type VolumeMetric = keyof typeof COLORS;
+
+const METRIC_META: Record<VolumeMetric, { label: string; kind: 'count' | 'currency' }> = {
+  impressions: { label: 'Impressions', kind: 'count' },
+  clicks: { label: 'Clicks', kind: 'count' },
+  spent: { label: 'Spend', kind: 'currency' },
+  leads: { label: 'Leads', kind: 'count' },
+};
+
+function formatValue(key: string, value: number) {
+  if (key === 'spent' || key === 'cpc' || key === 'cpm' || key === 'cpl') {
+    return `$${Number(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  }
+  if (key === 'ctr') return `${Number(value).toFixed(2)}%`;
+  return Number(value).toLocaleString();
+}
+
+function ChartTooltip({ active, payload, label }: {
+  active?: boolean;
+  payload?: Array<{ dataKey: string; value: number; color: string }>;
+  label?: string;
+}) {
   if (!active || !payload?.length) return null;
   return (
     <div className="rounded-lg border border-border bg-card px-3 py-2 shadow-md text-sm">
       <p className="font-medium text-foreground mb-1">{label}</p>
-      {payload.map((p: any) => (
+      {payload.map((p) => (
         <div key={p.dataKey} className="flex items-center gap-2">
           <span className="h-2 w-2 rounded-full" style={{ background: p.color }} />
           <span className="text-muted-foreground capitalize">{p.dataKey}:</span>
-          <span className="tabular-nums font-semibold">
-            {p.dataKey === 'spent' || p.dataKey === 'cpc' || p.dataKey === 'cpm' || p.dataKey === 'cpl'
-              ? `$${Number(p.value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-              : p.dataKey === 'ctr'
-                ? `${Number(p.value).toFixed(2)}%`
-                : Number(p.value).toLocaleString()}
-          </span>
+          <span className="tabular-nums font-semibold">{formatValue(p.dataKey, p.value)}</span>
         </div>
       ))}
     </div>
@@ -58,16 +74,19 @@ function ChartTooltip({ active, payload, label }: any) {
 }
 
 const PERIOD_OPTIONS = [
-  { label: '7d', days: 7 },
-  { label: '14d', days: 14 },
-  { label: '30d', days: 30 },
-  { label: '90d', days: 90 },
-] as const;
+  { label: '7d', value: 7 },
+  { label: '14d', value: 14 },
+  { label: '30d', value: 30 },
+  { label: '90d', value: 90 },
+];
+
+const axisTick = { fontSize: 11, fill: 'hsl(226 12% 44%)' };
 
 export function AnalyticsDashboard({ accessToken, selectedAccount }: AnalyticsDashboardProps) {
   const [dailyData, setDailyData] = useState<DayMetrics[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [period, setPeriod] = useState(30);
+  const [volumeMetric, setVolumeMetric] = useState<VolumeMetric>('impressions');
 
   const fetchDailyAnalytics = useCallback(async () => {
     if (!accessToken || !selectedAccount) return;
@@ -204,6 +223,9 @@ export function AnalyticsDashboard({ accessToken, selectedAccount }: AnalyticsDa
     })),
   [dailyData]);
 
+  const volumeColor = COLORS[volumeMetric];
+  const volumeMeta = METRIC_META[volumeMetric];
+
   if (isLoading) {
     return (
       <div className="space-y-6">
@@ -212,8 +234,8 @@ export function AnalyticsDashboard({ accessToken, selectedAccount }: AnalyticsDa
             <Skeleton key={i} className="h-32 rounded-xl bg-secondary" />
           ))}
         </div>
-        <Skeleton className="h-72 rounded-xl bg-secondary" />
-        <Skeleton className="h-72 rounded-xl bg-secondary" />
+        <Skeleton className="h-80 rounded-xl bg-secondary" />
+        <Skeleton className="h-56 rounded-xl bg-secondary" />
       </div>
     );
   }
@@ -221,21 +243,7 @@ export function AnalyticsDashboard({ accessToken, selectedAccount }: AnalyticsDa
   return (
     <div className="space-y-6">
       {/* Period selector */}
-      <div className="flex items-center gap-1 p-1 bg-muted rounded-lg w-fit">
-        {PERIOD_OPTIONS.map(opt => (
-          <button
-            key={opt.days}
-            onClick={() => setPeriod(opt.days)}
-            className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
-              period === opt.days
-                ? 'bg-background text-foreground shadow-sm'
-                : 'text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            {opt.label}
-          </button>
-        ))}
-      </div>
+      <SegmentedControl options={PERIOD_OPTIONS} value={period} onChange={setPeriod} />
 
       {/* KPI cards with real period-over-period changes */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -273,183 +281,140 @@ export function AnalyticsDashboard({ accessToken, selectedAccount }: AnalyticsDa
         />
       </div>
 
-      {/* Daily impressions + clicks area chart */}
+      {/* Daily volume — one metric at a time, one axis (no dual-axis charts) */}
       {chartData.length > 0 && (
-        <div className="border border-border/70 rounded-lg p-5 bg-card shadow-sm">
-          <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-4">
-            Daily Impressions & Clicks
-          </h3>
-          <ResponsiveContainer width="100%" height={280}>
-            <AreaChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-              <defs>
-                <linearGradient id="gradImpressions" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor={COLORS.impressions} stopOpacity={0.15} />
-                  <stop offset="95%" stopColor={COLORS.impressions} stopOpacity={0} />
-                </linearGradient>
-                <linearGradient id="gradClicks" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor={COLORS.clicks} stopOpacity={0.15} />
-                  <stop offset="95%" stopColor={COLORS.clicks} stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" className="stroke-border/30" />
-              <XAxis
-                dataKey="label"
-                tick={{ fontSize: 11 }}
-                className="text-muted-foreground"
-                interval={Math.max(0, Math.floor(chartData.length / 8))}
-              />
-              <YAxis
-                yAxisId="impressions"
-                tick={{ fontSize: 11 }}
-                className="text-muted-foreground"
-                tickFormatter={(v: number) => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(v)}
-              />
-              <YAxis
-                yAxisId="clicks"
-                orientation="right"
-                tick={{ fontSize: 11 }}
-                className="text-muted-foreground"
-              />
-              <Tooltip content={<ChartTooltip />} />
-              <Area
-                yAxisId="impressions"
-                type="monotone"
-                dataKey="impressions"
-                stroke={COLORS.impressions}
-                fill="url(#gradImpressions)"
-                strokeWidth={2}
-              />
-              <Area
-                yAxisId="clicks"
-                type="monotone"
-                dataKey="clicks"
-                stroke={COLORS.clicks}
-                fill="url(#gradClicks)"
-                strokeWidth={2}
-              />
-            </AreaChart>
+        <WidgetCard
+          title="Daily performance"
+          subtitle={`${volumeMeta.label} per day over the selected period`}
+          toolbar={
+            <SegmentedControl
+              size="sm"
+              value={volumeMetric}
+              onChange={setVolumeMetric}
+              options={(Object.keys(METRIC_META) as VolumeMetric[]).map(k => ({
+                value: k,
+                label: (
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="h-2 w-2 rounded-full" style={{ background: COLORS[k] }} />
+                    {METRIC_META[k].label}
+                  </span>
+                ),
+              }))}
+            />
+          }
+        >
+          <ResponsiveContainer width="100%" height={300}>
+            {volumeMetric === 'spent' || volumeMetric === 'leads' ? (
+              <BarChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(226 18% 89% / 0.6)" vertical={false} />
+                <XAxis
+                  dataKey="label"
+                  tick={axisTick}
+                  axisLine={false}
+                  tickLine={false}
+                  interval={Math.max(0, Math.floor(chartData.length / 8))}
+                />
+                <YAxis
+                  tick={axisTick}
+                  axisLine={false}
+                  tickLine={false}
+                  tickFormatter={(v: number) =>
+                    volumeMeta.kind === 'currency'
+                      ? `$${v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v}`
+                      : v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(v)}
+                />
+                <Tooltip content={<ChartTooltip />} cursor={{ fill: 'hsl(226 18% 89% / 0.35)' }} />
+                <Bar dataKey={volumeMetric} fill={volumeColor} radius={[4, 4, 0, 0]} maxBarSize={28} />
+              </BarChart>
+            ) : (
+              <AreaChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="gradVolume" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor={volumeColor} stopOpacity={0.15} />
+                    <stop offset="95%" stopColor={volumeColor} stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(226 18% 89% / 0.6)" vertical={false} />
+                <XAxis
+                  dataKey="label"
+                  tick={axisTick}
+                  axisLine={false}
+                  tickLine={false}
+                  interval={Math.max(0, Math.floor(chartData.length / 8))}
+                />
+                <YAxis
+                  tick={axisTick}
+                  axisLine={false}
+                  tickLine={false}
+                  tickFormatter={(v: number) => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(v)}
+                />
+                <Tooltip content={<ChartTooltip />} />
+                <Area
+                  type="monotone"
+                  dataKey={volumeMetric}
+                  stroke={volumeColor}
+                  fill="url(#gradVolume)"
+                  strokeWidth={2}
+                />
+              </AreaChart>
+            )}
           </ResponsiveContainer>
-        </div>
+        </WidgetCard>
       )}
 
-      {/* Daily spend + leads bar chart */}
-      {chartData.length > 0 && (
-        <div className="border border-border/70 rounded-lg p-5 bg-card shadow-sm">
-          <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-4">
-            Daily Spend & Leads
-          </h3>
-          <ResponsiveContainer width="100%" height={280}>
-            <BarChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" className="stroke-border/30" />
-              <XAxis
-                dataKey="label"
-                tick={{ fontSize: 11 }}
-                className="text-muted-foreground"
-                interval={Math.max(0, Math.floor(chartData.length / 8))}
-              />
-              <YAxis
-                yAxisId="spent"
-                tick={{ fontSize: 11 }}
-                className="text-muted-foreground"
-                tickFormatter={(v: number) => `$${v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v}`}
-              />
-              <YAxis
-                yAxisId="leads"
-                orientation="right"
-                tick={{ fontSize: 11 }}
-                className="text-muted-foreground"
-              />
-              <Tooltip content={<ChartTooltip />} />
-              <Bar yAxisId="spent" dataKey="spent" fill={COLORS.spent} radius={[3, 3, 0, 0]} opacity={0.85} />
-              <Bar yAxisId="leads" dataKey="leads" fill={COLORS.leads} radius={[3, 3, 0, 0]} opacity={0.85} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      )}
-
-      {/* Efficiency metrics: CTR + CPC over time */}
+      {/* Efficiency small multiples — CTR and CPC, each on its own axis */}
       {chartData.length > 0 && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="border border-border/70 rounded-lg p-5 bg-card shadow-sm">
-            <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-4">
-              CTR Trend
-            </h3>
-            <ResponsiveContainer width="100%" height={200}>
-              <AreaChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="gradCtr" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor={COLORS.impressions} stopOpacity={0.1} />
-                    <stop offset="95%" stopColor={COLORS.impressions} stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-border/30" />
-                <XAxis
-                  dataKey="label"
-                  tick={{ fontSize: 10 }}
-                  className="text-muted-foreground"
-                  interval={Math.max(0, Math.floor(chartData.length / 6))}
-                />
-                <YAxis
-                  tick={{ fontSize: 10 }}
-                  className="text-muted-foreground"
-                  tickFormatter={(v: number) => `${v}%`}
-                />
-                <Tooltip content={<ChartTooltip />} />
-                <Area
-                  type="monotone"
-                  dataKey="ctr"
-                  stroke={COLORS.impressions}
-                  fill="url(#gradCtr)"
-                  strokeWidth={2}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-
-          <div className="border border-border/70 rounded-lg p-5 bg-card shadow-sm">
-            <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-4">
-              CPC Trend
-            </h3>
-            <ResponsiveContainer width="100%" height={200}>
-              <AreaChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="gradCpc" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor={COLORS.spent} stopOpacity={0.1} />
-                    <stop offset="95%" stopColor={COLORS.spent} stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-border/30" />
-                <XAxis
-                  dataKey="label"
-                  tick={{ fontSize: 10 }}
-                  className="text-muted-foreground"
-                  interval={Math.max(0, Math.floor(chartData.length / 6))}
-                />
-                <YAxis
-                  tick={{ fontSize: 10 }}
-                  className="text-muted-foreground"
-                  tickFormatter={(v: number) => `$${v}`}
-                />
-                <Tooltip content={<ChartTooltip />} />
-                <Area
-                  type="monotone"
-                  dataKey="cpc"
-                  stroke={COLORS.spent}
-                  fill="url(#gradCpc)"
-                  strokeWidth={2}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
+          {([
+            { key: 'ctr', title: 'CTR trend', color: COLORS.impressions, fmt: (v: number) => `${v}%` },
+            { key: 'cpc', title: 'CPC trend', color: COLORS.spent, fmt: (v: number) => `$${v}` },
+          ] as const).map(({ key, title, color, fmt }) => (
+            <WidgetCard key={key} title={title}>
+              <ResponsiveContainer width="100%" height={200}>
+                <AreaChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id={`grad-${key}`} x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor={color} stopOpacity={0.1} />
+                      <stop offset="95%" stopColor={color} stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(226 18% 89% / 0.6)" vertical={false} />
+                  <XAxis
+                    dataKey="label"
+                    tick={{ ...axisTick, fontSize: 10 }}
+                    axisLine={false}
+                    tickLine={false}
+                    interval={Math.max(0, Math.floor(chartData.length / 6))}
+                  />
+                  <YAxis
+                    tick={{ ...axisTick, fontSize: 10 }}
+                    axisLine={false}
+                    tickLine={false}
+                    tickFormatter={fmt}
+                  />
+                  <Tooltip content={<ChartTooltip />} />
+                  <Area
+                    type="monotone"
+                    dataKey={key}
+                    stroke={color}
+                    fill={`url(#grad-${key})`}
+                    strokeWidth={2}
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            </WidgetCard>
+          ))}
         </div>
       )}
 
       {chartData.length === 0 && !isLoading && (
-        <div className="border border-border/70 rounded-lg p-8 bg-card shadow-sm text-center">
-          <p className="text-muted-foreground">
-            No analytics data available for the selected period. Try a longer date range or check that campaigns are active.
-          </p>
-        </div>
+        <WidgetCard noPadding>
+          <EmptyState
+            icon={BarChart3}
+            title="No analytics data for this period"
+            description="Try a longer date range, or check that campaigns are active on the selected account."
+          />
+        </WidgetCard>
       )}
     </div>
   );

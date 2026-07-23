@@ -1,5 +1,6 @@
 import { Audience } from "@/hooks/useLinkedInAds";
 import { Badge } from "@/components/ui/badge";
+import { StatusPill } from "./widgets";
 import { Users, Calendar, Globe } from "lucide-react";
 
 interface AudienceCardProps {
@@ -20,54 +21,56 @@ export function AudienceCard({ audience, delay = 0 }: AudienceCardProps) {
     return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
   };
 
+  const ready = audience.status === "READY";
+
   return (
     <div
-      className="glass rounded-xl p-5 animate-slide-up hover:border-primary/30 transition-colors"
-      style={{ animationDelay: `${delay}ms` }}
+      className="bg-card border border-border/70 rounded-xl p-5 animate-slide-up card-hover"
+      style={{ animationDelay: `${delay}ms`, boxShadow: "var(--shadow-sm)" }}
     >
-      <div className="flex items-start justify-between mb-3">
-        <div className="p-2 rounded-lg bg-primary/10">
-          <Users className="h-5 w-5 text-primary" />
+      <div className="flex items-start justify-between mb-4 gap-2">
+        <div className="h-8 w-8 rounded-lg bg-primary/[0.07] border border-primary/10 flex items-center justify-center shrink-0">
+          <Users className="h-4 w-4 text-primary" />
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 flex-wrap justify-end">
           {audience.type && (
             <Badge variant="outline" className="text-[10px] px-1.5 py-0">
               {typeLabels[audience.type] || audience.type}
             </Badge>
           )}
-          <Badge
-            variant={audience.status === "READY" ? "default" : "secondary"}
-            className={audience.status === "READY" ? "bg-success/20 text-success border-success/30" : ""}
-          >
-            {audience.status}
-          </Badge>
+          <StatusPill
+            tone={ready ? "success" : "neutral"}
+            label={ready ? "Ready" : audience.status.charAt(0) + audience.status.slice(1).toLowerCase()}
+          />
         </div>
       </div>
-      <h3 className="font-semibold mb-1 line-clamp-2">{audience.name}</h3>
-      <p className="text-2xl font-bold text-primary">
+
+      <h3 className="text-sm font-semibold mb-3 line-clamp-2 leading-snug" title={audience.name}>
+        {audience.name}
+      </h3>
+
+      <p className="text-[26px] font-bold tabular-nums tracking-tight leading-none">
         {audience.matchedCount.toLocaleString()}
       </p>
-      <p className="text-xs text-muted-foreground">matched members</p>
+      <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground mt-1">
+        matched members
+      </p>
 
       {(audience.sourcePlatform || audience.createdAt || audience.lastModifiedAt) && (
-        <div className="mt-3 pt-3 border-t border-border/50 space-y-1">
+        <div className="mt-4 pt-3 border-t border-border/50 flex items-center gap-3 flex-wrap">
           {audience.sourcePlatform && (
-            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
               <Globe className="h-3 w-3" />
-              <span>{audience.sourcePlatform}</span>
-            </div>
+              {audience.sourcePlatform}
+            </span>
           )}
-          {audience.createdAt && (
-            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          {(audience.lastModifiedAt || audience.createdAt) && (
+            <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
               <Calendar className="h-3 w-3" />
-              <span>Created {formatDate(audience.createdAt)}</span>
-            </div>
-          )}
-          {audience.lastModifiedAt && (
-            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <Calendar className="h-3 w-3" />
-              <span>Updated {formatDate(audience.lastModifiedAt)}</span>
-            </div>
+              {audience.lastModifiedAt
+                ? `Updated ${formatDate(audience.lastModifiedAt)}`
+                : `Created ${formatDate(audience.createdAt)}`}
+            </span>
           )}
         </div>
       )}
