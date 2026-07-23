@@ -135,8 +135,7 @@ function getActiveGroupId(activeTab: string): string {
   return "main";
 }
 
-/* Dark-surface nav row — deliberately not the shadcn Button (that's themed
-   for light surfaces); colors come from the sidebar token set. */
+/* Sidebar nav row — colors come from the sidebar token set. */
 function NavRow({
   icon: Icon,
   label,
@@ -161,18 +160,18 @@ function NavRow({
         "focus-visible:ring-2 focus-visible:ring-sidebar-ring/60",
         collapsed ? "justify-center px-0" : "gap-2.5 px-2.5",
         active
-          ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium shadow-[inset_0_1px_0_hsl(0_0%_100%/0.04)]"
-          : "text-sidebar-foreground/80 hover:text-sidebar-accent-foreground hover:bg-sidebar-accent/60",
+          ? "bg-primary/[0.08] text-sidebar-primary font-medium"
+          : "text-sidebar-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent",
         className
       )}
     >
       {active && !collapsed && (
-        <span className="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-r-full bg-sidebar-primary shadow-[0_0_8px_hsl(231_84%_67%/0.8)]" />
+        <span className="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-r-full bg-sidebar-primary" />
       )}
       <Icon
         className={cn(
           "h-4 w-4 shrink-0",
-          active ? "text-sidebar-primary" : "text-sidebar-foreground/60"
+          active ? "text-sidebar-primary" : "text-sidebar-foreground/70"
         )}
       />
       {!collapsed && <span className="truncate">{label}</span>}
@@ -210,7 +209,7 @@ export function Sidebar({
   return (
     <aside
       className={cn(
-        "fixed left-0 top-0 h-screen gradient-ink border-r border-sidebar-border flex flex-col transition-all duration-300 z-30",
+        "fixed left-0 top-0 h-screen bg-sidebar border-r border-sidebar-border flex flex-col transition-all duration-300 z-30",
         collapsed ? "w-16" : "w-64"
       )}
     >
@@ -231,10 +230,10 @@ export function Sidebar({
               <Linkedin className="h-4 w-4 text-primary-foreground" />
             </div>
             <div className="min-w-0">
-              <p className="font-bold text-[13px] leading-tight truncate text-white">
+              <p className="font-bold text-[13px] leading-tight truncate text-foreground">
                 LinkedIn Ads
               </p>
-              <p className="text-[10px] uppercase tracking-[0.14em] text-sidebar-foreground/50 leading-tight">
+              <p className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground leading-tight">
                 Manager
               </p>
             </div>
@@ -253,7 +252,7 @@ export function Sidebar({
               {hasLabel && !collapsed && (
                 <button
                   onClick={() => toggleGroup(group.id)}
-                  className="w-full flex items-center justify-between px-2.5 py-1 mb-0.5 rounded text-[10px] font-semibold uppercase tracking-[0.14em] text-sidebar-foreground/40 hover:text-sidebar-foreground/70 transition-colors cursor-pointer select-none"
+                  className="w-full flex items-center justify-between px-2.5 py-1 mb-0.5 rounded text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/60 hover:text-muted-foreground transition-colors cursor-pointer select-none"
                 >
                   {group.label}
                   <ChevronDown
@@ -290,7 +289,7 @@ export function Sidebar({
             label="Social Listener"
             collapsed={collapsed}
             onClick={() => navigate("/social-listener")}
-            className="text-emerald-400/90 hover:text-emerald-300 [&>svg]:text-emerald-400/80"
+            className="text-emerald-600 hover:!text-emerald-700 hover:!bg-emerald-50 [&>svg]:text-emerald-600"
           />
         </div>
 
@@ -324,7 +323,7 @@ export function Sidebar({
           label="Disconnect"
           collapsed={collapsed}
           onClick={onLogout}
-          className="hover:!text-red-400 [&:hover>svg]:text-red-400"
+          className="hover:!text-destructive hover:!bg-destructive/[0.06] [&:hover>svg]:text-destructive"
         />
 
         {onCollapsedChange && (
@@ -342,8 +341,8 @@ export function Sidebar({
               {initials}
             </div>
             <div className="min-w-0 py-1.5">
-              <p className="text-[10px] text-sidebar-foreground/50 leading-tight">Connected as</p>
-              <p className="text-xs font-medium text-sidebar-accent-foreground truncate leading-tight">
+              <p className="text-[10px] text-muted-foreground leading-tight">Connected as</p>
+              <p className="text-xs font-medium text-foreground truncate leading-tight">
                 {profileName}
               </p>
             </div>

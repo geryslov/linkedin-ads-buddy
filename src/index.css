@@ -69,7 +69,6 @@
 
     /* Gradients */
     --gradient-primary: linear-gradient(135deg, hsl(231 70% 51%) 0%, hsl(259 74% 57%) 100%);
-    --gradient-ink: linear-gradient(180deg, hsl(232 32% 12%) 0%, hsl(233 36% 8%) 100%);
     --gradient-glow: radial-gradient(ellipse at 50% -10%, hsl(231 70% 51% / 0.08) 0%, transparent 55%);
     --gradient-mesh:
       radial-gradient(at 15% 20%, hsl(231 70% 51% / 0.10) 0px, transparent 45%),
@@ -83,16 +82,16 @@
     --shadow-lg: 0 4px 8px hsl(230 30% 10% / 0.06), 0 16px 40px hsl(230 30% 10% / 0.11);
     --shadow-primary: 0 4px 14px hsl(231 70% 51% / 0.30);
 
-    /* Sidebar — deep ink surface (dark regardless of app theme) */
-    --sidebar-background: 232 32% 10%;
-    --sidebar-foreground: 227 18% 74%;
-    --sidebar-primary: 231 84% 67%;
+    /* Sidebar — clean white surface */
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 228 12% 38%;
+    --sidebar-primary: 231 70% 51%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 231 24% 17%;
-    --sidebar-accent-foreground: 0 0% 98%;
-    --sidebar-border: 231 22% 17%;
-    --sidebar-ring: 231 84% 67%;
-    --sidebar-muted: 228 12% 52%;
+    --sidebar-accent: 222 18% 95%;
+    --sidebar-accent-foreground: 230 30% 10%;
+    --sidebar-border: 226 18% 90%;
+    --sidebar-ring: 231 70% 51%;
+    --sidebar-muted: 226 12% 55%;
   }
 }
 
@@ -186,10 +185,6 @@
   /* ── Gradients ────────────────────────────────────────────── */
   .gradient-primary {
     background: var(--gradient-primary);
-  }
-
-  .gradient-ink {
-    background: var(--gradient-ink);
   }
 
   .gradient-mesh {

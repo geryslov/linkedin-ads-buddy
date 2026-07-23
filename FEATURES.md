@@ -91,9 +91,9 @@ Tokens live in [src/index.css](src/index.css) (CSS variables) + [tailwind.config
 
 - **Palette** — warm paper canvas, deep-ink text, electric indigo primary (`--primary: 231 70% 51%`) with a violet companion (`--violet`) used only in gradients. LinkedIn brand blue stays separate (`--linkedin`).
 - **Typography** — Plus Jakarta Sans for UI; **Fraunces** (`.font-display` / `font-display`) for the landing hero and dashboard page titles only. JetBrains Mono for code.
-- **Sidebar** — dark ink surface regardless of app theme, via the `--sidebar-*` token set. [Sidebar.tsx](src/components/dashboard/Sidebar.tsx) renders its own `NavRow` (not the shadcn Button, which is themed for light surfaces).
+- **Sidebar** — clean white surface via the `--sidebar-*` token set; active item = indigo tint pill + left accent bar. [Sidebar.tsx](src/components/dashboard/Sidebar.tsx) renders its own `NavRow` rather than the shadcn Button.
 - **Chart colors** — `--chart-1..8`, a CVD-validated categorical palette (dataviz reference set). Fixed slot order, never cycled; components reference `hsl(var(--chart-N))` or the matching hex, not ad-hoc Tailwind colors.
-- **Shadows/radius** — layered ink-tinted shadows (`--shadow-xs..lg`, `--shadow-primary` glow), 10px base radius. Utility classes: `.glass`, `.card-hover`, `.gradient-primary`, `.gradient-ink`, `.gradient-mesh`, `.text-gradient`.
+- **Shadows/radius** — layered ink-tinted shadows (`--shadow-xs..lg`, `--shadow-primary` glow), 10px base radius. Utility classes: `.glass`, `.card-hover`, `.gradient-primary`, `.gradient-mesh`, `.text-gradient`.
 
 ## Client-facing weekly reports
 

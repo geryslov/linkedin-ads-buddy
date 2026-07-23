@@ -232,21 +232,29 @@ export default function Index() {
 
           {/* ── Bottom CTA ────────────────────────────────────── */}
           <div className="max-w-4xl mx-auto mt-24">
-            <div className="relative rounded-3xl gradient-ink px-8 py-14 text-center overflow-hidden">
+            <div className="relative rounded-3xl gradient-primary px-8 py-14 text-center overflow-hidden shadow-lg">
               <div
                 aria-hidden
-                className="absolute inset-0 opacity-40"
-                style={{ background: "var(--gradient-mesh)" }}
+                className="absolute inset-0 opacity-25"
+                style={{
+                  background:
+                    "radial-gradient(at 20% 20%, hsl(0 0% 100% / 0.35) 0px, transparent 45%), radial-gradient(at 85% 80%, hsl(0 0% 100% / 0.2) 0px, transparent 45%)",
+                }}
               />
               <div className="relative">
                 <h2 className="font-display text-3xl md:text-4xl font-semibold text-white mb-3">
                   Ten minutes to a clearer account.
                 </h2>
-                <p className="text-white/60 max-w-md mx-auto mb-8">
+                <p className="text-white/75 max-w-md mx-auto mb-8">
                   Connect with LinkedIn OAuth and your campaigns, creatives, and
                   audiences are on screen — nothing to install.
                 </p>
-                <Button variant="hero" size="lg" onClick={initiateAuth} disabled={isLoading}>
+                <Button
+                  size="lg"
+                  onClick={initiateAuth}
+                  disabled={isLoading}
+                  className="bg-white text-primary hover:bg-white/90 shadow-lg font-bold"
+                >
                   {isLoading ? (
                     <Loader2 className="h-5 w-5 animate-spin" />
                   ) : (
