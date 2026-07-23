@@ -1,9 +1,8 @@
 import { useState, useCallback } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Loader2, Search, Crown, Tag, Briefcase, Layers, ArrowRight, BookOpen } from 'lucide-react';
+import { WidgetCard, EmptyState, StatusPill } from './widgets';
+import { Loader2, Search, Briefcase, Layers } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 
@@ -92,27 +91,23 @@ export function StandardizedTitlesPage({ accessToken, selectedAccount }: Standar
   }, [accessToken, query, selectedAccount, toast]);
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div>
-        <h2 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-          <BookOpen className="h-6 w-6 text-blue-500" />
-          Standardized Titles
-        </h2>
-        <p className="text-muted-foreground">
-          Search LinkedIn job titles to see their function and super title
-        </p>
-      </div>
-
-      {/* Search Card */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Search Job Titles</CardTitle>
-          <CardDescription>
-            Enter a job title to see its function category and super title
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
+    <div className="space-y-4">
+      <WidgetCard
+        title="Standardized Titles"
+        subtitle="Look up a job title's function category and its parent super title"
+        toolbar={
+          results.length > 0 ? (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground tabular-nums">
+                {results.length} result{results.length !== 1 ? 's' : ''}
+              </span>
+              <StatusPill tone="info" label={`${results.filter(t => t.isSuperTitle).length} Super`} />
+              <StatusPill tone="neutral" label={`${results.filter(t => !t.isSuperTitle).length} Standard`} />
+            </div>
+          ) : undefined
+        }
+      >
+        <div className="space-y-4">
           <div className="flex gap-2">
             <Input
               placeholder="Enter job title (e.g., Software Engineer, Marketing Manager)"
@@ -120,11 +115,12 @@ export function StandardizedTitlesPage({ accessToken, selectedAccount }: Standar
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
               disabled={isLoading}
-              className="flex-1"
+              className="flex-1 h-9"
             />
             <Button
               onClick={handleSearch}
               disabled={isLoading || !accessToken || query.trim().length < 2}
+              className="h-9"
             >
               {isLoading ? (
                 <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Searching...</>
@@ -136,24 +132,8 @@ export function StandardizedTitlesPage({ accessToken, selectedAccount }: Standar
 
           {/* Error */}
           {error && (
-            <div className="flex items-center gap-2 p-3 bg-destructive/10 text-destructive rounded-md">
+            <div className="flex items-center gap-2 px-3 py-2 bg-destructive/[0.06] border border-destructive/20 text-destructive rounded-lg">
               <span className="text-sm">{error}</span>
-            </div>
-          )}
-
-          {/* Summary */}
-          {results.length > 0 && (
-            <div className="flex gap-4 p-3 bg-muted/50 rounded-lg text-sm">
-              <span className="font-medium">{results.length} result{results.length !== 1 ? 's' : ''}</span>
-              <span className="text-muted-foreground">|</span>
-              <span className="flex items-center gap-1">
-                <Crown className="h-3.5 w-3.5 text-purple-500" />
-                {results.filter(t => t.isSuperTitle).length} Super
-              </span>
-              <span className="flex items-center gap-1">
-                <Tag className="h-3.5 w-3.5 text-blue-500" />
-                {results.filter(t => !t.isSuperTitle).length} Standard
-              </span>
             </div>
           )}
 
@@ -163,53 +143,42 @@ export function StandardizedTitlesPage({ accessToken, selectedAccount }: Standar
               {results.map((title, index) => (
                 <div
                   key={title.urn || index}
-                  className={`p-4 rounded-lg border transition-colors ${
-                    title.isSuperTitle
-                      ? 'bg-purple-50 border-purple-200 dark:bg-purple-950/30 dark:border-purple-800'
-                      : 'bg-card border-border'
-                  }`}
+                  className="px-4 py-3 rounded-lg border border-border/70 bg-card transition-colors hover:border-primary/25"
+                  style={{ boxShadow: 'var(--shadow-xs)' }}
                 >
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex-1 min-w-0">
-                      {/* Title Name + Type Badge */}
-                      <div className="flex items-center gap-3 flex-wrap">
-                        <span className="font-semibold text-lg">{title.name}</span>
-                        {title.isSuperTitle ? (
-                          <Badge className="bg-purple-600 hover:bg-purple-700 text-white">
-                            <Crown className="h-3 w-3 mr-1" />
-                            Super Title
-                          </Badge>
-                        ) : (
-                          <Badge variant="secondary" className="bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300">
-                            <Tag className="h-3 w-3 mr-1" />
-                            Standard Title
-                          </Badge>
-                        )}
-                      </div>
+                  <div className="flex-1 min-w-0">
+                    {/* Title Name + Type */}
+                    <div className="flex items-center gap-2.5 flex-wrap">
+                      <span className="font-semibold text-sm text-foreground">{title.name}</span>
+                      {title.isSuperTitle ? (
+                        <StatusPill tone="info" label="Super Title" />
+                      ) : (
+                        <StatusPill tone="neutral" label="Standard Title" />
+                      )}
+                    </div>
 
-                      {/* Function + Super Title info */}
-                      <div className="mt-3 flex flex-wrap gap-3">
-                        {title.jobFunction?.name && (
-                          <div className="flex items-center gap-1.5 bg-emerald-50 dark:bg-emerald-950/30 px-2.5 py-1 rounded-md border border-emerald-200 dark:border-emerald-800">
-                            <Briefcase className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
-                            <span className="text-xs text-muted-foreground">Function:</span>
-                            <span className="text-sm font-medium text-emerald-700 dark:text-emerald-300">{title.jobFunction.name}</span>
-                          </div>
-                        )}
+                    {/* Function + Super Title info */}
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {title.jobFunction?.name && (
+                        <span className="inline-flex items-center gap-1.5 bg-success/[0.06] border border-success/15 px-2 py-0.5 rounded text-xs">
+                          <Briefcase className="h-3 w-3 text-success" />
+                          <span className="text-muted-foreground">Function</span>
+                          <span className="font-medium text-foreground">{title.jobFunction.name}</span>
+                        </span>
+                      )}
 
-                        {!title.isSuperTitle && title.parentSuperTitle?.name && (
-                          <div className="flex items-center gap-1.5 bg-purple-50 dark:bg-purple-950/30 px-2.5 py-1 rounded-md border border-purple-200 dark:border-purple-800">
-                            <Layers className="h-3.5 w-3.5 text-purple-600 dark:text-purple-400" />
-                            <span className="text-xs text-muted-foreground">Super Title:</span>
-                            <span className="text-sm font-medium text-purple-700 dark:text-purple-300">{title.parentSuperTitle.name}</span>
-                          </div>
-                        )}
-                      </div>
+                      {!title.isSuperTitle && title.parentSuperTitle?.name && (
+                        <span className="inline-flex items-center gap-1.5 bg-primary/[0.06] border border-primary/10 px-2 py-0.5 rounded text-xs">
+                          <Layers className="h-3 w-3 text-primary" />
+                          <span className="text-muted-foreground">Super Title</span>
+                          <span className="font-medium text-foreground">{title.parentSuperTitle.name}</span>
+                        </span>
+                      )}
+                    </div>
 
-                      {/* URN */}
-                      <div className="mt-2 text-xs text-muted-foreground font-mono bg-muted/50 px-2 py-1 rounded w-fit">
-                        {title.urn}
-                      </div>
+                    {/* URN */}
+                    <div className="mt-2 text-[11px] text-muted-foreground font-mono bg-muted px-2 py-0.5 rounded w-fit">
+                      {title.urn}
                     </div>
                   </div>
                 </div>
@@ -219,13 +188,14 @@ export function StandardizedTitlesPage({ accessToken, selectedAccount }: Standar
 
           {/* No Results */}
           {hasSearched && !isLoading && !error && results.length === 0 && (
-            <div className="text-center py-8 text-muted-foreground">
-              <Search className="h-12 w-12 mx-auto mb-4 opacity-50" />
-              <p>No job titles found matching "{query}"</p>
-            </div>
+            <EmptyState
+              icon={Search}
+              title="No matching titles"
+              description={`No job titles found matching "${query}". Try a broader term.`}
+            />
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </WidgetCard>
     </div>
   );
 }

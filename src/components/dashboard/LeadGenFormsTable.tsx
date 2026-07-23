@@ -11,6 +11,7 @@ import {
 } from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
+import { EmptyState, StatusPill } from './widgets';
 import { LeadGenFormData, LeadGenFormCreative } from '@/hooks/useLeadGenFormsReport';
 import { exportToCSV } from '@/lib/exportUtils';
 import { useToast } from '@/hooks/use-toast';
@@ -39,25 +40,26 @@ interface AggregatedCreative {
 }
 
 function StatusBadge({ status }: { status?: string }) {
-  if (!status || status === 'UNKNOWN')
-    return <span className="inline-flex items-center rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground ring-1 ring-inset ring-border">Unknown</span>;
-  if (status === 'ACTIVE')
-    return <span className="inline-flex items-center gap-1 rounded-md bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600 ring-1 ring-inset ring-emerald-500/20"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />Active</span>;
-  if (status === 'PAUSED')
-    return <span className="inline-flex items-center gap-1 rounded-md bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 ring-1 ring-inset ring-amber-500/20"><span className="h-1.5 w-1.5 rounded-full bg-amber-500" />Paused</span>;
-  if (status === 'ARCHIVED' || status === 'COMPLETED')
-    return <span className="inline-flex items-center rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground ring-1 ring-inset ring-border">{status.charAt(0) + status.slice(1).toLowerCase()}</span>;
-  return <span className="inline-flex items-center rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground ring-1 ring-inset ring-border">{status}</span>;
+  if (status === 'ACTIVE') return <StatusPill tone="success" label="Active" />;
+  if (status === 'PAUSED') return <StatusPill tone="warning" label="Paused" />;
+  if (!status || status === 'UNKNOWN') return <StatusPill tone="neutral" label="Unknown" />;
+  return <StatusPill tone="neutral" label={status.charAt(0) + status.slice(1).toLowerCase()} />;
 }
 
 function MetricPill({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
   return (
-    <div className={`flex flex-col items-center rounded-lg px-4 py-2.5 ${accent ? 'bg-primary/10 ring-1 ring-primary/20' : 'bg-muted/60'}`}>
+    <div
+      className={`flex flex-col items-center rounded-lg px-4 py-2.5 border ${
+        accent ? 'bg-primary/[0.06] border-primary/15' : 'bg-secondary/60 border-border/60'
+      }`}
+    >
       <span className={`text-base font-bold tabular-nums ${accent ? 'text-primary' : 'text-foreground'}`}>{value}</span>
-      <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium mt-0.5">{label}</span>
+      <span className="text-[10px] uppercase tracking-[0.08em] text-muted-foreground font-semibold mt-0.5">{label}</span>
     </div>
   );
 }
+
+const SUB_TH = 'h-8 px-2 text-right align-middle text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground whitespace-nowrap';
 
 function AggregatedCreativeRow({ agg }: { agg: AggregatedCreative }) {
   const [isOpen, setIsOpen] = useState(false);
@@ -65,7 +67,7 @@ function AggregatedCreativeRow({ agg }: { agg: AggregatedCreative }) {
   return (
     <>
       <tr
-        className="group hover:bg-muted/30 border-b border-border/30 cursor-pointer transition-colors"
+        className="group hover:bg-secondary/40 border-b border-border/60 cursor-pointer transition-colors"
         onClick={() => setIsOpen((v) => !v)}
       >
         <td className="p-2 w-6 pl-3">
@@ -91,7 +93,7 @@ function AggregatedCreativeRow({ agg }: { agg: AggregatedCreative }) {
         </td>
       </tr>
       {isOpen && agg.instances.map((c) => (
-        <tr key={c.creativeId} className="bg-muted/20 border-b border-border/20">
+        <tr key={c.creativeId} className="bg-secondary/30 border-b border-border/40">
           <td />
           <td className="px-4 py-2 text-xs">
             <div className="flex flex-col gap-0.5">
@@ -155,25 +157,25 @@ function CreativesSubTable({ creatives }: { creatives: LeadGenFormCreative[] }) 
   }, [creatives]);
 
   return (
-    <div className="border-l-2 border-primary/20 ml-4 bg-muted/10 py-3 px-5">
+    <div className="border-l-2 border-primary/20 ml-4 bg-secondary/20 py-3 px-5">
       <p className="text-[11px] font-medium text-muted-foreground mb-2 flex items-center gap-1.5">
         <Activity className="h-3 w-3" />
         {aggregated.length} creative{aggregated.length !== 1 ? 's' : ''} — click to expand
       </p>
-      <div className="overflow-x-auto rounded-md border border-border/40">
+      <div className="overflow-x-auto rounded-lg border border-border/60 bg-card">
         <table className="w-full text-xs border-separate border-spacing-0 min-w-[860px]">
           <thead>
-            <tr className="bg-muted/40">
-              <th className="w-6 border-b border-border/60" />
-              <th className="text-left p-2 font-semibold border-b border-border/60 text-muted-foreground min-w-[220px]">Creative Name</th>
-              <th className="text-right p-2 font-semibold border-b border-border/60 text-muted-foreground">Impr.</th>
-              <th className="text-right p-2 font-semibold border-b border-border/60 text-muted-foreground">Clicks</th>
-              <th className="text-right p-2 font-semibold border-b border-border/60 text-muted-foreground">Spent</th>
-              <th className="text-right p-2 font-semibold border-b border-border/60 text-muted-foreground">Leads</th>
-              <th className="text-right p-2 font-semibold border-b border-border/60 text-muted-foreground">CTR</th>
-              <th className="text-right p-2 font-semibold border-b border-border/60 text-muted-foreground">CPC</th>
-              <th className="text-right p-2 font-semibold border-b border-border/60 text-muted-foreground">CPL</th>
-              <th className="text-right p-2 font-semibold border-b border-border/60 text-muted-foreground">LGF Rate</th>
+            <tr className="bg-secondary/40 [&>th]:border-b [&>th]:border-border">
+              <th className="w-6" />
+              <th className={`${SUB_TH} text-left min-w-[220px]`}>Creative Name</th>
+              <th className={SUB_TH}>Impr.</th>
+              <th className={SUB_TH}>Clicks</th>
+              <th className={SUB_TH}>Spent</th>
+              <th className={SUB_TH}>Leads</th>
+              <th className={SUB_TH}>CTR</th>
+              <th className={SUB_TH}>CPC</th>
+              <th className={SUB_TH}>CPL</th>
+              <th className={SUB_TH}>LGF Rate</th>
             </tr>
           </thead>
           <tbody>
@@ -226,9 +228,9 @@ function FormRow({
   return (
     <>
       <TableRow
-        className={`group cursor-pointer transition-all duration-150 ${
-          isOpen ? 'bg-muted/30' : 'hover:bg-muted/20'
-        } ${isSelected ? 'bg-primary/8 ring-1 ring-inset ring-primary/20' : ''}`}
+        className={`group cursor-pointer transition-all duration-150 [&>td]:py-2.5 ${
+          isOpen ? 'bg-secondary/40' : 'hover:bg-secondary/30'
+        } ${isSelected ? 'bg-primary/[0.05] ring-1 ring-inset ring-primary/20' : ''}`}
         onClick={() => {
           if (hasCreatives) setIsOpen(!isOpen);
           if (onSelect) onSelect(form.formUrn, form.formName);
@@ -272,7 +274,7 @@ function FormRow({
       </TableRow>
       {isOpen && (
         <tr>
-          <td colSpan={colCount} className="p-0 border-b border-border/30">
+          <td colSpan={colCount} className="p-0 border-b border-border/60">
             <CreativesSubTable creatives={form.creatives} />
           </td>
         </tr>
@@ -318,11 +320,11 @@ export function LeadGenFormsTable({ data, isLoading, selectedFormUrn, onSelectFo
 
   if (data.length === 0) {
     return (
-      <div className="text-center py-16 text-muted-foreground">
-        <TrendingUp className="h-10 w-10 mx-auto mb-3 opacity-30" />
-        <p className="font-medium">No lead gen forms found</p>
-        <p className="text-sm mt-1">Try expanding your date range or check that creatives have lead gen forms attached.</p>
-      </div>
+      <EmptyState
+        icon={TrendingUp}
+        title="No lead gen forms found"
+        description="Try expanding your date range or check that creatives have lead gen forms attached."
+      />
     );
   }
 
@@ -341,7 +343,7 @@ export function LeadGenFormsTable({ data, isLoading, selectedFormUrn, onSelectFo
   const summaryLgfRate = summary.formOpens > 0 ? (summary.leads / summary.formOpens) * 100 : 0;
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       {/* Summary pills */}
       <div className="flex flex-wrap gap-2">
         <MetricPill label="Leads" value={formatNumber(summary.leads)} accent />
@@ -359,22 +361,22 @@ export function LeadGenFormsTable({ data, isLoading, selectedFormUrn, onSelectFo
       </div>
 
       {/* Table */}
-      <div className="rounded-lg border border-border/60 overflow-x-auto bg-card/30">
+      <div className="rounded-lg border border-border/70 overflow-x-auto bg-card">
         <Table className="min-w-[1100px]">
           <TableHeader>
-            <TableRow className="bg-muted/30 hover:bg-muted/30">
+            <TableRow className="border-border hover:bg-transparent bg-secondary/40">
               <TableHead className="w-8" />
-              <TableHead className="min-w-[160px] text-xs font-semibold uppercase tracking-wider text-muted-foreground">Form Name</TableHead>
-              <TableHead className="text-right text-xs font-semibold uppercase tracking-wider text-muted-foreground">Impr.</TableHead>
-              <TableHead className="text-right text-xs font-semibold uppercase tracking-wider text-muted-foreground">Clicks</TableHead>
-              <TableHead className="text-right text-xs font-semibold uppercase tracking-wider text-muted-foreground">Spent</TableHead>
-              <TableHead className="text-right text-xs font-semibold uppercase tracking-wider text-muted-foreground">Leads</TableHead>
-              <TableHead className="text-right text-xs font-semibold uppercase tracking-wider text-muted-foreground">Opens</TableHead>
-              <TableHead className="text-right text-xs font-semibold uppercase tracking-wider text-muted-foreground">CTR</TableHead>
-              <TableHead className="text-right text-xs font-semibold uppercase tracking-wider text-muted-foreground">CPC</TableHead>
-              <TableHead className="text-right text-xs font-semibold uppercase tracking-wider text-muted-foreground">CPL</TableHead>
-              <TableHead className="text-right text-xs font-semibold uppercase tracking-wider text-muted-foreground">LGF Rate</TableHead>
-              <TableHead className="text-right text-xs font-semibold uppercase tracking-wider text-muted-foreground">Ads</TableHead>
+              <TableHead className="min-w-[160px]">Form Name</TableHead>
+              <TableHead className="text-right">Impr.</TableHead>
+              <TableHead className="text-right">Clicks</TableHead>
+              <TableHead className="text-right">Spent</TableHead>
+              <TableHead className="text-right">Leads</TableHead>
+              <TableHead className="text-right">Opens</TableHead>
+              <TableHead className="text-right">CTR</TableHead>
+              <TableHead className="text-right">CPC</TableHead>
+              <TableHead className="text-right">CPL</TableHead>
+              <TableHead className="text-right">LGF Rate</TableHead>
+              <TableHead className="text-right">Ads</TableHead>
               <TableHead className="w-10" />
             </TableRow>
           </TableHeader>

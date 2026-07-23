@@ -1,4 +1,4 @@
-import { ReactNode } from "react";
+import { ReactNode, Dispatch, SetStateAction } from "react";
 import { cn } from "@/lib/utils";
 import { LucideIcon } from "lucide-react";
 
@@ -122,7 +122,8 @@ export function SegmentedControl<T extends string | number>({
 }: {
   options: { label: ReactNode; value: T }[];
   value: T;
-  onChange: (value: T) => void;
+  // Accepts a useState setter directly, or a plain handler.
+  onChange: Dispatch<SetStateAction<T>> | ((value: T) => void);
   size?: "sm" | "default";
   className?: string;
 }) {

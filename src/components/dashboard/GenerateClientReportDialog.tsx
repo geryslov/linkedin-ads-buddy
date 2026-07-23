@@ -6,12 +6,12 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Badge } from '@/components/ui/badge';
+import { EmptyState, StatusPill } from './widgets';
 import { useToast } from '@/hooks/use-toast';
 import { useAIAnalysis } from '@/hooks/useAIAnalysis';
 import type { WeeklyReportData } from '@/hooks/useWeeklyReport';
 import { extractKpiSnapshot, serializeReportForClaude, type KpiSnapshot } from '@/lib/serializeReportForClaude';
-import { Sparkles, Copy, Check, ExternalLink, Loader2, Trash2, Share2 } from 'lucide-react';
+import { Sparkles, Copy, Check, ExternalLink, Loader2, Trash2, Share2, FileText } from 'lucide-react';
 
 interface Props {
   open: boolean;
@@ -178,18 +178,27 @@ export function GenerateClientReportDialog({ open, onOpenChange, data, accountId
                   <Input value={clientName} onChange={(e) => setClientName(e.target.value)} placeholder="Acme Corp" />
                 </div>
 
-                <div className="p-4 rounded-lg border border-border/70 bg-muted/30 space-y-2">
-                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Week snapshot</p>
-                  <p className="text-sm">
-                    <strong>{kpiSnapshot.weekStart}</strong> to <strong>{kpiSnapshot.weekEnd}</strong>
-                  </p>
-                  <div className="grid grid-cols-3 gap-2 text-xs">
-                    <div>Spent: <strong>${kpiSnapshot.thisWeek.spent.toFixed(0)}</strong></div>
-                    <div>Leads: <strong>{kpiSnapshot.thisWeek.leads}</strong></div>
-                    <div>CPL: <strong>${kpiSnapshot.thisWeek.cpl.toFixed(2)}</strong></div>
-                    <div>Impressions: <strong>{kpiSnapshot.thisWeek.impressions.toLocaleString()}</strong></div>
-                    <div>Clicks: <strong>{kpiSnapshot.thisWeek.clicks.toLocaleString()}</strong></div>
-                    <div>CTR: <strong>{kpiSnapshot.thisWeek.ctr.toFixed(2)}%</strong></div>
+                <div className="p-4 rounded-xl border border-border/70 bg-card space-y-3" style={{ boxShadow: 'var(--shadow-xs)' }}>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Week snapshot</p>
+                    <p className="text-xs text-muted-foreground tabular-nums">
+                      {kpiSnapshot.weekStart} — {kpiSnapshot.weekEnd}
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-3 gap-x-4 gap-y-2">
+                    {[
+                      { label: 'Spent', value: `$${kpiSnapshot.thisWeek.spent.toFixed(0)}` },
+                      { label: 'Leads', value: String(kpiSnapshot.thisWeek.leads) },
+                      { label: 'CPL', value: `$${kpiSnapshot.thisWeek.cpl.toFixed(2)}` },
+                      { label: 'Impressions', value: kpiSnapshot.thisWeek.impressions.toLocaleString() },
+                      { label: 'Clicks', value: kpiSnapshot.thisWeek.clicks.toLocaleString() },
+                      { label: 'CTR', value: `${kpiSnapshot.thisWeek.ctr.toFixed(2)}%` },
+                    ].map(({ label, value }) => (
+                      <div key={label}>
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</p>
+                        <p className="text-sm font-semibold tabular-nums text-foreground">{value}</p>
+                      </div>
+                    ))}
                   </div>
                 </div>
 
@@ -237,13 +246,13 @@ export function GenerateClientReportDialog({ open, onOpenChange, data, accountId
             {step === 'published' && publishedUrl && (
               <div className="space-y-4 py-4">
                 <div className="text-center space-y-2">
-                  <div className="h-10 w-10 rounded-full bg-green-100 dark:bg-green-900/30 mx-auto flex items-center justify-center">
-                    <Check className="h-5 w-5 text-green-600" />
+                  <div className="h-10 w-10 rounded-full bg-success/10 border border-success/20 mx-auto flex items-center justify-center">
+                    <Check className="h-5 w-5 text-success" />
                   </div>
                   <h3 className="text-lg font-semibold">Report published</h3>
                   <p className="text-sm text-muted-foreground">Send this link to your client. It works without login.</p>
                 </div>
-                <div className="flex items-center gap-2 p-3 rounded-lg border border-border/70 bg-muted/30">
+                <div className="flex items-center gap-2 p-3 rounded-lg border border-border/70 bg-secondary/40">
                   <code className="flex-1 text-xs break-all">{publishedUrl}</code>
                   <Button size="sm" onClick={() => handleCopy(publishedUrl)} className="gap-1.5 shrink-0">
                     {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
@@ -266,7 +275,12 @@ export function GenerateClientReportDialog({ open, onOpenChange, data, accountId
             {isLoadingList ? (
               <div className="flex items-center justify-center py-8"><Loader2 className="h-4 w-4 animate-spin" /></div>
             ) : pastReports.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-8">No published reports yet for this account.</p>
+              <EmptyState
+                icon={FileText}
+                title="No published reports"
+                description="Reports you publish for this account will appear here with copy and revoke controls."
+                className="py-8"
+              />
             ) : (
               <div className="space-y-2">
                 {pastReports.map(r => {
@@ -277,7 +291,7 @@ export function GenerateClientReportDialog({ open, onOpenChange, data, accountId
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <p className="text-sm font-medium truncate">{r.client_name}</p>
-                          {isRevoked && <Badge variant="destructive" className="text-[10px]">Revoked</Badge>}
+                          {isRevoked && <StatusPill tone="danger" label="Revoked" />}
                         </div>
                         <p className="text-xs text-muted-foreground">
                           {r.week_start} — {r.week_end} · published {new Date(r.published_at).toLocaleDateString()}

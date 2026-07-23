@@ -5,11 +5,20 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { WidgetCard, EmptyState, StatusPill, SegmentedControl } from './widgets';
 import { cn } from '@/lib/utils';
 import {
   RefreshCw, ChevronDown, ChevronRight, Layers, AlertTriangle,
   TrendingUp, TrendingDown, Table2, TreePine, Calendar, Star,
-  DollarSign, Eye, MousePointerClick, Target, CheckCircle2, XCircle, PauseCircle,
+  DollarSign, Eye, MousePointerClick, Target,
 } from 'lucide-react';
 
 interface Props {
@@ -35,25 +44,17 @@ function fmtMetricVal(key: string, v: number | null): string {
   return `$${v.toFixed(2)}`;
 }
 
-// ─── Benchmark Badge ─────────────────────────────────────────────────────────
+// ─── Benchmark pill — StatusPill with semantic tones ─────────────────────────
+
+const BENCH_TONE = {
+  PASS: 'success',
+  MISS: 'danger',
+  PAUSE: 'warning',
+} as const;
 
 function BenchBadge({ flag }: { flag: 'PASS' | 'MISS' | 'PAUSE' | null }) {
-  if (!flag) return (
-    <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-[18px] text-muted-foreground/60 border-dashed">
-      no benchmark
-    </Badge>
-  );
-  const cfg = {
-    PASS:  { cls: 'bg-green-500/10 text-green-600 border-green-500/30', icon: CheckCircle2, label: 'PASS' },
-    MISS:  { cls: 'bg-red-500/10 text-red-500 border-red-500/30', icon: XCircle, label: 'MISS' },
-    PAUSE: { cls: 'bg-amber-500/10 text-amber-600 border-amber-500/30', icon: PauseCircle, label: 'PAUSE' },
-  };
-  const c = cfg[flag];
-  return (
-    <Badge variant="outline" className={cn('text-[9px] font-bold px-1.5 py-0 h-[18px] gap-1', c.cls)}>
-      <c.icon className="h-2.5 w-2.5" />{c.label}
-    </Badge>
-  );
+  if (!flag) return <StatusPill tone="neutral" label="No benchmark" />;
+  return <StatusPill tone={BENCH_TONE[flag]} label={flag} />;
 }
 
 // ─── Delta Badge ─────────────────────────────────────────────────────────────
@@ -63,7 +64,7 @@ function DeltaBadge({ delta }: { delta: { absolute: number; pct: number | null; 
   return (
     <span className={cn(
       'inline-flex items-center gap-0.5 text-[10px] font-bold tabular-nums px-1.5 py-0.5 rounded-md',
-      delta.isBetter ? 'text-green-600 bg-green-500/10' : 'text-red-500 bg-red-500/10',
+      delta.isBetter ? 'text-success bg-success/10' : 'text-destructive bg-destructive/10',
     )}>
       {delta.isBetter ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
       {delta.pct > 0 ? '+' : ''}{delta.pct.toFixed(1)}%
@@ -76,9 +77,9 @@ function DeltaBadge({ delta }: { delta: { absolute: number; pct: number | null; 
 function ScorecardCard({ item }: { item: ScorecardItem }) {
   const isCpl = item.label.includes('CPL');
   const flagCfg = {
-    PASS:  { color: 'text-green-600', ring: 'ring-green-500/20', bar: 'bg-green-500' },
-    MISS:  { color: 'text-red-500', ring: 'ring-red-500/20', bar: 'bg-red-500' },
-    PAUSE: { color: 'text-amber-600', ring: 'ring-amber-500/20', bar: 'bg-amber-500' },
+    PASS:  { color: 'text-success', ring: 'ring-success/20', bar: 'bg-success' },
+    MISS:  { color: 'text-destructive', ring: 'ring-destructive/20', bar: 'bg-destructive' },
+    PAUSE: { color: 'text-warning', ring: 'ring-warning/20', bar: 'bg-warning' },
     'N/A': { color: 'text-muted-foreground', ring: 'ring-border', bar: 'bg-muted-foreground/30' },
   };
   const cfg = flagCfg[item.flag];
@@ -89,21 +90,21 @@ function ScorecardCard({ item }: { item: ScorecardItem }) {
   }
 
   return (
-    <div className={cn('border rounded-xl bg-card shadow-sm overflow-hidden ring-1', cfg.ring)}>
+    <div className={cn('border border-border/70 rounded-xl bg-card overflow-hidden ring-1', cfg.ring)} style={{ boxShadow: 'var(--shadow-sm)' }}>
       <div className={cn('h-1 w-full', cfg.bar, item.flag === 'N/A' ? 'opacity-30' : 'opacity-60')} />
       <div className="px-4 py-3.5">
         <div className="flex items-center justify-between mb-2">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{item.label}</span>
+          <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">{item.label}</span>
           <BenchBadge flag={item.flag === 'N/A' ? null : item.flag} />
         </div>
         <p className={cn('text-2xl font-bold tabular-nums', cfg.color)}>
           {item.currentValue != null ? isCpl ? '$' + Math.round(item.currentValue) : fmtPct(item.currentValue) : '—'}
         </p>
         <div className="mt-3">
-          <div className="h-2 w-full rounded-full bg-muted/40 overflow-hidden">
+          <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
             <div className={cn('h-full rounded-full transition-all duration-700', cfg.bar)} style={{ width: `${progress}%`, opacity: 0.7 }} />
           </div>
-          <p className="text-[10px] text-muted-foreground mt-1.5">
+          <p className="text-[10px] text-muted-foreground mt-1.5 tabular-nums">
             Target: {item.label.includes('CTR') ? '≥ 7%' : item.label.includes('Boosts') ? '≥ 4%' : '≤ $50'}
             {item.baselineValue != null && <span className="ml-2">Baseline: {isCpl ? '$' + Math.round(item.baselineValue) : fmtPct(item.baselineValue)}</span>}
           </p>
@@ -117,9 +118,9 @@ function ScorecardCard({ item }: { item: ScorecardItem }) {
 
 function PodRow({ node, headlineKey }: { node: SegmentNode; headlineKey: string }) {
   return (
-    <div className="flex items-center gap-3 py-2.5 px-3 rounded-lg bg-muted/30 border border-border/40 hover:bg-muted/50 transition-colors">
+    <div className="flex items-center gap-3 py-2.5 px-3 rounded-lg bg-secondary/40 border border-border/40 hover:bg-secondary/60 transition-colors">
       <span className={cn('w-2 h-2 rounded-full shrink-0',
-        node.benchmarkFlag === 'PASS' ? 'bg-green-500' : node.benchmarkFlag === 'MISS' ? 'bg-red-500' : 'bg-muted-foreground/40',
+        node.benchmarkFlag === 'PASS' ? 'bg-success' : node.benchmarkFlag === 'MISS' ? 'bg-destructive' : 'bg-muted-foreground/40',
       )} />
       <span className="text-[13px] font-medium flex-1 min-w-0 truncate">{node.label}</span>
       <div className="flex items-center gap-4 shrink-0 tabular-nums">
@@ -139,8 +140,6 @@ function PodRow({ node, headlineKey }: { node: SegmentNode; headlineKey: string 
 
 // ─── Activity Card ───────────────────────────────────────────────────────────
 
-const DEPTH_BORDERS = ['border-l-primary', 'border-l-violet-500', 'border-l-amber-500', 'border-l-emerald-500', 'border-l-rose-400'];
-
 function ActivityCard({ node, rank, isBest, showBaseline }: { node: SegmentNode; rank: number; isBest: boolean; showBaseline: boolean }) {
   const [open, setOpen] = useState(false);
   const headlineKey = node.headline.lowerIsBetter ? node.headline.name.toLowerCase() : 'ctr';
@@ -154,7 +153,10 @@ function ActivityCard({ node, rank, isBest, showBaseline }: { node: SegmentNode;
   }, [node]);
 
   return (
-    <div className={cn('rounded-xl border bg-card shadow-sm transition-all', isBest ? 'border-primary/50 ring-1 ring-primary/20' : 'border-border/60')}>
+    <div
+      className={cn('rounded-xl border bg-card transition-all', isBest ? 'border-primary/50 ring-1 ring-primary/20' : 'border-border/60')}
+      style={{ boxShadow: 'var(--shadow-xs)' }}
+    >
       <div className="p-4">
         <div className="flex items-center gap-3">
           <span className={cn('text-[11px] tabular-nums w-5 font-mono', isBest ? 'text-primary font-bold' : 'text-muted-foreground')}>
@@ -207,10 +209,10 @@ function ObjectiveSection({ node, showBaseline }: { node: SegmentNode; showBasel
   return (
     <div className="border-l-2 border-border/40 ml-1.5">
       <button onClick={() => setCollapsed(!collapsed)}
-        className="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg -ml-[2px] border-l-2 border-l-primary bg-muted/30 hover:bg-muted/50 transition-colors cursor-pointer">
+        className="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg -ml-[2px] border-l-2 border-l-primary bg-secondary/40 hover:bg-secondary/60 transition-colors cursor-pointer">
         <span className="text-[13px] text-muted-foreground">{collapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}</span>
-        <span className="text-lg font-semibold">{node.label}</span>
-        <Badge className="text-[10px] h-5 font-bold">{node.headline.name}</Badge>
+        <span className="text-base font-semibold">{node.label}</span>
+        <StatusPill tone="info" label={node.headline.name} />
         <span className="ml-auto text-xs text-muted-foreground tabular-nums">
           {money(node.metrics.spend)} · {node.children.length} plays
         </span>
@@ -230,21 +232,21 @@ function ObjectiveSection({ node, showBaseline }: { node: SegmentNode; showBasel
 
 function BusinessLineCard({ node, showBaseline }: { node: SegmentNode; showBaseline: boolean }) {
   return (
-    <div className="rounded-2xl border border-border/60 bg-card shadow-sm overflow-hidden">
-      <div className="flex items-baseline justify-between px-6 py-5 border-b border-border/40 bg-primary/[0.03]">
-        <h2 className="text-2xl font-bold">{node.label}</h2>
-        <span className="text-base font-semibold text-primary tabular-nums">{money(node.metrics.spend)}</span>
-      </div>
-      <div className="p-4 space-y-4">
+    <WidgetCard
+      noPadding
+      title={<span className="text-lg font-bold">{node.label}</span>}
+      toolbar={<span className="text-base font-semibold text-primary tabular-nums">{money(node.metrics.spend)}</span>}
+    >
+      <div className="p-4 pt-2 space-y-4">
         {node.children.map(obj => <ObjectiveSection key={obj.key} node={obj} showBaseline={showBaseline} />)}
       </div>
-    </div>
+    </WidgetCard>
   );
 }
 
 // ─── Summary Strip ───────────────────────────────────────────────────────────
 
-function SummaryStrip({ totals, tree }: { totals: { spend: number; impressions: number; clicks: number; leads: number; adSets: number }; tree: SegmentNode[] }) {
+function SummaryStrip({ totals }: { totals: { spend: number; impressions: number; clicks: number; leads: number; adSets: number } }) {
   const items = [
     { label: 'Total Spend', value: fmtCompact(totals.spend), icon: DollarSign },
     { label: 'Impressions', value: fmtNum(totals.impressions), icon: Eye },
@@ -255,7 +257,7 @@ function SummaryStrip({ totals, tree }: { totals: { spend: number; impressions: 
   return (
     <div className="grid grid-cols-5 gap-2">
       {items.map(({ label, value, icon: Icon }) => (
-        <div key={label} className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg bg-muted/30 border border-border/40">
+        <div key={label} className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg bg-card border border-border/70" style={{ boxShadow: 'var(--shadow-xs)' }}>
           <Icon className="h-3.5 w-3.5 text-primary/70 shrink-0" />
           <div className="min-w-0">
             <p className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/70 leading-none">{label}</p>
@@ -291,41 +293,45 @@ function FlatTable({ rows }: { rows: FlatRow[] }) {
     { key: 'cpc', label: 'CPC', align: 'right' as const }, { key: 'cpl', label: 'CPL', align: 'right' as const },
   ];
   return (
-    <div className="rounded-xl border border-border/60 bg-card shadow-sm overflow-hidden">
-      <div className="overflow-x-auto">
-        <table className="w-full text-[11px]">
-          <thead className="sticky top-0 z-10">
-            <tr className="border-b border-border bg-muted/60 backdrop-blur-sm">
-              {cols.map(c => (
-                <th key={c.key} onClick={() => toggleSort(c.key)}
-                  className={cn('px-2.5 py-2.5 font-semibold cursor-pointer hover:bg-muted/80 transition-colors whitespace-nowrap select-none text-[9px] uppercase tracking-wider',
-                    c.align === 'right' ? 'text-right' : 'text-left', sortKey === c.key && 'text-primary')}>
+    <WidgetCard noPadding>
+      <Table className="text-xs">
+        <TableHeader>
+          <TableRow className="border-border hover:bg-transparent bg-secondary/40">
+            {cols.map(c => (
+              <TableHead key={c.key} className={cn('h-9 px-2.5', c.align === 'right' && 'text-right')}>
+                <button
+                  onClick={() => toggleSort(c.key)}
+                  className={cn(
+                    'inline-flex items-center gap-1 font-semibold text-muted-foreground hover:text-foreground transition-colors uppercase tracking-[0.08em] text-[10px]',
+                    sortKey === c.key && 'text-primary',
+                  )}
+                >
                   {c.label}{sortKey === c.key && (sortDir === 'desc' ? ' ↓' : ' ↑')}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {sorted.map((row, i) => (
-              <tr key={i} className={cn('border-b border-border/20 hover:bg-primary/[0.03] transition-colors', i % 2 !== 0 && 'bg-muted/[0.015]')}>
-                <td className="px-2.5 py-2 max-w-[220px] truncate font-medium" title={row.campaignName}>{row.campaignName}</td>
-                <td className="px-2.5 py-2"><Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 font-semibold">{row.parsed.business_line}</Badge></td>
-                <td className="px-2.5 py-2 text-muted-foreground">{row.parsed.objective}</td>
-                <td className="px-2.5 py-2">{row.parsed.activity_type}</td>
-                <td className="px-2.5 py-2 text-muted-foreground">{row.parsed.segment}</td>
-                <td className="px-2.5 py-2 text-right tabular-nums font-semibold">{fmt$(row.metrics.spend)}</td>
-                <td className="px-2.5 py-2 text-right tabular-nums text-muted-foreground">{fmtNum(row.metrics.impressions)}</td>
-                <td className="px-2.5 py-2 text-right tabular-nums text-muted-foreground">{fmtNum(row.metrics.clicks)}</td>
-                <td className="px-2.5 py-2 text-right tabular-nums font-semibold">{fmtNum(row.metrics.leads)}</td>
-                <td className="px-2.5 py-2 text-right tabular-nums">{fmtPct(row.derived.ctr)}</td>
-                <td className="px-2.5 py-2 text-right tabular-nums text-muted-foreground">{fmt$(row.derived.cpc)}</td>
-                <td className="px-2.5 py-2 text-right tabular-nums text-muted-foreground">{fmt$(row.derived.cpl)}</td>
-              </tr>
+                </button>
+              </TableHead>
             ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {sorted.map((row, i) => (
+            <TableRow key={i} className="[&>td]:px-2.5 [&>td]:py-2">
+              <TableCell className="max-w-[220px] truncate font-medium" title={row.campaignName}>{row.campaignName}</TableCell>
+              <TableCell><Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 font-semibold">{row.parsed.business_line}</Badge></TableCell>
+              <TableCell className="text-muted-foreground">{row.parsed.objective}</TableCell>
+              <TableCell>{row.parsed.activity_type}</TableCell>
+              <TableCell className="text-muted-foreground">{row.parsed.segment}</TableCell>
+              <TableCell className="text-right tabular-nums font-semibold">{fmt$(row.metrics.spend)}</TableCell>
+              <TableCell className="text-right tabular-nums text-muted-foreground">{fmtNum(row.metrics.impressions)}</TableCell>
+              <TableCell className="text-right tabular-nums text-muted-foreground">{fmtNum(row.metrics.clicks)}</TableCell>
+              <TableCell className="text-right tabular-nums font-semibold">{fmtNum(row.metrics.leads)}</TableCell>
+              <TableCell className="text-right tabular-nums">{fmtPct(row.derived.ctr)}</TableCell>
+              <TableCell className="text-right tabular-nums text-muted-foreground">{fmt$(row.derived.cpc)}</TableCell>
+              <TableCell className="text-right tabular-nums text-muted-foreground">{fmt$(row.derived.cpl)}</TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </WidgetCard>
   );
 }
 
@@ -347,14 +353,17 @@ export function PerformanceSegmentation({ accessToken, selectedAccount }: Props)
   const handleRefresh = () => { if (selectedAccount) fetchReport(selectedAccount, startDate, endDate); };
 
   if (!selectedAccount) return (
-    <div className="flex flex-col items-center justify-center py-20 text-center">
-      <Layers className="h-10 w-10 text-muted-foreground/30 mb-3" />
-      <p className="text-sm text-muted-foreground">Select an ad account to view segmentation</p>
-    </div>
+    <WidgetCard noPadding>
+      <EmptyState
+        icon={Layers}
+        title="No account selected"
+        description="Select an ad account to view segmentation."
+      />
+    </WidgetCard>
   );
 
   if (isLoading && tree.length === 0) return (
-    <div className="space-y-5 animate-in fade-in-50 duration-300">
+    <div className="space-y-5 animate-fade-in">
       <div className="flex items-center gap-3 pb-1">
         <div className="h-9 w-9 rounded-xl bg-primary/10 flex items-center justify-center"><Layers className="h-5 w-5 text-primary animate-pulse" /></div>
         <div><p className="font-semibold text-sm">Loading segmentation data...</p><p className="text-xs text-muted-foreground">Parsing campaign names and building hierarchy</p></div>
@@ -366,12 +375,18 @@ export function PerformanceSegmentation({ accessToken, selectedAccount }: Props)
   );
 
   if (error && tree.length === 0) return (
-    <div className="border border-destructive/20 rounded-xl p-10 bg-destructive/5 text-center">
-      <AlertTriangle className="h-8 w-8 text-destructive mx-auto mb-3" />
-      <p className="font-semibold text-destructive mb-1">Failed to load segmentation data</p>
-      <p className="text-sm text-muted-foreground mb-4">{error}</p>
-      <Button variant="outline" size="sm" onClick={handleRefresh}><RefreshCw className="h-3.5 w-3.5 mr-1.5" /> Retry</Button>
-    </div>
+    <WidgetCard noPadding>
+      <EmptyState
+        icon={AlertTriangle}
+        title="Failed to load segmentation data"
+        description={error}
+        action={
+          <Button variant="outline" size="sm" onClick={handleRefresh}>
+            <RefreshCw className="h-3.5 w-3.5 mr-1.5" /> Retry
+          </Button>
+        }
+      />
+    </WidgetCard>
   );
 
   return (
@@ -379,11 +394,11 @@ export function PerformanceSegmentation({ accessToken, selectedAccount }: Props)
       {/* Controls */}
       <div className="flex items-center justify-between flex-wrap gap-3 pb-3 border-b border-border/40">
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 bg-muted/30 rounded-lg px-2.5 py-1.5 border border-border/40">
+          <div className="flex items-center gap-2 bg-card rounded-lg px-2.5 py-1.5 border border-border/70">
             <Calendar className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-            <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="h-6 text-xs bg-transparent border-none outline-none w-[110px]" />
+            <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="h-6 text-xs bg-transparent border-none outline-none w-[110px] tabular-nums" />
             <span className="text-[10px] text-muted-foreground/50">—</span>
-            <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="h-6 text-xs bg-transparent border-none outline-none w-[110px]" />
+            <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="h-6 text-xs bg-transparent border-none outline-none w-[110px] tabular-nums" />
           </div>
           <Button variant="default" size="sm" onClick={handleRefresh} disabled={isLoading} className="h-8 text-xs gap-1.5 rounded-lg">
             <RefreshCw className={cn('h-3 w-3', isLoading && 'animate-spin')} /> Apply
@@ -396,20 +411,21 @@ export function PerformanceSegmentation({ accessToken, selectedAccount }: Props)
               <span className="text-[11px] text-muted-foreground">vs Baseline{baselinePeriod ? ` (${baselinePeriod.replace('..', ' – ')})` : ''}</span>
             </label>
           )}
-          {!hasConfig && tree.length > 0 && <Badge variant="outline" className="text-[10px] text-muted-foreground/70 border-dashed">Generic parser</Badge>}
-          <div className="flex items-center rounded-lg border border-border/60 overflow-hidden bg-muted/20">
-            <button onClick={() => setViewMode('tree')} className={cn('h-8 px-3.5 text-xs flex items-center gap-1.5 transition-all duration-150 cursor-pointer', viewMode === 'tree' ? 'bg-card text-foreground font-medium shadow-sm' : 'text-muted-foreground hover:text-foreground')}>
-              <TreePine className="h-3 w-3" /> Funnel
-            </button>
-            <button onClick={() => setViewMode('flat')} className={cn('h-8 px-3.5 text-xs flex items-center gap-1.5 transition-all duration-150 border-l border-border/40 cursor-pointer', viewMode === 'flat' ? 'bg-card text-foreground font-medium shadow-sm' : 'text-muted-foreground hover:text-foreground')}>
-              <Table2 className="h-3 w-3" /> Table
-            </button>
-          </div>
+          {!hasConfig && tree.length > 0 && <StatusPill tone="neutral" label="Generic parser" />}
+          <SegmentedControl
+            size="sm"
+            value={viewMode}
+            onChange={setViewMode}
+            options={[
+              { value: 'tree', label: <span className="inline-flex items-center gap-1.5"><TreePine className="h-3 w-3" /> Funnel</span> },
+              { value: 'flat', label: <span className="inline-flex items-center gap-1.5"><Table2 className="h-3 w-3" /> Table</span> },
+            ]}
+          />
         </div>
       </div>
 
       {/* Summary */}
-      {flatRows.length > 0 && <SummaryStrip totals={totals} tree={tree} />}
+      {flatRows.length > 0 && <SummaryStrip totals={totals} />}
 
       {/* Scorecard */}
       {scorecard.length > 0 && (
@@ -427,7 +443,7 @@ export function PerformanceSegmentation({ accessToken, selectedAccount }: Props)
 
       {/* Footer */}
       {compareBaseline && hasBaseline && (
-        <p className="text-[10px] text-muted-foreground/60 text-center">
+        <p className="text-[10px] text-muted-foreground/60 text-center tabular-nums">
           Benchmark: {baselinePeriod?.replace('..', ' – ')} · Range: {startDate} to {endDate}
         </p>
       )}

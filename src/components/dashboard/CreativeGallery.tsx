@@ -4,8 +4,9 @@ import { CreativeTypeBadge } from './CreativeTypeBadge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { WidgetCard, EmptyState } from './widgets';
 import { cn } from '@/lib/utils';
-import { Search, ImageIcon, RefreshCw } from 'lucide-react';
+import { Search, ImageIcon, RefreshCw, AlertTriangle, FolderOpen } from 'lucide-react';
 import {
   Select,
   SelectContent,
@@ -22,6 +23,23 @@ import {
 interface CreativeGalleryProps {
   accessToken: string | null;
   selectedAccount: string | null;
+}
+
+/** Semantic status dot pinned to the thumbnail corner. */
+function StatusDot({ status }: { status: string }) {
+  return (
+    <span
+      className={cn(
+        'absolute top-2 right-2 h-2 w-2 rounded-full ring-2 ring-card',
+        status === 'ACTIVE'
+          ? 'bg-success'
+          : status === 'PAUSED'
+          ? 'bg-warning'
+          : 'bg-muted-foreground/50'
+      )}
+      title={status}
+    />
+  );
 }
 
 export function CreativeGallery({ accessToken, selectedAccount }: CreativeGalleryProps) {
@@ -77,80 +95,82 @@ export function CreativeGallery({ accessToken, selectedAccount }: CreativeGaller
 
   if (!selectedAccount) {
     return (
-      <div className="text-center py-12 text-muted-foreground">
-        Select an ad account to view creative images
-      </div>
+      <WidgetCard noPadding>
+        <EmptyState
+          icon={FolderOpen}
+          title="No account selected"
+          description="Select an ad account to view creative images."
+        />
+      </WidgetCard>
     );
   }
 
   return (
-    <div className="space-y-6">
-      {/* Controls */}
-      <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
-        <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search creatives or campaigns..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-9"
-          />
-        </div>
-        <div className="flex items-center gap-3">
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-[140px]">
-              <SelectValue placeholder="Status" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="ALL">All Statuses</SelectItem>
-              {availableStatuses.map(s => (
-                <SelectItem key={s} value={s}>{s}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select
-            value={timeFrameOptions.find(o =>
-              o.startDate.toISOString().split('T')[0] === dateRange.start
-            )?.value || '30d'}
-            onValueChange={(v) => {
-              const opt = timeFrameOptions.find(o => o.value === v);
-              if (opt) setTimeFrame(opt);
-            }}
-          >
-            <SelectTrigger className="w-[160px]">
-              <SelectValue placeholder="Time period" />
-            </SelectTrigger>
-            <SelectContent>
-              {timeFrameOptions.map(opt => (
-                <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={() => selectedAccount && fetchCreativeAnalytics(selectedAccount)}
-            disabled={isLoading}
-          >
-            <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
-          </Button>
-        </div>
-      </div>
-
-      {/* Stats */}
-      {!isLoading && (
-        <div className="text-sm text-muted-foreground">
-          {activeCreatives.length} creative{activeCreatives.length !== 1 ? 's' : ''} · {creativesWithImages.length} with images
-        </div>
-      )}
-
-      {/* Loading skeleton — mirrors card layout */}
-      {isLoading && (
-        <div className="space-y-6">
-          <Skeleton className="h-4 w-32" />
+    <>
+      <WidgetCard
+        title="Creative Gallery"
+        subtitle={
+          isLoading
+            ? 'Loading creatives…'
+            : `${activeCreatives.length} creative${activeCreatives.length !== 1 ? 's' : ''} · ${creativesWithImages.length} with images`
+        }
+        toolbar={
+          <>
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+              <Input
+                placeholder="Search creatives…"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="h-8 w-[200px] pl-8 text-sm"
+              />
+            </div>
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="h-8 w-[130px] text-sm bg-card border-border">
+                <SelectValue placeholder="Status" />
+              </SelectTrigger>
+              <SelectContent className="bg-card border-border">
+                <SelectItem value="ALL">All statuses</SelectItem>
+                {availableStatuses.map(s => (
+                  <SelectItem key={s} value={s}>{s}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select
+              value={timeFrameOptions.find(o =>
+                o.startDate.toISOString().split('T')[0] === dateRange.start
+              )?.value || '30d'}
+              onValueChange={(v) => {
+                const opt = timeFrameOptions.find(o => o.value === v);
+                if (opt) setTimeFrame(opt);
+              }}
+            >
+              <SelectTrigger className="h-8 w-[150px] text-sm bg-card border-border">
+                <SelectValue placeholder="Time period" />
+              </SelectTrigger>
+              <SelectContent className="bg-card border-border">
+                {timeFrameOptions.map(opt => (
+                  <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-8 w-8"
+              onClick={() => selectedAccount && fetchCreativeAnalytics(selectedAccount)}
+              disabled={isLoading}
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+            </Button>
+          </>
+        }
+      >
+        {/* Loading skeleton — mirrors card layout */}
+        {isLoading && (
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
             {[...Array(8)].map((_, i) => (
-              <div key={i} className="rounded-lg border border-border/70 overflow-hidden">
+              <div key={i} className="rounded-xl border border-border/70 overflow-hidden">
                 <Skeleton className="aspect-video w-full" />
                 <div className="p-3 space-y-2">
                   <Skeleton className="h-3 w-3/4" />
@@ -159,129 +179,111 @@ export function CreativeGallery({ accessToken, selectedAccount }: CreativeGaller
               </div>
             ))}
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Error */}
-      {error && (
-        <div className="text-center py-8 text-destructive">
-          {error}
-        </div>
-      )}
+        {/* Error */}
+        {error && !isLoading && (
+          <EmptyState
+            icon={AlertTriangle}
+            title="Failed to load creatives"
+            description={error}
+          />
+        )}
 
-      {/* Gallery */}
-      {!isLoading && !error && (
-        <>
-          {creativesWithImages.length === 0 && creativesWithoutImages.length === 0 ? (
-            <div className="text-center py-12 text-muted-foreground">
-              <ImageIcon className="h-12 w-12 mx-auto mb-3 opacity-30" />
-              <p>No active creatives found for the selected time period</p>
-            </div>
-          ) : (
-            <div className="space-y-8">
-              {/* Section: creatives with images */}
-              {creativesWithImages.length > 0 && (
-                <div className="space-y-3">
-                  <h3 className="text-sm font-semibold text-foreground">
-                    Ad Creatives ({creativesWithImages.length})
-                  </h3>
-                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                    {creativesWithImages.map((creative, i) => (
-                      <div
-                        key={`${creative.creativeId}-${i}`}
-                        className="group relative rounded-lg border border-border/70 overflow-hidden bg-card hover:border-primary/40 hover:shadow-sm transition-all duration-150 cursor-pointer"
-                        onClick={() => setSelectedCreative(creative)}
-                      >
-                        {/* Image area — reserved aspect ratio prevents CLS */}
-                        <div className="relative aspect-video bg-muted overflow-hidden">
-                          <img
-                            src={creative.imageUrl}
-                            alt={creative.creativeName}
-                            loading="lazy"
-                            className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-105"
-                            onError={(e) => {
-                              (e.target as HTMLImageElement).style.display = 'none';
-                            }}
-                          />
-                          {/* Status dot badge — top-right */}
-                          <span
-                            className={cn(
-                              'absolute top-2 right-2 h-2 w-2 rounded-full ring-2 ring-background',
-                              creative.status === 'ACTIVE'
-                                ? 'bg-green-500'
-                                : creative.status === 'PAUSED'
-                                ? 'bg-yellow-500'
-                                : 'bg-gray-400'
-                            )}
-                            title={creative.status}
-                          />
-                          {/* Hover overlay with key metrics */}
-                          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-3 py-2 translate-y-full group-hover:translate-y-0 transition-transform duration-200 ease-out">
-                            <div className="flex items-center justify-between text-white text-[11px] tabular-nums">
-                              <span>{creative.impressions.toLocaleString()} impr.</span>
-                              <span>{creative.ctr.toFixed(2)}% CTR</span>
-                              <span>${creative.spent.toFixed(0)}</span>
+        {/* Gallery */}
+        {!isLoading && !error && (
+          <>
+            {creativesWithImages.length === 0 && creativesWithoutImages.length === 0 ? (
+              <EmptyState
+                icon={ImageIcon}
+                title="No creatives found"
+                description="No active creatives found for the selected time period."
+              />
+            ) : (
+              <div className="space-y-8 animate-fade-in">
+                {/* Section: creatives with images */}
+                {creativesWithImages.length > 0 && (
+                  <div className="space-y-3">
+                    <h4 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                      Ad Creatives <span className="opacity-60">({creativesWithImages.length})</span>
+                    </h4>
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                      {creativesWithImages.map((creative, i) => (
+                        <div
+                          key={`${creative.creativeId}-${i}`}
+                          className="group relative rounded-xl border border-border/70 overflow-hidden bg-card card-hover cursor-pointer"
+                          style={{ boxShadow: 'var(--shadow-xs)' }}
+                          onClick={() => setSelectedCreative(creative)}
+                        >
+                          {/* Image area — reserved aspect ratio prevents CLS */}
+                          <div className="relative aspect-video bg-secondary/60 overflow-hidden">
+                            <img
+                              src={creative.imageUrl}
+                              alt={creative.creativeName}
+                              loading="lazy"
+                              className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-[1.03]"
+                              onError={(e) => {
+                                (e.target as HTMLImageElement).style.display = 'none';
+                              }}
+                            />
+                            <StatusDot status={creative.status} />
+                            {/* Hover overlay with key metrics */}
+                            <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-3 py-2 translate-y-full group-hover:translate-y-0 transition-transform duration-200 ease-out">
+                              <div className="flex items-center justify-between text-white text-[11px] tabular-nums">
+                                <span>{creative.impressions.toLocaleString()} impr.</span>
+                                <span>{creative.ctr.toFixed(2)}% CTR</span>
+                                <span>${creative.spent.toFixed(0)}</span>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="p-3 space-y-1.5">
+                            <p className="text-sm font-medium truncate">{creative.creativeName}</p>
+                            <p className="text-xs text-muted-foreground truncate">{creative.campaignName}</p>
+                            <div className="flex items-center justify-between gap-2">
+                              <CreativeTypeBadge type={creative.type} className="min-w-0" />
+                              <span className="text-xs text-muted-foreground tabular-nums shrink-0">${creative.spent.toFixed(0)}</span>
                             </div>
                           </div>
                         </div>
-                        <div className="p-3 space-y-1.5">
-                          <p className="text-sm font-medium truncate">{creative.creativeName}</p>
-                          <p className="text-xs text-muted-foreground truncate">{creative.campaignName}</p>
-                          <div className="flex items-center justify-between">
-                            <CreativeTypeBadge type={creative.type} />
-                            <span className="text-xs text-muted-foreground">${creative.spent.toFixed(0)}</span>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
 
-              {/* Section: creatives without images — compact list */}
-              {creativesWithoutImages.length > 0 && (
-                <div className="space-y-3">
-                  <h3 className="text-sm font-semibold text-muted-foreground">
-                    No Preview Available ({creativesWithoutImages.length})
-                  </h3>
-                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                    {creativesWithoutImages.map((creative, i) => (
-                      <div
-                        key={`no-img-${creative.creativeId}-${i}`}
-                        className="rounded-lg border border-border/70 overflow-hidden bg-card"
-                      >
-                        <div className="relative aspect-video bg-muted flex items-center justify-center">
-                          <ImageIcon className="h-8 w-8 text-muted-foreground/40" />
-                          {/* Status dot badge */}
-                          <span
-                            className={cn(
-                              'absolute top-2 right-2 h-2 w-2 rounded-full ring-2 ring-background',
-                              creative.status === 'ACTIVE'
-                                ? 'bg-green-500'
-                                : creative.status === 'PAUSED'
-                                ? 'bg-yellow-500'
-                                : 'bg-gray-400'
-                            )}
-                            title={creative.status}
-                          />
-                        </div>
-                        <div className="p-3 space-y-1.5">
-                          <p className="text-sm font-medium truncate">{creative.creativeName}</p>
-                          <p className="text-xs text-muted-foreground truncate">{creative.campaignName}</p>
-                          <div className="flex items-center justify-between">
-                            <CreativeTypeBadge type={creative.type} />
-                            <span className="text-xs text-muted-foreground">${creative.spent.toFixed(0)}</span>
+                {/* Section: creatives without images — clean secondary grid */}
+                {creativesWithoutImages.length > 0 && (
+                  <div className="space-y-3">
+                    <h4 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                      No Preview Available <span className="opacity-60">({creativesWithoutImages.length})</span>
+                    </h4>
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                      {creativesWithoutImages.map((creative, i) => (
+                        <div
+                          key={`no-img-${creative.creativeId}-${i}`}
+                          className="rounded-xl border border-border/60 overflow-hidden bg-card/60"
+                        >
+                          <div className="relative aspect-video bg-secondary/40 border-b border-dashed border-border/60 flex items-center justify-center">
+                            <ImageIcon className="h-7 w-7 text-muted-foreground/30" />
+                            <StatusDot status={creative.status} />
+                          </div>
+                          <div className="p-3 space-y-1.5">
+                            <p className="text-sm font-medium truncate text-foreground/90">{creative.creativeName}</p>
+                            <p className="text-xs text-muted-foreground truncate">{creative.campaignName}</p>
+                            <div className="flex items-center justify-between gap-2">
+                              <CreativeTypeBadge type={creative.type} className="min-w-0" />
+                              <span className="text-xs text-muted-foreground tabular-nums shrink-0">${creative.spent.toFixed(0)}</span>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
                   </div>
-                </div>
-              )}
-            </div>
-          )}
-        </>
-      )}
+                )}
+              </div>
+            )}
+          </>
+        )}
+      </WidgetCard>
 
       {/* Detail Dialog */}
       <Dialog open={!!selectedCreative} onOpenChange={(open) => !open && setSelectedCreative(null)}>
@@ -293,7 +295,7 @@ export function CreativeGallery({ accessToken, selectedAccount }: CreativeGaller
                 <img
                   src={selectedCreative.imageUrl}
                   alt={selectedCreative.creativeName}
-                  className="w-full h-auto rounded-lg"
+                  className="w-full h-auto rounded-lg border border-border/60"
                 />
               )}
               <div className="space-y-2">
@@ -302,29 +304,24 @@ export function CreativeGallery({ accessToken, selectedAccount }: CreativeGaller
                 <div className="flex gap-2 items-center">
                   <CreativeTypeBadge type={selectedCreative.type} />
                 </div>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-3 border-t">
-                  <div>
-                    <p className="text-xs text-muted-foreground">Impressions</p>
-                    <p className="font-semibold">{selectedCreative.impressions.toLocaleString()}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground">Clicks</p>
-                    <p className="font-semibold">{selectedCreative.clicks.toLocaleString()}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground">Spent</p>
-                    <p className="font-semibold">${selectedCreative.spent.toFixed(2)}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground">CTR</p>
-                    <p className="font-semibold">{selectedCreative.ctr.toFixed(2)}%</p>
-                  </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-3 border-t border-border/60">
+                  {[
+                    { label: 'Impressions', value: selectedCreative.impressions.toLocaleString() },
+                    { label: 'Clicks', value: selectedCreative.clicks.toLocaleString() },
+                    { label: 'Spent', value: `$${selectedCreative.spent.toFixed(2)}` },
+                    { label: 'CTR', value: `${selectedCreative.ctr.toFixed(2)}%` },
+                  ].map(({ label, value }) => (
+                    <div key={label}>
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">{label}</p>
+                      <p className="font-semibold tabular-nums mt-0.5">{value}</p>
+                    </div>
+                  ))}
                 </div>
               </div>
             </div>
           )}
         </DialogContent>
       </Dialog>
-    </div>
+    </>
   );
 }

@@ -2,17 +2,20 @@ import { useEffect, useRef, useState, useMemo } from 'react';
 import {
   useWeeklyReport,
   WeeklyCreativeRow,
-  WeeklyCampaignRow,
-  WeeklyCampaignGroupRow,
-  WeeklyFormRow,
   DemoEntry,
   WeekMetrics,
 } from '@/hooks/useWeeklyReport';
 import { useAIAnalysis } from '@/hooks/useAIAnalysis';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import {
   Select,
   SelectContent,
@@ -20,6 +23,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { WidgetCard, EmptyState, StatusPill, SegmentedControl } from './widgets';
 import { cn } from '@/lib/utils';
 import {
   RefreshCw,
@@ -36,9 +40,6 @@ import {
   BarChart2,
   ClipboardList,
   Filter,
-  FolderOpen,
-  Palette,
-  Tag,
   Sparkles,
   Copy,
   Check,
@@ -47,7 +48,7 @@ import {
   Share2,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
-import { LineChart, Line, ResponsiveContainer } from 'recharts';
+import { LineChart, Line } from 'recharts';
 import { GenerateClientReportDialog } from './GenerateClientReportDialog';
 
 interface Props {
@@ -117,6 +118,23 @@ function extractTheme(creativeName: string): string {
   return 'Other';
 }
 
+// ── Creative/campaign status pill ──────────────────────────────────────────────
+const STATUS_TONE: Record<string, 'success' | 'warning' | 'info' | 'neutral'> = {
+  ACTIVE: 'success',
+  PAUSED: 'warning',
+  DRAFT: 'info',
+};
+
+function statusPill(status?: string) {
+  if (!status) return null;
+  return (
+    <StatusPill
+      tone={STATUS_TONE[status] ?? 'neutral'}
+      label={status.charAt(0) + status.slice(1).toLowerCase()}
+    />
+  );
+}
+
 // ── WoW change indicator ───────────────────────────────────────────────────────
 function ChangeIndicator({ pct, lowerIsBetter = false }: { pct: number | null; lowerIsBetter?: boolean }) {
   if (pct === null || pct === undefined) return <span className="text-muted-foreground text-xs">—</span>;
@@ -135,7 +153,7 @@ function ChangeIndicator({ pct, lowerIsBetter = false }: { pct: number | null; l
   return (
     <span className={cn(
       'flex items-center gap-0.5 text-xs font-medium tabular-nums whitespace-nowrap',
-      isGood ? 'text-green-600' : 'text-red-500'
+      isGood ? 'text-success' : 'text-destructive'
     )}>
       <Icon className="h-3 w-3 shrink-0" />
       {sign}{absVal.toFixed(1)}%
@@ -143,7 +161,7 @@ function ChangeIndicator({ pct, lowerIsBetter = false }: { pct: number | null; l
   );
 }
 
-// ── Inline sparkline ──────────────────────────────────────────────────────────
+// ── Inline sparkline — chart slot 1 ───────────────────────────────────────────
 function Sparkline({ data }: { data: { date: string; spent: number }[] }) {
   if (!data || data.length < 2) {
     return <div className="w-[80px] h-[28px] rounded bg-muted/40" />;
@@ -163,12 +181,12 @@ function KpiCard({
   icon: React.ElementType;
 }) {
   return (
-    <div className="flex flex-col gap-1.5 p-4 rounded-lg border border-border/70 bg-card shadow-sm">
-      <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+    <div className="flex flex-col gap-1.5 p-4 rounded-xl border border-border/70 bg-card" style={{ boxShadow: 'var(--shadow-xs)' }}>
+      <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
         <Icon className="h-3.5 w-3.5 text-primary shrink-0" />
         {label}
       </div>
-      <div className="text-xl font-semibold tabular-nums text-foreground leading-none">{value}</div>
+      <div className="text-xl font-bold tabular-nums text-foreground leading-none">{value}</div>
       {sub && <div className="text-[11px] text-muted-foreground tabular-nums">{sub}</div>}
       <div className="flex items-center gap-1 text-[11px]">
         <span className="text-muted-foreground">WoW</span>
@@ -199,14 +217,27 @@ function useSortableTable<T extends Record<string, any>>(rows: T[], defaultKey: 
     });
   }, [rows, sortKey, sortDir]);
 
-  function SortIcon({ col }: { col: string }) {
-    if (sortKey !== col) return null;
-    return sortDir === 'desc'
-      ? <ArrowDown className="h-3 w-3 text-primary shrink-0" />
-      : <ArrowUp className="h-3 w-3 text-primary shrink-0" />;
+  function SortHeader({ col, label, align }: { col: string; label: string; align?: 'right' }) {
+    return (
+      <button
+        onClick={() => handleSort(col)}
+        className={cn(
+          'inline-flex items-center gap-1 font-semibold text-muted-foreground hover:text-foreground transition-colors',
+          align === 'right' && 'flex-row-reverse',
+          sortKey === col && 'text-foreground',
+        )}
+      >
+        {label}
+        {sortKey === col && (
+          sortDir === 'desc'
+            ? <ArrowDown className="h-3 w-3 text-primary shrink-0" />
+            : <ArrowUp className="h-3 w-3 text-primary shrink-0" />
+        )}
+      </button>
+    );
   }
 
-  return { sorted, handleSort, SortIcon };
+  return { sorted, handleSort, SortHeader };
 }
 
 // ── Demographic bar chart ──────────────────────────────────────────────────────
@@ -215,10 +246,10 @@ function DemoChart({ title, data, icon: Icon }: { title: string; data: DemoEntry
   const maxImpr = Math.max(...top10.map(d => d.impressions), 1);
 
   return (
-    <div className="rounded-lg border border-border/70 bg-card shadow-sm p-4">
+    <div className="rounded-xl border border-border/70 bg-card p-4" style={{ boxShadow: 'var(--shadow-xs)' }}>
       <div className="flex items-center gap-2 mb-3">
         <Icon className="h-3.5 w-3.5 text-primary shrink-0" />
-        <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{title}</h4>
+        <h4 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">{title}</h4>
       </div>
       {top10.length === 0 ? (
         <div className="flex items-center justify-center h-24 text-muted-foreground text-xs">No data</div>
@@ -237,8 +268,8 @@ function DemoChart({ title, data, icon: Icon }: { title: string; data: DemoEntry
                 </div>
                 <div className="flex-1 bg-muted/50 rounded-full h-1.5 overflow-hidden">
                   <div
-                    className="h-full bg-primary rounded-full transition-all duration-300"
-                    style={{ width: `${(entry.impressions / maxImpr) * 100}%` }}
+                    className="h-full rounded-full transition-all duration-300"
+                    style={{ width: `${(entry.impressions / maxImpr) * 100}%`, background: 'hsl(var(--chart-1))' }}
                   />
                 </div>
                 <div className="text-[11px] tabular-nums text-muted-foreground w-12 text-right shrink-0">
@@ -286,74 +317,57 @@ function GenericMetricsTable<T extends Record<string, any>>({
   defaultSort?: string;
   showWoW?: boolean;
 }) {
-  const { sorted, handleSort, SortIcon } = useSortableTable(rows, defaultSort);
+  const { sorted, SortHeader } = useSortableTable(rows, defaultSort);
 
   if (rows.length === 0) {
-    return (
-      <div className="flex items-center justify-center py-12 text-muted-foreground text-sm">
-        {emptyMessage}
-      </div>
-    );
+    return <EmptyState icon={BarChart2} title="Nothing to show" description={emptyMessage} />;
   }
 
   return (
-    <div className="border border-border rounded-lg overflow-hidden">
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-border bg-muted/40">
-              <th
-                className="text-left p-2 font-semibold text-xs min-w-[200px] cursor-pointer hover:bg-muted/60 transition-colors"
-                onClick={() => handleSort(nameKey)}
-              >
-                <div className="flex items-center gap-1">{nameLabel} <SortIcon col={nameKey} /></div>
-              </th>
-              {METRIC_COLS.map(col => (
-                <th
-                  key={col.key}
-                  className="text-right p-2 font-semibold text-xs cursor-pointer hover:bg-muted/60 transition-colors whitespace-nowrap"
-                  onClick={() => handleSort(col.key)}
-                >
-                  <div className="flex items-center justify-end gap-1">{col.label}<SortIcon col={col.key} /></div>
-                </th>
-              ))}
-              {showWoW && (
-                <>
-                  <th className="text-right p-2 font-semibold text-xs whitespace-nowrap">%Spent WoW</th>
-                  <th className="text-right p-2 font-semibold text-xs whitespace-nowrap">%CPL WoW</th>
-                </>
+    <Table>
+      <TableHeader>
+        <TableRow className="border-border hover:bg-transparent bg-secondary/40">
+          <TableHead className="min-w-[200px]"><SortHeader col={nameKey} label={nameLabel} /></TableHead>
+          {METRIC_COLS.map(col => (
+            <TableHead key={col.key} className="text-right">
+              <SortHeader col={col.key} label={col.label} align="right" />
+            </TableHead>
+          ))}
+          {showWoW && (
+            <>
+              <TableHead className="text-right">%Spent WoW</TableHead>
+              <TableHead className="text-right">%CPL WoW</TableHead>
+            </>
+          )}
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {sorted.map((row, idx) => (
+          <TableRow key={row[nameKey] || idx} className="[&>td]:py-2.5">
+            <TableCell className="max-w-[280px]">
+              {renderName ? renderName(row) : (
+                <span className="font-medium text-xs break-words">{row[nameKey]}</span>
               )}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border/50">
-            {sorted.map((row, idx) => (
-              <tr key={row[nameKey] || idx} className="hover:bg-muted/30 transition-colors duration-150">
-                <td className="p-2 max-w-[280px]">
-                  {renderName ? renderName(row) : (
-                    <span className="font-medium text-xs break-words">{row[nameKey]}</span>
-                  )}
-                </td>
-                {METRIC_COLS.map(col => (
-                  <td key={col.key} className="p-2 text-right text-xs font-mono tabular-nums">
-                    {col.format(row[col.key] as number)}
-                  </td>
-                ))}
-                {showWoW && (
-                  <>
-                    <td className="p-2 text-right">
-                      <ChangeIndicator pct={row.pctSpentChange} lowerIsBetter />
-                    </td>
-                    <td className="p-2 text-right">
-                      <ChangeIndicator pct={row.pctCplChange} lowerIsBetter />
-                    </td>
-                  </>
-                )}
-              </tr>
+            </TableCell>
+            {METRIC_COLS.map(col => (
+              <TableCell key={col.key} className="text-right text-xs tabular-nums">
+                {col.format(row[col.key] as number)}
+              </TableCell>
             ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
+            {showWoW && (
+              <>
+                <TableCell className="text-right">
+                  <div className="flex justify-end"><ChangeIndicator pct={row.pctSpentChange} lowerIsBetter /></div>
+                </TableCell>
+                <TableCell className="text-right">
+                  <div className="flex justify-end"><ChangeIndicator pct={row.pctCplChange} lowerIsBetter /></div>
+                </TableCell>
+              </>
+            )}
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
   );
 }
 
@@ -361,87 +375,67 @@ function GenericMetricsTable<T extends Record<string, any>>({
 function CreativeTable({ rows }: { rows: WeeklyCreativeRow[] }) {
   const flat = useMemo(() =>
     rows.map(r => ({ ...r, ...flattenMetrics(r.thisWeek) })), [rows]);
-  const { sorted, handleSort, SortIcon } = useSortableTable(flat, '_spent');
+  const { sorted, SortHeader } = useSortableTable(flat, '_spent');
 
   if (rows.length === 0) {
-    return (
-      <div className="flex items-center justify-center py-12 text-muted-foreground text-sm">
-        No creative data for this week
-      </div>
-    );
+    return <EmptyState icon={ImageIcon} title="Nothing to show" description="No creative data for this week" />;
   }
 
   return (
-    <div className="border border-border rounded-lg overflow-hidden">
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-border bg-muted/40">
-              <th className="p-2 w-[52px]" />
-              <th
-                className="text-left p-2 font-semibold text-xs min-w-[180px] cursor-pointer hover:bg-muted/60 transition-colors"
-                onClick={() => handleSort('creativeName')}
-              >
-                <div className="flex items-center gap-1">Creative <SortIcon col="creativeName" /></div>
-              </th>
-              {METRIC_COLS.map(col => (
-                <th
-                  key={col.key}
-                  className="text-right p-2 font-semibold text-xs cursor-pointer hover:bg-muted/60 transition-colors whitespace-nowrap"
-                  onClick={() => handleSort(col.key)}
-                >
-                  <div className="flex items-center justify-end gap-1">{col.label}<SortIcon col={col.key} /></div>
-                </th>
-              ))}
-              <th className="text-right p-2 font-semibold text-xs whitespace-nowrap">%Spent WoW</th>
-              <th className="text-right p-2 font-semibold text-xs whitespace-nowrap">%CPL WoW</th>
-              <th className="text-center p-2 font-semibold text-xs w-[90px]">Trend</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border/50">
-            {sorted.map(row => (
-              <tr key={row.creativeName} className="hover:bg-muted/30 transition-colors duration-150">
-                <td className="p-2">
-                  <div className="h-8 w-14 rounded bg-muted overflow-hidden flex items-center justify-center shrink-0">
-                    {row.imageUrl ? (
-                      <img src={row.imageUrl} alt="" loading="lazy" className="h-full w-full object-cover" />
-                    ) : (
-                      <ImageIcon className="h-3.5 w-3.5 text-muted-foreground/40" />
-                    )}
-                  </div>
-                </td>
-                <td className="p-2 max-w-[220px]">
-                  <div className="font-medium text-xs line-clamp-2 break-words">{row.creativeName}</div>
-                  <div className="text-[10px] text-muted-foreground mt-0.5">
-                    {row.type.replace(/_/g, ' ')}
-                    {row.status && (
-                      <span className={cn(
-                        'ml-1.5 font-medium',
-                        row.status === 'ACTIVE' ? 'text-green-600' : 'text-muted-foreground'
-                      )}>· {row.status}</span>
-                    )}
-                  </div>
-                </td>
-                {METRIC_COLS.map(col => (
-                  <td key={col.key} className="p-2 text-right text-xs font-mono tabular-nums">
-                    {col.format(row[col.key] as number)}
-                  </td>
-                ))}
-                <td className="p-2 text-right">
-                  <ChangeIndicator pct={row.pctSpentChange} lowerIsBetter />
-                </td>
-                <td className="p-2 text-right">
-                  <ChangeIndicator pct={row.pctCplChange} lowerIsBetter />
-                </td>
-                <td className="p-2 flex items-center justify-center">
-                  <Sparkline data={row.trend} />
-                </td>
-              </tr>
+    <Table>
+      <TableHeader>
+        <TableRow className="border-border hover:bg-transparent bg-secondary/40">
+          <TableHead className="w-[52px]" />
+          <TableHead className="min-w-[180px]"><SortHeader col="creativeName" label="Creative" /></TableHead>
+          {METRIC_COLS.map(col => (
+            <TableHead key={col.key} className="text-right">
+              <SortHeader col={col.key} label={col.label} align="right" />
+            </TableHead>
+          ))}
+          <TableHead className="text-right">%Spent WoW</TableHead>
+          <TableHead className="text-right">%CPL WoW</TableHead>
+          <TableHead className="text-center w-[90px]">Trend</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {sorted.map(row => (
+          <TableRow key={row.creativeName} className="[&>td]:py-2.5">
+            <TableCell>
+              <div className="h-8 w-14 rounded bg-muted overflow-hidden flex items-center justify-center shrink-0">
+                {row.imageUrl ? (
+                  <img src={row.imageUrl} alt="" loading="lazy" className="h-full w-full object-cover" />
+                ) : (
+                  <ImageIcon className="h-3.5 w-3.5 text-muted-foreground/40" />
+                )}
+              </div>
+            </TableCell>
+            <TableCell className="max-w-[220px]">
+              <div className="font-medium text-xs line-clamp-2 break-words">{row.creativeName}</div>
+              <div className="flex items-center gap-1.5 mt-1">
+                <span className="text-[10px] text-muted-foreground">{row.type.replace(/_/g, ' ')}</span>
+                {statusPill(row.status)}
+              </div>
+            </TableCell>
+            {METRIC_COLS.map(col => (
+              <TableCell key={col.key} className="text-right text-xs tabular-nums">
+                {col.format(row[col.key] as number)}
+              </TableCell>
             ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
+            <TableCell className="text-right">
+              <div className="flex justify-end"><ChangeIndicator pct={row.pctSpentChange} lowerIsBetter /></div>
+            </TableCell>
+            <TableCell className="text-right">
+              <div className="flex justify-end"><ChangeIndicator pct={row.pctCplChange} lowerIsBetter /></div>
+            </TableCell>
+            <TableCell>
+              <div className="flex items-center justify-center">
+                <Sparkline data={row.trend} />
+              </div>
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
   );
 }
 
@@ -457,7 +451,7 @@ function WeeklyReportSkeleton() {
         <Skeleton className="h-8 w-24" />
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        {[...Array(6)].map((_, i) => <Skeleton key={i} className="h-24 rounded-lg" />)}
+        {[...Array(6)].map((_, i) => <Skeleton key={i} className="h-24 rounded-xl" />)}
       </div>
       <Skeleton className="h-9 w-72" />
       <div className="space-y-2">
@@ -470,11 +464,15 @@ function WeeklyReportSkeleton() {
 // ── Objective filter type ──────────────────────────────────────────────────────
 type ObjectiveFilter = 'all' | 'leadgen' | 'others';
 
+// ── Breakdown dimension ────────────────────────────────────────────────────────
+type Breakdown = 'creative' | 'campaign' | 'campaignGroup' | 'creativeType' | 'theme' | 'leadform';
+
 // ── Main component ─────────────────────────────────────────────────────────────
 export function WeeklyReport({ accessToken, selectedAccount }: Props) {
   const { data, isLoading, error, fetchReport } = useWeeklyReport(accessToken);
   const aiAnalysis = useAIAnalysis();
   const [objectiveFilter, setObjectiveFilter] = useState<ObjectiveFilter>('all');
+  const [breakdown, setBreakdown] = useState<Breakdown>('creative');
   const [copied, setCopied] = useState(false);
   const [digestInput, setDigestInput] = useState('');
   const [publishOpen, setPublishOpen] = useState(false);
@@ -643,9 +641,13 @@ export function WeeklyReport({ accessToken, selectedAccount }: Props) {
 
   if (!selectedAccount) {
     return (
-      <div className="flex items-center justify-center py-16 text-muted-foreground text-sm">
-        Select an ad account to view the weekly report
-      </div>
+      <WidgetCard noPadding>
+        <EmptyState
+          icon={BarChart2}
+          title="No account selected"
+          description="Select an ad account to view the weekly report."
+        />
+      </WidgetCard>
     );
   }
 
@@ -653,12 +655,18 @@ export function WeeklyReport({ accessToken, selectedAccount }: Props) {
 
   if (error) {
     return (
-      <div className="flex flex-col items-center justify-center py-16 gap-3">
-        <p className="text-destructive text-sm">{error}</p>
-        <Button variant="outline" size="sm" onClick={() => selectedAccount && fetchReport(selectedAccount)}>
-          <RefreshCw className="h-3.5 w-3.5 mr-1.5" />Retry
-        </Button>
-      </div>
+      <WidgetCard noPadding>
+        <EmptyState
+          icon={RefreshCw}
+          title="Failed to load weekly report"
+          description={error}
+          action={
+            <Button variant="outline" size="sm" onClick={() => selectedAccount && fetchReport(selectedAccount)}>
+              <RefreshCw className="h-3.5 w-3.5 mr-1.5" />Retry
+            </Button>
+          }
+        />
+      </WidgetCard>
     );
   }
 
@@ -671,7 +679,7 @@ export function WeeklyReport({ accessToken, selectedAccount }: Props) {
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h2 className="text-base font-semibold text-foreground">
+          <h2 className="text-base font-bold text-foreground">
             Week of {formatWeekRange(weekRange.thisWeek.start, weekRange.thisWeek.end)}
           </h2>
           <p className="text-xs text-muted-foreground mt-0.5">
@@ -682,11 +690,11 @@ export function WeeklyReport({ accessToken, selectedAccount }: Props) {
         <div className="flex items-center gap-2">
           {/* Objective filter */}
           <Select value={objectiveFilter} onValueChange={(v) => setObjectiveFilter(v as ObjectiveFilter)}>
-            <SelectTrigger className="w-[160px] h-8 text-xs">
+            <SelectTrigger className="w-[160px] h-8 text-xs bg-card border-border">
               <Filter className="h-3.5 w-3.5 mr-1.5 shrink-0" />
               <SelectValue />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent className="bg-card border-border">
               <SelectItem value="all">All Objectives</SelectItem>
               <SelectItem value="leadgen">Lead Generation</SelectItem>
               <SelectItem value="others">Others</SelectItem>
@@ -771,44 +779,32 @@ export function WeeklyReport({ accessToken, selectedAccount }: Props) {
         />
       </div>
 
-      {/* Performance breakdown tabs */}
-      <Tabs defaultValue="creative" className="space-y-4">
-        <TabsList className="h-9 flex-wrap">
-          <TabsTrigger value="creative" className="text-xs sm:text-sm gap-1.5">
-            <ImageIcon className="h-3 w-3" />
-            Creative
-            <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4">{filteredCreatives.length}</Badge>
-          </TabsTrigger>
-          <TabsTrigger value="campaign" className="text-xs sm:text-sm gap-1.5">
-            Campaign
-            <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4">{filteredCampaigns.length}</Badge>
-          </TabsTrigger>
-          <TabsTrigger value="campaignGroup" className="text-xs sm:text-sm gap-1.5">
-            <FolderOpen className="h-3 w-3" />
-            Group
-            <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4">{filteredCampaignGroups.length}</Badge>
-          </TabsTrigger>
-          <TabsTrigger value="creativeType" className="text-xs sm:text-sm gap-1.5">
-            <Palette className="h-3 w-3" />
-            Type
-            <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4">{byCreativeType.length}</Badge>
-          </TabsTrigger>
-          <TabsTrigger value="theme" className="text-xs sm:text-sm gap-1.5">
-            <Tag className="h-3 w-3" />
-            Theme
-            <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4">{byTheme.length}</Badge>
-          </TabsTrigger>
-          <TabsTrigger value="leadform" className="text-xs sm:text-sm gap-1.5">
-            Lead Form
-            <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4">{byLeadForm.length}</Badge>
-          </TabsTrigger>
-        </TabsList>
+      {/* Performance breakdown */}
+      <WidgetCard
+        noPadding
+        title="Performance breakdown"
+        subtitle="This week vs. last, by dimension"
+      >
+        <div className="px-5 pb-3">
+          <SegmentedControl
+            size="sm"
+            value={breakdown}
+            onChange={setBreakdown}
+            className="flex-wrap"
+            options={[
+              { value: 'creative', label: <>Creative <span className="opacity-60">{filteredCreatives.length}</span></> },
+              { value: 'campaign', label: <>Campaign <span className="opacity-60">{filteredCampaigns.length}</span></> },
+              { value: 'campaignGroup', label: <>Group <span className="opacity-60">{filteredCampaignGroups.length}</span></> },
+              { value: 'creativeType', label: <>Type <span className="opacity-60">{byCreativeType.length}</span></> },
+              { value: 'theme', label: <>Theme <span className="opacity-60">{byTheme.length}</span></> },
+              { value: 'leadform', label: <>Lead Form <span className="opacity-60">{byLeadForm.length}</span></> },
+            ]}
+          />
+        </div>
 
-        <TabsContent value="creative">
-          <CreativeTable rows={filteredCreatives} />
-        </TabsContent>
+        {breakdown === 'creative' && <CreativeTable rows={filteredCreatives} />}
 
-        <TabsContent value="campaign">
+        {breakdown === 'campaign' && (
           <GenericMetricsTable
             rows={flatCampaigns}
             nameKey="campaignName"
@@ -817,89 +813,84 @@ export function WeeklyReport({ accessToken, selectedAccount }: Props) {
             renderName={(row) => (
               <div>
                 <div className="font-medium text-xs break-words">{row.campaignName}</div>
-                <div className={cn(
-                  'text-[10px] font-medium mt-0.5',
-                  row.status === 'ACTIVE' ? 'text-green-600' : 'text-muted-foreground'
-                )}>{row.status}</div>
+                <div className="mt-1">{statusPill(row.status)}</div>
               </div>
             )}
           />
-        </TabsContent>
+        )}
 
-        <TabsContent value="campaignGroup">
+        {breakdown === 'campaignGroup' && (
           <GenericMetricsTable
             rows={flatCampaignGroups}
             nameKey="campaignGroupName"
             nameLabel="Campaign Group"
             emptyMessage="No campaign group data for this week"
           />
-        </TabsContent>
+        )}
 
-        <TabsContent value="creativeType">
+        {breakdown === 'creativeType' && (
           <GenericMetricsTable
             rows={byCreativeType}
             nameKey="creativeType"
             nameLabel="Creative Type"
             emptyMessage="No creative type data"
           />
-        </TabsContent>
+        )}
 
-        <TabsContent value="theme">
+        {breakdown === 'theme' && (
           <GenericMetricsTable
             rows={byTheme}
             nameKey="theme"
             nameLabel="Theme"
             emptyMessage="No theme data (creative names need img_/doc_/message_ prefix)"
           />
-        </TabsContent>
+        )}
 
-        <TabsContent value="leadform">
+        {breakdown === 'leadform' && (
           <GenericMetricsTable
             rows={flatLeadForms}
             nameKey="formName"
             nameLabel="Lead Form"
             emptyMessage="No lead form data available"
           />
-        </TabsContent>
-      </Tabs>
+        )}
+      </WidgetCard>
 
       {/* Demographics */}
-      <div className="space-y-3 pt-2">
-        <div className="flex items-center gap-2">
-          <Users className="h-4 w-4 text-primary" />
-          <h3 className="text-sm font-semibold text-foreground">
-            Audience Demographics — This Week
-          </h3>
-        </div>
+      <WidgetCard
+        title="Audience Demographics"
+        subtitle="This week · top 10 by impressions"
+      >
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <DemoChart title="Job Title" data={demographics.jobTitle} icon={Users} />
           <DemoChart title="Seniority" data={demographics.seniority} icon={BarChart2} />
           <DemoChart title="Industry" data={demographics.industry} icon={ClipboardList} />
           <DemoChart title="Company Size" data={demographics.companySize} icon={Users} />
         </div>
-      </div>
+      </WidgetCard>
 
       {/* ── AI Weekly Digest ──────────────────────────────────────── */}
-      <div className={cn(
-        'border rounded-xl bg-card shadow-sm overflow-hidden transition-all duration-300',
-        aiAnalysis.isLoading ? 'border-primary/40 shadow-[0_0_0_1px_hsl(221_83%_53%_/_0.08)]' : 'border-primary/20',
-      )}>
-        <div className="flex items-center justify-between px-5 py-3 border-b border-primary/10 bg-primary/[0.03]">
-          <div className="flex items-center gap-2.5">
-            <div className={cn('h-6 w-6 rounded-md flex items-center justify-center transition-colors', aiAnalysis.isLoading ? 'bg-primary/20' : 'bg-primary/10')}>
+      <WidgetCard
+        noPadding
+        className={cn('transition-colors duration-300', aiAnalysis.isLoading && 'border-primary/40')}
+        title={
+          <span className="flex items-center gap-2.5">
+            <span className={cn('h-6 w-6 rounded-md flex items-center justify-center transition-colors', aiAnalysis.isLoading ? 'bg-primary/20' : 'bg-primary/10')}>
               <Sparkles className={cn('h-3.5 w-3.5 text-primary', aiAnalysis.isLoading && 'animate-pulse')} />
-            </div>
-            <span className="text-sm font-semibold">AI Client Digest</span>
+            </span>
+            AI Client Digest
             {aiAnalysis.isLoading && (
-              <div className="flex gap-0.5 items-center ml-0.5">
+              <span className="flex gap-0.5 items-center">
                 {[0, 1, 2].map(i => (
                   <span key={i} className="h-1 w-1 rounded-full bg-primary/50 animate-bounce"
                     style={{ animationDelay: `${i * 160}ms`, animationDuration: '900ms' }} />
                 ))}
-              </div>
+              </span>
             )}
-          </div>
-          <div className="flex items-center gap-2">
+          </span>
+        }
+        toolbar={
+          <>
             {/* Copy button — visible when there's assistant text */}
             {aiAnalysis.messages.some(m => m.role === 'assistant') && (
               <Button
@@ -913,7 +904,7 @@ export function WeeklyReport({ accessToken, selectedAccount }: Props) {
                   setTimeout(() => setCopied(false), 2000);
                 }}
               >
-                {copied ? <Check className="h-3 w-3 text-green-600" /> : <Copy className="h-3 w-3" />}
+                {copied ? <Check className="h-3 w-3 text-success" /> : <Copy className="h-3 w-3" />}
                 {copied ? 'Copied!' : 'Copy'}
               </Button>
             )}
@@ -958,9 +949,9 @@ export function WeeklyReport({ accessToken, selectedAccount }: Props) {
               <Sparkles className="h-3 w-3" />
               {aiAnalysis.messages.length > 0 ? 'Regenerate' : 'Generate Digest'}
             </Button>
-          </div>
-        </div>
-
+          </>
+        }
+      >
         {/* Streaming progress */}
         {aiAnalysis.isLoading && (
           <div className="h-0.5 bg-primary/10 overflow-hidden">
@@ -969,28 +960,27 @@ export function WeeklyReport({ accessToken, selectedAccount }: Props) {
         )}
 
         {/* Messages */}
-        <div className="max-h-[500px] overflow-y-auto scroll-smooth" style={{ scrollbarWidth: 'thin' }}>
+        <div className="max-h-[500px] overflow-y-auto scroll-smooth border-t border-border/60" style={{ scrollbarWidth: 'thin' }}>
           <div className="px-5 py-4 space-y-4">
             {aiAnalysis.messages.length === 0 && !aiAnalysis.isLoading && (
-              <div className="flex flex-col items-center justify-center py-12 text-center">
-                <div className="h-10 w-10 rounded-xl bg-primary/8 border border-primary/15 flex items-center justify-center mb-3">
-                  <Sparkles className="h-4.5 w-4.5 text-primary/60" />
-                </div>
-                <p className="text-sm text-muted-foreground">Click "Generate Digest" to create a client-ready summary</p>
-                <p className="text-xs text-muted-foreground/60 mt-1">AI writes a narrative you can paste into email or Slack</p>
-              </div>
+              <EmptyState
+                icon={Sparkles}
+                title='Click "Generate Digest" to create a client-ready summary'
+                description="AI writes a narrative you can paste into email or Slack"
+                className="py-12"
+              />
             )}
 
             {aiAnalysis.messages.map((msg, i) => (
               <div key={i}>
                 {msg.role === 'user' ? (
                   <div className="flex justify-end">
-                    <div className="bg-primary text-primary-foreground rounded-2xl rounded-tr-sm px-4 py-2.5 text-sm max-w-[75%] shadow-sm">
+                    <div className="bg-primary text-primary-foreground rounded-2xl rounded-tr-sm px-4 py-2.5 text-sm max-w-[75%]" style={{ boxShadow: 'var(--shadow-xs)' }}>
                       {msg.content}
                     </div>
                   </div>
                 ) : (
-                  <div className="rounded-2xl rounded-tl-sm bg-muted/30 border border-border/40 px-4 py-3.5">
+                  <div className="rounded-2xl rounded-tl-sm bg-secondary/40 border border-border/40 px-4 py-3.5">
                     <div className="prose prose-sm dark:prose-invert max-w-none
                       [&>*:first-child]:mt-0 [&>*:last-child]:mb-0
                       [&_h1]:text-base [&_h1]:font-bold [&_h1]:mt-5 [&_h1]:mb-2
@@ -1008,7 +998,7 @@ export function WeeklyReport({ accessToken, selectedAccount }: Props) {
             ))}
 
             {aiAnalysis.isLoading && aiAnalysis.messages.length === 0 && (
-              <div className="rounded-2xl rounded-tl-sm bg-muted/20 border border-border/30 px-4 py-3">
+              <div className="rounded-2xl rounded-tl-sm bg-secondary/30 border border-border/30 px-4 py-3">
                 <div className="flex gap-1 items-center h-4">
                   {[0, 1, 2].map(i => (
                     <span key={i} className="h-1.5 w-1.5 rounded-full bg-primary/50 animate-bounce"
@@ -1032,7 +1022,7 @@ export function WeeklyReport({ accessToken, selectedAccount }: Props) {
               setDigestInput('');
               aiAnalysis.ask(q, { weekRange, summary }, 'weekly_digest');
             }}
-            className="flex gap-2 px-4 py-3 border-t border-border/40 bg-muted/5"
+            className="flex gap-2 px-4 py-3 border-t border-border/40"
           >
             <input
               value={digestInput}
@@ -1052,7 +1042,7 @@ export function WeeklyReport({ accessToken, selectedAccount }: Props) {
             )}
           </form>
         )}
-      </div>
+      </WidgetCard>
     </div>
   );
 }

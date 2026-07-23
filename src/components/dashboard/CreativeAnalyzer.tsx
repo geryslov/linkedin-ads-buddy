@@ -3,10 +3,10 @@ import { useCreativeAnalyzer } from '@/hooks/useCreativeAnalyzer';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Badge } from '@/components/ui/badge';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
+import { StatusPill, ChartLegend } from './widgets';
 import {
   Sparkles, Send, Loader2, RefreshCw, AlertTriangle, TrendingDown,
   TrendingUp, CheckCircle2, ChevronDown, ChevronRight,
@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import {
   AreaChart, Area, BarChart, Bar, ResponsiveContainer,
-  XAxis, YAxis, Tooltip, CartesianGrid, Cell,
+  XAxis, YAxis, Tooltip, CartesianGrid,
 } from 'recharts';
 import ReactMarkdown from 'react-markdown';
 import { cn } from '@/lib/utils';
@@ -28,27 +28,35 @@ interface CreativeAnalyzerProps {
 
 type StatusGroup = 'fatigued' | 'warning' | 'healthy' | 'no_data';
 
-const STATUS_CONFIG = {
-  fatigued: { color: '#ef4444', bg: 'bg-red-500/8', border: 'border-red-500/30', text: 'text-red-600', label: 'Fatigued', accent: 'bg-red-500' },
-  warning:  { color: '#f59e0b', bg: 'bg-amber-500/8', border: 'border-amber-500/30', text: 'text-amber-600', label: 'Warning', accent: 'bg-amber-500' },
-  healthy:  { color: '#22c55e', bg: 'bg-green-500/8', border: 'border-green-500/30', text: 'text-green-600', label: 'Healthy', accent: 'bg-green-500' },
-  no_data:  { color: '#94a3b8', bg: 'bg-slate-500/8', border: 'border-slate-500/30', text: 'text-slate-500', label: 'No Data', accent: 'bg-slate-400' },
-} as const;
+/* Semantic status styling — success / warning / destructive tokens only. */
+const STATUS_CONFIG: Record<StatusGroup, {
+  color: string;   // chart stroke (hsl token)
+  sparkId: string; // id-safe key for gradient defs
+  tone: 'danger' | 'warning' | 'success' | 'neutral';
+  border: string;
+  accent: string;
+  label: string;
+}> = {
+  fatigued: { color: 'hsl(var(--destructive))', sparkId: 'fatigued', tone: 'danger', border: 'border-destructive/30', accent: 'bg-destructive', label: 'Fatigued' },
+  warning:  { color: 'hsl(var(--warning))', sparkId: 'warning', tone: 'warning', border: 'border-warning/30', accent: 'bg-warning', label: 'Warning' },
+  healthy:  { color: 'hsl(var(--success))', sparkId: 'healthy', tone: 'success', border: 'border-success/30', accent: 'bg-success', label: 'Healthy' },
+  no_data:  { color: 'hsl(var(--muted-foreground))', sparkId: 'nodata', tone: 'neutral', border: 'border-border', accent: 'bg-muted-foreground/40', label: 'No Data' },
+};
 
 /** Tiny inline sparkline (48x18px) showing CTR trend across 4 periods */
-function Sparkline({ data, color }: { data: number[]; color: string }) {
+function Sparkline({ data, color, sparkId }: { data: number[]; color: string; sparkId: string }) {
   const points = data.map((v, i) => ({ v, i }));
   return (
     <ResponsiveContainer width={48} height={18}>
       <AreaChart data={points} margin={{ top: 2, right: 0, left: 0, bottom: 2 }}>
         <defs>
-          <linearGradient id={`spark-${color.replace('#', '')}`} x1="0" y1="0" x2="0" y2="1">
+          <linearGradient id={`spark-${sparkId}`} x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor={color} stopOpacity={0.3} />
             <stop offset="100%" stopColor={color} stopOpacity={0} />
           </linearGradient>
         </defs>
         <Area type="monotone" dataKey="v" stroke={color} strokeWidth={1.5}
-          fill={`url(#spark-${color.replace('#', '')})`} dot={false} />
+          fill={`url(#spark-${sparkId})`} dot={false} />
       </AreaChart>
     </ResponsiveContainer>
   );
@@ -61,7 +69,7 @@ function TrendBadge({ value, invert }: { value: number; invert?: boolean }) {
   if (abs < 1) return <span className="text-[11px] text-muted-foreground">—</span>;
   return (
     <span className={`inline-flex items-center gap-0.5 text-[11px] font-semibold tabular-nums ${
-      isPos ? 'text-green-600' : isNeg ? 'text-red-500' : 'text-muted-foreground'
+      isPos ? 'text-success' : isNeg ? 'text-destructive' : 'text-muted-foreground'
     }`}>
       {isPos ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
       {abs.toFixed(0)}%
@@ -77,15 +85,15 @@ function FatigueMeter({ fatigued, warning, healthy, total }: { fatigued: number;
   const pH = (healthy / total) * 100;
   return (
     <div className="flex items-center gap-3 w-full">
-      <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden flex">
-        {pF > 0 && <div className="bg-red-500 transition-all duration-500" style={{ width: `${pF}%` }} />}
-        {pW > 0 && <div className="bg-amber-400 transition-all duration-500" style={{ width: `${pW}%` }} />}
-        {pH > 0 && <div className="bg-green-500 transition-all duration-500" style={{ width: `${pH}%` }} />}
+      <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden flex gap-px">
+        {pF > 0 && <div className="bg-destructive transition-all duration-500" style={{ width: `${pF}%` }} />}
+        {pW > 0 && <div className="bg-warning transition-all duration-500" style={{ width: `${pW}%` }} />}
+        {pH > 0 && <div className="bg-success transition-all duration-500" style={{ width: `${pH}%` }} />}
       </div>
-      <div className="flex gap-3 text-[10px] text-muted-foreground shrink-0">
-        {fatigued > 0 && <span className="flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full bg-red-500" />{fatigued}</span>}
-        {warning > 0 && <span className="flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full bg-amber-400" />{warning}</span>}
-        <span className="flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full bg-green-500" />{healthy}</span>
+      <div className="flex gap-3 text-[10px] text-muted-foreground tabular-nums shrink-0">
+        {fatigued > 0 && <span className="flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full bg-destructive" />{fatigued}</span>}
+        {warning > 0 && <span className="flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full bg-warning" />{warning}</span>}
+        <span className="flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full bg-success" />{healthy}</span>
       </div>
     </div>
   );
@@ -105,20 +113,21 @@ function CreativeGroupSection({
   const sorted = [...creatives].sort((a, b) => b.last7d.spent - a.last7d.spent);
 
   return (
-    <div className={`relative rounded-lg overflow-hidden border ${config.border} transition-colors`}>
+    <section
+      className={`relative rounded-xl overflow-hidden border bg-card ${config.border} transition-colors`}
+      style={{ boxShadow: 'var(--shadow-xs)' }}
+    >
       <span className={`absolute left-0 top-0 bottom-0 w-1 ${config.accent}`} />
       <button
         onClick={() => setOpen(!open)}
-        className="w-full flex items-center justify-between pl-5 pr-4 py-3 hover:bg-muted/20 transition-colors cursor-pointer"
+        className="w-full flex items-center justify-between pl-5 pr-4 py-3 hover:bg-secondary/30 transition-colors cursor-pointer"
       >
         <div className="flex items-center gap-2.5">
-          {status === 'fatigued' && <TrendingDown className="h-4 w-4 text-red-500" />}
-          {status === 'warning' && <AlertTriangle className="h-4 w-4 text-amber-500" />}
-          {status === 'healthy' && <CheckCircle2 className="h-4 w-4 text-green-500" />}
-          <span className="text-sm font-semibold">{config.label}</span>
-          <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${config.border} ${config.text}`}>
-            {creatives.length}
-          </Badge>
+          {status === 'fatigued' && <TrendingDown className="h-4 w-4 text-destructive" />}
+          {status === 'warning' && <AlertTriangle className="h-4 w-4 text-warning" />}
+          {status === 'healthy' && <CheckCircle2 className="h-4 w-4 text-success" />}
+          <span className="text-sm font-bold">{config.label}</span>
+          <StatusPill tone={config.tone} label={String(creatives.length)} />
         </div>
         {open
           ? <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform" />
@@ -126,10 +135,10 @@ function CreativeGroupSection({
         }
       </button>
       {open && (
-        <div className="overflow-x-auto border-t border-border/40">
+        <div className="overflow-x-auto border-t border-border/60">
           <Table className="min-w-[1000px]">
             <TableHeader>
-              <TableRow className="bg-muted/15 [&>th]:py-2 [&>th]:text-[10px] [&>th]:uppercase [&>th]:tracking-wider [&>th]:font-semibold [&>th]:text-muted-foreground">
+              <TableRow>
                 <TableHead className="pl-5 w-[240px]">Creative</TableHead>
                 <TableHead className="w-[180px]">Campaign</TableHead>
                 <TableHead className="text-right w-[80px]">Impr</TableHead>
@@ -152,7 +161,7 @@ function CreativeGroupSection({
                 const campaignNames = c.campaigns.map((camp: any) => camp.campaignName);
                 const sparkData = [c.lastMonth.ctr, c.last30d.ctr, c.last14d.ctr, c.last7d.ctr];
                 return (
-                  <TableRow key={idx} className="hover:bg-muted/10 [&>td]:py-2.5 [&>td]:text-xs group">
+                  <TableRow key={idx} className="[&>td]:py-2.5 [&>td]:text-xs group">
                     <TableCell className="pl-5 font-medium">
                       <div className="max-w-[230px]">
                         <span className="block truncate text-foreground" title={c.creativeName}>{c.creativeName}</span>
@@ -175,7 +184,7 @@ function CreativeGroupSection({
                     <TableCell className="text-right tabular-nums text-muted-foreground">{c.last7d.clicks.toLocaleString()}</TableCell>
                     <TableCell className="text-right tabular-nums font-semibold">{c.last7d.ctr.toFixed(2)}%</TableCell>
                     <TableCell className="text-center"><TrendBadge value={ctrChange} /></TableCell>
-                    <TableCell className="text-center"><Sparkline data={sparkData} color={config.color} /></TableCell>
+                    <TableCell className="text-center"><Sparkline data={sparkData} color={config.color} sparkId={config.sparkId} /></TableCell>
                     <TableCell className="text-right tabular-nums font-medium">${c.last7d.spent.toFixed(0)}</TableCell>
                     <TableCell className="text-center"><TrendBadge value={deliveryChange} /></TableCell>
                     {status !== 'healthy' && (
@@ -194,7 +203,7 @@ function CreativeGroupSection({
           </Table>
         </div>
       )}
-    </div>
+    </section>
   );
 }
 
@@ -235,20 +244,21 @@ function AnalysisCharts({ rows }: { rows: CreativePerformanceRow[] }) {
   const tooltipStyle: React.CSSProperties = {
     backgroundColor: 'hsl(var(--card))',
     border: '1px solid hsl(var(--border))',
-    borderRadius: '6px',
+    borderRadius: '8px',
     fontSize: '11px',
     padding: '6px 10px',
+    boxShadow: 'var(--shadow-md)',
   };
 
   const tickStyle = { fontSize: 9, fill: 'hsl(var(--muted-foreground))' };
 
   return (
-    <div className="border-b border-primary/10">
+    <div className="border-b border-border/60">
       <button
         onClick={() => setOpen(!open)}
-        className="w-full flex items-center justify-between px-5 py-2.5 text-xs hover:bg-muted/10 transition-colors cursor-pointer group"
+        className="w-full flex items-center justify-between px-5 py-2.5 text-xs hover:bg-secondary/30 transition-colors cursor-pointer group"
       >
-        <span className="flex items-center gap-1.5 font-semibold uppercase tracking-wider text-muted-foreground group-hover:text-foreground transition-colors">
+        <span className="flex items-center gap-1.5 font-semibold uppercase tracking-[0.08em] text-muted-foreground group-hover:text-foreground transition-colors">
           <BarChart3 className="h-3 w-3" />
           Data Visualization
         </span>
@@ -260,9 +270,17 @@ function AnalysisCharts({ rows }: { rows: CreativePerformanceRow[] }) {
           {/* CTR comparison */}
           {ctrData.length > 0 && (
             <div>
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2.5">
-                CTR — 7d vs 30d baseline
-              </p>
+              <div className="flex items-center justify-between mb-2.5 gap-2 flex-wrap">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                  CTR — 7d vs 30d baseline
+                </p>
+                <ChartLegend
+                  items={[
+                    { label: '7d', color: 'hsl(var(--chart-1))' },
+                    { label: '30d baseline', color: 'hsl(var(--muted-foreground) / 0.35)' },
+                  ]}
+                />
+              </div>
               <ResponsiveContainer width="100%" height={Math.max(160, ctrData.length * 26)}>
                 <BarChart data={ctrData} layout="vertical" margin={{ top: 0, right: 16, left: 4, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="hsl(var(--border))" strokeOpacity={0.4} />
@@ -286,20 +304,17 @@ function AnalysisCharts({ rows }: { rows: CreativePerformanceRow[] }) {
                     formatter={(v: number, name: string) => [`${v}%`, name]}
                     cursor={{ fill: 'hsl(var(--muted))', fillOpacity: 0.4 }}
                   />
-                  <Bar dataKey="30d" name="30d CTR" fill="hsl(var(--muted-foreground))" fillOpacity={0.2} radius={[0, 3, 3, 0]} barSize={7} />
-                  <Bar dataKey="7d" name="7d CTR" fill="hsl(var(--chart-1))" fillOpacity={0.85} radius={[0, 3, 3, 0]} barSize={7} />
+                  <Bar dataKey="30d" name="30d CTR" fill="hsl(var(--muted-foreground))" fillOpacity={0.25} radius={[0, 3, 3, 0]} barSize={7} />
+                  <Bar dataKey="7d" name="7d CTR" fill="hsl(var(--chart-1))" fillOpacity={0.9} radius={[0, 3, 3, 0]} barSize={7} />
                 </BarChart>
               </ResponsiveContainer>
-              <p className="text-[9px] text-muted-foreground/50 mt-1 text-right">
-                blue = 7d · grey = 30d baseline
-              </p>
             </div>
           )}
 
           {/* Spend distribution */}
           {spendData.length > 0 && (
             <div>
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2.5">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground mb-2.5">
                 Spend Distribution — Last 7 Days
               </p>
               <ResponsiveContainer width="100%" height={Math.max(160, spendData.length * 26)}>
@@ -325,11 +340,7 @@ function AnalysisCharts({ rows }: { rows: CreativePerformanceRow[] }) {
                     formatter={(v: number) => [`$${v.toLocaleString()}`, 'Spend']}
                     cursor={{ fill: 'hsl(var(--muted))', fillOpacity: 0.4 }}
                   />
-                  <Bar dataKey="spend" name="Spend" radius={[0, 3, 3, 0]} barSize={7}>
-                    {spendData.map((_, i) => (
-                      <Cell key={i} fill={`hsl(213 68% ${Math.max(30, 60 - i * 4)}%)`} fillOpacity={0.85} />
-                    ))}
-                  </Bar>
+                  <Bar dataKey="spend" name="Spend" fill="hsl(var(--chart-1))" fillOpacity={0.9} radius={[0, 3, 3, 0]} barSize={7} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -430,10 +441,10 @@ export function CreativeAnalyzer({ accessToken, selectedAccount }: CreativeAnaly
   // Loading skeleton
   if (isLoadingData && !analysisData) {
     return (
-      <div className="space-y-5 animate-in fade-in-50 duration-300">
+      <div className="space-y-5 animate-fade-in">
         <div className="flex items-center gap-3 pb-1">
-          <div className="h-9 w-9 rounded-lg bg-primary/10 flex items-center justify-center">
-            <Sparkles className="h-4.5 w-4.5 text-primary animate-pulse" />
+          <div className="h-9 w-9 rounded-lg bg-primary/[0.07] border border-primary/10 flex items-center justify-center">
+            <Sparkles className="h-4 w-4 text-primary animate-pulse" />
           </div>
           <div>
             <p className="font-semibold text-sm">Analyzing your creatives...</p>
@@ -442,12 +453,12 @@ export function CreativeAnalyzer({ accessToken, selectedAccount }: CreativeAnaly
         </div>
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           {[...Array(5)].map((_, i) => (
-            <Skeleton key={i} className="h-[76px] rounded-lg" style={{ animationDelay: `${i * 80}ms` }} />
+            <Skeleton key={i} className="h-[76px] rounded-xl" style={{ animationDelay: `${i * 80}ms` }} />
           ))}
         </div>
         <Skeleton className="h-3 w-full rounded-full" />
-        <Skeleton className="h-56 rounded-lg" />
-        <Skeleton className="h-80 rounded-lg" />
+        <Skeleton className="h-56 rounded-xl" />
+        <Skeleton className="h-80 rounded-xl" />
       </div>
     );
   }
@@ -455,7 +466,7 @@ export function CreativeAnalyzer({ accessToken, selectedAccount }: CreativeAnaly
   // Error state
   if (dataError && !analysisData) {
     return (
-      <div className="border border-destructive/20 rounded-lg p-8 bg-destructive/5 text-center">
+      <div className="border border-destructive/20 rounded-xl p-8 bg-destructive/5 text-center">
         <AlertTriangle className="h-8 w-8 text-destructive mx-auto mb-3" />
         <p className="font-medium text-destructive mb-1">Failed to load creative data</p>
         <p className="text-sm text-muted-foreground mb-4">{dataError}</p>
@@ -480,12 +491,16 @@ export function CreativeAnalyzer({ accessToken, selectedAccount }: CreativeAnaly
             { label: 'Spend (7d)', value: `$${s.totalSpend7d.toLocaleString(undefined, { maximumFractionDigits: 0 })}`, icon: DollarSign },
             { label: 'Issues Found', value: s.fatigued + s.warning, sub: s.fatigued + s.warning === 0 ? 'All clear' : `${s.fatigued} critical`, icon: Zap },
           ].map(({ label, value, sub, icon: Icon }) => (
-            <div key={label} className="border border-border/60 rounded-lg px-3.5 py-3 bg-card shadow-sm flex items-start gap-3">
-              <div className="p-1.5 rounded-md bg-primary/7 border border-primary/10 mt-0.5 shrink-0">
+            <div
+              key={label}
+              className="border border-border/70 rounded-xl px-3.5 py-3 bg-card flex items-start gap-3"
+              style={{ boxShadow: 'var(--shadow-xs)' }}
+            >
+              <div className="h-7 w-7 rounded-lg bg-primary/[0.07] border border-primary/10 flex items-center justify-center mt-0.5 shrink-0">
                 <Icon className="h-3.5 w-3.5 text-primary" />
               </div>
               <div className="min-w-0">
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground leading-none">{label}</p>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground leading-none">{label}</p>
                 <p className="text-lg font-bold tabular-nums mt-1 leading-none">{value}</p>
                 {sub && <p className="text-[10px] text-muted-foreground mt-1">{sub}</p>}
               </div>
@@ -511,17 +526,20 @@ export function CreativeAnalyzer({ accessToken, selectedAccount }: CreativeAnaly
       )}
 
       {/* ── AI Analysis ────────────────────────────────────────── */}
-      <div className={cn(
-        'border rounded-xl bg-card shadow-sm overflow-hidden transition-all duration-300',
-        isLoading ? 'border-primary/40 shadow-[0_0_0_1px_hsl(221_83%_53%_/_0.08)]' : 'border-primary/20',
-      )}>
+      <div
+        className={cn(
+          'border rounded-xl bg-card overflow-hidden transition-all duration-300',
+          isLoading ? 'border-primary/40' : 'border-border/70',
+        )}
+        style={{ boxShadow: 'var(--shadow-sm)' }}
+      >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-3 border-b border-primary/10 bg-primary/[0.03]">
+        <div className="flex items-center justify-between px-5 py-3 border-b border-border/60 bg-primary/[0.03]">
           <div className="flex items-center gap-2.5">
-            <div className={cn('h-6 w-6 rounded-md flex items-center justify-center transition-colors', isLoading ? 'bg-primary/20' : 'bg-primary/10')}>
+            <div className={cn('h-6 w-6 rounded-md flex items-center justify-center transition-colors border border-primary/10', isLoading ? 'bg-primary/20' : 'bg-primary/[0.07]')}>
               <Sparkles className={cn('h-3.5 w-3.5 text-primary', isLoading && 'animate-pulse')} />
             </div>
-            <span className="text-sm font-semibold">AI Analysis</span>
+            <span className="text-sm font-bold">AI Analysis</span>
             {isLoading && (
               <div className="flex gap-0.5 items-center ml-0.5">
                 {[0, 1, 2].map(i => (
@@ -559,8 +577,8 @@ export function CreativeAnalyzer({ accessToken, selectedAccount }: CreativeAnaly
             <div className="px-5 py-4 space-y-5">
               {messages.length === 0 && !isLoading && (
                 <div className="h-full flex flex-col items-center justify-center py-20 text-center">
-                  <div className="h-10 w-10 rounded-xl bg-primary/8 border border-primary/15 flex items-center justify-center mb-3">
-                    <Sparkles className="h-4.5 w-4.5 text-primary/60" />
+                  <div className="h-12 w-12 rounded-xl bg-primary/[0.06] border border-primary/10 flex items-center justify-center mb-4">
+                    <Sparkles className="h-5 w-5 text-primary/70" />
                   </div>
                   <p className="text-sm text-muted-foreground">Analysis will appear here once data loads</p>
                   <p className="text-xs text-muted-foreground/60 mt-1">Ask anything about your creatives below</p>
@@ -570,11 +588,11 @@ export function CreativeAnalyzer({ accessToken, selectedAccount }: CreativeAnaly
               {messages.map((msg, i) => (
                 <div key={i} className={msg.role === 'user' ? 'flex justify-end' : 'flex flex-col gap-0'}>
                   {msg.role === 'user' ? (
-                    <div className="bg-primary text-primary-foreground rounded-2xl rounded-tr-sm px-4 py-2.5 text-sm max-w-[75%] shadow-sm">
+                    <div className="bg-primary text-primary-foreground rounded-2xl rounded-tr-sm px-4 py-2.5 text-sm max-w-[75%]" style={{ boxShadow: 'var(--shadow-xs)' }}>
                       {msg.content}
                     </div>
                   ) : (
-                    <div className="rounded-2xl rounded-tl-sm bg-muted/30 border border-border/40 px-4 py-3.5">
+                    <div className="rounded-2xl rounded-tl-sm bg-secondary/40 border border-border/50 px-4 py-3.5">
                       <div className="prose prose-sm dark:prose-invert max-w-none
                         [&>*:first-child]:mt-0 [&>*:last-child]:mb-0
                         [&_h1]:text-base [&_h1]:font-bold [&_h1]:mt-5 [&_h1]:mb-2
@@ -605,10 +623,10 @@ export function CreativeAnalyzer({ accessToken, selectedAccount }: CreativeAnaly
                       className={cn(
                         'inline-flex items-center gap-2 text-[11px] px-3 py-1.5 rounded-full border w-fit transition-all duration-300',
                         evt.status === 'running'
-                          ? 'bg-primary/5 border-primary/25 text-primary'
+                          ? 'bg-primary/[0.05] border-primary/25 text-primary'
                           : evt.status === 'error'
-                          ? 'bg-destructive/5 border-destructive/20 text-destructive/70 opacity-60'
-                          : 'bg-green-500/5 border-green-500/20 text-green-600 dark:text-green-400 opacity-70',
+                          ? 'bg-destructive/[0.05] border-destructive/20 text-destructive/70 opacity-60'
+                          : 'bg-success/[0.05] border-success/20 text-success opacity-70',
                       )}
                     >
                       {evt.status === 'running' ? (
@@ -625,7 +643,7 @@ export function CreativeAnalyzer({ accessToken, selectedAccount }: CreativeAnaly
               )}
 
               {isLoading && (messages.length === 0 || messages[messages.length - 1]?.role !== 'assistant') && (
-                <div className="rounded-2xl rounded-tl-sm bg-muted/20 border border-border/30 px-4 py-3">
+                <div className="rounded-2xl rounded-tl-sm bg-secondary/30 border border-border/40 px-4 py-3">
                   <TypingDots />
                 </div>
               )}
@@ -640,15 +658,15 @@ export function CreativeAnalyzer({ accessToken, selectedAccount }: CreativeAnaly
 
         {/* Quick follow-up pills */}
         {messages.length > 0 && !isLoading && (
-          <div className="px-5 py-3 border-t border-border/40 bg-muted/10">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 mb-2">Follow-up</p>
+          <div className="px-5 py-3 border-t border-border/60 bg-secondary/20">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/60 mb-2">Follow-up</p>
             <div className="flex flex-wrap gap-1.5">
               {followUpQuestions.map(q => (
                 <button
                   key={q}
                   onClick={() => setInput(q)}
-                  className="text-[11px] px-2.5 py-1 rounded-full border border-border/60 text-muted-foreground
-                    hover:bg-primary/5 hover:border-primary/30 hover:text-foreground transition-all duration-150 cursor-pointer"
+                  className="text-[11px] px-2.5 py-1 rounded-full border border-border/60 bg-card text-muted-foreground
+                    hover:bg-primary/[0.05] hover:border-primary/30 hover:text-foreground transition-all duration-150 cursor-pointer"
                 >
                   {q}
                 </button>
@@ -665,13 +683,13 @@ export function CreativeAnalyzer({ accessToken, selectedAccount }: CreativeAnaly
         )}
 
         {/* Input */}
-        <form onSubmit={handleSubmit} className="flex gap-2 px-4 py-3 border-t border-border/40 bg-muted/5">
+        <form onSubmit={handleSubmit} className="flex gap-2 px-4 py-3 border-t border-border/60 bg-secondary/20">
           <Input
             value={input}
             onChange={e => setInput(e.target.value)}
             placeholder="Ask about your creatives — fatigue, patterns, what to do next..."
             disabled={isLoading || isLoadingData}
-            className="flex-1 h-9 text-sm"
+            className="flex-1 h-9 text-sm bg-card"
           />
           {isLoading ? (
             <Button type="button" size="icon" variant="ghost" onClick={cancel} className="h-9 w-9 text-muted-foreground hover:text-destructive">

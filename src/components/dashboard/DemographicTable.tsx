@@ -8,9 +8,10 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
-import { ArrowUpDown, Search, Building, Briefcase, Factory, Users, Globe } from 'lucide-react';
+import { ArrowUpDown, ArrowUp, ArrowDown, Search, Building, Briefcase, Factory, Users, Globe } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
+import { WidgetCard, EmptyState } from './widgets';
+import { cn } from '@/lib/utils';
 import { DemographicItem, DemographicPivot } from '@/hooks/useDemographicReporting';
 
 interface DemographicTableProps {
@@ -50,149 +51,135 @@ export function DemographicTable({ data, isLoading, pivot }: DemographicTablePro
 
   const filteredAndSortedData = useMemo(() => {
     let filtered = data;
-    
+
     if (searchQuery) {
       const query = searchQuery.toLowerCase();
-      filtered = data.filter(item => 
+      filtered = data.filter(item =>
         item.entityName.toLowerCase().includes(query)
       );
     }
-    
+
     return [...filtered].sort((a, b) => {
       const aValue = a[sortField];
       const bValue = b[sortField];
-      
+
       if (typeof aValue === 'string' && typeof bValue === 'string') {
-        return sortDirection === 'asc' 
-          ? aValue.localeCompare(bValue) 
+        return sortDirection === 'asc'
+          ? aValue.localeCompare(bValue)
           : bValue.localeCompare(aValue);
       }
-      
-      return sortDirection === 'asc' 
-        ? (aValue as number) - (bValue as number) 
+
+      return sortDirection === 'asc'
+        ? (aValue as number) - (bValue as number)
         : (bValue as number) - (aValue as number);
     });
   }, [data, searchQuery, sortField, sortDirection]);
 
-  const SortButton = ({ field, children }: { field: SortField; children: React.ReactNode }) => (
-    <Button
-      variant="ghost"
-      size="sm"
-      className="h-8 px-2 hover:bg-muted/50"
+  const SortHeader = ({ field, label, align }: { field: SortField; label: string; align?: 'right' }) => (
+    <button
       onClick={() => handleSort(field)}
+      className={cn(
+        'inline-flex items-center gap-1 font-semibold text-muted-foreground hover:text-foreground transition-colors',
+        align === 'right' && 'flex-row-reverse'
+      )}
     >
-      {children}
-      <ArrowUpDown className="ml-1 h-3 w-3" />
-    </Button>
+      {label}
+      {sortField === field ? (
+        sortDirection === 'asc' ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+      ) : (
+        <ArrowUpDown className="h-3 w-3 opacity-40" />
+      )}
+    </button>
   );
 
   if (isLoading) {
     return (
-      <div className="space-y-3">
-        <Skeleton className="h-10 w-full" />
-        <Skeleton className="h-10 w-full" />
-        <Skeleton className="h-10 w-full" />
-        <Skeleton className="h-10 w-full" />
-        <Skeleton className="h-10 w-full" />
-      </div>
+      <WidgetCard title="Demographic analytics">
+        <div className="space-y-3">
+          {[...Array(5)].map((_, i) => (
+            <Skeleton key={i} className="h-10 w-full" />
+          ))}
+        </div>
+      </WidgetCard>
     );
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-4">
-        <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+    <WidgetCard
+      noPadding
+      title="Demographic analytics"
+      subtitle={`${filteredAndSortedData.length} ${pivotInfo.plural}`}
+      toolbar={
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <Input
-            placeholder={`Search ${pivotInfo.plural}...`}
+            placeholder={`Search ${pivotInfo.plural}…`}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-9"
+            className="h-8 w-[220px] pl-8 text-sm"
           />
         </div>
-        <span className="text-sm text-muted-foreground">
-          {filteredAndSortedData.length} {pivotInfo.plural}
-        </span>
-      </div>
-
-      <div className="rounded-lg border border-border/50 overflow-x-auto">
+      }
+    >
+      {filteredAndSortedData.length === 0 ? (
+        <EmptyState
+          icon={IconComponent}
+          title="No demographic data"
+          description={
+            searchQuery
+              ? `No ${pivotInfo.plural} match your search.`
+              : 'LinkedIn returns empty results below its 300-impression privacy threshold.'
+          }
+        />
+      ) : (
         <Table className="min-w-[800px]">
           <TableHeader>
-            <TableRow className="bg-muted/30 hover:bg-muted/30">
-              <TableHead className="min-w-[180px]">
-                <SortButton field="entityName">{pivotInfo.singular}</SortButton>
-              </TableHead>
-              <TableHead className="text-right">
-                <SortButton field="impressions">Impressions</SortButton>
-              </TableHead>
-              <TableHead className="text-right">
-                <SortButton field="clicks">Clicks</SortButton>
-              </TableHead>
-              <TableHead className="text-right">
-                <SortButton field="spent">Spent</SortButton>
-              </TableHead>
-              <TableHead className="text-right">
-                <SortButton field="leads">Leads</SortButton>
-              </TableHead>
-              <TableHead className="text-right">
-                <SortButton field="ctr">CTR</SortButton>
-              </TableHead>
-              <TableHead className="text-right">
-                <SortButton field="cpc">CPC</SortButton>
-              </TableHead>
-              <TableHead className="text-right">
-                <SortButton field="cpm">CPM</SortButton>
-              </TableHead>
+            <TableRow className="border-border hover:bg-transparent bg-secondary/40">
+              <TableHead className="min-w-[180px]"><SortHeader field="entityName" label={pivotInfo.singular} /></TableHead>
+              <TableHead className="text-right"><SortHeader field="impressions" label="Impressions" align="right" /></TableHead>
+              <TableHead className="text-right"><SortHeader field="clicks" label="Clicks" align="right" /></TableHead>
+              <TableHead className="text-right"><SortHeader field="spent" label="Spent" align="right" /></TableHead>
+              <TableHead className="text-right"><SortHeader field="leads" label="Leads" align="right" /></TableHead>
+              <TableHead className="text-right"><SortHeader field="ctr" label="CTR" align="right" /></TableHead>
+              <TableHead className="text-right"><SortHeader field="cpc" label="CPC" align="right" /></TableHead>
+              <TableHead className="text-right"><SortHeader field="cpm" label="CPM" align="right" /></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filteredAndSortedData.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={8} className="h-24 text-center text-muted-foreground">
-                  <div className="flex flex-col items-center gap-2">
-                    <IconComponent className="h-8 w-8 opacity-50" />
-                    <span>No demographic data available</span>
+            {filteredAndSortedData.map((item, index) => (
+              <TableRow key={item.entityUrn || index} className="border-border hover:bg-secondary/30 [&>td]:py-2.5">
+                <TableCell className="font-medium">
+                  <div className="flex items-center gap-2">
+                    <IconComponent className="h-4 w-4 text-muted-foreground shrink-0" />
+                    <span className="break-words">{item.entityName}</span>
                   </div>
                 </TableCell>
+                <TableCell className="text-right tabular-nums">
+                  {item.impressions.toLocaleString()}
+                </TableCell>
+                <TableCell className="text-right tabular-nums">
+                  {item.clicks.toLocaleString()}
+                </TableCell>
+                <TableCell className="text-right tabular-nums">
+                  ${item.spent.toFixed(2)}
+                </TableCell>
+                <TableCell className="text-right tabular-nums">
+                  {item.leads.toLocaleString()}
+                </TableCell>
+                <TableCell className="text-right tabular-nums">
+                  {item.ctr.toFixed(2)}%
+                </TableCell>
+                <TableCell className="text-right tabular-nums">
+                  ${item.cpc.toFixed(2)}
+                </TableCell>
+                <TableCell className="text-right tabular-nums">
+                  ${item.cpm.toFixed(2)}
+                </TableCell>
               </TableRow>
-            ) : (
-              filteredAndSortedData.map((item, index) => (
-                <TableRow key={item.entityUrn || index} className="hover:bg-muted/20">
-                  <TableCell className="font-medium">
-                    <div className="flex items-center gap-2">
-                      <IconComponent className="h-4 w-4 text-muted-foreground shrink-0" />
-                      <span className="break-words">
-                        {item.entityName}
-                      </span>
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {item.impressions.toLocaleString()}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {item.clicks.toLocaleString()}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    ${item.spent.toFixed(2)}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {item.leads.toLocaleString()}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {item.ctr.toFixed(2)}%
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    ${item.cpc.toFixed(2)}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    ${item.cpm.toFixed(2)}
-                  </TableCell>
-                </TableRow>
-              ))
-            )}
+            ))}
           </TableBody>
         </Table>
-      </div>
-    </div>
+      )}
+    </WidgetCard>
   );
 }

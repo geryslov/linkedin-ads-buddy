@@ -35,6 +35,7 @@ import { AgenticChatDrawer } from "@/components/dashboard/AgenticChatDrawer";
 import { AccountHealthCheck } from "@/components/dashboard/AccountHealthCheck";
 import { PerformanceSegmentation } from "@/components/dashboard/PerformanceSegmentation";
 import { ConnectClaude } from "@/components/dashboard/ConnectClaude";
+import { CommandPalette } from "@/components/dashboard/CommandPalette";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { WidgetCard, EmptyState, StatusPill } from "@/components/dashboard/widgets";
@@ -206,6 +207,12 @@ export default function Dashboard() {
             <h1 className="font-semibold truncate">{meta.title}</h1>
           </div>
           <div className="flex items-center gap-2 shrink-0">
+            <CommandPalette
+              onNavigate={setActiveTab}
+              onConnectClaude={() => setConnectClaudeOpen(true)}
+              onLogout={logout}
+              isAdmin={isAdmin}
+            />
             <AccountSelector
               accounts={adAccounts}
               selectedAccount={selectedAccount}
@@ -241,6 +248,7 @@ export default function Dashboard() {
           </div>
 
         <ErrorBoundary resetKey={activeTab} label={meta.title}>
+        <div key={activeTab} className="animate-fade-in">
         {activeTab === "overview" && (
           <div className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -549,6 +557,7 @@ export default function Dashboard() {
             selectedAccount={selectedAccount}
           />
         )}
+        </div>{/* end animated tab wrapper */}
         </ErrorBoundary>
         </div>{/* end p-6 content wrapper */}
       </main>
