@@ -2391,12 +2391,11 @@ serve(async (req) => {
           
           console.log(`[get_demographic_analytics] Page returned ${pageElements.length} records, total so far: ${allElements.length}`);
           
-          // Check if there are more pages
-          const paging = analyticsData.paging;
-          if (paging && paging.total && (startOffset + pageElements.length) < paging.total) {
-            startOffset += pageSize;
-          } else if (pageElements.length === pageSize) {
-            // No paging info but got full page, try fetching more
+          // Continue only while the page came back completely full. Do NOT trust
+          // paging.total — for demographic pivots LinkedIn reports the underlying
+          // record count (not pivot-row count), and re-requesting with &start=
+          // can return the same rows again, which we would then double-count.
+          if (pageElements.length >= pageSize) {
             startOffset += pageSize;
           } else {
             hasMore = false;
@@ -2776,30 +2775,45 @@ serve(async (req) => {
         const pageSize = 10000;
         let hasMore = true;
         let totalReceived = 0;
-        
+        let prevPageSig = '';
+
         while (hasMore) {
           const paginatedUrl = `${analyticsUrl}&start=${startOffset}`;
           const analyticsResponse = await fetch(paginatedUrl, {
             headers: { 'Authorization': `Bearer ${accessToken}` },
           });
-          
+
           if (!analyticsResponse.ok) {
             const errorText = await analyticsResponse.text();
             console.error('[Error] Failed to fetch company demographic:', analyticsResponse.status, errorText);
-            return new Response(JSON.stringify({ 
+            return new Response(JSON.stringify({
               error: 'MEMBER_COMPANY pivot may not be available for this account',
               details: errorText,
-              elements: [] 
+              elements: []
             }), {
               status: 200,
               headers: { ...corsHeaders, 'Content-Type': 'application/json' },
             });
           }
-          
+
           const analyticsData = await analyticsResponse.json();
           const pageElements = analyticsData.elements || [];
+
+          // LinkedIn's adAnalytics finder does not reliably honor &start= for
+          // aggregated pivot queries — it can return the SAME page again. If this
+          // page is identical to the previous one, stop instead of re-summing
+          // (which would inflate every company's metrics by a whole-number factor).
+          const pageSig = pageElements.length > 0
+            ? `${pageElements.length}:${pageElements[0]?.pivotValue || ''}:${pageElements[pageElements.length - 1]?.pivotValue || ''}`
+            : 'empty';
+          if (pageElements.length > 0 && pageSig === prevPageSig) {
+            console.warn('[get_company_demographic] Duplicate page detected (LinkedIn ignored &start=); stopping pagination to avoid double-counting.');
+            break;
+          }
+          prevPageSig = pageSig;
+
           totalReceived += pageElements.length;
-          
+
           // Aggregate immediately instead of collecting all elements
           for (const el of pageElements) {
             const entityUrn = el.pivotValue || '';
@@ -2840,12 +2854,13 @@ serve(async (req) => {
             }
           }
           
-          const paging = analyticsData.paging;
-          if (pageElements.length === 0) {
-            hasMore = false;
-          } else if (paging && paging.total && (startOffset + pageElements.length) < paging.total) {
-            startOffset += pageElements.length;
-          } else if (!paging?.total && pageElements.length >= pageSize) {
+          // Only continue while the page came back completely full — the one
+          // trustworthy signal that more rows may exist. Do NOT consult
+          // paging.total: for demographic pivots LinkedIn reports the underlying
+          // record count (campaign×creative×company), not the pivot-row count,
+          // so trusting it made this loop re-request and re-sum the same
+          // companies, inflating every metric ~N×.
+          if (pageElements.length >= pageSize) {
             startOffset += pageElements.length;
           } else {
             hasMore = false;
@@ -2855,8 +2870,8 @@ serve(async (req) => {
             hasMore = false;
           }
         }
-        
-        console.log(`[get_company_demographic] Total received: ${totalReceived} records, aggregated to ${companyMap.size} unique companies`);
+
+        console.log(`[get_company_demographic] Total received: ${totalReceived} records, aggregated to ${companyMap.size} unique companies (ratio should be ~1:1 for timeGranularity=ALL)`);
 
         // Filter out zero-metric entries before sorting/slicing so totalCompanies and hasMore are accurate
         const allCompaniesSorted = Array.from(companyMap.entries())
@@ -3294,10 +3309,10 @@ serve(async (req) => {
                   if (requestedUrns.size === 0) break;
                 }
 
-                const paging = data.paging;
-                if (pageElements.length === 0) hasMorePages = false;
-                else if (paging?.total && (pageStart + pageElements.length) < paging.total) pageStart += pageElements.length;
-                else if (!paging?.total && pageElements.length >= pageSize) pageStart += pageElements.length;
+                // Continue only on a completely full page; never trust
+                // paging.total (LinkedIn's offset pagination is unreliable for
+                // pivot queries and re-returns rows we would double-count).
+                if (pageElements.length >= pageSize) pageStart += pageElements.length;
                 else hasMorePages = false;
               }
 
@@ -3544,10 +3559,10 @@ serve(async (req) => {
                 const pageElements = data.elements || [];
                 elements.push(...pageElements);
 
-                const paging = data.paging;
-                if (pageElements.length === 0) hasMorePages = false;
-                else if (paging?.total && (pageStart + pageElements.length) < paging.total) pageStart += pageElements.length;
-                else if (!paging?.total && pageElements.length >= pageSize) pageStart += pageElements.length;
+                // Continue only on a completely full page; never trust
+                // paging.total (LinkedIn's offset pagination is unreliable for
+                // pivot queries and re-returns rows we would double-count).
+                if (pageElements.length >= pageSize) pageStart += pageElements.length;
                 else hasMorePages = false;
               }
 
@@ -10788,11 +10803,10 @@ serve(async (req) => {
 
           console.log(`[get_company_engagement_report] Page at offset ${startOffset}: ${pageElements.length} records, total: ${allElements.length}`);
 
-          // Check pagination
-          const paging = analyticsData.paging;
-          if (paging && paging.total && (startOffset + pageElements.length) < paging.total) {
-            startOffset += pageSize;
-          } else if (pageElements.length === pageSize) {
+          // Continue only on a completely full page; never trust paging.total
+          // (LinkedIn's offset pagination is unreliable for pivot queries and
+          // re-returns rows we would double-count).
+          if (pageElements.length >= pageSize) {
             startOffset += pageSize;
           } else {
             hasMore = false;
