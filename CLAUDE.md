@@ -4,6 +4,8 @@ LinkedIn Ads Manager dashboard — React + Vite frontend, Supabase edge function
 
 Companion docs: [FEATURES.md](FEATURES.md) — what exists and where. [HISTORY.md](HISTORY.md) — how it got built.
 
+**At session start, read [FEATURES.md](FEATURES.md) and [HISTORY.md](HISTORY.md) before making changes** — they are the source of truth for current state and past decisions. A SessionStart hook ([.claude/hooks/load-docs.sh](.claude/hooks/load-docs.sh)) inlines FEATURES.md automatically, but read HISTORY.md when you need background.
+
 Both are kept current by a Stop hook ([.claude/hooks/docs-freshness.sh](.claude/hooks/docs-freshness.sh)): if `src/`, `supabase/`, or `mcp-server/` changed in a session and neither doc was touched, it blocks once and asks for an update. Update them in the same session as the code — don't let them drift.
 
 ## Stack
