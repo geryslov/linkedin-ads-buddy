@@ -30,6 +30,7 @@ import {
   CheckCircle2,
   Replace,
   PlusCircle,
+  MinusCircle,
   Save,
   FolderOpen,
   Upload,
@@ -73,7 +74,7 @@ export function CampaignTargetingEditor({
   
   // Campaign targeting state - now supports multiple campaigns
   const [selectedCampaignIds, setSelectedCampaignIds] = useState<string[]>([]);
-  const [updateMode, setUpdateMode] = useState<'append' | 'replace'>('append');
+  const [updateMode, setUpdateMode] = useState<'append' | 'replace' | 'exclude'>('append');
   const [isUpdating, setIsUpdating] = useState(false);
   
   // Saved audiences
@@ -443,7 +444,7 @@ export function CampaignTargetingEditor({
       if (successCount === totalCount) {
         toast({ 
           title: 'Targeting Updated', 
-          description: `Successfully ${updateMode === 'append' ? 'added' : 'replaced'} targeting on ${successCount} campaign(s).`,
+          description: `Successfully ${updateMode === 'append' ? 'added' : updateMode === 'exclude' ? 'excluded' : 'replaced'} targeting on ${successCount} campaign(s).`,
         });
         clearSelection();
         setSelectedCampaignIds([]);
@@ -550,12 +551,13 @@ export function CampaignTargetingEditor({
                     </TooltipTrigger>
                     <TooltipContent side="top" className="max-w-[200px] text-xs">
                       <p><strong>Append</strong> — AND with existing targeting (narrows audience).</p>
-                      <p className="mt-1"><strong>Replace</strong> — overwrites all existing targeting.</p>
+                      <p className="mt-1"><strong>Replace</strong> — overwrites the titles/skills facets.</p>
+                      <p className="mt-1"><strong>Exclude</strong> — adds them to the campaign's exclusions.</p>
                     </TooltipContent>
                   </Tooltip>
                 </label>
                 <div className="flex rounded-lg border border-border overflow-hidden">
-                  {(['append', 'replace'] as const).map(mode => (
+                  {(['append', 'replace', 'exclude'] as const).map(mode => (
                     <button
                       key={mode}
                       onClick={() => setUpdateMode(mode)}
@@ -565,8 +567,8 @@ export function CampaignTargetingEditor({
                           : 'bg-background text-muted-foreground hover:bg-muted hover:text-foreground'
                       }`}
                     >
-                      {mode === 'append' ? <PlusCircle className="h-3.5 w-3.5" /> : <Replace className="h-3.5 w-3.5" />}
-                      {mode === 'append' ? 'Append' : 'Replace'}
+                      {mode === 'append' ? <PlusCircle className="h-3.5 w-3.5" /> : mode === 'replace' ? <Replace className="h-3.5 w-3.5" /> : <MinusCircle className="h-3.5 w-3.5" />}
+                      {mode === 'append' ? 'Append' : mode === 'replace' ? 'Replace' : 'Exclude'}
                     </button>
                   ))}
                 </div>
