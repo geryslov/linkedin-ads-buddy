@@ -60,7 +60,7 @@ supabase/
 - Production URL: `https://linkedin-ads-buddy-production.up.railway.app/mcp`
 - OAuth Client ID (users type manually in Claude web): `linkedin-ads-buddy`
 - Auth model: user pastes their MCP API key UUID on the OAuth page → server resolves UUID → fresh LinkedIn token from `mcp_api_keys` table on every call
-- All 74+ edge function actions callable via the `call_linkedin_action` passthrough tool
+- All 67 edge function actions callable via the `call_linkedin_action` passthrough tool (except the platform-only writes, which 401 from MCP by construction — see Bulk Editing)
 
 ## Token flow
 
@@ -104,13 +104,20 @@ Sidebar group with two tools. Both are **platform-only writes** (JWT + can_write
 - **Creative thumbnails are not available for most creatives.** LinkedIn's `/rest/posts/{urn}` returns 403 `partnerApiPostsExternal` — that's a Marketing Developer Platform Partner-gated endpoint, not a scope issue. `/v2/shares` is deprecated. Without Partner status, `imageUrl` will be empty for `SPONSORED_STATUS_UPDATE`, `SPONSORED_UPDATE_NATIVE_DOCUMENT`, and `SPONSORED_INMAILS`. The Creative Gallery UI handles this by splitting into "with images" vs "No Preview Available" sections.
 - **`SPONSORED_INMAILS` ads reference `urn:li:adInMailContent:` URNs**, not posts. Filter these out before calling share content APIs — they will never resolve.
 - **Demographic analytics returns empty below LinkedIn's 300-impression privacy threshold.** Not a bug.
-- **Edge function `linkedin-api` is monolithic** (~13k lines). Search by `case '<action>':` to find handlers.
+- **`adAnalyticsV2?q=analytics` `paging.total` lies for demographic pivots** — it reports the underlying record count (campaign×creative×company), not the number of pivot rows, and the finder does not reliably honor `&start=`. Pagination loops must terminate on "page came back not completely full" (+ a duplicate-page guard), never on `paging.total`, or metrics inflate ~10× (see HISTORY, Jul 23).
+- **Edge function `linkedin-api` is monolithic** (~13.6k lines). Search by `case '<action>':` to find handlers.
+
+## UI / design
+
+Design tokens (palette, the DM Sans / Space Grotesk / Bricolage Grotesque type system, shadows, radius) live in [src/index.css](src/index.css) + [tailwind.config.ts](tailwind.config.ts); shared widgets in [widgets.tsx](src/components/dashboard/widgets.tsx). See FEATURES.md → **Design system**. Nav items carry an optional `hidden?: boolean` (frozen tabs) that the sidebar and ⌘K command palette both filter out while the route still works. A dashboard-wide [ErrorBoundary](src/components/ErrorBoundary.tsx) wraps the tab content so a render crash shows a recoverable error card (with the message) instead of unmounting the whole tree to a blank page.
 
 ## Common pitfalls
 
 - Editing edge function without deploying → changes never take effect. Watch for stale behavior.
+- **`bun run build` / `vite build` is NOT the type gate.** esbuild strips types without checking them, and root `tsconfig.json` has no `files`, so `tsc --noEmit` checks nothing. Always type-check with **`tsc -p tsconfig.app.json --noEmit`** — that's what catches "X is not defined" and generics regressions before they ship.
 - `imageUrl: undefined` gets stripped by `JSON.stringify` — so a missing key in the response means the extraction produced empty, not that the field doesn't exist in the code.
 - The MCP server hardcodes Supabase URL + anon key (no env vars) — intentional for simplicity, do not add env setup unless there's a reason.
+- A Radix `<SelectItem>` value can never be `""` — when mapping user-supplied data (e.g. CSV headers) into items, trim + drop empties first or the whole view crashes.
 
 ## Preferences
 
