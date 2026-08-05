@@ -88,6 +88,8 @@ Groups and items:
 - **Campaign targeting editing** — [CampaignTargetingEditor](src/components/dashboard/CampaignTargetingEditor.tsx), writes targeting back to LinkedIn (surfaced under **Bulk Editing → Campaign Editor**)
 - **CSV export** — most report tables, via [exportUtils](src/lib/exportUtils.ts)
 - **MCP setup** — [ConnectClaude](src/components/dashboard/ConnectClaude.tsx)
+- **Error boundary** — [ErrorBoundary](src/components/ErrorBoundary.tsx) wraps the dashboard tab content (in [Dashboard.tsx](src/pages/Dashboard.tsx)); a render crash shows a recoverable card with the error message instead of a blank page, and resets on tab change
+- **Command palette** — [CommandPalette](src/components/dashboard/CommandPalette.tsx), ⌘K to jump to any screen/action (built off the sidebar's exported `navGroups`; AI Advisor moved to ⌘J)
 
 ## Design system
 
