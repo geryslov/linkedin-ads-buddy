@@ -8417,7 +8417,28 @@ serve(async (req) => {
             // Step 5: Build targeting criteria
             let targetingCriteria: any;
             
-            if (mode === 'replace') {
+            if (mode === 'exclude') {
+              // EXCLUDE MODE — leave include untouched, merge into exclusion facets.
+              const existingExcludeOr: Record<string, string[]> = existingTargeting?.exclude?.or || {};
+              const mergedOr: Record<string, string[]> = { ...existingExcludeOr };
+
+              const mergeFacet = (facet: string, urns: string[]) => {
+                const current = Array.isArray(mergedOr[facet]) ? mergedOr[facet] : [];
+                mergedOr[facet] = Array.from(new Set([...current, ...urns]));
+              };
+
+              if (titleUrns && titleUrns.length > 0) {
+                mergeFacet('urn:li:adTargetingFacet:titles', titleUrns);
+              }
+              if (skillUrns && skillUrns.length > 0) {
+                mergeFacet('urn:li:adTargetingFacet:skills', skillUrns);
+              }
+
+              targetingCriteria = {
+                include: existingTargeting?.include || { and: [] },
+                exclude: { or: mergedOr }
+              };
+            } else if (mode === 'replace') {
               // Preserve ALL existing facets except the ones we're explicitly replacing.
               // Previous logic dropped any clause that wasn't a "required" facet, which broke
               // Message/Conversation Ads campaigns that require industries/seniorities/etc to stay.
