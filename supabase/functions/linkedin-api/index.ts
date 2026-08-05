@@ -8615,7 +8615,7 @@ serve(async (req) => {
         return new Response(JSON.stringify({ 
           success: allSuccess,
           message: allSuccess 
-            ? `Targeting ${mode === 'append' ? 'appended' : 'replaced'} on ${successCount} campaign(s)`
+            ? `Targeting ${mode === 'append' ? 'appended' : mode === 'exclude' ? 'excluded' : 'replaced'} on ${successCount} campaign(s)`
             : `${successCount}/${idsToUpdate.length} campaigns updated`,
           results,
           titlesAdded: titleUrns?.length || 0,
