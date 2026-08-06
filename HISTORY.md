@@ -192,9 +192,11 @@ Deploying and migrating both stalled on Supabase access tokens that authenticate
 almost certainly explains the edge-function CI failure that has been blamed on an expired secret
 since June. Same symptom, same fix: an unrestricted token.
 
-`scripts/setup-product.py` exists because of this — it verifies project access *first* and explains
+The product's setup script exists because of this — it verifies project access *first* and explains
 the failure, rather than letting a 403 three steps later be the symptom, then applies both
-migrations, deploys the function, and mints the `mcp_server` JWT.
+migrations, deploys the function, and mints the `mcp_server` JWT. (Written here as
+`scripts/setup-product.py`; moved to `scripts/setup.py` in `geryslov/ads-manager-hub-2bd81d31` on
+2026-08-06 when the product's auth function and schema moved to that repo.)
 
 ### The hole that turned out to be public
 

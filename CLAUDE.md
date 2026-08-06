@@ -24,7 +24,8 @@ Both are kept current by a Stop hook ([.claude/hooks/docs-freshness.sh](.claude/
 | MCP server (product) | `mcp-server/` → `npm run start:product` | **Service does not exist yet** — create it |
 | Product site | separate repo `geryslov/ads-manager-hub-2bd81d31` | Lovable |
 | Edge functions | `supabase/functions/**` | Workflow exists but is **currently failing** — treat as manual |
-| DB migrations | `supabase/migrations/` | **No — manual via SQL Editor**, or `scripts/setup-product.py` |
+| DB migrations | `supabase/migrations/` | **No — manual via SQL Editor** |
+| Product auth fn + schema | separate repo, function `mcp-auth` | its own `scripts/setup.py` |
 
 Both MCP servers build from the same `mcp-server/` folder and differ only in start command and env
 vars — two Railway services, one source tree, no fork.
@@ -39,15 +40,11 @@ Token from https://supabase.com/dashboard/account/tokens. It must be **unrestric
 token authenticates fine but returns `[]` from `/v1/projects` and 403s on deploy. That is the most
 likely cause of the CI failure too, and it is easy to misread as "expired".
 
-For the standalone product, [scripts/setup-product.py](scripts/setup-product.py) does the whole
-token-dependent half in one command — verifies project access, applies both product migrations via
-the Management API, deploys `linkedin-api`, and mints the `mcp_server` JWT:
-
-```bash
-export SUPABASE_ACCESS_TOKEN=sbp_...
-export SUPABASE_JWT_SECRET=...   # optional, Dashboard → Settings → API → JWT Settings
-python3 scripts/setup-product.py
-```
+**The standalone product does not live here.** Its edge function (`mcp-auth`), its migrations
+(`mcp_keys`, `resolve_mcp_key`) and its setup script are in `geryslov/ads-manager-hub-2bd81d31`.
+Run `python3 scripts/setup.py` **from that repo**, not this one. Both deploy to the same Supabase
+project, so `profiles` / `user_roles` / `has_role()` are shared — but this function is the shared
+LinkedIn *reporting* surface only, and the product's auth must not be duplicated into it.
 
 Idempotent. Everything it cannot do (Railway service, Lovable env vars, LinkedIn redirect URLs) it
 prints at the end.
@@ -75,12 +72,13 @@ mcp-server/
   railway.toml
 
 supabase/
-  functions/linkedin-api/index.ts # All LinkedIn API actions (71)
-  migrations/                     # Schema — mcp_api_keys (legacy), mcp_keys (product)
-
-scripts/
-  setup-product.py                # One-shot product setup (migrations + deploy + JWT)
+  functions/linkedin-api/index.ts # All LinkedIn API actions (67) — reporting only
+  migrations/                     # Schema — mcp_api_keys (legacy)
 ```
+
+The product's own pieces live in `geryslov/ads-manager-hub-2bd81d31`:
+`supabase/functions/mcp-auth/` (sign-in + key lifecycle), `supabase/migrations/` (`mcp_keys`,
+`resolve_mcp_key`), `scripts/setup.py`.
 
 ## MCP server
 
@@ -104,12 +102,16 @@ against a **separate table**. The key carries a `user_id`; resolution goes throu
 `resolve_mcp_key()`, re-checked every 60s so revocation lands on live sessions.
 
 Sign-in does **not** use Supabase's `linkedin_oidc` provider — that needs a dashboard toggle whose
-credentials already exist here as edge secrets, and it was a persistent source of
-`provider is not enabled`. Instead `linkedin_signin` (unauthenticated by necessity — the caller is
-signing in; the LinkedIn authorization code is the credential) exchanges the code, reads
-`/v2/userinfo`, finds-or-creates the Supabase user, stores the ads token, and returns a one-time
-`hashed_token` from `generateLink` that the browser redeems with `verifyOtp`. The LinkedIn token
-never reaches the client. `link_mcp_key` / `connect_linkedin` / `revoke_mcp_key` remain JWT-scoped.
+credentials already exist as edge secrets, and it was a persistent source of
+`provider is not enabled`. Instead `linkedin_signin` exchanges the code, reads `/v2/userinfo`,
+finds-or-creates the Supabase user, stores the ads token, and returns a one-time `hashed_token`
+from `generateLink` that the browser redeems with `verifyOtp`. The LinkedIn token never reaches
+the client.
+
+⚠️ **That action is not in this function.** `linkedin_signin`, `connect_linkedin`, `link_mcp_key`
+and `revoke_mcp_key` live in the product repo's `mcp-auth` function
+(`geryslov/ads-manager-hub-2bd81d31`). Do not re-add them here — this file is the shared reporting
+surface, and duplicating auth into it is how the two systems start to drift.
 
 ## Two MCP servers — keep them separate
 
@@ -148,17 +150,21 @@ Env vars for the product server: `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_
 
 ## LinkedIn OAuth scopes
 
-`get_auth_url` serves two **mutually exclusive** scope sets, selected by `params.scopeSet`:
+Two **mutually exclusive** scope sets, one per product — served by two different functions:
 
 ```
-legacy (default)  r_liteprofile r_ads r_ads_reporting rw_ads w_member_social r_marketing_leadgen_automation
-oidc              openid profile email r_ads r_ads_reporting rw_ads r_marketing_leadgen_automation
+this app    linkedin-api → get_auth_url
+            r_liteprofile r_ads r_ads_reporting rw_ads w_member_social r_marketing_leadgen_automation
+
+MCP product mcp-auth → get_auth_url   (in geryslov/ads-manager-hub-2bd81d31)
+            openid profile email r_ads r_ads_reporting rw_ads r_marketing_leadgen_automation
 ```
 
 They can't be merged: `r_liteprofile` is deprecated and ungrantable for apps created after Aug 2023,
-and requesting it alongside `openid` returns `unauthorized_scope_error`. `legacy` stays the default
-because `get_profile` calls `/v2/me`, which requires `r_liteprofile` — the old dashboard depends on
-it. OIDC callers should read identity from `/v2/userinfo`. Flip the default once the old app retires.
+and requesting it alongside `openid` returns `unauthorized_scope_error`. This app keeps
+`r_liteprofile` because `get_profile` calls `/v2/me`, which requires it. That incompatibility is
+*why* the product has its own authorize call rather than a flag on this one — OIDC callers read
+identity from `/v2/userinfo` instead.
 
 Bump `REQUIRED_SCOPE_VERSION` in [src/hooks/useLinkedInAuth.ts](src/hooks/useLinkedInAuth.ts) when scopes change — forces existing users to re-auth.
 

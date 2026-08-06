@@ -123,17 +123,15 @@ Agency → client publishing flow.
 
 | Function | Purpose |
 |---|---|
-| `linkedin-api` | Monolith (~14.3k lines), **71 actions**. All LinkedIn API access |
+| `linkedin-api` | Monolith (~14k lines), **67 actions**. LinkedIn reporting + writes. Product auth is NOT here — see `mcp-auth` in the product repo |
 | `analyze-data` | Claude calls. `DEFAULT_MODEL` = `claude-sonnet-4-20250514`, overridden per report type via `MODEL_BY_REPORT_TYPE` |
 | `apify-proxy` | Apify passthrough for Social Listener. Needs `APIFY_TOKEN` |
 
 `create-test-user` was **deleted 2026-08-05** — a public `verify_jwt = false` endpoint that minted email-confirmed accounts with the service role for anyone who knew the URL. ⚠️ Deleting the folder does not undeploy it; remove it in the Supabase dashboard (or `npx supabase functions delete create-test-user`) or it stays live.
 
-### `linkedin-api` actions (71)
+### `linkedin-api` actions (67)
 
 **Auth & accounts** — `get_auth_url`, `exchange_token`, `get_profile`, `get_ad_accounts`, `sync_ad_accounts`, `sync_mcp_token`
-
-**MCP product auth** (new 2026-08-05) — `linkedin_signin` (unauthenticated; sign-in), `link_mcp_key`, `connect_linkedin`, `revoke_mcp_key` (all JWT-scoped)
 
 **Campaigns & creatives** — `get_campaigns`, `get_campaign_report`, `get_campaign_group_performance`, `get_campaign_performance_report`, `get_creatives`, `get_creative_report`, `get_creative_names_report`, `get_creative_performance_report`, `get_creative_analytics`, `get_creative_fatigue`, `get_account_structure`, `update_campaign_status`, `update_campaign_targeting`, `bulk_copy_creatives`, `list_lead_forms`
 
@@ -195,7 +193,7 @@ Everything new in `tools.ts` sits behind `mode: "product"` and defaults to `"leg
 
 **Signup is approval-gated.** `profiles.access_status` defaults to `'pending'`, so a LinkedIn signup on the product site gets a profile and a key but `resolve_mcp_key` returns `access_denied` until an admin approves — the key is inert in the meantime. The migration adds the column with `default 'active'` and *then* flips the default, so pre-existing dashboard users are backfilled as active and only new signups are gated. Approve from `/admin` on the product site.
 
-⚠️ **Nothing seeds the first admin.** No migration inserts a `user_roles` row with `role = 'admin'`, so `/admin` is unreachable until you add one by hand after your first sign-in — `scripts/setup-product.py` prints the SQL. Without it, pending users cannot be approved by anyone.
+⚠️ **Nothing seeds the first admin.** No migration inserts a `user_roles` row with `role = 'admin'`, so `/admin` is unreachable until you add one by hand after your first sign-in — `scripts/setup.py` in the product repo prints the SQL. Without it, pending users cannot be approved by anyone.
 
 Key lifecycle actions are JWT-scoped: `link_mcp_key` (mint/rotate, derives `user_id` from the JWT), `connect_linkedin` (server-side code exchange; the token is stored, never returned to the browser — also the day-60 reconnect path), `revoke_mcp_key`.
 
@@ -204,7 +202,7 @@ Key lifecycle actions are JWT-scoped: `link_mcp_key` (mint/rotate, derives `user
 Does **not** use `signInWithOAuth({provider: "linkedin_oidc"})`. That needs the LinkedIn provider enabled in the Supabase dashboard, and enabling it repeatedly failed with `Unsupported provider: provider is not enabled` — confirmed against `/auth/v1/settings`, which showed `email` as the only enabled provider. Since the credentials it wants already exist as edge secrets, the flow runs through our own function instead:
 
 ```
-get_auth_url (scopeSet "oidc") → LinkedIn consent → /auth/callback?code=…
+mcp-auth get_auth_url (OIDC scopes) → LinkedIn consent → /auth/callback?code=…
   → linkedin_signin  (unauthenticated by necessity — the caller is signing in;
                       the LinkedIn authorization code is the credential)
        exchange code → /v2/userinfo → find-or-create user → store token in mcp_keys
@@ -220,14 +218,16 @@ Lives in a **separate repo**: `geryslov/ads-manager-hub-2bd81d31` (Lovable — T
 
 ### Rollout status — nothing below is live yet
 
-| Piece | State |
-|---|---|
-| Migrations `20260805120000` / `120100` | written, **not applied** — `mcp_keys` returns 404 |
-| `linkedin_signin` + `link_mcp_key` + `connect_linkedin` | written, **not deployed** — production returns `Unknown action` |
-| `src/server-product.ts` | written, **no Railway service exists** |
-| Product site | built and pushed; blocked on the three above |
+| Piece | Where | State |
+|---|---|---|
+| Migrations `20260805120000` / `120100` | product repo | written, **not applied** — `mcp_keys` returns 404 |
+| `mcp-auth` function (sign-in + key lifecycle) | product repo | written, **not deployed** |
+| `src/server-product.ts` | **here** | written, **no Railway service exists** |
+| Product site | product repo | built and pushed; blocked on the three above |
 
-All four are blocked on one thing: a Supabase access token with project access. [scripts/setup-product.py](scripts/setup-product.py) does the token-dependent half in one command.
+All four are blocked on one thing: a Supabase access token with project access. Run
+`python3 scripts/setup.py` **from `geryslov/ads-manager-hub-2bd81d31`** — it applies the product
+migrations and deploys `mcp-auth`. Nothing in this repo needs to be deployed for the product.
 
 ## Known gaps
 
