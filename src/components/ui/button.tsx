@@ -10,19 +10,19 @@ const buttonVariants = cva(
     variants: {
       variant: {
         default:
-          "bg-primary text-primary-foreground shadow-md hover:bg-primary/90 hover:shadow-lg active:scale-[0.98]",
+          "bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 hover:shadow-primary active:scale-[0.98]",
         destructive:
-          "bg-destructive text-destructive-foreground shadow-md hover:bg-destructive/90",
+          "bg-destructive text-destructive-foreground shadow-sm hover:bg-destructive/90",
         outline:
-          "border border-border bg-transparent text-foreground hover:bg-secondary hover:border-primary/50",
+          "border border-border bg-card text-foreground shadow-xs hover:bg-secondary hover:border-primary/40",
         secondary:
           "bg-secondary text-secondary-foreground hover:bg-secondary/80",
         ghost: "text-foreground hover:bg-secondary hover:text-foreground",
         link: "text-primary underline-offset-4 hover:underline",
         linkedin:
-          "bg-[hsl(201,100%,35%)] text-foreground shadow-md hover:bg-[hsl(201,100%,30%)] hover:shadow-lg active:scale-[0.98]",
+          "bg-[hsl(201,100%,35%)] text-white shadow-sm hover:bg-[hsl(201,100%,30%)] hover:shadow-md active:scale-[0.98]",
         hero:
-          "bg-gradient-to-r from-[hsl(199,89%,48%)] to-[hsl(201,100%,35%)] text-[hsl(222,47%,6%)] shadow-lg hover:shadow-xl active:scale-[0.98] font-bold",
+          "gradient-primary text-white shadow-lg glow-primary hover:brightness-110 active:scale-[0.98] font-bold",
         glass:
           "bg-card/80 backdrop-blur-xl border border-border/50 text-foreground hover:bg-card/90",
       },

@@ -26,48 +26,40 @@ export function MetricCard({
   return (
     <div
       className={cn(
-        "relative bg-card rounded-lg p-5 animate-slide-up overflow-hidden",
-        "border border-border/70 shadow-sm",
-        "flex flex-col gap-3"
+        "group relative bg-card rounded-xl p-5 animate-slide-up overflow-hidden",
+        "border border-border/70 card-hover",
+        "flex flex-col gap-4"
       )}
       style={{
         animationDelay: `${delay}ms`,
         boxShadow: "var(--shadow-sm)",
       }}
     >
-      {/* Left-edge accent bar — encodes card type visually */}
-      <span
-        className={cn(
-          "absolute left-0 top-0 bottom-0 w-0.5 rounded-l",
-          changeType === "positive" ? "bg-success" :
-          changeType === "negative" ? "bg-destructive" :
-          "bg-primary/40"
-        )}
+      {/* Corner wash — barely-there brand tint, top right */}
+      <div
+        aria-hidden
+        className="absolute -top-10 -right-10 h-28 w-28 rounded-full opacity-[0.06] group-hover:opacity-[0.10] transition-opacity"
+        style={{ background: "var(--gradient-primary)" }}
       />
 
-      {/* Top row: icon (left) + trend badge (right) */}
-      <div className="flex items-start justify-between">
-        <div className={cn(
-          "p-2 rounded-md",
-          "bg-primary/8 border border-primary/12"
-        )}
-          style={{ background: "hsl(221 83% 53% / 0.07)", border: "1px solid hsl(221 83% 53% / 0.12)" }}
-        >
-          <Icon className="h-4 w-4 text-primary" />
+      {/* Label row: icon chip + label left, trend badge right */}
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="h-7 w-7 rounded-lg flex items-center justify-center shrink-0 bg-primary/[0.07] border border-primary/10">
+            <Icon className="h-3.5 w-3.5 text-primary" />
+          </div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground truncate">
+            {title}
+          </p>
         </div>
         {change && (
           <span
             className={cn(
-              "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold border",
-              changeType === "positive" && "bg-success/8 text-success border-success/20",
-              changeType === "negative" && "bg-destructive/8 text-destructive border-destructive/20",
-              changeType === "neutral" && "bg-muted text-muted-foreground border-border"
+              "inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] font-semibold shrink-0",
+              changeType === "positive" && "bg-success/10 text-success",
+              changeType === "negative" && "bg-destructive/10 text-destructive",
+              changeType === "neutral" && "bg-muted text-muted-foreground"
             )}
-            style={
-              changeType === "positive" ? { background: "hsl(142 71% 45% / 0.08)" } :
-              changeType === "negative" ? { background: "hsl(0 72% 51% / 0.08)" } :
-              undefined
-            }
           >
             <TrendIcon className="h-3 w-3" />
             {change}
@@ -75,15 +67,10 @@ export function MetricCard({
         )}
       </div>
 
-      {/* Label + value */}
-      <div>
-        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1 leading-none">
-          {title}
-        </p>
-        <p className="text-2xl font-bold tracking-tight tabular-nums text-foreground leading-tight">
-          {value}
-        </p>
-      </div>
+      {/* Hero number */}
+      <p className="text-[28px] font-bold tracking-tight tabular-nums text-foreground leading-none">
+        {value}
+      </p>
     </div>
   );
 }

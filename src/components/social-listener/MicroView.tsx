@@ -18,7 +18,7 @@ const PLATFORM_ICONS: Record<SocialPlatform, React.ElementType> = {
 };
 
 const PLATFORM_COLORS: Record<SocialPlatform, string> = {
-  linkedin: '#2563EB',
+  linkedin: '#2a78d6',
   twitter: '#0EA5E9',
   instagram: '#EC4899',
 };
@@ -259,7 +259,7 @@ export function MicroView({ profiles, profileStatsList, getPostsForProfile }: Mi
                         width={30}
                       />
                       <Tooltip contentStyle={{ fontSize: 11, borderRadius: 6 }} />
-                      <Bar dataKey="reactions" name="Reactions" fill="#2563EB" radius={[2, 2, 0, 0]} />
+                      <Bar dataKey="reactions" name="Reactions" fill="#2a78d6" radius={[2, 2, 0, 0]} />
                       <Bar dataKey="comments" name="Comments" fill="#10B981" radius={[2, 2, 0, 0]} />
                       <Bar dataKey="reposts" name="Reposts" fill="#F97316" radius={[2, 2, 0, 0]} />
                     </BarChart>

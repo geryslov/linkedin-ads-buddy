@@ -1,15 +1,12 @@
 import { useEffect, useState, useMemo } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Badge } from '@/components/ui/badge';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Input } from '@/components/ui/input';
+import { WidgetCard, EmptyState, SegmentedControl, ChartLegend } from './widgets';
 import {
   RefreshCw,
   Building2,
-  TrendingUp,
   Eye,
   MousePointerClick,
   Users,
@@ -20,6 +17,8 @@ import {
   X,
   Search,
   ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
 } from 'lucide-react';
 import {
   LineChart,
@@ -29,7 +28,6 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  Legend,
   AreaChart,
   Area,
 } from 'recharts';
@@ -37,6 +35,7 @@ import { useCompanyEngagementTimeline, CompanyTimeline } from '@/hooks/useCompan
 import { TimeFrameSelector } from './TimeFrameSelector';
 import { useToast } from '@/hooks/use-toast';
 import { exportToCSV } from '@/lib/exportUtils';
+import { cn } from '@/lib/utils';
 import {
   Table,
   TableBody,
@@ -60,11 +59,11 @@ function normalizeCompanyUrn(urn: string): { id: string | null } {
 }
 
 // Inline editing component for company names
-function EditableCompanyName({ 
-  company, 
-  onNameUpdate 
-}: { 
-  company: CompanyTimeline; 
+function EditableCompanyName({
+  company,
+  onNameUpdate
+}: {
+  company: CompanyTimeline;
   onNameUpdate?: (orgId: string, name: string) => Promise<{ success: boolean }>;
 }) {
   const [isEditing, setIsEditing] = useState(false);
@@ -132,12 +131,32 @@ const CHART_COLORS = [
   'hsl(var(--chart-3))',
   'hsl(var(--chart-4))',
   'hsl(var(--chart-5))',
-  '#10b981',
-  '#f59e0b',
-  '#ef4444',
-  '#8b5cf6',
-  '#ec4899',
+  'hsl(var(--chart-6))',
+  'hsl(var(--chart-7))',
+  'hsl(var(--chart-8))',
 ];
+
+const CHART_TOOLTIP_STYLE = {
+  fontSize: 12,
+  backgroundColor: 'hsl(var(--card))',
+  border: '1px solid hsl(var(--border))',
+  borderRadius: 8,
+  color: 'hsl(var(--foreground))',
+};
+
+const AXIS_TICK = { fontSize: 11, fill: 'hsl(var(--muted-foreground))' };
+
+function StatTile({ label, value, accent }: { label: string; value: string | number; accent?: boolean }) {
+  return (
+    <div
+      className="bg-card border border-border/70 rounded-xl px-4 py-3"
+      style={{ boxShadow: 'var(--shadow-xs)' }}
+    >
+      <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground leading-none">{label}</p>
+      <p className={cn('text-xl font-bold tabular-nums mt-1.5 leading-none', accent && 'text-primary')}>{value}</p>
+    </div>
+  );
+}
 
 export function CompanyEngagementTimeline({ accessToken, selectedAccount }: CompanyEngagementTimelineProps) {
   const {
@@ -175,20 +194,20 @@ export function CompanyEngagementTimeline({ accessToken, selectedAccount }: Comp
 
   const filteredAndSortedCompanies = useMemo(() => {
     if (!data?.topCompanies) return [];
-    
+
     let filtered = data.topCompanies;
-    
+
     if (searchQuery) {
       const query = searchQuery.toLowerCase();
-      filtered = data.topCompanies.filter(company => 
+      filtered = data.topCompanies.filter(company =>
         company.companyName.toLowerCase().includes(query)
       );
     }
-    
+
     return [...filtered].sort((a, b) => {
       let aValue: number | string;
       let bValue: number | string;
-      
+
       switch (sortField) {
         case 'companyName':
           aValue = a.companyName;
@@ -226,15 +245,15 @@ export function CompanyEngagementTimeline({ accessToken, selectedAccount }: Comp
           aValue = a.totals.impressions;
           bValue = b.totals.impressions;
       }
-      
+
       if (typeof aValue === 'string' && typeof bValue === 'string') {
-        return sortDirection === 'asc' 
-          ? aValue.localeCompare(bValue) 
+        return sortDirection === 'asc'
+          ? aValue.localeCompare(bValue)
           : bValue.localeCompare(aValue);
       }
-      
-      return sortDirection === 'asc' 
-        ? (aValue as number) - (bValue as number) 
+
+      return sortDirection === 'asc'
+        ? (aValue as number) - (bValue as number)
         : (bValue as number) - (aValue as number);
     });
   }, [data?.topCompanies, searchQuery, sortField, sortDirection]);
@@ -255,16 +274,21 @@ export function CompanyEngagementTimeline({ accessToken, selectedAccount }: Comp
   const totalCpc = tableTotals.clicks > 0 ? tableTotals.spend / tableTotals.clicks : 0;
   const totalCpm = tableTotals.impressions > 0 ? (tableTotals.spend / tableTotals.impressions) * 1000 : 0;
 
-  const SortButton = ({ field, children }: { field: SortField; children: React.ReactNode }) => (
-    <Button
-      variant="ghost"
-      size="sm"
-      className="h-8 px-2 hover:bg-muted/50"
+  const SortButton = ({ field, children, align }: { field: SortField; children: React.ReactNode; align?: 'right' }) => (
+    <button
       onClick={() => handleSort(field)}
+      className={cn(
+        'inline-flex items-center gap-1 font-semibold text-muted-foreground hover:text-foreground transition-colors',
+        align === 'right' && 'flex-row-reverse'
+      )}
     >
       {children}
-      <ArrowUpDown className="ml-1 h-3 w-3" />
-    </Button>
+      {sortField === field ? (
+        sortDirection === 'asc' ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+      ) : (
+        <ArrowUpDown className="h-3 w-3 opacity-40" />
+      )}
+    </button>
   );
 
   useEffect(() => {
@@ -321,194 +345,161 @@ export function CompanyEngagementTimeline({ accessToken, selectedAccount }: Comp
 
   if (error) {
     return (
-      <Card className="bg-destructive/10 border-destructive/30">
-        <CardContent className="pt-4">
-          <p className="text-destructive">{error}</p>
-        </CardContent>
-      </Card>
+      <div className="rounded-xl border border-destructive/30 bg-destructive/[0.06] px-4 py-3">
+        <p className="text-destructive text-sm">{error}</p>
+      </div>
     );
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {/* Names Resolution Warning */}
       {data?.metadata?.namesResolutionFailed && (
-        <Alert className="border-yellow-500/50 bg-yellow-50 dark:bg-yellow-950/30">
-          <AlertTriangle className="h-4 w-4 text-yellow-600" />
-          <AlertTitle className="text-yellow-800 dark:text-yellow-200">
-            Some Company Names Unavailable
-          </AlertTitle>
-          <AlertDescription className="text-yellow-700 dark:text-yellow-300">
-            LinkedIn blocked automatic name resolution. Showing cached names and IDs for unknowns.
-            Click the edit icon next to any "Company 12345" to set a name manually.
-          </AlertDescription>
-        </Alert>
+        <div className="rounded-xl border border-warning/40 bg-warning/[0.07] px-4 py-3 flex gap-3">
+          <AlertTriangle className="h-4 w-4 text-warning shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm font-semibold text-foreground">Some Company Names Unavailable</p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              LinkedIn blocked automatic name resolution. Showing cached names and IDs for unknowns.
+              Click the edit icon next to any "Company 12345" to set a name manually.
+            </p>
+          </div>
+        </div>
       )}
 
       {/* Controls */}
-      <Card className="bg-card/50 backdrop-blur-sm border-border/50">
-        <CardContent className="pt-4">
-          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-            <TimeFrameSelector
-              timeFrameOptions={timeFrameOptions}
-              selectedTimeFrame={selectedTimeFrame}
-              onTimeFrameChange={handleTimeFrameChange}
-              timeGranularity="DAILY"
-              onGranularityChange={() => {}}
-              dateRange={dateRange}
-              onCustomDateChange={(start, end) => {
-                setDateRange({
-                  start: start.toISOString().split('T')[0],
-                  end: end.toISOString().split('T')[0],
-                });
-              }}
-            />
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={handleExport}>
-                <Download className="h-4 w-4 mr-2" />
-                Export
-              </Button>
-              <Button variant="outline" size="sm" onClick={handleRefresh}>
-                <RefreshCw className="h-4 w-4 mr-2" />
-                Refresh
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+        <TimeFrameSelector
+          timeFrameOptions={timeFrameOptions}
+          selectedTimeFrame={selectedTimeFrame}
+          onTimeFrameChange={handleTimeFrameChange}
+          timeGranularity="DAILY"
+          onGranularityChange={() => {}}
+          dateRange={dateRange}
+          onCustomDateChange={(start, end) => {
+            setDateRange({
+              start: start.toISOString().split('T')[0],
+              end: end.toISOString().split('T')[0],
+            });
+          }}
+        />
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={handleExport} className="h-8 text-xs gap-1.5">
+            <Download className="h-3.5 w-3.5" />
+            Export
+          </Button>
+          <Button variant="outline" size="sm" onClick={handleRefresh} className="h-8 text-xs gap-1.5">
+            <RefreshCw className="h-3.5 w-3.5" />
+            Refresh
+          </Button>
+        </div>
+      </div>
 
-      {/* Summary Cards */}
-      <div className="grid gap-4 grid-cols-2 md:grid-cols-4 lg:grid-cols-6">
-        <Card className="bg-card/50">
-          <CardContent className="pt-4">
-            <div className="text-xs text-muted-foreground">Companies Reached</div>
-            <div className="text-2xl font-bold">{data?.summary?.totalCompanies || 0}</div>
-          </CardContent>
-        </Card>
-        <Card className="bg-card/50">
-          <CardContent className="pt-4">
-            <div className="text-xs text-muted-foreground">Total Impressions</div>
-            <div className="text-2xl font-bold">{(data?.summary?.totalImpressions || 0).toLocaleString()}</div>
-          </CardContent>
-        </Card>
-        <Card className="bg-card/50">
-          <CardContent className="pt-4">
-            <div className="text-xs text-muted-foreground">Total Clicks</div>
-            <div className="text-2xl font-bold">{(data?.summary?.totalClicks || 0).toLocaleString()}</div>
-          </CardContent>
-        </Card>
-        <Card className="bg-card/50">
-          <CardContent className="pt-4">
-            <div className="text-xs text-muted-foreground">Total Leads</div>
-            <div className="text-2xl font-bold text-primary">{data?.summary?.totalLeads || 0}</div>
-          </CardContent>
-        </Card>
-        <Card className="bg-card/50">
-          <CardContent className="pt-4">
-            <div className="text-xs text-muted-foreground">Total Spend</div>
-            <div className="text-2xl font-bold">${(data?.summary?.totalSpend || 0).toFixed(2)}</div>
-          </CardContent>
-        </Card>
-        <Card className="bg-card/50">
-          <CardContent className="pt-4">
-            <div className="text-xs text-muted-foreground">Days in Range</div>
-            <div className="text-2xl font-bold">{data?.summary?.daysInRange || 0}</div>
-          </CardContent>
-        </Card>
+      {/* Summary tiles */}
+      <div className="grid gap-3 grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
+        <StatTile label="Companies Reached" value={data?.summary?.totalCompanies || 0} />
+        <StatTile label="Total Impressions" value={(data?.summary?.totalImpressions || 0).toLocaleString()} />
+        <StatTile label="Total Clicks" value={(data?.summary?.totalClicks || 0).toLocaleString()} />
+        <StatTile label="Total Leads" value={data?.summary?.totalLeads || 0} accent />
+        <StatTile label="Total Spend" value={`$${(data?.summary?.totalSpend || 0).toFixed(2)}`} />
+        <StatTile label="Days in Range" value={data?.summary?.daysInRange || 0} />
       </div>
 
       {/* Aggregate Timeline Chart */}
-      <Card className="bg-card/50 backdrop-blur-sm border-border/50">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <TrendingUp className="h-5 w-5 text-primary" />
-            Daily Company Engagement (Aggregated)
-          </CardTitle>
-          <CardDescription>
-            Total engagement across all companies over time
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {chartData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={300}>
-              <AreaChart data={chartData}>
-                <defs>
-                  <linearGradient id="colorImpressions" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="hsl(var(--chart-1))" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="hsl(var(--chart-1))" stopOpacity={0} />
-                  </linearGradient>
-                  <linearGradient id="colorClicks" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="hsl(var(--chart-2))" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="hsl(var(--chart-2))" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                <XAxis
-                  dataKey="date"
-                  className="text-xs"
-                  tickFormatter={(value) => {
-                    const date = new Date(value);
-                    return `${date.getMonth() + 1}/${date.getDate()}`;
-                  }}
-                />
-                <YAxis className="text-xs" />
-                <Tooltip
-                  contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))' }}
-                  labelFormatter={(label) => new Date(label).toLocaleDateString()}
-                  formatter={(value: number, name: string) => [
-                    value.toLocaleString(),
-                    name === 'totalImpressions' ? 'Impressions' :
-                    name === 'totalClicks' ? 'Clicks' :
-                    name === 'totalLeads' ? 'Leads' :
-                    name === 'companyCount' ? 'Companies' : name
-                  ]}
-                />
-                <Legend />
-                <Area
-                  type="monotone"
-                  dataKey="totalImpressions"
-                  name="Impressions"
-                  stroke="hsl(var(--chart-1))"
-                  fill="url(#colorImpressions)"
-                  strokeWidth={2}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="totalClicks"
-                  name="Clicks"
-                  stroke="hsl(var(--chart-2))"
-                  fill="url(#colorClicks)"
-                  strokeWidth={2}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="companyCount"
-                  name="Companies"
-                  stroke="hsl(var(--chart-3))"
-                  strokeWidth={2}
-                  dot={false}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="h-[300px] flex items-center justify-center text-muted-foreground">
-              No data available for the selected period
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      <WidgetCard
+        title="Daily Company Engagement"
+        subtitle="Total engagement across all companies over time"
+        toolbar={
+          chartData.length > 0 ? (
+            <ChartLegend
+              items={[
+                { label: 'Impressions', color: 'hsl(var(--chart-1))' },
+                { label: 'Clicks', color: 'hsl(var(--chart-2))' },
+                { label: 'Companies', color: 'hsl(var(--chart-3))' },
+              ]}
+            />
+          ) : undefined
+        }
+      >
+        {chartData.length > 0 ? (
+          <ResponsiveContainer width="100%" height={300}>
+            <AreaChart data={chartData}>
+              <defs>
+                <linearGradient id="colorImpressions" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="hsl(var(--chart-1))" stopOpacity={0.3} />
+                  <stop offset="95%" stopColor="hsl(var(--chart-1))" stopOpacity={0} />
+                </linearGradient>
+                <linearGradient id="colorClicks" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="hsl(var(--chart-2))" stopOpacity={0.3} />
+                  <stop offset="95%" stopColor="hsl(var(--chart-2))" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border) / 0.5)" />
+              <XAxis
+                dataKey="date"
+                tick={AXIS_TICK}
+                tickFormatter={(value) => {
+                  const date = new Date(value);
+                  return `${date.getMonth() + 1}/${date.getDate()}`;
+                }}
+              />
+              <YAxis tick={AXIS_TICK} />
+              <Tooltip
+                contentStyle={CHART_TOOLTIP_STYLE}
+                labelFormatter={(label) => new Date(label).toLocaleDateString()}
+                formatter={(value: number, name: string) => [
+                  value.toLocaleString(),
+                  name === 'totalImpressions' ? 'Impressions' :
+                  name === 'totalClicks' ? 'Clicks' :
+                  name === 'totalLeads' ? 'Leads' :
+                  name === 'companyCount' ? 'Companies' : name
+                ]}
+              />
+              <Area
+                type="monotone"
+                dataKey="totalImpressions"
+                name="Impressions"
+                stroke="hsl(var(--chart-1))"
+                fill="url(#colorImpressions)"
+                strokeWidth={2}
+              />
+              <Area
+                type="monotone"
+                dataKey="totalClicks"
+                name="Clicks"
+                stroke="hsl(var(--chart-2))"
+                fill="url(#colorClicks)"
+                strokeWidth={2}
+              />
+              <Line
+                type="monotone"
+                dataKey="companyCount"
+                name="Companies"
+                stroke="hsl(var(--chart-3))"
+                strokeWidth={2}
+                dot={false}
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+        ) : (
+          <EmptyState
+            icon={Building2}
+            title="No data available"
+            description="No engagement data for the selected period."
+          />
+        )}
+      </WidgetCard>
 
       {/* Company Selection and Individual Charts */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         {/* Company List */}
-        <Card className="bg-card/50 backdrop-blur-sm border-border/50">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
-              <Building2 className="h-4 w-4" />
-              Select Companies to Compare
-            </CardTitle>
-            <div className="flex gap-2">
-              <Button variant="ghost" size="sm" onClick={() => {
+        <WidgetCard
+          noPadding
+          title="Compare Companies"
+          subtitle="Select companies to chart"
+          toolbar={
+            <>
+              <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => {
                 if (data?.topCompanies) {
                   const topFive = data.topCompanies.slice(0, 5).map(c => c.companyUrn);
                   topFive.forEach(urn => {
@@ -520,89 +511,91 @@ export function CompanyEngagementTimeline({ accessToken, selectedAccount }: Comp
               }}>
                 Top 5
               </Button>
-              <Button variant="ghost" size="sm" onClick={clearSelection}>
+              <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={clearSelection}>
                 Clear
               </Button>
-            </div>
-          </CardHeader>
-          <CardContent className="max-h-[400px] overflow-y-auto">
+            </>
+          }
+        >
+          <div className="max-h-[400px] overflow-y-auto px-5 pb-4">
             {data?.topCompanies?.map((company, idx) => (
               <div
                 key={company.companyUrn}
-                className="flex items-center gap-3 py-2 border-b border-border/50 last:border-0"
+                className="flex items-center gap-3 py-2 border-b border-border/60 last:border-0"
               >
                 <Checkbox
                   checked={selectedCompanies.has(company.companyUrn)}
                   onCheckedChange={() => toggleCompanySelection(company.companyUrn)}
                 />
                 <div
-                  className="w-3 h-3 rounded-full"
+                  className="w-2.5 h-2.5 rounded-[3px] shrink-0"
                   style={{ backgroundColor: CHART_COLORS[idx % CHART_COLORS.length] }}
                 />
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-medium truncate">
                     <EditableCompanyName company={company} onNameUpdate={updateCompanyName} />
                   </div>
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-xs text-muted-foreground tabular-nums">
                     {company.totals.impressions.toLocaleString()} imp · {company.totals.clicks} clicks · {company.totals.leads} leads
                   </p>
                 </div>
               </div>
             ))}
-          </CardContent>
-        </Card>
+          </div>
+        </WidgetCard>
 
         {/* Selected Companies Chart */}
-        <Card className="bg-card/50 backdrop-blur-sm border-border/50 lg:col-span-2">
-          <CardHeader>
-            <CardTitle className="text-sm font-medium">Company Comparison</CardTitle>
-            <div className="flex gap-2">
-              <Button
-                variant={activeMetric === 'impressions' ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setActiveMetric('impressions')}
-              >
-                <Eye className="h-3 w-3 mr-1" />
-                Impressions
-              </Button>
-              <Button
-                variant={activeMetric === 'clicks' ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setActiveMetric('clicks')}
-              >
-                <MousePointerClick className="h-3 w-3 mr-1" />
-                Clicks
-              </Button>
-              <Button
-                variant={activeMetric === 'leads' ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setActiveMetric('leads')}
-              >
-                <Users className="h-3 w-3 mr-1" />
-                Leads
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent>
-            {chartCompanies.length > 0 && chartData.length > 0 ? (
-              <ResponsiveContainer width="100%" height={350}>
+        <WidgetCard
+          className="lg:col-span-2"
+          title="Company Comparison"
+          subtitle="Daily trend for the selected companies"
+          toolbar={
+            <SegmentedControl
+              size="sm"
+              value={activeMetric}
+              onChange={setActiveMetric}
+              options={[
+                {
+                  value: 'impressions',
+                  label: (
+                    <span className="inline-flex items-center gap-1"><Eye className="h-3 w-3" />Impressions</span>
+                  ),
+                },
+                {
+                  value: 'clicks',
+                  label: (
+                    <span className="inline-flex items-center gap-1"><MousePointerClick className="h-3 w-3" />Clicks</span>
+                  ),
+                },
+                {
+                  value: 'leads',
+                  label: (
+                    <span className="inline-flex items-center gap-1"><Users className="h-3 w-3" />Leads</span>
+                  ),
+                },
+              ]}
+            />
+          }
+        >
+          {chartCompanies.length > 0 && chartData.length > 0 ? (
+            <>
+              <ResponsiveContainer width="100%" height={330}>
                 <LineChart data={chartData}>
-                  <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border) / 0.5)" />
                   <XAxis
                     dataKey="date"
-                    className="text-xs"
+                    tick={AXIS_TICK}
                     tickFormatter={(value) => {
                       const date = new Date(value);
                       return `${date.getMonth() + 1}/${date.getDate()}`;
                     }}
                   />
-                  <YAxis className="text-xs" />
+                  <YAxis tick={AXIS_TICK} />
                   <Tooltip
-                    contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))' }}
+                    contentStyle={CHART_TOOLTIP_STYLE}
                     labelFormatter={(label) => new Date(label).toLocaleDateString()}
                   />
-                  <Legend />
-                  {chartCompanies.map((company, idx) => (
+                  {chartCompanies.map((company) => (
                     <Line
                       key={company.companyUrn}
                       type="monotone"
@@ -615,125 +608,119 @@ export function CompanyEngagementTimeline({ accessToken, selectedAccount }: Comp
                   ))}
                 </LineChart>
               </ResponsiveContainer>
-            ) : (
-              <div className="h-[350px] flex items-center justify-center text-muted-foreground">
-                Select companies from the list to compare their engagement over time
-              </div>
-            )}
-          </CardContent>
-        </Card>
+              <ChartLegend
+                className="mt-3"
+                items={chartCompanies.map((company) => ({
+                  label: company.companyName,
+                  color: CHART_COLORS[data?.topCompanies?.findIndex(c => c.companyUrn === company.companyUrn) % CHART_COLORS.length],
+                }))}
+              />
+            </>
+          ) : (
+            <EmptyState
+              icon={Building2}
+              title="No companies selected"
+              description="Select companies from the list to compare their engagement over time."
+            />
+          )}
+        </WidgetCard>
       </div>
 
       {/* Company Table */}
-      <Card className="bg-card/50 backdrop-blur-sm border-border/50">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Building2 className="h-5 w-5 text-primary" />
-            Company Engagement Summary
-          </CardTitle>
-          <CardDescription>
-            Top companies by total impressions during the selected period
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {/* Search and count */}
-          <div className="flex items-center gap-4">
-            <div className="relative flex-1 max-w-sm">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                placeholder="Search companies..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-9"
-              />
-            </div>
-            <span className="text-sm text-muted-foreground">
-              {filteredAndSortedCompanies.length} companies
-            </span>
+      <WidgetCard
+        noPadding
+        title="Company Engagement Summary"
+        subtitle={`Top companies by total impressions · ${filteredAndSortedCompanies.length} companies`}
+        toolbar={
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+            <Input
+              placeholder="Search companies…"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="h-8 w-[200px] pl-8 text-sm"
+            />
           </div>
+        }
+      >
+        {filteredAndSortedCompanies.length > 0 ? (
+          <Table>
+            <TableHeader>
+              <TableRow className="border-border hover:bg-transparent bg-secondary/40">
+                <TableHead className="w-8">#</TableHead>
+                <TableHead className="min-w-[200px]">
+                  <SortButton field="companyName">Company</SortButton>
+                </TableHead>
+                <TableHead className="text-right">
+                  <SortButton field="impressions" align="right">Impressions</SortButton>
+                </TableHead>
+                <TableHead className="text-right">
+                  <SortButton field="clicks" align="right">Clicks</SortButton>
+                </TableHead>
+                <TableHead className="text-right">
+                  <SortButton field="leads" align="right">Leads</SortButton>
+                </TableHead>
+                <TableHead className="text-right">
+                  <SortButton field="spend" align="right">Spend</SortButton>
+                </TableHead>
+                <TableHead className="text-right">
+                  <SortButton field="ctr" align="right">CTR</SortButton>
+                </TableHead>
+                <TableHead className="text-right">
+                  <SortButton field="cpc" align="right">CPC</SortButton>
+                </TableHead>
+                <TableHead className="text-right">
+                  <SortButton field="cpm" align="right">CPM</SortButton>
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filteredAndSortedCompanies.map((company, idx) => {
+                const cpc = company.totals.clicks > 0 ? company.totals.spend / company.totals.clicks : 0;
+                const cpm = company.totals.impressions > 0 ? (company.totals.spend / company.totals.impressions) * 1000 : 0;
 
-          {filteredAndSortedCompanies.length > 0 ? (
-            <div className="rounded-lg border border-border/50 overflow-hidden">
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-muted/30 hover:bg-muted/30">
-                    <TableHead className="w-8">#</TableHead>
-                    <TableHead className="min-w-[200px]">
-                      <SortButton field="companyName">Company</SortButton>
-                    </TableHead>
-                    <TableHead className="text-right">
-                      <SortButton field="impressions">Impressions</SortButton>
-                    </TableHead>
-                    <TableHead className="text-right">
-                      <SortButton field="clicks">Clicks</SortButton>
-                    </TableHead>
-                    <TableHead className="text-right">
-                      <SortButton field="leads">Leads</SortButton>
-                    </TableHead>
-                    <TableHead className="text-right">
-                      <SortButton field="spend">Spend</SortButton>
-                    </TableHead>
-                    <TableHead className="text-right">
-                      <SortButton field="ctr">CTR</SortButton>
-                    </TableHead>
-                    <TableHead className="text-right">
-                      <SortButton field="cpc">CPC</SortButton>
-                    </TableHead>
-                    <TableHead className="text-right">
-                      <SortButton field="cpm">CPM</SortButton>
-                    </TableHead>
+                return (
+                  <TableRow key={company.companyUrn} className="hover:bg-secondary/30 [&>td]:py-2.5">
+                    <TableCell className="text-muted-foreground tabular-nums">{idx + 1}</TableCell>
+                    <TableCell className="font-medium min-w-[200px]">
+                      <div className="flex items-center gap-2">
+                        <Building2 className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                        <EditableCompanyName company={company} onNameUpdate={updateCompanyName} />
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">{company.totals.impressions.toLocaleString()}</TableCell>
+                    <TableCell className="text-right tabular-nums">{company.totals.clicks.toLocaleString()}</TableCell>
+                    <TableCell className="text-right tabular-nums font-medium text-primary">{company.totals.leads}</TableCell>
+                    <TableCell className="text-right tabular-nums">${company.totals.spend.toFixed(2)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{company.totals.ctr.toFixed(2)}%</TableCell>
+                    <TableCell className="text-right tabular-nums">${cpc.toFixed(2)}</TableCell>
+                    <TableCell className="text-right tabular-nums">${cpm.toFixed(2)}</TableCell>
                   </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredAndSortedCompanies.map((company, idx) => {
-                    const cpc = company.totals.clicks > 0 ? company.totals.spend / company.totals.clicks : 0;
-                    const cpm = company.totals.impressions > 0 ? (company.totals.spend / company.totals.impressions) * 1000 : 0;
-                    
-                    return (
-                      <TableRow key={company.companyUrn} className="hover:bg-muted/20">
-                        <TableCell className="font-medium">{idx + 1}</TableCell>
-                        <TableCell className="font-medium min-w-[200px]">
-                          <div className="flex items-center gap-2">
-                            <Building2 className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                            <EditableCompanyName company={company} onNameUpdate={updateCompanyName} />
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums">{company.totals.impressions.toLocaleString()}</TableCell>
-                        <TableCell className="text-right tabular-nums">{company.totals.clicks.toLocaleString()}</TableCell>
-                        <TableCell className="text-right tabular-nums font-medium text-primary">{company.totals.leads}</TableCell>
-                        <TableCell className="text-right tabular-nums">${company.totals.spend.toFixed(2)}</TableCell>
-                        <TableCell className="text-right tabular-nums">{company.totals.ctr.toFixed(2)}%</TableCell>
-                        <TableCell className="text-right tabular-nums">${cpc.toFixed(2)}</TableCell>
-                        <TableCell className="text-right tabular-nums">${cpm.toFixed(2)}</TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-                <TableFooter>
-                  <TableRow className="bg-muted/50 font-semibold">
-                    <TableCell></TableCell>
-                    <TableCell>Total ({filteredAndSortedCompanies.length} companies)</TableCell>
-                    <TableCell className="text-right tabular-nums">{tableTotals.impressions.toLocaleString()}</TableCell>
-                    <TableCell className="text-right tabular-nums">{tableTotals.clicks.toLocaleString()}</TableCell>
-                    <TableCell className="text-right tabular-nums font-medium text-primary">{tableTotals.leads.toLocaleString()}</TableCell>
-                    <TableCell className="text-right tabular-nums">${tableTotals.spend.toFixed(2)}</TableCell>
-                    <TableCell className="text-right tabular-nums">{totalCtr.toFixed(2)}%</TableCell>
-                    <TableCell className="text-right tabular-nums">${totalCpc.toFixed(2)}</TableCell>
-                    <TableCell className="text-right tabular-nums">${totalCpm.toFixed(2)}</TableCell>
-                  </TableRow>
-                </TableFooter>
-              </Table>
-            </div>
-          ) : (
-            <div className="text-center py-12 text-muted-foreground">
-              <div className="flex flex-col items-center gap-2">
-                <Building2 className="h-8 w-8 opacity-50" />
-                <span>No company data available for the selected period</span>
-              </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+                );
+              })}
+            </TableBody>
+            <TableFooter>
+              <TableRow className="bg-secondary/50 font-semibold">
+                <TableCell></TableCell>
+                <TableCell>Total ({filteredAndSortedCompanies.length} companies)</TableCell>
+                <TableCell className="text-right tabular-nums">{tableTotals.impressions.toLocaleString()}</TableCell>
+                <TableCell className="text-right tabular-nums">{tableTotals.clicks.toLocaleString()}</TableCell>
+                <TableCell className="text-right tabular-nums font-medium text-primary">{tableTotals.leads.toLocaleString()}</TableCell>
+                <TableCell className="text-right tabular-nums">${tableTotals.spend.toFixed(2)}</TableCell>
+                <TableCell className="text-right tabular-nums">{totalCtr.toFixed(2)}%</TableCell>
+                <TableCell className="text-right tabular-nums">${totalCpc.toFixed(2)}</TableCell>
+                <TableCell className="text-right tabular-nums">${totalCpm.toFixed(2)}</TableCell>
+              </TableRow>
+            </TableFooter>
+          </Table>
+        ) : (
+          <EmptyState
+            icon={Building2}
+            title="No company data"
+            description="No company data available for the selected period."
+          />
+        )}
+      </WidgetCard>
     </div>
   );
 }

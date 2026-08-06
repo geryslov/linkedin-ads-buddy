@@ -5,7 +5,7 @@ import { AudienceExpansionSuggester } from "./AudienceExpansionSuggester";
 import { DemographicTable } from "./DemographicTable";
 import { JobSeniorityMatrix } from "./JobSeniorityMatrix";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { WidgetCard, EmptyState, SegmentedControl } from "./widgets";
 import { Users, BarChart3, Lightbulb, Grid3X3 } from "lucide-react";
 import { useDemographicReporting, DemographicPivot, DEMOGRAPHIC_PIVOT_OPTIONS } from "@/hooks/useDemographicReporting";
 import { useJobSeniorityMatrix } from "@/hooks/useJobSeniorityMatrix";
@@ -43,13 +43,13 @@ export function AudienceInsightsHub({
   }, [selectedAccount, activeInsight, jobSeniorityMatrix.dateRange]);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {/* Segment Cards */}
       <div>
-        <h3 className="text-sm font-medium text-muted-foreground mb-3 flex items-center gap-2">
-          <Users className="h-4 w-4" />
-          DMP Segments ({audiences.length})
-        </h3>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-bold text-foreground leading-tight">DMP Segments</h3>
+          <span className="text-xs text-muted-foreground tabular-nums">{audiences.length} segments</span>
+        </div>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {isLoading ? (
             [...Array(6)].map((_, i) => (
@@ -64,43 +64,68 @@ export function AudienceInsightsHub({
               />
             ))
           ) : (
-            <div className="col-span-full glass rounded-xl p-12 text-center">
-              <p className="text-muted-foreground">No audiences found for this account</p>
+            <div className="col-span-full">
+              <WidgetCard noPadding>
+                <EmptyState
+                  icon={Users}
+                  title="No audiences found"
+                  description="No matched audiences exist for this account yet."
+                />
+              </WidgetCard>
             </div>
           )}
         </div>
       </div>
 
-      {/* Insights Tabs */}
+      {/* Insights */}
       {selectedAccount && (
-        <Tabs value={activeInsight} onValueChange={setActiveInsight} className="space-y-4">
-          <TabsList className="bg-muted/50">
-            <TabsTrigger value="demographics" className="gap-1.5">
-              <BarChart3 className="h-3.5 w-3.5" />
-              Demographics
-            </TabsTrigger>
-            <TabsTrigger value="expansion" className="gap-1.5">
-              <Lightbulb className="h-3.5 w-3.5" />
-              Expansion
-            </TabsTrigger>
-            <TabsTrigger value="matrix" className="gap-1.5">
-              <Grid3X3 className="h-3.5 w-3.5" />
-              Seniority Matrix
-            </TabsTrigger>
-          </TabsList>
+        <div className="space-y-4">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <SegmentedControl
+              value={activeInsight}
+              onChange={setActiveInsight}
+              options={[
+                {
+                  value: "demographics",
+                  label: (
+                    <span className="inline-flex items-center gap-1.5">
+                      <BarChart3 className="h-3.5 w-3.5" />
+                      Demographics
+                    </span>
+                  ),
+                },
+                {
+                  value: "expansion",
+                  label: (
+                    <span className="inline-flex items-center gap-1.5">
+                      <Lightbulb className="h-3.5 w-3.5" />
+                      Expansion
+                    </span>
+                  ),
+                },
+                {
+                  value: "matrix",
+                  label: (
+                    <span className="inline-flex items-center gap-1.5">
+                      <Grid3X3 className="h-3.5 w-3.5" />
+                      Seniority Matrix
+                    </span>
+                  ),
+                },
+              ]}
+            />
 
-          <TabsContent value="demographics">
-            <div className="space-y-4">
-              <div className="flex items-center gap-3">
-                <span className="text-sm text-muted-foreground">Pivot by:</span>
+            {activeInsight === "demographics" && (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground">Pivot by</span>
                 <Select
                   value={demographicReporting.pivot}
                   onValueChange={(v) => demographicReporting.setPivot(v as DemographicPivot)}
                 >
-                  <SelectTrigger className="w-[180px]">
+                  <SelectTrigger className="h-8 w-[180px] text-sm bg-card border-border">
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="bg-card border-border">
                     {DEMOGRAPHIC_PIVOT_OPTIONS.map((opt) => (
                       <SelectItem key={opt.value} value={opt.value}>
                         {opt.label}
@@ -109,30 +134,33 @@ export function AudienceInsightsHub({
                   </SelectContent>
                 </Select>
               </div>
-              <DemographicTable
-                data={demographicReporting.demographicData}
-                isLoading={demographicReporting.isLoading}
-                pivot={demographicReporting.pivot}
-              />
-            </div>
-          </TabsContent>
+            )}
+          </div>
 
-          <TabsContent value="expansion">
+          {activeInsight === "demographics" && (
+            <DemographicTable
+              data={demographicReporting.demographicData}
+              isLoading={demographicReporting.isLoading}
+              pivot={demographicReporting.pivot}
+            />
+          )}
+
+          {activeInsight === "expansion" && (
             <AudienceExpansionSuggester
               accessToken={accessToken}
               selectedAccount={selectedAccount}
             />
-          </TabsContent>
+          )}
 
-          <TabsContent value="matrix">
+          {activeInsight === "matrix" && (
             <JobSeniorityMatrix
               matrixData={jobSeniorityMatrix.matrixData}
               isLoading={jobSeniorityMatrix.isLoading}
               selectedMetric={jobSeniorityMatrix.selectedMetric}
               onMetricChange={jobSeniorityMatrix.setSelectedMetric}
             />
-          </TabsContent>
-        </Tabs>
+          )}
+        </div>
       )}
     </div>
   );

@@ -17,6 +17,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { WidgetCard, EmptyState, SegmentedControl } from './widgets';
 import { cn } from '@/lib/utils';
 import {
   RefreshCw,
@@ -124,15 +125,15 @@ function CopyButton({ text }: { text: string }) {
       title={copied ? 'Copied!' : 'Copy to clipboard'}
       aria-label="Copy to clipboard"
     >
-      {copied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
+      {copied ? <Check className="h-3 w-3 text-success" /> : <Copy className="h-3 w-3" />}
     </button>
   );
 }
 
 function LeadTableSkeleton() {
   return (
-    <div className="rounded-xl border border-border/60 overflow-hidden">
-      <div className="bg-muted/30 border-b border-border/40 px-4 h-10 flex items-center gap-6">
+    <div className="overflow-hidden">
+      <div className="bg-secondary/40 border-b border-border px-4 h-10 flex items-center gap-6">
         <Skeleton className="h-3 w-16 rounded" />
         <Skeleton className="h-3 w-20 rounded" />
         <Skeleton className="h-3 w-28 rounded" />
@@ -140,7 +141,7 @@ function LeadTableSkeleton() {
         <Skeleton className="h-3 w-10 rounded" />
       </div>
       {[...Array(8)].map((_, i) => (
-        <div key={i} className="border-b border-border/20 px-4 py-3 flex items-center gap-6">
+        <div key={i} className="border-b border-border/60 px-4 py-3 flex items-center gap-6">
           <Skeleton className="h-3.5 w-28 rounded" />
           <Skeleton className="h-3.5 w-24 rounded" />
           <Skeleton className="h-3 w-40 rounded" />
@@ -289,13 +290,13 @@ export function LeadRecordsViewer({ accessToken, selectedAccount }: LeadRecordsV
     switch (k) {
       case 'name':
         return (
-          <TableCell key={k} className="px-4 py-2.5 font-medium text-sm whitespace-nowrap">
+          <TableCell key={k} className="py-2.5 font-medium text-sm whitespace-nowrap">
             {lead.displayName || '—'}
           </TableCell>
         );
       case 'company':
         return (
-          <TableCell key={k} className="px-4 py-2.5 whitespace-nowrap">
+          <TableCell key={k} className="py-2.5 whitespace-nowrap">
             <div className="group/cell flex items-center min-w-0">
               <span className="text-sm text-foreground/80">{lead.displayCompany || '—'}</span>
               {lead.displayCompany && <CopyButton text={lead.displayCompany} />}
@@ -304,7 +305,7 @@ export function LeadRecordsViewer({ accessToken, selectedAccount }: LeadRecordsV
         );
       case 'email':
         return (
-          <TableCell key={k} className="px-4 py-2.5 whitespace-nowrap">
+          <TableCell key={k} className="py-2.5 whitespace-nowrap">
             <div className="group/cell flex items-center gap-0.5">
               <span className="text-sm text-muted-foreground font-mono">{lead.displayEmail || '—'}</span>
               {lead.displayEmail && <CopyButton text={lead.displayEmail} />}
@@ -313,7 +314,7 @@ export function LeadRecordsViewer({ accessToken, selectedAccount }: LeadRecordsV
         );
       case 'submitted':
         return (
-          <TableCell key={k} className="px-4 py-2.5 text-xs text-muted-foreground tabular-nums whitespace-nowrap">
+          <TableCell key={k} className="py-2.5 text-xs text-muted-foreground tabular-nums whitespace-nowrap">
             {lead.submittedAt
               ? new Date(lead.submittedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
               : '—'}
@@ -321,7 +322,7 @@ export function LeadRecordsViewer({ accessToken, selectedAccount }: LeadRecordsV
         );
       case 'campaign':
         return (
-          <TableCell key={k} className="px-4 py-2.5 whitespace-nowrap">
+          <TableCell key={k} className="py-2.5 whitespace-nowrap">
             <div className="group/cell flex min-w-0 flex-col gap-0.5">
               <div className="flex min-w-0 items-center">
                 <span className="text-sm font-medium text-foreground/85" title={lead.displayCampaign || ''}>
@@ -341,92 +342,88 @@ export function LeadRecordsViewer({ accessToken, selectedAccount }: LeadRecordsV
   };
 
   return (
-    <div className="space-y-5">
-      {/* Controls */}
-      <div className="flex flex-wrap items-center gap-2.5">
-        <div className="flex items-center gap-1.5 rounded-lg border border-border/50 bg-card/60 px-3 py-1.5">
-          <Calendar className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-          <Select value={period} onValueChange={setPeriod}>
-            <SelectTrigger className="border-0 bg-transparent h-7 text-xs font-medium p-0 focus:ring-0 w-[130px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {PERIOD_OPTIONS.map((o) => (
-                <SelectItem key={o.value} value={o.value} className="text-xs">
-                  {o.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        <Button size="sm" onClick={handleFetch} disabled={isLoading || !selectedAccount} className="h-8 text-xs gap-1.5">
-          <RefreshCw className={cn('h-3.5 w-3.5', isLoading && 'animate-spin')} />
-          {leads.length ? 'Refresh' : 'Fetch Leads'}
-        </Button>
-
-        <div className="relative flex-1 min-w-[180px] max-w-sm">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
-          <Input
-            placeholder="Search name, email, company…"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-8 pr-8 h-8 text-xs"
-          />
-          {searchQuery && (
-            <button
-              onClick={() => setSearchQuery('')}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/60 hover:text-muted-foreground transition-colors"
-              aria-label="Clear search"
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
-          )}
-        </div>
-
-        <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={showTestLeads}
-            onChange={(e) => setShowTestLeads(e.target.checked)}
-            className="rounded border-border h-3.5 w-3.5 accent-primary"
-          />
-          Show test leads
-        </label>
-
-        {filteredLeads.length > 0 && (
-          <Button variant="outline" size="sm" onClick={handleExport} className="h-8 text-xs gap-1.5 ml-auto">
-            <Download className="h-3.5 w-3.5" />
-            Export CSV
-          </Button>
-        )}
-      </div>
-
-      {/* Stats */}
-      {leads.length > 0 && (
-        <div className="flex items-center gap-3 text-sm">
-          <div className="flex items-center gap-2 rounded-lg bg-muted/50 px-3 py-1.5">
-            <Users className="h-3.5 w-3.5 text-primary shrink-0" />
-            <span className="font-semibold tabular-nums">{filteredLeads.length.toLocaleString()}</span>
-            <span className="text-muted-foreground text-xs">
-              {filteredLeads.length === 1 ? 'lead' : 'leads'}
-            </span>
+    <WidgetCard
+      noPadding
+      title="Lead Records"
+      subtitle={
+        leads.length > 0 ? (
+          <>
+            <span className="tabular-nums font-semibold text-foreground">{filteredLeads.length.toLocaleString()}</span>{' '}
+            {filteredLeads.length === 1 ? 'lead' : 'leads'}
+            {isFiltered && filteredLeads.length !== leads.length && (
+              <> · filtered from {leads.length.toLocaleString()}</>
+            )}
+            {total > leads.length && (
+              <> · {total.toLocaleString()} available on server</>
+            )}
+          </>
+        ) : (
+          'Form responses across the account'
+        )
+      }
+      toolbar={
+        <>
+          <div className="flex items-center gap-1.5">
+            <Calendar className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+            <Select value={period} onValueChange={setPeriod}>
+              <SelectTrigger className="h-8 w-[130px] text-xs font-medium bg-card border-border">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="bg-card border-border">
+                {PERIOD_OPTIONS.map((o) => (
+                  <SelectItem key={o.value} value={o.value} className="text-xs">
+                    {o.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
-          {isFiltered && filteredLeads.length !== leads.length && (
-            <span className="text-xs text-muted-foreground">
-              filtered from {leads.length.toLocaleString()} total
-            </span>
-          )}
-          {total > leads.length && (
-            <span className="text-xs text-muted-foreground/60">
-              · {total.toLocaleString()} available on server
-            </span>
-          )}
-        </div>
-      )}
 
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+            <Input
+              placeholder="Search name, email, company…"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-8 pr-8 h-8 w-[200px] text-xs"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/60 hover:text-muted-foreground transition-colors"
+                aria-label="Clear search"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+
+          <SegmentedControl
+            size="sm"
+            value={showTestLeads ? 'all' : 'real'}
+            onChange={(v) => setShowTestLeads(v === 'all')}
+            options={[
+              { value: 'real', label: 'Hide test' },
+              { value: 'all', label: 'All leads' },
+            ]}
+          />
+
+          {filteredLeads.length > 0 && (
+            <Button variant="outline" size="sm" onClick={handleExport} className="h-8 text-xs gap-1.5">
+              <Download className="h-3.5 w-3.5" />
+              Export
+            </Button>
+          )}
+
+          <Button size="sm" onClick={handleFetch} disabled={isLoading || !selectedAccount} className="h-8 text-xs gap-1.5">
+            <RefreshCw className={cn('h-3.5 w-3.5', isLoading && 'animate-spin')} />
+            {leads.length ? 'Refresh' : 'Fetch Leads'}
+          </Button>
+        </>
+      }
+    >
       {error && (
-        <div className="flex items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+        <div className="mx-5 mb-4 flex items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/[0.06] px-4 py-3 text-sm text-destructive">
           <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
           <div>
             <p className="font-medium">Failed to load leads</p>
@@ -444,45 +441,49 @@ export function LeadRecordsViewer({ accessToken, selectedAccount }: LeadRecordsV
       )}
 
       {!selectedAccount && !isLoading && (
-        <div className="rounded-xl border border-border/60 bg-muted/10 py-16 px-6 text-center">
-          <Users className="h-10 w-10 mx-auto text-muted-foreground/30 mb-3" />
-          <p className="text-sm font-medium text-muted-foreground">No account selected</p>
-          <p className="text-xs text-muted-foreground/60 mt-1">Select an ad account from the header to view leads</p>
-        </div>
+        <EmptyState
+          icon={Users}
+          title="No account selected"
+          description="Select an ad account from the header to view leads."
+        />
       )}
 
       {selectedAccount && !isLoading && !error && leads.length === 0 && (
-        <div className="rounded-xl border border-border/60 bg-muted/10 py-16 px-6 text-center">
-          <Inbox className="h-10 w-10 mx-auto text-muted-foreground/30 mb-3" />
-          <p className="text-sm font-medium text-muted-foreground">No leads loaded</p>
-          <p className="text-xs text-muted-foreground/60 mt-1">Click "Fetch Leads" to load responses for this account</p>
-          <Button size="sm" onClick={handleFetch} disabled={isLoading} className="mt-4 text-xs h-8 gap-1.5">
-            <RefreshCw className="h-3.5 w-3.5" />
-            Fetch Leads
-          </Button>
-        </div>
+        <EmptyState
+          icon={Inbox}
+          title="No leads loaded"
+          description='Click "Fetch Leads" to load responses for this account.'
+          action={
+            <Button size="sm" onClick={handleFetch} disabled={isLoading} className="text-xs h-8 gap-1.5">
+              <RefreshCw className="h-3.5 w-3.5" />
+              Fetch Leads
+            </Button>
+          }
+        />
       )}
 
       {!isLoading && leads.length > 0 && filteredLeads.length === 0 && (
-        <div className="rounded-xl border border-border/60 bg-muted/10 py-12 px-6 text-center">
-          <Search className="h-8 w-8 mx-auto text-muted-foreground/30 mb-3" />
-          <p className="text-sm font-medium text-muted-foreground">No results for "{searchQuery}"</p>
-          <p className="text-xs text-muted-foreground/60 mt-1">Try a different name, email, or company</p>
-          <Button variant="outline" size="sm" onClick={() => setSearchQuery('')} className="mt-4 text-xs h-7 gap-1">
-            <X className="h-3 w-3" />
-            Clear search
-          </Button>
-        </div>
+        <EmptyState
+          icon={Search}
+          title={`No results for "${searchQuery}"`}
+          description="Try a different name, email, or company."
+          action={
+            <Button variant="outline" size="sm" onClick={() => setSearchQuery('')} className="text-xs h-7 gap-1">
+              <X className="h-3 w-3" />
+              Clear search
+            </Button>
+          }
+        />
       )}
 
       {isLoading && leads.length === 0 && <LeadTableSkeleton />}
 
       {filteredLeads.length > 0 && (
-        <div className="rounded-xl border border-border/60 overflow-hidden">
+        <>
           <div className="overflow-x-auto">
-            <Table className="w-auto">
+            <Table className="w-auto min-w-full">
               <TableHeader>
-                <TableRow className="bg-muted/30 hover:bg-muted/30">
+                <TableRow className="border-border hover:bg-transparent bg-secondary/40">
                   {visibleCoreCols.map((k) => {
                     const sortable = k === 'submitted' || k === 'campaign';
                     const active = sortable && sortKey === k;
@@ -495,7 +496,6 @@ export function LeadRecordsViewer({ accessToken, selectedAccount }: LeadRecordsV
                       <TableHead
                         key={k}
                         className={cn(
-                          'px-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap py-2.5',
                           sortable && 'cursor-pointer select-none hover:text-foreground transition-colors',
                         )}
                         onClick={sortable ? () => toggleSort(k as 'submitted' | 'campaign') : undefined}
@@ -511,11 +511,7 @@ export function LeadRecordsViewer({ accessToken, selectedAccount }: LeadRecordsV
                     );
                   })}
                   {visibleCustomCols.map((label) => (
-                    <TableHead
-                      key={label}
-                      className="px-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap py-2.5"
-                      title={label}
-                    >
+                    <TableHead key={label} title={label}>
                       {label}
                     </TableHead>
                   ))}
@@ -525,7 +521,7 @@ export function LeadRecordsViewer({ accessToken, selectedAccount }: LeadRecordsV
                 {filteredLeads.map((lead, idx) => (
                   <TableRow
                     key={lead.leadUrn || idx}
-                    className={cn('group transition-colors duration-150', lead.testLead && 'opacity-60', 'hover:bg-muted/20')}
+                    className={cn('group transition-colors duration-150', lead.testLead && 'opacity-60', 'hover:bg-secondary/30')}
                   >
                     {visibleCoreCols.map((k) => renderCoreCell(k, lead))}
                     {visibleCustomCols.map((label) => {
@@ -533,7 +529,7 @@ export function LeadRecordsViewer({ accessToken, selectedAccount }: LeadRecordsV
                       return (
                         <TableCell
                           key={label}
-                          className="px-4 py-2.5 text-sm text-foreground/80 align-middle whitespace-nowrap"
+                          className="py-2.5 text-sm text-foreground/80 align-middle whitespace-nowrap"
                         >
                           {val || '—'}
                         </TableCell>
@@ -546,7 +542,7 @@ export function LeadRecordsViewer({ accessToken, selectedAccount }: LeadRecordsV
           </div>
 
           {hasMore && (
-            <div className="border-t border-border/40 p-3 text-center bg-muted/10">
+            <div className="border-t border-border/60 p-3 text-center bg-secondary/20">
               <Button
                 variant="ghost"
                 size="sm"
@@ -559,7 +555,7 @@ export function LeadRecordsViewer({ accessToken, selectedAccount }: LeadRecordsV
               </Button>
             </div>
           )}
-        </div>
+        </>
       )}
 
       {isLoading && leads.length > 0 && (
@@ -567,6 +563,6 @@ export function LeadRecordsViewer({ accessToken, selectedAccount }: LeadRecordsV
           <RefreshCw className="h-4 w-4 animate-spin mx-auto text-muted-foreground/50" />
         </div>
       )}
-    </div>
+    </WidgetCard>
   );
 }

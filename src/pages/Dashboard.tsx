@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useLinkedInAuth } from "@/hooks/useLinkedInAuth";
 import { useLinkedInAds } from "@/hooks/useLinkedInAds";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import { Sidebar } from "@/components/dashboard/Sidebar";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AccountSelector } from "@/components/dashboard/AccountSelector";
 import { MetricCard } from "@/components/dashboard/MetricCard";
 import { CampaignTable } from "@/components/dashboard/CampaignTable";
@@ -14,6 +16,8 @@ import { TitleCheckerPage } from "@/components/dashboard/TitleCheckerPage";
 import { CompanyEngagementTimeline } from "@/components/dashboard/CompanyEngagementTimeline";
 import { MegaBudgetPacingDashboard } from "@/components/dashboard/MegaBudgetPacingDashboard";
 import { CreativeGallery } from "@/components/dashboard/CreativeGallery";
+import { BulkCreativeCopy } from "@/components/dashboard/BulkCreativeCopy";
+import { CampaignTargetingEditor } from "@/components/dashboard/CampaignTargetingEditor";
 import { CreativePerformanceReport } from "@/components/dashboard/CreativePerformanceReport";
 import { CampaignPerformanceReport } from "@/components/dashboard/CampaignPerformanceReport";
 import { CompanyInfluenceMatcher } from "@/components/dashboard/CompanyInfluenceMatcher";
@@ -31,17 +35,18 @@ import { AgenticChatDrawer } from "@/components/dashboard/AgenticChatDrawer";
 import { AccountHealthCheck } from "@/components/dashboard/AccountHealthCheck";
 import { PerformanceSegmentation } from "@/components/dashboard/PerformanceSegmentation";
 import { ConnectClaude } from "@/components/dashboard/ConnectClaude";
+import { CommandPalette } from "@/components/dashboard/CommandPalette";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { WidgetCard, EmptyState, StatusPill } from "@/components/dashboard/widgets";
 import {
   Eye,
   MousePointerClick,
   DollarSign,
   Target,
   RefreshCw,
-  TrendingUp,
-  Percent,
   ChevronRight,
+  Megaphone,
 } from "lucide-react";
 
 // U8 — Page metadata: group label, title, and contextual subtitle
@@ -50,6 +55,8 @@ const tabMeta: Record<string, { group: string; title: string; subtitle: string }
   campaigns:           { group: "Campaigns",  title: "Campaign Management",         subtitle: "Manage and monitor your active campaigns" },
   budget_pacing:       { group: "Campaigns",  title: "Budget Pacing",               subtitle: "Track budget distribution across campaigns" },
   creatives:           { group: "Campaigns",  title: "Ad Creatives",                subtitle: "Browse and analyze your creative assets" },
+  bulk_add_creatives:  { group: "Bulk Editing", title: "Add Ads to Campaigns",       subtitle: "Copy existing ads into other campaigns in bulk" },
+  campaign_editor:     { group: "Bulk Editing", title: "Campaign Editor",             subtitle: "Bulk-edit targeting across multiple campaigns" },
   analytics:           { group: "Analytics",  title: "Analytics",                   subtitle: "Performance metrics and key insights" },
   campaign_reports:    { group: "Analytics",  title: "Campaign Reports",            subtitle: "Detailed campaign performance breakdown" },
   creative_reports:    { group: "Analytics",  title: "Creative Reports",            subtitle: "Creative-level performance analysis" },
@@ -94,7 +101,13 @@ export default function Dashboard() {
     syncAdAccounts,
   } = useLinkedInAds(accessToken);
 
-  const [activeTab, setActiveTab] = useState("overview");
+  // Tab state lives in the URL (?tab=…) so views are deep-linkable
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = searchParams.get("tab") ?? "overview";
+  const setActiveTab = useCallback(
+    (tab: string) => setSearchParams(tab === "overview" ? {} : { tab }),
+    [setSearchParams]
+  );
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [connectClaudeOpen, setConnectClaudeOpen] = useState(false);
   const lastFetchedAccountsTokenRef = useRef<string | null>(null);
@@ -182,18 +195,24 @@ export default function Dashboard() {
 
       <main className={cn("transition-all duration-300 min-h-screen", sidebarCollapsed ? "ml-16" : "ml-64")}>
         {/* ── Sticky top header bar ───────────────────────────── */}
-        <header className="sticky top-0 z-20 bg-background/95 backdrop-blur-sm border-b border-border/60 px-6 h-14 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-2 min-w-0">
+        <header className="sticky top-0 z-20 bg-background/85 backdrop-blur-md border-b border-border/60 px-6 h-14 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-1.5 min-w-0 text-[13px]">
             {/* Breadcrumb */}
             {meta.group && (
-              <div className="flex items-center gap-1 text-xs text-muted-foreground shrink-0">
-                <span className="font-medium">{meta.group}</span>
-                <ChevronRight className="h-3 w-3" />
-              </div>
+              <>
+                <span className="text-muted-foreground shrink-0">{meta.group}</span>
+                <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/50 shrink-0" />
+              </>
             )}
-            <h1 className="text-sm font-semibold truncate">{meta.title}</h1>
+            <h1 className="font-semibold truncate">{meta.title}</h1>
           </div>
           <div className="flex items-center gap-2 shrink-0">
+            <CommandPalette
+              onNavigate={setActiveTab}
+              onConnectClaude={() => setConnectClaudeOpen(true)}
+              onLogout={logout}
+              isAdmin={isAdmin}
+            />
             <AccountSelector
               accounts={adAccounts}
               selectedAccount={selectedAccount}
@@ -217,17 +236,21 @@ export default function Dashboard() {
         </header>
 
         {/* ── Page content ────────────────────────────────────── */}
-        <div className="p-6">
-          {/* Page title + subtitle (below header bar) */}
-          <div className="mb-6">
-            <h2 className="text-xl font-bold text-foreground">{meta.title}</h2>
+        <div className="px-6 py-8 max-w-[1440px] mx-auto">
+          {/* Page title + subtitle */}
+          <div className="mb-8">
+            <h2 className="font-display text-[26px] font-semibold text-foreground leading-tight">
+              {meta.title}
+            </h2>
             {meta.subtitle && (
-              <p className="text-sm text-muted-foreground mt-0.5">{meta.subtitle}</p>
+              <p className="text-sm text-muted-foreground mt-1">{meta.subtitle}</p>
             )}
           </div>
 
+        <ErrorBoundary resetKey={activeTab} label={meta.title}>
+        <div key={activeTab} className="animate-fade-in">
         {activeTab === "overview" && (
-          <div className="space-y-8">
+          <div className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
               {isLoading || !analytics ? (
                 <>
@@ -265,50 +288,107 @@ export default function Dashboard() {
               )}
             </div>
 
-            <div>
-              <h3 className="text-base font-semibold mb-3 text-foreground">Recent Campaigns</h3>
-              {isLoading ? (
-                <Skeleton className="h-64 rounded-xl bg-secondary" />
-              ) : (
-                <CampaignTable 
-                  campaigns={campaigns.slice(0, 5)} 
-                  onStatusChange={updateCampaignStatus}
-                  isLoading={isLoading}
-                />
-              )}
-            </div>
+            {/* Derived efficiency strip — computed from the same aggregates */}
+            {analytics && !isLoading && (() => {
+              const spend = parseFloat(analytics.costInLocalCurrency) || 0;
+              const derived = [
+                {
+                  label: "CTR",
+                  value: analytics.impressions > 0
+                    ? `${((analytics.clicks / analytics.impressions) * 100).toFixed(2)}%`
+                    : "—",
+                },
+                {
+                  label: "CPC",
+                  value: analytics.clicks > 0 ? `$${(spend / analytics.clicks).toFixed(2)}` : "—",
+                },
+                {
+                  label: "CPM",
+                  value: analytics.impressions > 0
+                    ? `$${((spend / analytics.impressions) * 1000).toFixed(2)}`
+                    : "—",
+                },
+                {
+                  label: "Cost / conversion",
+                  value: analytics.conversions > 0 ? `$${(spend / analytics.conversions).toFixed(2)}` : "—",
+                },
+              ];
+              return (
+                <WidgetCard noPadding className="animate-slide-up">
+                  <div className="grid grid-cols-2 md:grid-cols-4 divide-x divide-border/60">
+                    {derived.map((d) => (
+                      <div key={d.label} className="px-5 py-4">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                          {d.label}
+                        </p>
+                        <p className="text-lg font-bold tabular-nums mt-1">{d.value}</p>
+                      </div>
+                    ))}
+                  </div>
+                </WidgetCard>
+              );
+            })()}
+
+            {/* Recent campaigns — light list, full table lives in the Campaigns tab */}
+            {isLoading ? (
+              <Skeleton className="h-64 rounded-xl bg-secondary" />
+            ) : (
+              <WidgetCard
+                noPadding
+                title="Recent campaigns"
+                subtitle="Latest 6 campaigns on this account"
+                toolbar={
+                  <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setActiveTab("campaigns")}>
+                    View all
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </Button>
+                }
+              >
+                {campaigns.length === 0 ? (
+                  <EmptyState
+                    icon={Megaphone}
+                    title="No campaigns yet"
+                    description="Create your first campaign in LinkedIn Campaign Manager and it will appear here automatically."
+                  />
+                ) : (
+                  <ul className="divide-y divide-border/60">
+                    {campaigns.slice(0, 6).map((c) => {
+                      const tone =
+                        c.status === "ACTIVE" ? "success"
+                        : c.status === "PAUSED" ? "warning"
+                        : c.status === "DRAFT" ? "info"
+                        : "neutral";
+                      const label = c.status.charAt(0) + c.status.slice(1).toLowerCase();
+                      return (
+                        <li key={c.id} className="flex items-center gap-3 px-5 py-3">
+                          <span className="min-w-0 flex-1 truncate text-sm font-medium" title={c.name}>
+                            {c.name}
+                          </span>
+                          <span className="hidden md:inline text-xs text-muted-foreground shrink-0">
+                            {c.type}
+                          </span>
+                          <span className="hidden sm:inline text-sm tabular-nums text-muted-foreground shrink-0 w-28 text-right">
+                            {c.dailyBudget
+                              ? `${c.dailyBudget.currencyCode} ${parseFloat(c.dailyBudget.amount).toLocaleString()}/d`
+                              : "—"}
+                          </span>
+                          <StatusPill tone={tone} label={label} className="shrink-0" />
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </WidgetCard>
+            )}
           </div>
         )}
 
         {activeTab === "campaigns" && (
-          <div className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <MetricCard
-                title="Active Campaigns"
-                value={campaigns.filter(c => c.status === "ACTIVE").length}
-                icon={TrendingUp}
-                delay={0}
-              />
-              <MetricCard
-                title="Paused Campaigns"
-                value={campaigns.filter(c => c.status === "PAUSED").length}
-                icon={Target}
-                delay={50}
-              />
-              <MetricCard
-                title="Total Campaigns"
-                value={campaigns.length}
-                icon={Percent}
-                delay={100}
-              />
-            </div>
-            
-            <CampaignTable 
-              campaigns={campaigns} 
-              onStatusChange={updateCampaignStatus}
-              isLoading={isLoading}
-            />
-          </div>
+          <CampaignTable
+            campaigns={campaigns}
+            onStatusChange={updateCampaignStatus}
+            isLoading={isLoading}
+          />
         )}
 
         {activeTab === "audiences" && (
@@ -345,6 +425,23 @@ export default function Dashboard() {
           <CreativeGallery
             accessToken={accessToken}
             selectedAccount={selectedAccount}
+          />
+        )}
+
+        {activeTab === "bulk_add_creatives" && (
+          <BulkCreativeCopy
+            accessToken={accessToken}
+            selectedAccount={selectedAccount}
+          />
+        )}
+
+        {activeTab === "campaign_editor" && (
+          <CampaignTargetingEditor
+            accessToken={accessToken}
+            selectedAccount={selectedAccount}
+            campaigns={campaigns.map((c) => ({ id: c.id, name: c.name, status: c.status }))}
+            canWrite={currentAccountCanWrite}
+            onRefreshCampaigns={() => selectedAccount && fetchCampaigns(selectedAccount)}
           />
         )}
 
@@ -460,6 +557,8 @@ export default function Dashboard() {
             selectedAccount={selectedAccount}
           />
         )}
+        </div>{/* end animated tab wrapper */}
+        </ErrorBoundary>
         </div>{/* end p-6 content wrapper */}
       </main>
 

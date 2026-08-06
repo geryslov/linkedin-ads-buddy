@@ -19,7 +19,7 @@ export function CreativeThumbnail({ imageUrl, creativeName, size = 40 }: Creativ
   if (!imageUrl || hasError) {
     return (
       <div
-        className="rounded bg-muted/50 flex items-center justify-center shrink-0"
+        className="rounded-md bg-secondary/60 border border-border/60 flex items-center justify-center shrink-0"
         style={{ width: size, height: size }}
       >
         <ImageIcon className="h-4 w-4 text-muted-foreground/50" />
@@ -32,7 +32,7 @@ export function CreativeThumbnail({ imageUrl, creativeName, size = 40 }: Creativ
       <img
         src={imageUrl}
         alt={creativeName || 'Creative thumbnail'}
-        className="rounded object-cover cursor-pointer hover:opacity-80 transition-opacity shrink-0"
+        className="rounded-md object-cover cursor-pointer ring-1 ring-border/60 hover:ring-primary/40 hover:opacity-90 transition-all shrink-0"
         style={{ width: size, height: size }}
         onClick={(e) => {
           e.stopPropagation();
@@ -46,7 +46,7 @@ export function CreativeThumbnail({ imageUrl, creativeName, size = 40 }: Creativ
           <img
             src={imageUrl}
             alt={creativeName || 'Creative preview'}
-            className="w-full h-auto rounded"
+            className="w-full h-auto rounded-lg"
           />
           {creativeName && (
             <p className="text-sm text-muted-foreground mt-2 break-words">{creativeName}</p>

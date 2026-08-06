@@ -1,73 +1,50 @@
-# Welcome to your Lovable project
+# LinkedIn Ads Buddy
 
-## Project info
+An agency-grade **LinkedIn Ads management dashboard**: browse and report on campaigns, creatives, audiences and leads; run AI analyzers; bulk-edit ads; and publish client-facing weekly reports — plus an MCP server so Claude can query the same data.
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+- **Frontend** — React + Vite + TypeScript + Tailwind + shadcn/ui (auto-deploys via Lovable on push to `main`)
+- **Backend** — Supabase (Postgres, Auth, Edge Functions); one monolithic `linkedin-api` edge function fronts all LinkedIn Marketing API access (67 actions)
+- **MCP server** — Node + Express on Railway, exposes the edge actions to Claude via a `call_linkedin_action` passthrough tool
+- **Package manager** — bun
 
-## How can I edit this code?
+## Documentation
 
-There are several ways of editing your application.
+The source of truth lives in three companion docs, kept current with the code:
 
-**Use Lovable**
+- **[CLAUDE.md](CLAUDE.md)** — architecture, deployment matrix, token flow, known constraints, and pitfalls
+- **[FEATURES.md](FEATURES.md)** — what exists and where: every route, nav group, component, hook, edge action, and the design system
+- **[HISTORY.md](HISTORY.md)** — how it got built, chronologically
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
-
-Changes made via Lovable will be committed automatically to this repo.
-
-**Use your preferred IDE**
-
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
-
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
+## Getting started
 
 ```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
+git clone https://github.com/geryslov/linkedin-ads-buddy
+cd linkedin-ads-buddy
+bun install        # or: npm install
+bun run dev        # Vite dev server
 ```
 
-**Edit a file directly in GitHub**
+Type-check before committing — **`vite build` alone does not type-check**:
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+```sh
+npx tsc -p tsconfig.app.json --noEmit
+```
 
-**Use GitHub Codespaces**
+## Deploying
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+| Piece | Deploys |
+|---|---|
+| Frontend (`src/`) | Automatically via **Lovable** on push to `main` |
+| MCP server (`mcp-server/`) | Automatically via **Railway** on push to `main` |
+| Edge functions (`supabase/functions/**`) | **Manual** — the CI workflow is currently failing (see [CLAUDE.md](CLAUDE.md)) |
+| DB migrations (`supabase/migrations/`) | **Manual** via the Supabase SQL Editor |
 
-## What technologies are used for this project?
+Deploy the edge function manually after backend changes:
 
-This project is built with:
+```sh
+SUPABASE_ACCESS_TOKEN=<token> npx supabase functions deploy linkedin-api --project-ref bxoxefmenvlxiubynuay
+```
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+## Working in Lovable
 
-## How can I deploy this project?
-
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
-
-## Can I connect a custom domain to my Lovable project?
-
-Yes, you can!
-
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
-
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+This repo is connected to Lovable — changes made there are committed automatically, and pushes here are reflected back. To edit visually, open the [Lovable project](https://lovable.dev); to publish the frontend, use **Share → Publish**. Custom domains: **Project → Settings → Domains**.

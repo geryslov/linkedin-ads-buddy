@@ -1324,15 +1324,132 @@ serve(async (req) => {
       }
 
       case 'get_creatives': {
-        const { accountId } = params || {};
-        const creativesResponse = await fetch(
-          `https://api.linkedin.com/v2/adCreativesV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}`,
-          { headers: { 'Authorization': `Bearer ${accessToken}` } }
-        );
-        const creatives = await creativesResponse.json();
-        console.log('Creatives fetched:', creatives.elements?.length || 0);
-        
-        return new Response(JSON.stringify(creatives), {
+        const { accountId, status } = params || {};
+        // Optional status filter (e.g. ACTIVE) — dramatically fewer pages on large
+        // accounts, so the source list loads much faster than pulling every status.
+        const baseUrl = `https://api.linkedin.com/v2/adCreativesV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}` +
+          (status ? `&search.status.values[0]=${status}` : '');
+
+        // Paginate — with no count LinkedIn returns only 10, so newly created and
+        // recent creatives on any account with >10 creatives are invisible.
+        // Mirror get_campaigns: page through everything with start/count.
+        const pageSize = 100;
+        let start = 0;
+        const allElements: any[] = [];
+        let lastPayload: any = null;
+        for (let i = 0; i < 100; i++) { // hard cap = 10,000 creatives
+          const pageUrl = `${baseUrl}&start=${start}&count=${pageSize}`;
+          const resp = await fetch(pageUrl, {
+            headers: { 'Authorization': `Bearer ${accessToken}` },
+          });
+          const payload = await resp.json();
+          lastPayload = payload;
+          const els = payload?.elements || [];
+          allElements.push(...els);
+          if (els.length < pageSize) break;
+          start += pageSize;
+        }
+        console.log(`Creatives fetched: ${allElements.length} (paginated)`);
+
+        // Attach a normalized content reference (ugcPost/share/activity URN) to each
+        // creative. The frontend uses this to let creatives that share content — e.g.
+        // a copy and its source — share a display name, so drafts with no analytics
+        // name can inherit their source's resolved name instead of showing an ID.
+        const extractRef = (c: any): string => {
+          if (typeof c?.reference === 'string' && c.reference) return c.reference;
+          if (c?.content && typeof c.content === 'object' && typeof c.content.reference === 'string') return c.content.reference;
+          try {
+            const m = JSON.stringify(c ?? {}).match(/urn:li:(?:ugcPost|share|activity):[0-9]+/);
+            if (m) return m[0];
+          } catch { /* ignore */ }
+          return '';
+        };
+        const enriched = allElements.map((c) => ({ ...c, reference: extractRef(c) }));
+
+        // Resolve friendly names. The legacy adCreativesV2 list does not return a
+        // usable name for sponsored content (that is why creatives showed as IDs),
+        // but the versioned REST creative object does (its `name` field — the same
+        // one the copy action reads). Batch-GET the REST creatives to pull names.
+        try {
+          const ids = enriched.map((c) => (c.id ?? '').toString()).filter(Boolean);
+          const nameById: Record<string, string> = {};
+          const restHeaders = {
+            'Authorization': `Bearer ${accessToken}`,
+            'LinkedIn-Version': '202511',
+            'X-Restli-Protocol-Version': '2.0.0',
+          };
+          for (let i = 0; i < ids.length; i += 50) {
+            const chunk = ids.slice(i, i + 50);
+            const idList = chunk
+              .map((id) => encodeURIComponent(`urn:li:sponsoredCreative:${id}`))
+              .join(',');
+            const batchUrl = `https://api.linkedin.com/rest/adAccounts/${accountId}/creatives?ids=List(${idList})`;
+            const batchResp = await fetch(batchUrl, { headers: restHeaders });
+            if (!batchResp.ok) {
+              console.log(`[get_creatives] name batch-get failed: HTTP ${batchResp.status}`);
+              continue;
+            }
+            const batchJson = await batchResp.json();
+            const results = batchJson?.results || {};
+            for (const [urn, obj] of Object.entries<any>(results)) {
+              const cid = urn.split(':').pop() || '';
+              const nm = obj?.name;
+              if (cid && typeof nm === 'string' && nm.trim()) nameById[cid] = nm.trim();
+            }
+          }
+          const resolvedCount = Object.keys(nameById).length;
+          console.log(`[get_creatives] resolved ${resolvedCount}/${ids.length} names via REST`);
+          for (const c of enriched) {
+            const nm = nameById[(c.id ?? '').toString()];
+            if (nm) c.name = nm; // overlay the friendly name onto the element
+          }
+        } catch (e) {
+          console.error('[get_creatives] name resolution error:', e);
+        }
+
+        // Second pass: many sponsored ads have no `name` set — their real label is the
+        // underlying post's text. Resolve it via /v2/ugcPosts (the non-partner-gated
+        // endpoint), bounded + concurrency-limited so big accounts stay responsive.
+        try {
+          const needText = enriched.filter(
+            (c) => !c.name && typeof c.reference === 'string' &&
+              (c.reference.includes('ugcPost') || c.reference.includes('share')),
+          );
+          const MAX_TEXT = 200;
+          const CONCURRENCY = 8;
+          const targets = needText.slice(0, MAX_TEXT);
+          const textByRef = new Map<string, string>();
+
+          for (let i = 0; i < targets.length; i += CONCURRENCY) {
+            const chunk = targets.slice(i, i + CONCURRENCY);
+            await Promise.all(chunk.map(async (c) => {
+              const ref: string = c.reference;
+              if (textByRef.has(ref)) { c.name = textByRef.get(ref)!; return; }
+              const isUgc = ref.includes('ugcPost');
+              const url = isUgc
+                ? `https://api.linkedin.com/v2/ugcPosts/${encodeURIComponent(ref)}`
+                : `https://api.linkedin.com/v2/shares/${encodeURIComponent(ref)}`;
+              try {
+                const r = await fetch(url, { headers: { 'Authorization': `Bearer ${accessToken}` } });
+                if (!r.ok) return;
+                const d = await r.json();
+                const raw = d?.specificContent?.['com.linkedin.ugc.ShareContent']?.shareCommentary?.text
+                  || d?.text?.text || d?.commentary || '';
+                const text = String(raw).replace(/\s+/g, ' ').trim();
+                if (text) {
+                  const label = text.length > 80 ? `${text.slice(0, 80)}…` : text;
+                  textByRef.set(ref, label);
+                  c.name = label;
+                }
+              } catch { /* leave unnamed */ }
+            }));
+          }
+          console.log(`[get_creatives] resolved ${textByRef.size} post-text names (of ${needText.length} needed)`);
+        } catch (e) {
+          console.error('[get_creatives] post-text resolution error:', e);
+        }
+
+        return new Response(JSON.stringify({ ...lastPayload, elements: enriched }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
@@ -2594,12 +2711,11 @@ serve(async (req) => {
           
           console.log(`[get_demographic_analytics] Page returned ${pageElements.length} records, total so far: ${allElements.length}`);
           
-          // Check if there are more pages
-          const paging = analyticsData.paging;
-          if (paging && paging.total && (startOffset + pageElements.length) < paging.total) {
-            startOffset += pageSize;
-          } else if (pageElements.length === pageSize) {
-            // No paging info but got full page, try fetching more
+          // Continue only while the page came back completely full. Do NOT trust
+          // paging.total — for demographic pivots LinkedIn reports the underlying
+          // record count (not pivot-row count), and re-requesting with &start=
+          // can return the same rows again, which we would then double-count.
+          if (pageElements.length >= pageSize) {
             startOffset += pageSize;
           } else {
             hasMore = false;
@@ -2979,30 +3095,45 @@ serve(async (req) => {
         const pageSize = 10000;
         let hasMore = true;
         let totalReceived = 0;
-        
+        let prevPageSig = '';
+
         while (hasMore) {
           const paginatedUrl = `${analyticsUrl}&start=${startOffset}`;
           const analyticsResponse = await fetch(paginatedUrl, {
             headers: { 'Authorization': `Bearer ${accessToken}` },
           });
-          
+
           if (!analyticsResponse.ok) {
             const errorText = await analyticsResponse.text();
             console.error('[Error] Failed to fetch company demographic:', analyticsResponse.status, errorText);
-            return new Response(JSON.stringify({ 
+            return new Response(JSON.stringify({
               error: 'MEMBER_COMPANY pivot may not be available for this account',
               details: errorText,
-              elements: [] 
+              elements: []
             }), {
               status: 200,
               headers: { ...corsHeaders, 'Content-Type': 'application/json' },
             });
           }
-          
+
           const analyticsData = await analyticsResponse.json();
           const pageElements = analyticsData.elements || [];
+
+          // LinkedIn's adAnalytics finder does not reliably honor &start= for
+          // aggregated pivot queries — it can return the SAME page again. If this
+          // page is identical to the previous one, stop instead of re-summing
+          // (which would inflate every company's metrics by a whole-number factor).
+          const pageSig = pageElements.length > 0
+            ? `${pageElements.length}:${pageElements[0]?.pivotValue || ''}:${pageElements[pageElements.length - 1]?.pivotValue || ''}`
+            : 'empty';
+          if (pageElements.length > 0 && pageSig === prevPageSig) {
+            console.warn('[get_company_demographic] Duplicate page detected (LinkedIn ignored &start=); stopping pagination to avoid double-counting.');
+            break;
+          }
+          prevPageSig = pageSig;
+
           totalReceived += pageElements.length;
-          
+
           // Aggregate immediately instead of collecting all elements
           for (const el of pageElements) {
             const entityUrn = el.pivotValue || '';
@@ -3043,12 +3174,13 @@ serve(async (req) => {
             }
           }
           
-          const paging = analyticsData.paging;
-          if (pageElements.length === 0) {
-            hasMore = false;
-          } else if (paging && paging.total && (startOffset + pageElements.length) < paging.total) {
-            startOffset += pageElements.length;
-          } else if (!paging?.total && pageElements.length >= pageSize) {
+          // Only continue while the page came back completely full — the one
+          // trustworthy signal that more rows may exist. Do NOT consult
+          // paging.total: for demographic pivots LinkedIn reports the underlying
+          // record count (campaign×creative×company), not the pivot-row count,
+          // so trusting it made this loop re-request and re-sum the same
+          // companies, inflating every metric ~N×.
+          if (pageElements.length >= pageSize) {
             startOffset += pageElements.length;
           } else {
             hasMore = false;
@@ -3058,8 +3190,8 @@ serve(async (req) => {
             hasMore = false;
           }
         }
-        
-        console.log(`[get_company_demographic] Total received: ${totalReceived} records, aggregated to ${companyMap.size} unique companies`);
+
+        console.log(`[get_company_demographic] Total received: ${totalReceived} records, aggregated to ${companyMap.size} unique companies (ratio should be ~1:1 for timeGranularity=ALL)`);
 
         // Filter out zero-metric entries before sorting/slicing so totalCompanies and hasMore are accurate
         const allCompaniesSorted = Array.from(companyMap.entries())
@@ -3497,10 +3629,10 @@ serve(async (req) => {
                   if (requestedUrns.size === 0) break;
                 }
 
-                const paging = data.paging;
-                if (pageElements.length === 0) hasMorePages = false;
-                else if (paging?.total && (pageStart + pageElements.length) < paging.total) pageStart += pageElements.length;
-                else if (!paging?.total && pageElements.length >= pageSize) pageStart += pageElements.length;
+                // Continue only on a completely full page; never trust
+                // paging.total (LinkedIn's offset pagination is unreliable for
+                // pivot queries and re-returns rows we would double-count).
+                if (pageElements.length >= pageSize) pageStart += pageElements.length;
                 else hasMorePages = false;
               }
 
@@ -3747,10 +3879,10 @@ serve(async (req) => {
                 const pageElements = data.elements || [];
                 elements.push(...pageElements);
 
-                const paging = data.paging;
-                if (pageElements.length === 0) hasMorePages = false;
-                else if (paging?.total && (pageStart + pageElements.length) < paging.total) pageStart += pageElements.length;
-                else if (!paging?.total && pageElements.length >= pageSize) pageStart += pageElements.length;
+                // Continue only on a completely full page; never trust
+                // paging.total (LinkedIn's offset pagination is unreliable for
+                // pivot queries and re-returns rows we would double-count).
+                if (pageElements.length >= pageSize) pageStart += pageElements.length;
                 else hasMorePages = false;
               }
 
@@ -10991,11 +11123,10 @@ serve(async (req) => {
 
           console.log(`[get_company_engagement_report] Page at offset ${startOffset}: ${pageElements.length} records, total: ${allElements.length}`);
 
-          // Check pagination
-          const paging = analyticsData.paging;
-          if (paging && paging.total && (startOffset + pageElements.length) < paging.total) {
-            startOffset += pageSize;
-          } else if (pageElements.length === pageSize) {
+          // Continue only on a completely full page; never trust paging.total
+          // (LinkedIn's offset pagination is unreliable for pivot queries and
+          // re-returns rows we would double-count).
+          if (pageElements.length >= pageSize) {
             startOffset += pageSize;
           } else {
             hasMore = false;
@@ -13703,6 +13834,410 @@ serve(async (req) => {
           linkedInMessage: probeBodyJson?.message ?? null,
           bodyText: probeBodyText.slice(0, 1200),
           cleanup: { archiveAttempted, archiveOk, archiveStatus, archiveBody },
+        }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      case 'list_lead_forms': {
+        // Lightweight list of lead gen forms for an account, for the copy-with-form
+        // picker. Reuses the Lead Sync finder that get_lead_gen_forms relies on.
+        const { accountId: lfAccountId } = params || {};
+        if (!lfAccountId) {
+          return new Response(JSON.stringify({ error: 'accountId is required' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+        const lfOwner = `(sponsoredAccount:urn%3Ali%3AsponsoredAccount%3A${lfAccountId})`;
+        const lfUrl = `https://api.linkedin.com/rest/leadForms?q=owner&owner=${lfOwner}&count=500`;
+
+        const lfName = (form: any): string | null => {
+          const n = form?.name;
+          if (typeof n === 'string' && n.trim()) return n.trim();
+          if (n && typeof n === 'object') {
+            const loc = n.localized || n;
+            for (const v of Object.values(loc)) if (typeof v === 'string' && v.trim()) return v.trim();
+          }
+          const h = form?.headline;
+          if (typeof h === 'string' && h.trim()) return h.trim();
+          return null;
+        };
+
+        const lfForms: any[] = [];
+        try {
+          const resp = await fetch(lfUrl, {
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+              'X-Restli-Protocol-Version': '2.0.0',
+              'LinkedIn-Version': '202511',
+            },
+          });
+          if (resp.ok) {
+            const data = await resp.json();
+            for (const form of (data?.elements || [])) {
+              const rawId = String(form.id ?? '').trim();
+              const vMatch = rawId.match(/^\((\d+),\d+\)$/);
+              const formId = vMatch ? vMatch[1] : (rawId || String(form.entityUrn || form['$URN'] || '').split(':').pop() || '');
+              if (!formId) continue;
+              lfForms.push({ id: formId, name: lfName(form) || `Form ${formId}`, status: form.status || 'UNKNOWN' });
+            }
+          } else {
+            console.log(`[list_lead_forms] HTTP ${resp.status}`);
+          }
+        } catch (e) {
+          console.error('[list_lead_forms] error:', e);
+        }
+        console.log(`[list_lead_forms] ${lfForms.length} forms for account ${lfAccountId}`);
+        return new Response(JSON.stringify({ forms: lfForms }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      case 'bulk_copy_creatives': {
+        // Bulk "add existing ads to other campaigns". A LinkedIn creative is bound
+        // to one campaign, so there is no move/share — we CREATE a new creative in
+        // each target campaign that references the same content URN as the source.
+        // Platform-only (JWT + can_write gated, exactly like probe_creative_create);
+        // MCP sends the anon key, so auth.getUser() fails there and this 401s.
+        const {
+          accountId: bulkAccountId,
+          sourceCreativeIds,
+          targetCampaignIds,
+          intendedStatus: bulkIntendedStatus,
+          adFormId,          // optional: override lead gen form on lead-gen copies
+          ctaLabel,          // optional: override the CTA label (e.g. DOWNLOAD)
+        } = params || {};
+
+        const bulkStatus = bulkIntendedStatus === 'ACTIVE' ? 'ACTIVE' : 'DRAFT';
+        // A lead gen form/CTA can only be set while a creative is DRAFT. When the
+        // caller asks to assign one, create as DRAFT, set it, then activate if they
+        // chose Active. Destination is an adForm URN.
+        const wantLeadgen = !!(adFormId || ctaLabel);
+        const overrideDestination = adFormId ? `urn:li:adForm:${String(adFormId).replace(/\D/g, '')}` : null;
+        const overrideLabel = ctaLabel ? String(ctaLabel) : null;
+
+        if (!bulkAccountId || !Array.isArray(sourceCreativeIds) || !Array.isArray(targetCampaignIds)
+            || sourceCreativeIds.length === 0 || targetCampaignIds.length === 0) {
+          return new Response(JSON.stringify({
+            error: 'accountId, a non-empty sourceCreativeIds array, and a non-empty targetCampaignIds array are required',
+          }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        // ---- JWT gate (platform-only) ----
+        const bulkAuthHeader = req.headers.get('Authorization');
+        const BULK_SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
+        const BULK_SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!;
+        const { createClient: createBulkClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+        const bulkSupabase = createBulkClient(BULK_SUPABASE_URL, BULK_SUPABASE_ANON_KEY, {
+          global: { headers: { Authorization: bulkAuthHeader || '' } },
+        });
+
+        const { data: { user: bulkUser }, error: bulkUserError } = await bulkSupabase.auth.getUser();
+        if (bulkUserError || !bulkUser) {
+          return new Response(JSON.stringify({
+            error: 'Authentication required. This action is platform-only and not reachable from MCP.',
+            errorCode: 'AUTH_REQUIRED',
+          }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        // ---- can_write gate, mirroring probe_creative_create (self-healing discovery) ----
+        let { data: bulkAccRow } = await bulkSupabase
+          .from('linkedin_ad_accounts')
+          .select('can_write, user_role')
+          .eq('user_id', bulkUser.id)
+          .eq('account_id', bulkAccountId)
+          .maybeSingle();
+
+        if (!bulkAccRow) {
+          try {
+            const accResp = await fetch(
+              `https://api.linkedin.com/v2/adAccountsV2/${bulkAccountId}`,
+              { headers: { 'Authorization': `Bearer ${accessToken}` } }
+            );
+            if (accResp.ok) {
+              const accData = await accResp.json();
+              let bulkRole = 'UNKNOWN';
+              try {
+                const usersResp = await fetch(
+                  'https://api.linkedin.com/rest/adAccountUsers?q=authenticatedUser',
+                  { headers: {
+                      'Authorization': `Bearer ${accessToken}`,
+                      'LinkedIn-Version': '202511',
+                      'X-Restli-Protocol-Version': '2.0.0',
+                  } }
+                );
+                if (usersResp.ok) {
+                  const usersData = await usersResp.json();
+                  for (const el of (usersData?.elements || [])) {
+                    if ((el.account || '').split(':').pop() === String(bulkAccountId)) {
+                      bulkRole = el.role || 'UNKNOWN';
+                      break;
+                    }
+                  }
+                }
+              } catch (_e) { /* role stays UNKNOWN */ }
+
+              const bulkWriteRoles = ['ACCOUNT_MANAGER', 'CAMPAIGN_MANAGER', 'CREATIVE_MANAGER'];
+              await bulkSupabase.from('linkedin_ad_accounts').upsert({
+                user_id: bulkUser.id,
+                account_id: bulkAccountId,
+                account_urn: `urn:li:sponsoredAccount:${bulkAccountId}`,
+                name: accData.name || `Account ${bulkAccountId}`,
+                status: accData.status || 'ACTIVE',
+                type: accData.type || 'UNKNOWN',
+                currency: accData.currency || 'USD',
+                user_role: bulkRole,
+                can_write: bulkWriteRoles.includes(bulkRole),
+                last_synced_at: new Date().toISOString(),
+              }, { onConflict: 'user_id,account_id' });
+
+              const { data: bulkAccRow2 } = await bulkSupabase
+                .from('linkedin_ad_accounts')
+                .select('can_write, user_role')
+                .eq('user_id', bulkUser.id)
+                .eq('account_id', bulkAccountId)
+                .maybeSingle();
+              bulkAccRow = bulkAccRow2;
+            }
+          } catch (e) {
+            console.error('[bulk_copy_creatives] Discovery failed:', e);
+          }
+        }
+
+        if (!bulkAccRow) {
+          return new Response(JSON.stringify({
+            error: 'This ad account is not accessible in this app.',
+            errorCode: 'ACCOUNT_NOT_ACCESSIBLE',
+          }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+        // DIRECT_ACCESS means the role is unknown — let LinkedIn be the judge.
+        if (!bulkAccRow.can_write && bulkAccRow.user_role !== 'DIRECT_ACCESS') {
+          return new Response(JSON.stringify({
+            error: `No write-capable role on this account (role: ${bulkAccRow.user_role || 'UNKNOWN'}). Needs Account/Campaign/Creative Manager.`,
+            errorCode: 'ROLE_INSUFFICIENT',
+          }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        const bulkVersionHeaders = {
+          'Authorization': `Bearer ${accessToken}`,
+          'LinkedIn-Version': '202511',
+          'X-Restli-Protocol-Version': '2.0.0',
+        };
+        const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+        // ---- Step 1: resolve each source creative's content reference ONCE. ----
+        // A source with no usable reference fails all its targets with one reason.
+        const sourceRefs: Record<string, {
+          reference: string | null; error: string | null; name: string | null;
+          leadgen: { destination: string; label: string } | null;
+        }> = {};
+        for (const rawId of sourceCreativeIds) {
+          const sId = String(rawId);
+          const srcUrn = encodeURIComponent(`urn:li:sponsoredCreative:${sId}`);
+          try {
+            const srcResp = await fetch(
+              `https://api.linkedin.com/rest/adAccounts/${bulkAccountId}/creatives/${srcUrn}`,
+              { headers: bulkVersionHeaders }
+            );
+            if (!srcResp.ok) {
+              const t = await srcResp.text();
+              sourceRefs[sId] = { reference: null, name: null, leadgen: null,
+                error: `Could not read source creative (HTTP ${srcResp.status}). ${t.slice(0, 200)}` };
+              continue;
+            }
+            const src = await srcResp.json();
+            const content = src.content;
+            const reference = (typeof content === 'string' ? content : content?.reference) || '';
+            const name = src.name || src.creativeDscName || null;
+            // Present only on lead gen ads; used to know the ad is lead gen and to
+            // keep its existing form/label when the caller overrides only one of them.
+            const lg = src.leadgenCallToAction;
+            const leadgen = (lg && lg.destination)
+              ? { destination: String(lg.destination), label: String(lg.label || '') }
+              : null;
+
+            if (!reference) {
+              sourceRefs[sId] = { reference: null, name, leadgen,
+                error: 'Inline content (text/spotlight/follower ad) has no shareable reference and cannot be copied.' };
+            } else if (reference.includes('adInMailContent')) {
+              sourceRefs[sId] = { reference: null, name, leadgen,
+                error: 'Message/InMail ads reference adInMailContent URNs, which are not copyable.' };
+            } else if (!reference.includes('ugcPost') && !reference.includes('share')) {
+              sourceRefs[sId] = { reference: null, name, leadgen,
+                error: `Unsupported content reference (${reference}).` };
+            } else {
+              sourceRefs[sId] = { reference, name, leadgen, error: null };
+            }
+          } catch (e) {
+            sourceRefs[sId] = { reference: null, name: null, leadgen: null,
+              error: `Failed to read source creative: ${e instanceof Error ? e.message : String(e)}` };
+          }
+          await sleep(80);
+        }
+
+        // ---- Step 2: for each (source × target), create a new creative. ----
+        const bulkResults: any[] = [];
+        const createUrl = `https://api.linkedin.com/rest/adAccounts/${bulkAccountId}/creatives`;
+
+        for (const rawSid of sourceCreativeIds) {
+          const sId = String(rawSid);
+          const srcInfo = sourceRefs[sId];
+
+          for (const rawCid of targetCampaignIds) {
+            const cId = String(rawCid);
+
+            if (!srcInfo || !srcInfo.reference) {
+              bulkResults.push({
+                sourceCreativeId: sId,
+                sourceCreativeName: srcInfo?.name || null,
+                targetCampaignId: cId,
+                ok: false,
+                verdict: 'SOURCE_UNUSABLE',
+                createdUrn: null,
+                message: srcInfo?.error || 'Source creative could not be resolved.',
+              });
+              continue;
+            }
+
+            // Assign a form/CTA when requested. Such copies must be created DRAFT
+            // (the field is read-only once non-draft). We can apply overrides even
+            // when the source didn't have a leadgen CTA, provided the caller
+            // supplied BOTH form + label (otherwise we'd have nothing to merge with).
+            const canApplyFromOverrideOnly = !!(overrideDestination && overrideLabel);
+            const applyLeadgen = wantLeadgen && (!!srcInfo.leadgen || canApplyFromOverrideOnly);
+            const createStatus = applyLeadgen ? 'DRAFT' : bulkStatus;
+
+            try {
+              const createResp = await fetch(createUrl, {
+                method: 'POST',
+                headers: { ...bulkVersionHeaders, 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  campaign: `urn:li:sponsoredCampaign:${cId}`,
+                  content: { reference: srcInfo.reference },
+                  intendedStatus: createStatus,
+                }),
+              });
+
+              const bodyText = await createResp.text();
+              let bodyJson: any = null;
+              try { bodyJson = JSON.parse(bodyText); } catch { /* keep raw */ }
+
+              // New URN arrives in a header (id in body is unreliable for creates).
+              const createdUrn = createResp.headers.get('x-restli-id')
+                || createResp.headers.get('x-linkedin-id')
+                || (createResp.headers.get('location')?.split('/').pop() || null)
+                || bodyJson?.id || bodyJson?.['$URN'] || null;
+
+              const ok = createResp.ok && !!createdUrn;
+              const errText = bodyText.toLowerCase();
+              let verdict: string;
+              let message: string | null = null;
+              if (ok) {
+                verdict = 'CREATED';
+              } else if (createResp.ok && !createdUrn) {
+                verdict = 'CREATED_NO_URN';
+                message = 'LinkedIn accepted the create but returned no creative URN.';
+              } else if (createResp.status === 401) {
+                verdict = 'TOKEN_EXPIRED';
+                message = 'Your LinkedIn session expired. Reconnect and try again.';
+              } else if (createResp.status === 403) {
+                verdict = (errText.includes('partner') || errText.includes('marketing developer'))
+                  ? 'PARTNER_GATED' : 'ROLE_INSUFFICIENT';
+                message = bodyJson?.message || 'Permission denied by LinkedIn.';
+              } else if (createResp.status === 422) {
+                verdict = 'INCOMPATIBLE_CONTENT';
+                message = bodyJson?.message || 'Target campaign is incompatible with this content type.';
+              } else if (createResp.status === 429) {
+                verdict = 'RATE_LIMITED';
+                message = 'LinkedIn rate limit hit. Try again with fewer copies.';
+              } else if (createResp.status === 400) {
+                verdict = 'BAD_REQUEST';
+                message = bodyJson?.message || bodyText.slice(0, 200);
+              } else {
+                verdict = 'UNKNOWN';
+                message = bodyJson?.message || bodyText.slice(0, 200);
+              }
+
+              // ---- Assign lead gen form / CTA on the new DRAFT creative. ----
+              let formApplied = false;
+              let formNote: string | null = null;
+              if (ok && createdUrn && wantLeadgen) {
+                const destination = overrideDestination || srcInfo.leadgen?.destination || null;
+                const label = overrideLabel || srcInfo.leadgen?.label || null;
+                if (!destination || !label) {
+                  formNote = !srcInfo.leadgen
+                    ? 'Source is not a lead gen ad — provide BOTH a form and a CTA to assign one.'
+                    : 'Form/CTA missing — nothing to apply.';
+                } else {
+                  try {
+                    const patchResp = await fetch(
+                      `${createUrl}/${encodeURIComponent(createdUrn)}`,
+                      {
+                        method: 'POST',
+                        headers: { ...bulkVersionHeaders, 'Content-Type': 'application/json', 'X-Restli-Method': 'partial_update' },
+                        body: JSON.stringify({ patch: { $set: { leadgenCallToAction: { destination, label } } } }),
+                      },
+                    );
+                    if (patchResp.ok) {
+                      formApplied = true;
+                      // Honor an Active choice now that the form is set.
+                      if (bulkStatus === 'ACTIVE') {
+                        await fetch(`${createUrl}/${encodeURIComponent(createdUrn)}`, {
+                          method: 'POST',
+                          headers: { ...bulkVersionHeaders, 'Content-Type': 'application/json', 'X-Restli-Method': 'partial_update' },
+                          body: JSON.stringify({ patch: { $set: { intendedStatus: 'ACTIVE' } } }),
+                        });
+                      }
+                    } else {
+                      const pt = await patchResp.text();
+                      formNote = `Copied, but form/CTA not applied (HTTP ${patchResp.status}). ${pt.slice(0, 200)}`;
+                      console.error('[bulk_copy_creatives] leadgen patch failed', patchResp.status, pt.slice(0, 400));
+                    }
+                  } catch (pe) {
+                    formNote = `Copied, but form/CTA not applied: ${pe instanceof Error ? pe.message : String(pe)}`;
+                  }
+                }
+              }
+
+              bulkResults.push({
+                sourceCreativeId: sId,
+                sourceCreativeName: srcInfo.name,
+                targetCampaignId: cId,
+                ok,
+                verdict,
+                createdUrn,
+                httpStatus: createResp.status,
+                message: message || formNote,
+                isLeadGen: !!srcInfo.leadgen,
+                formApplied,
+              });
+            } catch (e) {
+              bulkResults.push({
+                sourceCreativeId: sId,
+                sourceCreativeName: srcInfo.name,
+                targetCampaignId: cId,
+                ok: false,
+                verdict: 'REQUEST_FAILED',
+                createdUrn: null,
+                message: e instanceof Error ? e.message : String(e),
+                isLeadGen: !!srcInfo?.leadgen,
+                formApplied: false,
+              });
+            }
+            await sleep(120); // be gentle on the write rate limit
+          }
+        }
+
+        const successCount = bulkResults.filter((r) => r.ok).length;
+        const formsAppliedCount = bulkResults.filter((r) => r.formApplied).length;
+        console.log(`[bulk_copy_creatives] ${successCount}/${bulkResults.length} copies created as ${bulkStatus}; forms applied: ${formsAppliedCount}`);
+
+        return new Response(JSON.stringify({
+          ok: successCount > 0,
+          intendedStatus: bulkStatus,
+          summary: {
+            attempted: bulkResults.length,
+            succeeded: successCount,
+            failed: bulkResults.length - successCount,
+            formsApplied: formsAppliedCount,
+          },
+          results: bulkResults,
         }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 

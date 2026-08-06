@@ -1,119 +1,52 @@
-import { Badge } from '@/components/ui/badge';
-import { 
-  Image, 
-  Video, 
-  LayoutGrid, 
-  Type, 
-  Star, 
-  Users, 
+import {
+  Image,
+  Video,
+  LayoutGrid,
+  Type,
+  Star,
+  Users,
   Briefcase,
   FileText,
   HelpCircle,
   Mail,
   FileSpreadsheet
 } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 interface CreativeTypeBadgeProps {
   type: string;
   className?: string;
 }
 
-const TYPE_CONFIG: Record<string, { 
+/* Ad-format identity chip — neutral ink, icon carries the format.
+   Format is metadata, not status, so it stays out of the semantic
+   (success/warning/destructive) and chart color ranges. */
+const TYPE_CONFIG: Record<string, {
   icon: React.ComponentType<{ className?: string }>;
   label: string;
-  colors: string;
 }> = {
-  SPONSORED_CONTENT: {
-    icon: Image,
-    label: 'Sponsored Content',
-    colors: 'bg-blue-500/10 text-blue-600 border-blue-500/20 dark:bg-blue-500/20 dark:text-blue-400',
-  },
-  IMAGE_ENG: {
-    icon: Image,
-    label: 'Image Engagement',
-    colors: 'bg-blue-500/10 text-blue-600 border-blue-500/20 dark:bg-blue-500/20 dark:text-blue-400',
-  },
-  IMAGE_GATED: {
-    icon: Image,
-    label: 'Image Gated',
-    colors: 'bg-indigo-500/10 text-indigo-600 border-indigo-500/20 dark:bg-indigo-500/20 dark:text-indigo-400',
-  },
-  DOC_GATED: {
-    icon: FileSpreadsheet,
-    label: 'Doc Gated',
-    colors: 'bg-teal-500/10 text-teal-600 border-teal-500/20 dark:bg-teal-500/20 dark:text-teal-400',
-  },
-  VIDEO_GATED: {
-    icon: Video,
-    label: 'Video Gated',
-    colors: 'bg-rose-500/10 text-rose-600 border-rose-500/20 dark:bg-rose-500/20 dark:text-rose-400',
-  },
-  CAROUSEL_GATED: {
-    icon: LayoutGrid,
-    label: 'Carousel Gated',
-    colors: 'bg-orange-500/10 text-orange-600 border-orange-500/20 dark:bg-orange-500/20 dark:text-orange-400',
-  },
-  SPONSORED_UPDATE: {
-    icon: FileText,
-    label: 'Sponsored Update',
-    colors: 'bg-purple-500/10 text-purple-600 border-purple-500/20 dark:bg-purple-500/20 dark:text-purple-400',
-  },
-  TEXT_AD: {
-    icon: Type,
-    label: 'Text Ad',
-    colors: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20 dark:bg-emerald-500/20 dark:text-emerald-400',
-  },
-  SPOTLIGHT_AD: {
-    icon: Star,
-    label: 'Spotlight Ad',
-    colors: 'bg-amber-500/10 text-amber-600 border-amber-500/20 dark:bg-amber-500/20 dark:text-amber-400',
-  },
-  VIDEO_AD: {
-    icon: Video,
-    label: 'Video Ad',
-    colors: 'bg-rose-500/10 text-rose-600 border-rose-500/20 dark:bg-rose-500/20 dark:text-rose-400',
-  },
-  VIDEO: {
-    icon: Video,
-    label: 'Video',
-    colors: 'bg-rose-500/10 text-rose-600 border-rose-500/20 dark:bg-rose-500/20 dark:text-rose-400',
-  },
-  CAROUSEL_AD: {
-    icon: LayoutGrid,
-    label: 'Carousel Ad',
-    colors: 'bg-orange-500/10 text-orange-600 border-orange-500/20 dark:bg-orange-500/20 dark:text-orange-400',
-  },
-  CAROUSEL: {
-    icon: LayoutGrid,
-    label: 'Carousel',
-    colors: 'bg-orange-500/10 text-orange-600 border-orange-500/20 dark:bg-orange-500/20 dark:text-orange-400',
-  },
-  FOLLOWER_AD: {
-    icon: Users,
-    label: 'Follower Ad',
-    colors: 'bg-pink-500/10 text-pink-600 border-pink-500/20 dark:bg-pink-500/20 dark:text-pink-400',
-  },
-  JOBS_AD: {
-    icon: Briefcase,
-    label: 'Jobs Ad',
-    colors: 'bg-cyan-500/10 text-cyan-600 border-cyan-500/20 dark:bg-cyan-500/20 dark:text-cyan-400',
-  },
-  MESSAGE_AD: {
-    icon: Mail,
-    label: 'Message Ad',
-    colors: 'bg-violet-500/10 text-violet-600 border-violet-500/20 dark:bg-violet-500/20 dark:text-violet-400',
-  },
-  DOCUMENT_AD: {
-    icon: FileSpreadsheet,
-    label: 'Document Ad',
-    colors: 'bg-teal-500/10 text-teal-600 border-teal-500/20 dark:bg-teal-500/20 dark:text-teal-400',
-  },
+  SPONSORED_CONTENT: { icon: Image, label: 'Sponsored Content' },
+  IMAGE_ENG: { icon: Image, label: 'Image Engagement' },
+  IMAGE_GATED: { icon: Image, label: 'Image Gated' },
+  DOC_GATED: { icon: FileSpreadsheet, label: 'Doc Gated' },
+  VIDEO_GATED: { icon: Video, label: 'Video Gated' },
+  CAROUSEL_GATED: { icon: LayoutGrid, label: 'Carousel Gated' },
+  SPONSORED_UPDATE: { icon: FileText, label: 'Sponsored Update' },
+  TEXT_AD: { icon: Type, label: 'Text Ad' },
+  SPOTLIGHT_AD: { icon: Star, label: 'Spotlight Ad' },
+  VIDEO_AD: { icon: Video, label: 'Video Ad' },
+  VIDEO: { icon: Video, label: 'Video' },
+  CAROUSEL_AD: { icon: LayoutGrid, label: 'Carousel Ad' },
+  CAROUSEL: { icon: LayoutGrid, label: 'Carousel' },
+  FOLLOWER_AD: { icon: Users, label: 'Follower Ad' },
+  JOBS_AD: { icon: Briefcase, label: 'Jobs Ad' },
+  MESSAGE_AD: { icon: Mail, label: 'Message Ad' },
+  DOCUMENT_AD: { icon: FileSpreadsheet, label: 'Document Ad' },
 };
 
 const DEFAULT_CONFIG = {
   icon: HelpCircle,
   label: 'Unknown',
-  colors: 'bg-muted text-muted-foreground border-muted',
 };
 
 export function CreativeTypeBadge({ type, className = '' }: CreativeTypeBadgeProps) {
@@ -122,12 +55,15 @@ export function CreativeTypeBadge({ type, className = '' }: CreativeTypeBadgePro
   const displayLabel = TYPE_CONFIG[type]?.label || type.replace(/_/g, ' ');
 
   return (
-    <Badge 
-      variant="outline" 
-      className={`text-xs gap-1.5 font-medium ${config.colors} ${className}`}
+    <span
+      className={cn(
+        'inline-flex items-center gap-1 rounded-md border border-border/70 bg-secondary/50',
+        'px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground whitespace-nowrap',
+        className
+      )}
     >
-      <Icon className="h-3 w-3" />
+      <Icon className="h-3 w-3 shrink-0" />
       {displayLabel}
-    </Badge>
+    </span>
   );
 }

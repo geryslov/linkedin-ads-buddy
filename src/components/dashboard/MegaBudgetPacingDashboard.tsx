@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useMegaBudgetPacing, AccountPacingSummary } from "@/hooks/useMegaBudgetPacing";
 import { MetricCard } from "./MetricCard";
-import { Badge } from "@/components/ui/badge";
+import { WidgetCard, EmptyState, StatusPill } from "./widgets";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
@@ -78,24 +78,31 @@ export function MegaBudgetPacingDashboard({ accessToken, adAccounts }: Props) {
   const pacingColor = (s: AccountPacingSummary) => {
     if (s.budget === 0) return "text-muted-foreground";
     if (s.pacingStatus === "overspend") return "text-destructive";
-    if (s.pacingStatus === "underspend") return "text-yellow-500";
-    return "text-green-500";
+    if (s.pacingStatus === "underspend") return "text-warning";
+    return "text-success";
   };
 
   const statusBadge = (s: AccountPacingSummary) => {
-    if (s.budget === 0) return <Badge variant="secondary">No Budget</Badge>;
-    if (s.pacingStatus === "overspend") return <Badge variant="destructive">Over</Badge>;
-    if (s.pacingStatus === "underspend") return <Badge className="bg-yellow-500/20 text-yellow-600 border-yellow-500/30">Under</Badge>;
-    return <Badge className="bg-green-500/20 text-green-600 border-green-500/30">On Track</Badge>;
+    if (s.budget === 0) return <StatusPill tone="neutral" label="No budget" />;
+    if (s.pacingStatus === "overspend") return <StatusPill tone="danger" label="Over" />;
+    if (s.pacingStatus === "underspend") return <StatusPill tone="warning" label="Under" />;
+    return <StatusPill tone="success" label="On track" />;
   };
 
   if (error) {
     return (
-      <div className="glass rounded-xl p-8 text-center">
-        <AlertTriangle className="h-8 w-8 text-destructive mx-auto mb-2" />
-        <p className="text-destructive">{error}</p>
-        <Button variant="outline" className="mt-4" onClick={() => fetchAll(adAccounts.map(a => a.id))}>Retry</Button>
-      </div>
+      <WidgetCard noPadding>
+        <EmptyState
+          icon={AlertTriangle}
+          title="Couldn't load budget pacing"
+          description={error}
+          action={
+            <Button variant="outline" size="sm" onClick={() => fetchAll(adAccounts.map(a => a.id))}>
+              Retry
+            </Button>
+          }
+        />
+      </WidgetCard>
     );
   }
 
@@ -128,9 +135,9 @@ export function MegaBudgetPacingDashboard({ accessToken, adAccounts }: Props) {
       </div>
 
       {/* Account Table */}
-      <div className="glass rounded-xl overflow-hidden animate-slide-up" style={{ animationDelay: "200ms" }}>
+      <WidgetCard noPadding title="Account pacing" subtitle="Spend vs. budget across every ad account" className="animate-slide-up">
         {isLoading ? (
-          <div className="p-8"><Skeleton className="h-64 bg-secondary rounded-lg" /></div>
+          <div className="p-5"><Skeleton className="h-64 bg-secondary rounded-lg" /></div>
         ) : (
           <Table>
             <TableHeader>
@@ -224,14 +231,14 @@ export function MegaBudgetPacingDashboard({ accessToken, adAccounts }: Props) {
                       </div>
                     ) : <span className="text-muted-foreground text-xs">—</span>}
                   </TableCell>
-                  <TableCell>${s.projected.toLocaleString(undefined, { maximumFractionDigits: 0 })}</TableCell>
-                  <TableCell>{s.daysRemaining}d</TableCell>
+                  <TableCell className="tabular-nums">${s.projected.toLocaleString(undefined, { maximumFractionDigits: 0 })}</TableCell>
+                  <TableCell className="tabular-nums">{s.daysRemaining}d</TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
         )}
-      </div>
+      </WidgetCard>
     </div>
   );
 }

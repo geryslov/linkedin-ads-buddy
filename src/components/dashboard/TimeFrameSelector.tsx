@@ -16,6 +16,7 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import { TimeFrameOption, TimeGranularity } from '@/hooks/useDemographicReporting';
+import { SegmentedControl } from './widgets';
 import { cn } from '@/lib/utils';
 
 interface TimeFrameSelectorProps {
@@ -79,19 +80,19 @@ export function TimeFrameSelector({
 
   return (
     <div className="flex flex-wrap items-center gap-3">
-      <div className="flex items-center gap-2">
-        <CalendarIcon className="h-4 w-4 text-muted-foreground" />
-        <span className="text-sm text-muted-foreground">Time Period:</span>
+      <div className="flex items-center gap-1.5">
+        <CalendarIcon className="h-3.5 w-3.5 text-muted-foreground" />
+        <span className="text-xs font-medium text-muted-foreground">Period</span>
       </div>
-      
+
       <Select
         value={isCustom ? 'custom' : selectedTimeFrame}
         onValueChange={handleTimeFrameChange}
       >
-        <SelectTrigger className="w-[160px] bg-background/50">
+        <SelectTrigger className="h-8 w-[150px] text-sm bg-card border-border">
           <SelectValue placeholder="Select period" />
         </SelectTrigger>
-        <SelectContent>
+        <SelectContent className="bg-card border-border">
           {timeFrameOptions.map((option) => (
             <SelectItem key={option.value} value={option.value}>
               {option.label}
@@ -109,15 +110,15 @@ export function TimeFrameSelector({
                 variant="outline"
                 size="sm"
                 className={cn(
-                  "w-[130px] justify-start text-left font-normal",
+                  "h-8 w-[130px] justify-start text-left font-normal",
                   !startDate && "text-muted-foreground"
                 )}
               >
-                <CalendarIcon className="mr-2 h-4 w-4" />
+                <CalendarIcon className="mr-2 h-3.5 w-3.5" />
                 {startDate ? format(startDate, "MMM dd, yyyy") : "Start date"}
               </Button>
             </PopoverTrigger>
-            <PopoverContent className="w-auto p-0" align="start">
+            <PopoverContent className="w-auto p-0 bg-card border-border" align="start">
               <Calendar
                 mode="single"
                 selected={startDate}
@@ -128,24 +129,24 @@ export function TimeFrameSelector({
               />
             </PopoverContent>
           </Popover>
-          
-          <span className="text-muted-foreground">→</span>
-          
+
+          <span className="text-muted-foreground text-xs">→</span>
+
           <Popover open={endOpen} onOpenChange={setEndOpen}>
             <PopoverTrigger asChild>
               <Button
                 variant="outline"
                 size="sm"
                 className={cn(
-                  "w-[130px] justify-start text-left font-normal",
+                  "h-8 w-[130px] justify-start text-left font-normal",
                   !endDate && "text-muted-foreground"
                 )}
               >
-                <CalendarIcon className="mr-2 h-4 w-4" />
+                <CalendarIcon className="mr-2 h-3.5 w-3.5" />
                 {endDate ? format(endDate, "MMM dd, yyyy") : "End date"}
               </Button>
             </PopoverTrigger>
-            <PopoverContent className="w-auto p-0" align="start">
+            <PopoverContent className="w-auto p-0 bg-card border-border" align="start">
               <Calendar
                 mode="single"
                 selected={endDate}
@@ -159,29 +160,26 @@ export function TimeFrameSelector({
         </div>
       )}
 
-      <div className="h-6 w-px bg-border/50 hidden sm:block" />
+      <div className="h-5 w-px bg-border hidden sm:block" />
 
       <div className="flex items-center gap-2">
-        <span className="text-sm text-muted-foreground">Group by:</span>
-        <div className="flex gap-1">
-          {(['DAILY', 'MONTHLY', 'ALL'] as TimeGranularity[]).map((granularity) => (
-            <Button
-              key={granularity}
-              variant={timeGranularity === granularity ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => onGranularityChange(granularity)}
-              className="text-xs"
-            >
-              {granularity === 'ALL' ? 'Total' : granularity.charAt(0) + granularity.slice(1).toLowerCase()}
-            </Button>
-          ))}
-        </div>
+        <span className="text-xs font-medium text-muted-foreground">Group by</span>
+        <SegmentedControl<TimeGranularity>
+          size="sm"
+          value={timeGranularity}
+          onChange={onGranularityChange}
+          options={[
+            { value: 'DAILY', label: 'Daily' },
+            { value: 'MONTHLY', label: 'Monthly' },
+            { value: 'ALL', label: 'Total' },
+          ]}
+        />
       </div>
 
       {!isCustom && (
         <>
-          <div className="h-6 w-px bg-border/50 hidden sm:block" />
-          <div className="text-xs text-muted-foreground">
+          <div className="h-5 w-px bg-border hidden sm:block" />
+          <div className="text-xs text-muted-foreground tabular-nums">
             {dateRange.start} → {dateRange.end}
           </div>
         </>

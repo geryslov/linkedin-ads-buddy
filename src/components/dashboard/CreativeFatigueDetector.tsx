@@ -1,11 +1,11 @@
 import { useEffect, useState, useMemo } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { RefreshCw, AlertTriangle, AlertCircle, CheckCircle, TrendingDown, TrendingUp, ChevronDown, ChevronRight } from 'lucide-react';
+import { RefreshCw, AlertTriangle, AlertCircle, TrendingDown, TrendingUp, ChevronDown, ChevronRight, SearchX } from 'lucide-react';
 import { useCreativeFatigue, CreativeFatigueItem } from '@/hooks/useCreativeFatigue';
 import { TimeFrameSelector } from './TimeFrameSelector';
+import { WidgetCard, EmptyState, StatusPill } from './widgets';
+import { cn } from '@/lib/utils';
 import {
   Table,
   TableBody,
@@ -49,38 +49,19 @@ interface CreativeRowProps {
   objectiveFilter: ObjectiveFilter;
 }
 
-function StatusBadge({ status }: { status: 'healthy' | 'warning' | 'fatigued' }) {
-  if (status === 'fatigued') {
-    return (
-      <Badge variant="destructive" className="gap-1">
-        <AlertTriangle className="h-3 w-3" />
-        Fatigued
-      </Badge>
-    );
-  }
-  if (status === 'warning') {
-    return (
-      <Badge variant="secondary" className="gap-1 bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200">
-        <AlertCircle className="h-3 w-3" />
-        Warning
-      </Badge>
-    );
-  }
-  return (
-    <Badge variant="secondary" className="gap-1 bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
-      <CheckCircle className="h-3 w-3" />
-      Healthy
-    </Badge>
-  );
-}
+const STATUS_TONE: Record<'healthy' | 'warning' | 'fatigued', { tone: 'success' | 'warning' | 'danger'; label: string }> = {
+  fatigued: { tone: 'danger', label: 'Fatigued' },
+  warning: { tone: 'warning', label: 'Warning' },
+  healthy: { tone: 'success', label: 'Healthy' },
+};
 
 function TrendIndicator({ value, inverted = false }: { value: number; inverted?: boolean }) {
   const isPositive = inverted ? value < 0 : value > 0;
-  const color = isPositive ? 'text-green-600' : value === 0 ? 'text-muted-foreground' : 'text-red-600';
+  const color = isPositive ? 'text-success' : value === 0 ? 'text-muted-foreground' : 'text-destructive';
   const Icon = value >= 0 ? TrendingUp : TrendingDown;
 
   return (
-    <span className={`flex items-center gap-1 ${color}`}>
+    <span className={`inline-flex items-center justify-end gap-1 tabular-nums ${color}`}>
       <Icon className="h-3 w-3" />
       {Math.abs(value).toFixed(0)}%
     </span>
@@ -92,34 +73,35 @@ function CreativeRow({ creative, objectiveFilter }: CreativeRowProps) {
   const showCpl = objectiveFilter === 'all' || objectiveFilter === 'LEAD_GENERATION';
   const showCtr = objectiveFilter === 'all' || objectiveFilter === 'ENGAGEMENT';
   const colSpan = 6 + (showCtr ? 2 : 0) + (showCpl ? 2 : 0);
+  const s = STATUS_TONE[creative.status];
 
   // Determine which chart to show based on objective
   const chartMetric = objectiveFilter === 'LEAD_GENERATION' ? 'cpl' : 'ctr';
   const chartLabel = objectiveFilter === 'LEAD_GENERATION' ? 'CPL' : 'CTR';
-  const chartFormatter = objectiveFilter === 'LEAD_GENERATION' 
+  const chartFormatter = objectiveFilter === 'LEAD_GENERATION'
     ? (value: number) => [`$${value.toFixed(2)}`, 'CPL']
     : (value: number) => [`${value.toFixed(2)}%`, 'CTR'];
 
   return (
     <>
-      <TableRow className="hover:bg-muted/50 cursor-pointer" onClick={() => setIsOpen(!isOpen)}>
+      <TableRow className="cursor-pointer [&>td]:py-2.5" onClick={() => setIsOpen(!isOpen)}>
         <TableCell className="w-10">
           <Button variant="ghost" size="sm" className="h-6 w-6 p-0">
             {isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
           </Button>
         </TableCell>
-        <TableCell className="w-24">
-          <StatusBadge status={creative.status} />
+        <TableCell className="w-28">
+          <StatusPill tone={s.tone} label={s.label} />
         </TableCell>
         <TableCell className="font-medium min-w-[150px]">
           <span className="break-words">{creative.creativeName}</span>
         </TableCell>
-        <TableCell className="text-right">{creative.metrics.totalImpressions.toLocaleString()}</TableCell>
-        <TableCell className="text-right">${creative.metrics.totalSpend.toFixed(2)}</TableCell>
-        <TableCell className="text-right">{creative.metrics.totalLeads}</TableCell>
+        <TableCell className="text-right tabular-nums">{creative.metrics.totalImpressions.toLocaleString()}</TableCell>
+        <TableCell className="text-right tabular-nums">${creative.metrics.totalSpend.toFixed(2)}</TableCell>
+        <TableCell className="text-right tabular-nums">{creative.metrics.totalLeads}</TableCell>
         {showCtr && (
           <>
-            <TableCell className="text-right">{creative.metrics.avgCtr.toFixed(2)}%</TableCell>
+            <TableCell className="text-right tabular-nums">{creative.metrics.avgCtr.toFixed(2)}%</TableCell>
             <TableCell className="text-right">
               <TrendIndicator value={creative.metrics.ctrTrend} />
             </TableCell>
@@ -127,27 +109,27 @@ function CreativeRow({ creative, objectiveFilter }: CreativeRowProps) {
         )}
         {showCpl && (
           <>
-            <TableCell className="text-right">
-              {creative.metrics.totalLeads > 0 ? `$${creative.metrics.avgCpl.toFixed(2)}` : '-'}
+            <TableCell className="text-right tabular-nums">
+              {creative.metrics.totalLeads > 0 ? `$${creative.metrics.avgCpl.toFixed(2)}` : <span className="text-muted-foreground/50">—</span>}
             </TableCell>
             <TableCell className="text-right">
-              {creative.metrics.totalLeads > 0 ? <TrendIndicator value={creative.metrics.cplTrend} inverted /> : '-'}
+              {creative.metrics.totalLeads > 0 ? <TrendIndicator value={creative.metrics.cplTrend} inverted /> : <span className="text-muted-foreground/50">—</span>}
             </TableCell>
           </>
         )}
       </TableRow>
       {isOpen && (
-        <TableRow>
+        <TableRow className="hover:bg-transparent">
           <TableCell colSpan={colSpan} className="p-0">
-            <div className="bg-muted/30 p-4 space-y-4">
+            <div className="bg-secondary/30 border-y border-border/60 p-4 space-y-4">
               {/* Signals */}
               {creative.signals.length > 0 && (
                 <div>
-                  <h4 className="text-sm font-medium mb-2">Fatigue Signals</h4>
+                  <h4 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground mb-2">Fatigue Signals</h4>
                   <ul className="space-y-1">
                     {creative.signals.map((signal, i) => (
                       <li key={i} className="text-sm text-muted-foreground flex items-center gap-2">
-                        <AlertCircle className="h-3 w-3 text-destructive" />
+                        <AlertCircle className="h-3 w-3 text-destructive shrink-0" />
                         {signal}
                       </li>
                     ))}
@@ -156,24 +138,30 @@ function CreativeRow({ creative, objectiveFilter }: CreativeRowProps) {
               )}
 
               {/* Recommendation */}
-              <div className="p-3 bg-background rounded-md border">
+              <div className="p-3 bg-card rounded-lg border border-border/70" style={{ boxShadow: 'var(--shadow-xs)' }}>
                 <p className="text-sm"><strong>Recommendation:</strong> {creative.recommendation}</p>
               </div>
 
               {/* Trend Chart - show CPL for lead gen, CTR for engagement */}
               {creative.dailyData.length > 0 && (
                 <div>
-                  <h4 className="text-sm font-medium mb-2">{chartLabel} Trend (Last 30 Days)</h4>
+                  <h4 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground mb-2">{chartLabel} Trend (Last 30 Days)</h4>
                   <ResponsiveContainer width="100%" height={150}>
                     <LineChart data={creative.dailyData}>
-                      <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                      <XAxis dataKey="date" tick={{ fontSize: 10 }} />
-                      <YAxis tick={{ fontSize: 10 }} />
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" strokeOpacity={0.4} />
+                      <XAxis dataKey="date" tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} tickLine={false} axisLine={false} />
+                      <YAxis tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} tickLine={false} axisLine={false} />
                       <Tooltip
-                        contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))' }}
+                        contentStyle={{
+                          backgroundColor: 'hsl(var(--card))',
+                          border: '1px solid hsl(var(--border))',
+                          borderRadius: '8px',
+                          fontSize: '11px',
+                          boxShadow: 'var(--shadow-md)',
+                        }}
                         formatter={chartFormatter}
                       />
-                      <Line type="monotone" dataKey={chartMetric} stroke="hsl(var(--primary))" strokeWidth={2} dot={false} />
+                      <Line type="monotone" dataKey={chartMetric} stroke="hsl(var(--chart-1))" strokeWidth={2} dot={false} />
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
@@ -188,7 +176,7 @@ function CreativeRow({ creative, objectiveFilter }: CreativeRowProps) {
 
 export function CreativeFatigueDetector({ accessToken, selectedAccount }: CreativeFatigueDetectorProps) {
   const [objectiveFilter, setObjectiveFilter] = useState<ObjectiveFilter>('all');
-  
+
   const {
     data,
     isLoading,
@@ -249,168 +237,147 @@ export function CreativeFatigueDetector({ accessToken, selectedAccount }: Creati
   if (isLoading) {
     return (
       <div className="space-y-4">
-        <Skeleton className="h-32 w-full" />
-        <Skeleton className="h-64 w-full" />
+        <div className="grid gap-3 grid-cols-2 md:grid-cols-4">
+          {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-20 rounded-xl" />)}
+        </div>
+        <Skeleton className="h-64 w-full rounded-xl" />
       </div>
     );
   }
 
   if (error) {
     return (
-      <Card className="bg-destructive/10 border-destructive/30">
-        <CardContent className="pt-4">
-          <p className="text-destructive">{error}</p>
-        </CardContent>
-      </Card>
+      <WidgetCard noPadding>
+        <EmptyState
+          icon={AlertTriangle}
+          title="Failed to load fatigue data"
+          description={error}
+          action={
+            <Button variant="outline" size="sm" onClick={handleRefresh}>
+              <RefreshCw className="h-3.5 w-3.5 mr-1.5" /> Retry
+            </Button>
+          }
+        />
+      </WidgetCard>
     );
   }
 
-  return (
-    <div className="space-y-6">
-      {/* Controls */}
-      <Card className="bg-card/50 backdrop-blur-sm border-border/50">
-        <CardContent className="pt-4">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-            <div className="flex flex-wrap items-center gap-3">
-              <TimeFrameSelector
-                timeFrameOptions={timeFrameOptions}
-                selectedTimeFrame="last_30_days"
-                onTimeFrameChange={handleTimeFrameChange}
-                timeGranularity="ALL"
-                onGranularityChange={() => {}}
-                dateRange={dateRange}
-                onCustomDateChange={(start, end) => {
-                  setDateRange({
-                    start: start.toISOString().split('T')[0],
-                    end: end.toISOString().split('T')[0],
-                  });
-                }}
-              />
-              <Select value={objectiveFilter} onValueChange={(v) => setObjectiveFilter(v as ObjectiveFilter)}>
-                <SelectTrigger className="w-[180px]">
-                  <SelectValue placeholder="Filter by Objective" />
-                </SelectTrigger>
-                <SelectContent>
-                  {OBJECTIVE_OPTIONS.map((opt) => (
-                    <SelectItem key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {objectiveFilter !== 'all' && (
-                <Badge variant="secondary" className="text-xs">
-                  Focus: {focusMetricLabel}
-                </Badge>
-              )}
-            </div>
-            <Button variant="outline" onClick={handleRefresh}>
-              <RefreshCw className="h-4 w-4 mr-2" />
-              Refresh
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+  const summaryTiles = [
+    { label: 'Total Analyzed', value: filteredSummary.total, accent: 'text-foreground', bar: 'bg-primary/60' },
+    { label: 'Fatigued', value: filteredSummary.fatigued, accent: 'text-destructive', bar: 'bg-destructive' },
+    { label: 'Warning', value: filteredSummary.warning, accent: 'text-warning', bar: 'bg-warning' },
+    { label: 'Healthy', value: filteredSummary.healthy, accent: 'text-success', bar: 'bg-success' },
+  ];
 
-      {/* Summary Cards */}
-      <div className="grid gap-4 grid-cols-2 md:grid-cols-4">
-        <Card className="bg-card/50">
-          <CardContent className="pt-4">
-            <div className="text-xs text-muted-foreground">Total Analyzed</div>
-            <div className="text-2xl font-bold">{filteredSummary.total}</div>
-          </CardContent>
-        </Card>
-        <Card className="bg-destructive/10 border-destructive/30">
-          <CardContent className="pt-4">
-            <div className="text-xs text-destructive">Fatigued</div>
-            <div className="text-2xl font-bold text-destructive">{filteredSummary.fatigued}</div>
-          </CardContent>
-        </Card>
-        <Card className="bg-secondary border-secondary">
-          <CardContent className="pt-4">
-            <div className="text-xs text-muted-foreground">Warning</div>
-            <div className="text-2xl font-bold">{filteredSummary.warning}</div>
-          </CardContent>
-        </Card>
-        <Card className="bg-accent border-accent">
-          <CardContent className="pt-4">
-            <div className="text-xs text-muted-foreground">Healthy</div>
-            <div className="text-2xl font-bold">{filteredSummary.healthy}</div>
-          </CardContent>
-        </Card>
+  return (
+    <div className="space-y-4">
+      {/* Summary tiles */}
+      <div className="grid gap-3 grid-cols-2 md:grid-cols-4">
+        {summaryTiles.map(({ label, value, accent, bar }) => (
+          <div
+            key={label}
+            className="relative bg-card border border-border/70 rounded-xl px-4 py-3 overflow-hidden"
+            style={{ boxShadow: 'var(--shadow-xs)' }}
+          >
+            <span className={cn('absolute left-0 top-0 bottom-0 w-1', bar)} />
+            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">{label}</p>
+            <p className={cn('text-2xl font-bold tabular-nums mt-1 leading-none', accent)}>{value}</p>
+          </div>
+        ))}
       </div>
 
       {/* Creatives Table */}
-      <Card className="bg-card/50 backdrop-blur-sm border-border/50">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <AlertTriangle className="h-5 w-5 text-primary" />
-            Creative Fatigue Analysis
-          </CardTitle>
-          <CardDescription>
-            Creatives showing declining performance over time. Click a row to see details and trends.
-            {objectiveFilter !== 'all' && ` Filtered by ${OBJECTIVE_OPTIONS.find(o => o.value === objectiveFilter)?.label}.`}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {filteredCreatives.length > 0 ? (
-            <div className="rounded-md border overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-10"></TableHead>
-                    <TableHead className="w-24">Status</TableHead>
-                    <TableHead>Creative</TableHead>
-                    <TableHead className="text-right">Impressions</TableHead>
-                    <TableHead className="text-right">Spend</TableHead>
-                    <TableHead className="text-right">Leads</TableHead>
-                    {showCtr && (
-                      <>
-                        <TableHead className="text-right">CTR</TableHead>
-                        <TableHead className="text-right">CTR Trend</TableHead>
-                      </>
-                    )}
-                    {showCpl && (
-                      <>
-                        <TableHead className="text-right">CPL</TableHead>
-                        <TableHead className="text-right">CPL Trend</TableHead>
-                      </>
-                    )}
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredCreatives.map((creative) => (
-                    <CreativeRow key={creative.creativeId} creative={creative} objectiveFilter={objectiveFilter} />
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          ) : (
-            <div className="text-center py-12 text-muted-foreground">
-              <p>No creatives with sufficient data to analyze.</p>
-              <p className="text-sm mt-2">Creatives need at least {data?.thresholds?.minImpressions || 1000} impressions to be included.</p>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Thresholds Info */}
-      <Card className="bg-muted/30">
-        <CardContent className="pt-4">
-          <h4 className="text-sm font-medium mb-2">Detection Thresholds</h4>
-          <div className="grid grid-cols-3 gap-4 text-sm text-muted-foreground">
-            <div>
-              <span className="font-medium">CTR Decline:</span> {data?.thresholds?.ctrDeclineThreshold || 20}%
-            </div>
-            <div>
-              <span className="font-medium">CPL Increase:</span> {data?.thresholds?.cplIncreaseThreshold || 30}%
-            </div>
-            <div>
-              <span className="font-medium">Min Impressions:</span> {data?.thresholds?.minImpressions?.toLocaleString() || '1,000'}
-            </div>
+      <WidgetCard
+        noPadding
+        title="Creative Fatigue Analysis"
+        subtitle={
+          <>
+            Creatives showing declining performance over time. Click a row for details and trends.
+            {objectiveFilter !== 'all' && ` Focus: ${focusMetricLabel}.`}
+          </>
+        }
+        toolbar={
+          <>
+            <TimeFrameSelector
+              timeFrameOptions={timeFrameOptions}
+              selectedTimeFrame="last_30_days"
+              onTimeFrameChange={handleTimeFrameChange}
+              timeGranularity="ALL"
+              onGranularityChange={() => {}}
+              dateRange={dateRange}
+              onCustomDateChange={(start, end) => {
+                setDateRange({
+                  start: start.toISOString().split('T')[0],
+                  end: end.toISOString().split('T')[0],
+                });
+              }}
+            />
+            <Select value={objectiveFilter} onValueChange={(v) => setObjectiveFilter(v as ObjectiveFilter)}>
+              <SelectTrigger className="h-8 w-[160px] text-sm bg-card border-border">
+                <SelectValue placeholder="Filter by Objective" />
+              </SelectTrigger>
+              <SelectContent className="bg-card border-border">
+                {OBJECTIVE_OPTIONS.map((opt) => (
+                  <SelectItem key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button variant="outline" size="icon" className="h-8 w-8" onClick={handleRefresh}>
+              <RefreshCw className="h-3.5 w-3.5" />
+            </Button>
+          </>
+        }
+      >
+        {filteredCreatives.length > 0 ? (
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-10"></TableHead>
+                  <TableHead className="w-28">Status</TableHead>
+                  <TableHead>Creative</TableHead>
+                  <TableHead className="text-right">Impressions</TableHead>
+                  <TableHead className="text-right">Spend</TableHead>
+                  <TableHead className="text-right">Leads</TableHead>
+                  {showCtr && (
+                    <>
+                      <TableHead className="text-right">CTR</TableHead>
+                      <TableHead className="text-right">CTR Trend</TableHead>
+                    </>
+                  )}
+                  {showCpl && (
+                    <>
+                      <TableHead className="text-right">CPL</TableHead>
+                      <TableHead className="text-right">CPL Trend</TableHead>
+                    </>
+                  )}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredCreatives.map((creative) => (
+                  <CreativeRow key={creative.creativeId} creative={creative} objectiveFilter={objectiveFilter} />
+                ))}
+              </TableBody>
+            </Table>
           </div>
-        </CardContent>
-      </Card>
+        ) : (
+          <EmptyState
+            icon={SearchX}
+            title="No creatives to analyze"
+            description={`Creatives need at least ${data?.thresholds?.minImpressions?.toLocaleString() || '1,000'} impressions to be included.`}
+          />
+        )}
+
+        {/* Detection thresholds footer */}
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-1 px-5 py-3 border-t border-border/60 bg-secondary/20 text-xs text-muted-foreground">
+          <span className="font-semibold uppercase tracking-[0.08em] text-[10px]">Detection thresholds</span>
+          <span>CTR decline <span className="font-medium text-foreground tabular-nums">{data?.thresholds?.ctrDeclineThreshold || 20}%</span></span>
+          <span>CPL increase <span className="font-medium text-foreground tabular-nums">{data?.thresholds?.cplIncreaseThreshold || 30}%</span></span>
+          <span>Min impressions <span className="font-medium text-foreground tabular-nums">{data?.thresholds?.minImpressions?.toLocaleString() || '1,000'}</span></span>
+        </div>
+      </WidgetCard>
     </div>
   );
 }

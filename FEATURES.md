@@ -17,7 +17,11 @@ What exists in LinkedIn Ads Buddy today. See [CLAUDE.md](CLAUDE.md) for architec
 
 ## Dashboard navigation
 
-Defined in [Sidebar.tsx](src/components/dashboard/Sidebar.tsx). Six groups:
+Defined in [Sidebar.tsx](src/components/dashboard/Sidebar.tsx). Seven groups.
+
+**Frozen items** — nav items marked `hidden: true` on their `NavItem` are filtered out of both the sidebar and the ⌘K command palette, but their routes/tabs still exist and render if reached by direct URL (`?tab=<id>`). Currently frozen: Campaigns (`campaigns`), Creatives (`creatives`), Conv. Breakdown (`conv_breakdown`), Activity Report (`activity_report`), Account Health (`account_health`), Audiences (`audiences`), Titles (`standardized_titles`). Remove the flag to bring one back. A group whose visible items all become hidden renders nothing (no orphan header).
+
+Groups and items:
 
 ### Main
 | Item | Component |
@@ -30,6 +34,16 @@ Defined in [Sidebar.tsx](src/components/dashboard/Sidebar.tsx). Six groups:
 | Campaigns | [CampaignTable](src/components/dashboard/CampaignTable.tsx) | [useLinkedInAds](src/hooks/useLinkedInAds.ts) |
 | Budget Pacing | [BudgetPacingDashboard](src/components/dashboard/BudgetPacingDashboard.tsx), [MegaBudgetPacingDashboard](src/components/dashboard/MegaBudgetPacingDashboard.tsx) | [useBudgetPacing](src/hooks/useBudgetPacing.ts), [useMegaBudgetPacing](src/hooks/useMegaBudgetPacing.ts) |
 | Creatives | [CreativeGallery](src/components/dashboard/CreativeGallery.tsx) | [useCreativeReporting](src/hooks/useCreativeReporting.ts) |
+
+### Bulk Editing
+| Item | Component | Hook |
+|---|---|---|
+| Add Ads to Campaigns | [BulkCreativeCopy](src/components/dashboard/BulkCreativeCopy.tsx) | [useBulkCreativeCopy](src/hooks/useBulkCreativeCopy.ts) |
+| Campaign Editor | [CampaignTargetingEditor](src/components/dashboard/CampaignTargetingEditor.tsx) | — |
+
+**Add Ads to Campaigns** — copies existing ads into other campaigns in bulk (N sources × M campaigns → N×M new creatives). Backend `bulk_copy_creatives`; platform-only (JWT + can_write gated), creates as Draft by default. Only *duplicable* ad types are listed (skips inline text/spotlight/follower, Message/InMail and dynamic ads — no shareable content reference). Source list defaults to **Active** ads (server-side status filter) for speed, with a status selector (Active/Paused/Draft/All). Names come from the REST creative `name`, then the post's text, then the analytics report. When copying a **lead gen** ad, an optional picker assigns a form (`list_lead_forms`) + CTA to the copies — `leadgenCallToAction` is DRAFT-only, so those copies are made Draft, the form/CTA is set via `partial_update`, then activated if Active was chosen. UI is a two-panel, numbered picker with a sticky action bar.
+
+**Campaign Editor** — bulk targeting edits across multiple campaigns (append/replace job titles + skills). Backend `update_campaign_targeting`. Moved here from Reports (it is a bulk operation).
 
 ### Analytics
 | Item | Component | Notes |
@@ -71,9 +85,26 @@ Defined in [Sidebar.tsx](src/components/dashboard/Sidebar.tsx). Six groups:
 - **AI chat** — [AgenticChatDrawer](src/components/dashboard/AgenticChatDrawer.tsx), global drawer with tool-calling
 - **AI analysis panel** — [AIAnalysisPanel](src/components/dashboard/AIAnalysisPanel.tsx) + [useAIAnalysis](src/hooks/useAIAnalysis.ts)
 - **Custom fields** — [CustomFieldEditor](src/components/dashboard/CustomFieldEditor.tsx), per campaign / campaign group
-- **Campaign targeting editing** — [CampaignTargetingEditor](src/components/dashboard/CampaignTargetingEditor.tsx), writes targeting back to LinkedIn
+- **Campaign targeting editing** — [CampaignTargetingEditor](src/components/dashboard/CampaignTargetingEditor.tsx), writes targeting back to LinkedIn (surfaced under **Bulk Editing → Campaign Editor**)
 - **CSV export** — most report tables, via [exportUtils](src/lib/exportUtils.ts)
 - **MCP setup** — [ConnectClaude](src/components/dashboard/ConnectClaude.tsx)
+- **Error boundary** — [ErrorBoundary](src/components/ErrorBoundary.tsx) wraps the dashboard tab content (in [Dashboard.tsx](src/pages/Dashboard.tsx)); a render crash shows a recoverable card with the error message instead of a blank page, and resets on tab change
+- **Command palette** — [CommandPalette](src/components/dashboard/CommandPalette.tsx), ⌘K to jump to any screen/action (built off the sidebar's exported `navGroups`; AI Advisor moved to ⌘J)
+
+## Design system
+
+Tokens live in [src/index.css](src/index.css) (CSS variables) + [tailwind.config.ts](tailwind.config.ts); all shadcn components inherit them.
+
+- **Palette** — warm paper canvas, deep-ink text, electric indigo primary (`--primary: 231 70% 51%`) with a violet companion (`--violet`) used only in gradients. LinkedIn brand blue stays separate (`--linkedin`).
+- **Typography** — four-family system, all loaded via the `@import` in [src/index.css](src/index.css): **DM Sans** for body/UI (`font-sans`), **Space Grotesk** for headings (`h1`–`h6` base, `font-heading`), **Bricolage Grotesque** for the landing hero and dashboard page titles (`.font-display` / `font-display`), **JetBrains Mono** for code (`font-mono`).
+- **Sidebar** — clean white surface via the `--sidebar-*` token set; active item = indigo tint pill + left accent bar. [Sidebar.tsx](src/components/dashboard/Sidebar.tsx) renders its own `NavRow` rather than the shadcn Button.
+- **Chart colors** — `--chart-1..8`, a CVD-validated categorical palette (dataviz reference set). Fixed slot order, never cycled; components reference `hsl(var(--chart-N))` or the matching hex, not ad-hoc Tailwind colors.
+- **Shadows/radius** — layered ink-tinted shadows (`--shadow-xs..lg`, `--shadow-primary` glow), 10px base radius. Utility classes: `.glass`, `.card-hover`, `.gradient-primary`, `.gradient-mesh`, `.text-gradient`.
+- **Widget kit** — [widgets.tsx](src/components/dashboard/widgets.tsx): `WidgetCard` (card shell with title/subtitle/toolbar header), `EmptyState`, `StatusPill` (semantic tones: success/warning/danger/info/neutral), `SegmentedControl`, `ChartLegend`. All dashboard panels build from these; the budget-pacing dashboards were also moved onto the kit and LeadGenAnalyzer / CompanyInfluenceMatcher normalized to semantic status colors (`text-success`/`text-warning`/`text-destructive`) rather than ad-hoc Tailwind green/red/yellow.
+- **Global primitives restyled** — the shadcn `Table` (uppercase tracked headers, secondary header band, softer row hover), `Tabs` (pill segmented look), and `Input` (card surface, focus ring) carry the new style, so every table/tab/field inherits it without per-file work.
+- **Command palette (⌘K)** — [CommandPalette.tsx](src/components/dashboard/CommandPalette.tsx): fuzzy "jump to any screen or action" launcher, opened by the header "Jump to…" chip or ⌘/Ctrl-K. Navigation items are generated from the sidebar's exported `navGroups`.
+- **AI Advisor shortcut** — moved from ⌘K to **⌘/Ctrl-J** (the palette now owns ⌘K).
+- **Deep-linkable tabs** — dashboard tab state lives in the URL (`/dashboard?tab=campaigns`); `overview` is the bare URL. Switching tabs runs a fade-in transition.
 
 ## Client-facing weekly reports
 
@@ -92,19 +123,19 @@ Agency → client publishing flow.
 
 | Function | Purpose |
 |---|---|
-| `linkedin-api` | Monolith (~13.6k lines), **69 actions**. All LinkedIn API access |
+| `linkedin-api` | Monolith (~14.3k lines), **71 actions**. All LinkedIn API access |
 | `analyze-data` | Claude calls. `DEFAULT_MODEL` = `claude-sonnet-4-20250514`, overridden per report type via `MODEL_BY_REPORT_TYPE` |
 | `apify-proxy` | Apify passthrough for Social Listener. Needs `APIFY_TOKEN` |
 
 `create-test-user` was **deleted 2026-08-05** — a public `verify_jwt = false` endpoint that minted email-confirmed accounts with the service role for anyone who knew the URL. ⚠️ Deleting the folder does not undeploy it; remove it in the Supabase dashboard (or `npx supabase functions delete create-test-user`) or it stays live.
 
-### `linkedin-api` actions (69)
+### `linkedin-api` actions (71)
 
 **Auth & accounts** — `get_auth_url`, `exchange_token`, `get_profile`, `get_ad_accounts`, `sync_ad_accounts`, `sync_mcp_token`
 
 **MCP product auth** (new 2026-08-05) — `linkedin_signin` (unauthenticated; sign-in), `link_mcp_key`, `connect_linkedin`, `revoke_mcp_key` (all JWT-scoped)
 
-**Campaigns & creatives** — `get_campaigns`, `get_campaign_report`, `get_campaign_group_performance`, `get_campaign_performance_report`, `get_creatives`, `get_creative_report`, `get_creative_names_report`, `get_creative_performance_report`, `get_creative_analytics`, `get_creative_fatigue`, `get_account_structure`, `update_campaign_status`, `update_campaign_targeting`
+**Campaigns & creatives** — `get_campaigns`, `get_campaign_report`, `get_campaign_group_performance`, `get_campaign_performance_report`, `get_creatives`, `get_creative_report`, `get_creative_names_report`, `get_creative_performance_report`, `get_creative_analytics`, `get_creative_fatigue`, `get_account_structure`, `update_campaign_status`, `update_campaign_targeting`, `bulk_copy_creatives`, `list_lead_forms`
 
 **Analytics** — `get_analytics`, `get_ad_analytics`, `get_demographic_analytics`, `get_objective_breakdowns`, `get_form_creative_analytics`
 

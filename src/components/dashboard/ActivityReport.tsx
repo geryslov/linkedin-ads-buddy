@@ -4,12 +4,19 @@ import { useCampaignPerformanceReport, PeriodMetrics } from '@/hooks/useCampaign
 import { useAuth } from '@/hooks/useAuth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { WidgetCard, EmptyState, StatusPill } from './widgets';
 import { MetricCard } from './MetricCard';
 import {
   Plus, Pencil, Trash2, Search, Eye, MousePointerClick, DollarSign, Target,
@@ -21,6 +28,12 @@ interface Props {
   accessToken: string | null;
   selectedAccount: string | null;
 }
+
+const STATUS_TONE: Record<string, 'success' | 'warning' | 'info' | 'neutral'> = {
+  ACTIVE: 'success',
+  PAUSED: 'warning',
+  DRAFT: 'info',
+};
 
 export function ActivityReport({ accessToken, selectedAccount }: Props) {
   const { user, isLoading: authLoading, isAuthenticated } = useAuth();
@@ -129,12 +142,18 @@ export function ActivityReport({ accessToken, selectedAccount }: Props) {
       </div>
 
       {activities.length === 0 ? (
-        <Card>
-          <CardContent className="py-12 text-center">
-            <FolderOpen className="h-12 w-12 mx-auto text-muted-foreground/40 mb-3" />
-            <p className="text-muted-foreground">No activities yet. Create one to start tracking grouped campaign performance.</p>
-          </CardContent>
-        </Card>
+        <WidgetCard noPadding>
+          <EmptyState
+            icon={FolderOpen}
+            title="No activities yet"
+            description="Create one to start tracking grouped campaign performance."
+            action={
+              <Button onClick={openCreateDialog} size="sm" className="gap-2" disabled={authLoading || !isAuthenticated}>
+                <Plus className="h-4 w-4" /> Add Activity
+              </Button>
+            }
+          />
+        </WidgetCard>
       ) : (
         <div className="space-y-4">
           {activities.map(activity => {
@@ -142,77 +161,87 @@ export function ActivityReport({ accessToken, selectedAccount }: Props) {
             const isExpanded = expandedActivity === activity.id;
 
             return (
-              <Card key={activity.id} className="overflow-hidden">
-                <CardHeader className="pb-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3 cursor-pointer" onClick={() => setExpandedActivity(isExpanded ? null : activity.id)}>
-                      {isExpanded ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
-                      <div>
-                        <CardTitle className="text-base">{activity.name}</CardTitle>
-                        <p className="text-xs text-muted-foreground mt-0.5">
-                          {activity.campaign_ids.length} campaign{activity.campaign_ids.length !== 1 ? 's' : ''}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEditDialog(activity)}>
-                        <Pencil className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive" onClick={() => deleteActivity(activity.id)}>
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
-                  </div>
-                </CardHeader>
-
-                <CardContent className="pt-0">
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+              <WidgetCard
+                key={activity.id}
+                noPadding
+                title={
+                  <button
+                    onClick={() => setExpandedActivity(isExpanded ? null : activity.id)}
+                    className="flex items-center gap-2 hover:text-primary transition-colors"
+                  >
+                    {isExpanded
+                      ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                      : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
+                    {activity.name}
+                  </button>
+                }
+                subtitle={`${activity.campaign_ids.length} campaign${activity.campaign_ids.length !== 1 ? 's' : ''} · last 7 days`}
+                toolbar={
+                  <>
+                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEditDialog(activity)}>
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive" onClick={() => deleteActivity(activity.id)}>
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </>
+                }
+              >
+                <div className={cn('px-5', isExpanded ? 'pb-3' : 'pb-5')}>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                     <MetricCard title="Impressions" value={metrics.impressions.toLocaleString()} icon={Eye} delay={0} />
                     <MetricCard title="Clicks" value={metrics.clicks.toLocaleString()} icon={MousePointerClick} delay={50} />
                     <MetricCard title="Spend" value={`$${metrics.spent.toFixed(2)}`} icon={DollarSign} delay={100} />
                     <MetricCard title="Leads" value={metrics.leads.toLocaleString()} icon={Target} delay={150} />
                   </div>
+                </div>
 
-                  {isExpanded && (
-                    <div className="mt-4 border rounded-lg overflow-hidden">
-                      <table className="w-full text-sm">
-                        <thead>
-                          <tr className="bg-muted/50 border-b">
-                            <th className="text-left px-3 py-2 font-medium">Campaign</th>
-                            <th className="text-left px-3 py-2 font-medium">Status</th>
-                            <th className="text-right px-3 py-2 font-medium">Impressions</th>
-                            <th className="text-right px-3 py-2 font-medium">Clicks</th>
-                            <th className="text-right px-3 py-2 font-medium">CTR</th>
-                            <th className="text-right px-3 py-2 font-medium">Spend</th>
-                            <th className="text-right px-3 py-2 font-medium">Leads</th>
-                            <th className="text-right px-3 py-2 font-medium">CPL</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {campaigns.length === 0 ? (
-                            <tr><td colSpan={8} className="px-3 py-6 text-center text-muted-foreground">No matching campaign data found</td></tr>
-                          ) : campaigns.map(c => (
-                            <tr key={c.campaignId} className="border-b last:border-0 hover:bg-muted/30">
-                              <td className="px-3 py-2 font-medium max-w-[200px] truncate">{c.campaignName}</td>
-                              <td className="px-3 py-2">
-                                <Badge variant={c.campaignStatus === 'ACTIVE' ? 'default' : 'secondary'} className="text-xs">
-                                  {c.campaignStatus}
-                                </Badge>
-                              </td>
-                              <td className="px-3 py-2 text-right tabular-nums">{c.last7d.impressions.toLocaleString()}</td>
-                              <td className="px-3 py-2 text-right tabular-nums">{c.last7d.clicks.toLocaleString()}</td>
-                              <td className="px-3 py-2 text-right tabular-nums">{c.last7d.ctr.toFixed(2)}%</td>
-                              <td className="px-3 py-2 text-right tabular-nums">${c.last7d.spent.toFixed(2)}</td>
-                              <td className="px-3 py-2 text-right tabular-nums">{c.last7d.leads.toLocaleString()}</td>
-                              <td className="px-3 py-2 text-right tabular-nums">{c.last7d.cpl > 0 ? `$${c.last7d.cpl.toFixed(2)}` : '—'}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
+                {isExpanded && (
+                  <div className="border-t border-border/60">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="border-border hover:bg-transparent bg-secondary/40">
+                          <TableHead>Campaign</TableHead>
+                          <TableHead>Status</TableHead>
+                          <TableHead className="text-right">Impressions</TableHead>
+                          <TableHead className="text-right">Clicks</TableHead>
+                          <TableHead className="text-right">CTR</TableHead>
+                          <TableHead className="text-right">Spend</TableHead>
+                          <TableHead className="text-right">Leads</TableHead>
+                          <TableHead className="text-right">CPL</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {campaigns.length === 0 ? (
+                          <TableRow>
+                            <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                              No matching campaign data found
+                            </TableCell>
+                          </TableRow>
+                        ) : campaigns.map(c => (
+                          <TableRow key={c.campaignId} className="[&>td]:py-2.5">
+                            <TableCell className="font-medium max-w-[240px]">
+                              <span className="block truncate" title={c.campaignName}>{c.campaignName}</span>
+                            </TableCell>
+                            <TableCell>
+                              <StatusPill
+                                tone={STATUS_TONE[c.campaignStatus] ?? 'neutral'}
+                                label={c.campaignStatus.charAt(0) + c.campaignStatus.slice(1).toLowerCase()}
+                              />
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums">{c.last7d.impressions.toLocaleString()}</TableCell>
+                            <TableCell className="text-right tabular-nums">{c.last7d.clicks.toLocaleString()}</TableCell>
+                            <TableCell className="text-right tabular-nums">{c.last7d.ctr.toFixed(2)}%</TableCell>
+                            <TableCell className="text-right tabular-nums">${c.last7d.spent.toFixed(2)}</TableCell>
+                            <TableCell className="text-right tabular-nums">{c.last7d.leads.toLocaleString()}</TableCell>
+                            <TableCell className="text-right tabular-nums">{c.last7d.cpl > 0 ? `$${c.last7d.cpl.toFixed(2)}` : '—'}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </WidgetCard>
             );
           })}
         </div>
@@ -257,7 +286,7 @@ export function ActivityReport({ accessToken, selectedAccount }: Props) {
                       <label
                         key={c.campaignId}
                         className={cn(
-                          'flex items-center gap-3 px-3 py-2 rounded-md cursor-pointer hover:bg-muted/50 transition-colors',
+                          'flex items-center gap-3 px-3 py-2 rounded-md cursor-pointer hover:bg-secondary/40 transition-colors',
                           selectedCampaigns.includes(c.campaignId) && 'bg-primary/5'
                         )}
                       >

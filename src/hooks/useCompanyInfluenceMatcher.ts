@@ -57,7 +57,7 @@ export type InfluenceTab = 'matched' | 'unmatched' | 'all';
 const COMPANY_SUFFIXES = /\b(inc\.?|incorporated|llc|ltd\.?|limited|corp\.?|corporation|gmbh|co\.?|company|plc|ag|sa|s\.?a\.?|s\.?r\.?l\.?|pty|pvt|n\.?v\.?|b\.?v\.?|l\.?p\.?)\s*$/i;
 
 function normalizeName(name: string): string {
-  return name
+  return (name || '')
     .toLowerCase()
     .trim()
     .replace(COMPANY_SUFFIXES, '')
@@ -89,7 +89,9 @@ function standardizeUrl(url: string): string {
 }
 
 function detectColumns(headers: string[]): { nameCol: string | null; urlCol: string | null; dateCol: string | null } {
-  const lower = headers.map(h => h.toLowerCase().trim());
+  // Coerce defensively — malformed CSVs can yield undefined/duplicate header
+  // fields, and h.toLowerCase() on a non-string would crash the whole view.
+  const lower = headers.map(h => String(h ?? '').toLowerCase().trim());
 
   const namePatterns = ['company name', 'company', 'name', 'account name', 'organization', 'org'];
   const urlPatterns = ['url', 'website', 'domain', 'company url', 'website url', 'web', 'site', 'email', 'e-mail', 'email address', 'contact email'];

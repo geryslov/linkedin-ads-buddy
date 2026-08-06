@@ -2,9 +2,10 @@ import { useEffect, useState, useMemo } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import { RefreshCw, FileBarChart, Users, Target, PieChart, Globe, List, Download, Grid3X3, Settings, CheckCircle2, XCircle, Loader2, ClipboardList, Search, Pencil, Wallet, AlertTriangle, Sparkles, Building2, Eye, MousePointerClick, DollarSign, TrendingUp, BarChart3, CheckCircle, AlertCircle, ChevronDown, ChevronRight, Trophy } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { WidgetCard, EmptyState, StatusPill } from './widgets';
+import { RefreshCw, FileBarChart, Users, Target, PieChart, Globe, List, Download, Grid3X3, Settings, Loader2, ClipboardList, Search, Wallet, AlertTriangle, Sparkles, Building2, Eye, MousePointerClick, DollarSign, TrendingUp, BarChart3, ChevronDown, ChevronRight, Trophy, CheckCircle, CheckCircle2, XCircle } from 'lucide-react';
 import { useDemographicReporting, TimeFrameOption as DemoTimeFrameOption, TimeGranularity, DemographicPivot, DEMOGRAPHIC_PIVOT_OPTIONS } from '@/hooks/useDemographicReporting';
 import { useCompanyDemographic, TimeFrameOption as CompanyDemoTimeFrameOption } from '@/hooks/useCompanyDemographic';
 import { useCreativeNamesReport, TimeFrameOption as CreativeNamesTimeFrameOption } from '@/hooks/useCreativeNamesReport';
@@ -25,7 +26,6 @@ import { LeadGenFormsTable } from './LeadGenFormsTable';
 import { CampaignMultiSelect } from './CampaignMultiSelect';
 import { JobTitleSearch } from './JobTitleSearch';
 import { SkillSearch } from './SkillSearch';
-import { CampaignTargetingEditor } from './CampaignTargetingEditor';
 import { TimeFrameSelector } from './TimeFrameSelector';
 import { MetricCard } from './MetricCard';
 import { BudgetPacingDashboard } from './BudgetPacingDashboard';
@@ -48,6 +48,15 @@ interface ReportingSectionProps {
   accessToken: string | null;
   selectedAccount: string | null;
   canWrite?: boolean;
+}
+
+/** Inline error banner for report fetch failures. */
+function ErrorNote({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="rounded-xl border border-destructive/30 bg-destructive/[0.06] px-4 py-3 text-sm text-destructive">
+      {children}
+    </div>
+  );
 }
 
 export function ReportingSection({ accessToken, selectedAccount, canWrite = false }: ReportingSectionProps) {
@@ -601,18 +610,12 @@ export function ReportingSection({ accessToken, selectedAccount, canWrite = fals
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight">Reports</h2>
-          <p className="text-muted-foreground">
-            Analyze your ad performance across different dimensions
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
+      {/* Header — page title comes from the dashboard shell; just actions here */}
+      <div className="flex items-center justify-end gap-2">
           <Button
             variant="outline"
             size="sm"
+            className="h-8"
             onClick={handleExportCSV}
             disabled={isLoading || isExportingBreakdown}
           >
@@ -632,13 +635,13 @@ export function ReportingSection({ accessToken, selectedAccount, canWrite = fals
           <Button
             variant="outline"
             size="sm"
+            className="h-8"
             onClick={handleRefresh}
             disabled={isLoading}
           >
             <RefreshCw className={`mr-2 h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
             Refresh
           </Button>
-        </div>
       </div>
 
       {/* Report Type Tabs */}
@@ -675,10 +678,6 @@ export function ReportingSection({ accessToken, selectedAccount, canWrite = fals
           <TabsTrigger value="targeting_tools" className="gap-2">
             <Search className="h-4 w-4" />
             Targeting Tools
-          </TabsTrigger>
-          <TabsTrigger value="campaign_editor" className="gap-2">
-            <Pencil className="h-4 w-4" />
-            Campaign Editor
           </TabsTrigger>
           <TabsTrigger value="budget_pacing" className="gap-2">
             <Wallet className="h-4 w-4" />
@@ -717,21 +716,19 @@ export function ReportingSection({ accessToken, selectedAccount, canWrite = fals
 
         {/* Campaign Performance Tab */}
         <TabsContent value="campaign_performance" className="space-y-6 mt-6">
-          <Card className="bg-card/50 backdrop-blur-sm border-border/50">
-            <CardContent className="pt-4">
-              <TimeFrameSelector
-                timeFrameOptions={campaignGroupPerformance.timeFrameOptions}
-                selectedTimeFrame={selectedTimeFrame}
-                onTimeFrameChange={handleCampaignGroupTimeFrameChange}
-                timeGranularity="ALL"
-                onGranularityChange={() => {}}
-                dateRange={campaignGroupPerformance.dateRange}
-                onCustomDateChange={handleCampaignGroupCustomDate}
-              />
-            </CardContent>
-          </Card>
+          <WidgetCard>
+            <TimeFrameSelector
+              timeFrameOptions={campaignGroupPerformance.timeFrameOptions}
+              selectedTimeFrame={selectedTimeFrame}
+              onTimeFrameChange={handleCampaignGroupTimeFrameChange}
+              timeGranularity="ALL"
+              onGranularityChange={() => {}}
+              dateRange={campaignGroupPerformance.dateRange}
+              onCustomDateChange={handleCampaignGroupCustomDate}
+            />
+          </WidgetCard>
 
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-4 gap-4">
             <MetricCard title="Impressions" value={campaignGroupPerformance.totals.impressions.toLocaleString()} icon={FileBarChart} />
             <MetricCard title="Clicks" value={campaignGroupPerformance.totals.clicks.toLocaleString()} icon={FileBarChart} />
             <MetricCard title="Total Spent" value={`$${campaignGroupPerformance.totals.spent.toFixed(2)}`} icon={FileBarChart} />
@@ -743,53 +740,39 @@ export function ReportingSection({ accessToken, selectedAccount, canWrite = fals
           </div>
 
           {campaignGroupPerformance.error && (
-            <Card className="bg-destructive/10 border-destructive/30">
-              <CardContent className="pt-4">
-                <p className="text-sm text-destructive"><strong>Note:</strong> {campaignGroupPerformance.error}</p>
-              </CardContent>
-            </Card>
+            <ErrorNote><strong>Note:</strong> {campaignGroupPerformance.error}</ErrorNote>
           )}
 
-          <Card className="bg-card/50 backdrop-blur-sm border-border/50">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <FileBarChart className="h-5 w-5 text-primary" />
-                Campaign Group Performance
-              </CardTitle>
-              <CardDescription>
-                Performance metrics aggregated by campaign group
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <CampaignGroupPerformanceTable
-                data={campaignGroupPerformance.campaignGroups}
-                isLoading={campaignGroupPerformance.isLoading}
-                customFields={customFields.grouped}
-                uniqueFieldNames={customFields.uniqueFieldNames}
-                onSaveCustomField={handleSaveCampaignGroupCustomField}
-                onDeleteCustomField={handleDeleteCampaignGroupCustomField}
-              />
-            </CardContent>
-          </Card>
+          <WidgetCard
+            title="Campaign group performance"
+            subtitle="Performance metrics aggregated by campaign group"
+          >
+            <CampaignGroupPerformanceTable
+              data={campaignGroupPerformance.campaignGroups}
+              isLoading={campaignGroupPerformance.isLoading}
+              customFields={customFields.grouped}
+              uniqueFieldNames={customFields.uniqueFieldNames}
+              onSaveCustomField={handleSaveCampaignGroupCustomField}
+              onDeleteCustomField={handleDeleteCampaignGroupCustomField}
+            />
+          </WidgetCard>
         </TabsContent>
 
         {/* Campaigns Tab */}
         <TabsContent value="campaigns" className="space-y-6 mt-6">
-          <Card className="bg-card/50 backdrop-blur-sm border-border/50">
-            <CardContent className="pt-4">
-              <TimeFrameSelector
-                timeFrameOptions={campaignReporting.timeFrameOptions}
-                selectedTimeFrame={selectedTimeFrame}
-                onTimeFrameChange={handleCampaignTimeFrameChange}
-                timeGranularity={campaignReporting.timeGranularity as TimeGranularity}
-                onGranularityChange={(g: TimeGranularity) => campaignReporting.setTimeGranularity(g as any)}
-                dateRange={campaignReporting.dateRange}
-                onCustomDateChange={handleCampaignCustomDate}
-              />
-            </CardContent>
-          </Card>
+          <WidgetCard>
+            <TimeFrameSelector
+              timeFrameOptions={campaignReporting.timeFrameOptions}
+              selectedTimeFrame={selectedTimeFrame}
+              onTimeFrameChange={handleCampaignTimeFrameChange}
+              timeGranularity={campaignReporting.timeGranularity as TimeGranularity}
+              onGranularityChange={(g: TimeGranularity) => campaignReporting.setTimeGranularity(g as any)}
+              dateRange={campaignReporting.dateRange}
+              onCustomDateChange={handleCampaignCustomDate}
+            />
+          </WidgetCard>
 
-          <div className="grid grid-cols-2 md:grid-cols-5 lg:grid-cols-10 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
             <MetricCard title="Impressions" value={campaignReporting.totals.impressions.toLocaleString()} icon={FileBarChart} />
             <MetricCard title="Clicks" value={campaignReporting.totals.clicks.toLocaleString()} icon={FileBarChart} />
             <MetricCard title="Spent" value={`$${campaignReporting.totals.spent.toFixed(2)}`} icon={FileBarChart} />
@@ -803,46 +786,27 @@ export function ReportingSection({ accessToken, selectedAccount, canWrite = fals
           </div>
 
           {campaignReporting.error && (
-            <Card className="bg-destructive/10 border-destructive/30">
-              <CardContent className="pt-4">
-                <p className="text-sm text-destructive"><strong>Note:</strong> {campaignReporting.error}</p>
-              </CardContent>
-            </Card>
+            <ErrorNote><strong>Note:</strong> {campaignReporting.error}</ErrorNote>
           )}
 
-          <Card className="bg-card/50 backdrop-blur-sm border-border/50">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Target className="h-5 w-5 text-primary" />
-                Campaign Performance
-              </CardTitle>
-              <CardDescription>
-                Performance metrics by campaign with objective type and status filters
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <CampaignReportingTable data={campaignReporting.campaignData} isLoading={campaignReporting.isLoading} />
-            </CardContent>
-          </Card>
+          <CampaignReportingTable data={campaignReporting.campaignData} isLoading={campaignReporting.isLoading} />
         </TabsContent>
 
         {/* Creative Names Tab */}
         <TabsContent value="creative_names" className="space-y-6 mt-6">
-          <Card className="bg-card/50 backdrop-blur-sm border-border/50">
-            <CardContent className="pt-4">
-              <TimeFrameSelector
-                timeFrameOptions={creativeNamesReport.timeFrameOptions}
-                selectedTimeFrame={selectedTimeFrame}
-                onTimeFrameChange={handleCreativeNamesTimeFrameChange}
-                timeGranularity={creativeNamesReport.timeGranularity as TimeGranularity}
-                onGranularityChange={(g: TimeGranularity) => creativeNamesReport.setTimeGranularity(g as any)}
-                dateRange={creativeNamesReport.dateRange}
-                onCustomDateChange={handleCreativeNamesCustomDate}
-              />
-            </CardContent>
-          </Card>
+          <WidgetCard>
+            <TimeFrameSelector
+              timeFrameOptions={creativeNamesReport.timeFrameOptions}
+              selectedTimeFrame={selectedTimeFrame}
+              onTimeFrameChange={handleCreativeNamesTimeFrameChange}
+              timeGranularity={creativeNamesReport.timeGranularity as TimeGranularity}
+              onGranularityChange={(g: TimeGranularity) => creativeNamesReport.setTimeGranularity(g as any)}
+              dateRange={creativeNamesReport.dateRange}
+              onCustomDateChange={handleCreativeNamesCustomDate}
+            />
+          </WidgetCard>
 
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-4 gap-4">
             <MetricCard
               title="Impressions"
               value={creativeNamesReport.totals.impressions.toLocaleString()}
@@ -881,72 +845,51 @@ export function ReportingSection({ accessToken, selectedAccount, canWrite = fals
           </div>
 
           {creativeNamesReport.error && (
-            <Card className="bg-destructive/10 border-destructive/30">
-              <CardContent className="pt-4">
-                <p className="text-sm text-destructive">
-                  <strong>Note:</strong> {creativeNamesReport.error}
-                </p>
-              </CardContent>
-            </Card>
+            <ErrorNote><strong>Note:</strong> {creativeNamesReport.error}</ErrorNote>
           )}
 
-          <Card className="bg-card/50 backdrop-blur-sm border-border/50">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <List className="h-5 w-5 text-primary" />
-                Creative Names Report
-              </CardTitle>
-              <CardDescription>
-                All creatives with performance metrics, status filtering, and time frame selection
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <CreativeNamesReportTable data={creativeNamesReport.creativeData} isLoading={creativeNamesReport.isLoading} />
-            </CardContent>
-          </Card>
+          <CreativeNamesReportTable data={creativeNamesReport.creativeData} isLoading={creativeNamesReport.isLoading} />
         </TabsContent>
 
         {/* Demographics Tab */}
         <TabsContent value="demographics" className="space-y-6 mt-6">
-          <Card className="bg-card/50 backdrop-blur-sm border-border/50">
-            <CardContent className="pt-4 space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center gap-4">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium">Pivot By:</span>
-                  <Select 
-                    value={demographicReporting.pivot} 
-                    onValueChange={(v) => demographicReporting.setPivot(v as DemographicPivot)}
-                  >
-                    <SelectTrigger className="w-[160px]">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {DEMOGRAPHIC_PIVOT_OPTIONS.map(opt => (
-                        <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <TimeFrameSelector
-                  timeFrameOptions={demographicReporting.timeFrameOptions}
-                  selectedTimeFrame={selectedTimeFrame}
-                  onTimeFrameChange={handleDemoTimeFrameChange}
-                  timeGranularity={demographicReporting.timeGranularity as TimeGranularity}
-                  onGranularityChange={(g: TimeGranularity) => demographicReporting.setTimeGranularity(g as any)}
-                  dateRange={demographicReporting.dateRange}
-                  onCustomDateChange={handleDemoCustomDate}
-                />
+          <WidgetCard contentClassName="space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium text-muted-foreground">Pivot by</span>
+                <Select
+                  value={demographicReporting.pivot}
+                  onValueChange={(v) => demographicReporting.setPivot(v as DemographicPivot)}
+                >
+                  <SelectTrigger className="h-8 w-[160px] text-sm bg-card border-border">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-card border-border">
+                    {DEMOGRAPHIC_PIVOT_OPTIONS.map(opt => (
+                      <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
-              <CampaignMultiSelect
-                campaigns={campaignReporting.campaignData}
-                selectedCampaignIds={demographicReporting.selectedCampaignIds}
-                onSelectionChange={demographicReporting.setSelectedCampaignIds}
-                isLoading={campaignReporting.isLoading}
+              <TimeFrameSelector
+                timeFrameOptions={demographicReporting.timeFrameOptions}
+                selectedTimeFrame={selectedTimeFrame}
+                onTimeFrameChange={handleDemoTimeFrameChange}
+                timeGranularity={demographicReporting.timeGranularity as TimeGranularity}
+                onGranularityChange={(g: TimeGranularity) => demographicReporting.setTimeGranularity(g as any)}
+                dateRange={demographicReporting.dateRange}
+                onCustomDateChange={handleDemoCustomDate}
               />
-            </CardContent>
-          </Card>
+            </div>
+            <CampaignMultiSelect
+              campaigns={campaignReporting.campaignData}
+              selectedCampaignIds={demographicReporting.selectedCampaignIds}
+              onSelectionChange={demographicReporting.setSelectedCampaignIds}
+              isLoading={campaignReporting.isLoading}
+            />
+          </WidgetCard>
 
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-4 gap-4">
             <MetricCard
               title="Impressions"
               value={demographicReporting.totals.impressions.toLocaleString()}
@@ -1041,7 +984,7 @@ export function ReportingSection({ accessToken, selectedAccount, canWrite = fals
             </CardContent>
           </Card>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-7 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4">
             <MetricCard
               title="Impressions"
               value={companyDemographic.totals.impressions.toLocaleString()}
@@ -1313,7 +1256,7 @@ export function ReportingSection({ accessToken, selectedAccount, canWrite = fals
             </CardContent>
           </Card>
 
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-4 gap-4">
             <MetricCard title="Forms" value={leadGenForms.formsData.length.toString()} icon={ClipboardList} />
             <MetricCard title="Leads" value={leadGenForms.totals.leads.toLocaleString()} icon={FileBarChart} />
             <MetricCard title="Form Opens" value={leadGenForms.totals.formOpens.toLocaleString()} icon={FileBarChart} />
@@ -1360,25 +1303,6 @@ export function ReportingSection({ accessToken, selectedAccount, canWrite = fals
             <JobTitleSearch accessToken={accessToken} selectedAccount={selectedAccount} />
             <SkillSearch accessToken={accessToken} selectedAccount={selectedAccount} />
           </div>
-        </TabsContent>
-
-        {/* Campaign Editor Tab */}
-        <TabsContent value="campaign_editor" className="space-y-6 mt-6">
-          <CampaignTargetingEditor
-            accessToken={accessToken}
-            selectedAccount={selectedAccount}
-            campaigns={campaignReporting.campaignData.map(c => ({
-              id: c.campaignId,
-              name: c.campaignName,
-              status: c.status,
-            }))}
-            canWrite={canWrite}
-            onRefreshCampaigns={() => {
-              if (selectedAccount) {
-                campaignReporting.fetchCampaignReport(selectedAccount);
-              }
-            }}
-          />
         </TabsContent>
 
         {/* Budget Pacing Tab */}

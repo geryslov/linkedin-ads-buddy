@@ -21,7 +21,8 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Label } from '@/components/ui/label';
-import { Pencil, Trash2, RefreshCw, LayoutList, BarChart3, Plus, X } from 'lucide-react';
+import { WidgetCard, EmptyState, StatusPill, SegmentedControl } from './widgets';
+import { Pencil, Trash2, RefreshCw, Tags, Inbox, X } from 'lucide-react';
 
 interface NamingConventionReportProps {
   accessToken: string | null;
@@ -75,76 +76,81 @@ function SetupWizard({
   };
 
   return (
-    <div className="max-w-xl space-y-6">
-      <div>
-        <h2 className="text-xl font-semibold mb-1">Set Up Naming Convention</h2>
-        <p className="text-sm text-muted-foreground">
-          Define how your campaign names are structured so we can parse them into labeled segments.
-        </p>
-      </div>
-
-      {/* Step 1: Separator */}
-      <div className="space-y-2">
-        <Label>Separator character</Label>
-        <Input
-          value={separator}
-          onChange={e => setSeparator(e.target.value)}
-          className="w-24"
-          maxLength={5}
-          placeholder="_"
-        />
-      </div>
-
-      {/* Step 2: Example name */}
-      <div className="space-y-2">
-        <Label>Example campaign name</Label>
-        <Input
-          value={exampleName}
-          onChange={e => setExampleName(e.target.value)}
-          placeholder={`e.g. lg${separator}titles${separator}us`}
-          className="font-mono"
-        />
-        {parts.length > 0 && (
-          <div className="flex flex-wrap gap-2 mt-2">
-            {parts.map((part, i) => (
-              <div
-                key={i}
-                className="px-3 py-1 rounded border border-border bg-muted text-sm font-mono"
-              >
-                {part}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Step 3: Label each segment */}
-      {parts.length > 0 && (
+    <WidgetCard
+      title="Set Up Naming Convention"
+      subtitle="Define how your campaign names are structured so we can parse them into labeled segments"
+      className="max-w-xl"
+    >
+      <div className="space-y-5">
+        {/* Step 1: Separator */}
         <div className="space-y-2">
-          <Label>Label each segment</Label>
-          <div className="space-y-2">
-            {parts.map((part, i) => (
-              <div key={i} className="flex items-center gap-3">
-                <span className="font-mono text-sm w-32 truncate text-muted-foreground bg-muted px-2 py-1 rounded">
+          <Label className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+            Separator character
+          </Label>
+          <Input
+            value={separator}
+            onChange={e => setSeparator(e.target.value)}
+            className="w-24 h-9"
+            maxLength={5}
+            placeholder="_"
+          />
+        </div>
+
+        {/* Step 2: Example name */}
+        <div className="space-y-2">
+          <Label className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+            Example campaign name
+          </Label>
+          <Input
+            value={exampleName}
+            onChange={e => setExampleName(e.target.value)}
+            placeholder={`e.g. lg${separator}titles${separator}us`}
+            className="font-mono h-9"
+          />
+          {parts.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mt-2">
+              {parts.map((part, i) => (
+                <span
+                  key={i}
+                  className="px-2.5 py-1 rounded-md border border-border/70 bg-secondary/60 text-xs font-mono"
+                >
                   {part}
                 </span>
-                <span className="text-muted-foreground">→</span>
-                <Input
-                  value={labels[i] ?? ''}
-                  onChange={e => handleLabelChange(i, e.target.value)}
-                  placeholder={`segment ${i + 1} name`}
-                  className="w-40"
-                />
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
-      )}
 
-      <Button onClick={handleSave} disabled={!canSave || isSaving}>
-        {isSaving ? 'Saving…' : 'Save Convention'}
-      </Button>
-    </div>
+        {/* Step 3: Label each segment */}
+        {parts.length > 0 && (
+          <div className="space-y-2">
+            <Label className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+              Label each segment
+            </Label>
+            <div className="space-y-2">
+              {parts.map((part, i) => (
+                <div key={i} className="flex items-center gap-3">
+                  <span className="font-mono text-xs w-32 truncate text-muted-foreground bg-secondary/60 border border-border/60 px-2 py-1.5 rounded-md">
+                    {part}
+                  </span>
+                  <span className="text-muted-foreground/60">→</span>
+                  <Input
+                    value={labels[i] ?? ''}
+                    onChange={e => handleLabelChange(i, e.target.value)}
+                    placeholder={`segment ${i + 1} name`}
+                    className="w-40 h-8 text-sm"
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <Button onClick={handleSave} disabled={!canSave || isSaving}>
+          {isSaving ? 'Saving…' : 'Save Convention'}
+        </Button>
+      </div>
+    </WidgetCard>
   );
 }
 
@@ -204,94 +210,98 @@ function FlatView({
   const hasActiveFilters = Object.values(segmentFilters).some(v => v && v !== '__all__');
 
   return (
-    <div className="space-y-4">
-      {/* Segment filter row */}
-      <div className="flex flex-wrap gap-2 items-center">
-        {segments.map(seg => {
-          const values = Array.from(distinctValues[seg] ?? []).sort();
-          return (
-            <Select
-              key={seg}
-              value={segmentFilters[seg] ?? '__all__'}
-              onValueChange={v => setSegmentFilters(prev => ({ ...prev, [seg]: v }))}
-            >
-              <SelectTrigger className="w-[160px]">
-                <SelectValue placeholder={seg} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__all__">All {seg}</SelectItem>
-                {values.map(v => (
-                  <SelectItem key={v} value={v}>{v}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          );
-        })}
-        {hasActiveFilters && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setSegmentFilters({})}
-            className="gap-1"
-          >
-            <X className="h-3 w-3" />
-            Clear
-          </Button>
-        )}
-      </div>
-
-      <div className="text-sm text-muted-foreground">
-        Showing {filtered.length} of {rows.length} campaigns
-      </div>
-
-      <div className="rounded-lg border border-border overflow-x-auto">
-        <Table className="min-w-[900px]">
-          <TableHeader>
-            <TableRow className="bg-muted/30">
-              <TableHead className="min-w-[200px]">Campaign Name</TableHead>
-              {segments.map(seg => (
-                <TableHead key={seg} className="capitalize">{seg}</TableHead>
-              ))}
-              <TableHead className="text-right">Impressions</TableHead>
-              <TableHead className="text-right">Clicks</TableHead>
-              <TableHead className="text-right">Spend</TableHead>
-              <TableHead className="text-right">Leads</TableHead>
-              <TableHead className="text-right">CTR</TableHead>
-              <TableHead className="text-right">CPC</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filtered.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={6 + segments.length} className="text-center py-8 text-muted-foreground">
-                  No campaigns match the selected filters
-                </TableCell>
-              </TableRow>
-            ) : (
-              filtered.map(row => (
-                <TableRow key={row.campaignId} className="hover:bg-muted/20">
-                  <TableCell className="font-medium">
-                    <div className="break-words">{row.campaignName}</div>
-                    <div className="text-xs text-muted-foreground">ID: {row.campaignId}</div>
-                  </TableCell>
-                  {segments.map(seg => (
-                    <TableCell key={seg} className="text-sm">
-                      {row.parsedSegments[seg] || <span className="text-muted-foreground">—</span>}
-                    </TableCell>
+    <WidgetCard
+      noPadding
+      title="Campaigns"
+      subtitle={`${filtered.length} of ${rows.length} shown`}
+      toolbar={
+        <>
+          {segments.map(seg => {
+            const values = Array.from(distinctValues[seg] ?? []).sort();
+            return (
+              <Select
+                key={seg}
+                value={segmentFilters[seg] ?? '__all__'}
+                onValueChange={v => setSegmentFilters(prev => ({ ...prev, [seg]: v }))}
+              >
+                <SelectTrigger className="h-8 w-[140px] text-sm bg-card border-border capitalize">
+                  <SelectValue placeholder={seg} />
+                </SelectTrigger>
+                <SelectContent className="bg-card border-border">
+                  <SelectItem value="__all__">All {seg}</SelectItem>
+                  {values.map(v => (
+                    <SelectItem key={v} value={v}>{v}</SelectItem>
                   ))}
-                  <TableCell className="text-right">{fmt(row.impressions)}</TableCell>
-                  <TableCell className="text-right">{fmt(row.clicks)}</TableCell>
-                  <TableCell className="text-right">{fmtCurrency(row.spent)}</TableCell>
-                  <TableCell className="text-right">{fmt(row.leads)}</TableCell>
-                  <TableCell className="text-right">{row.ctr.toFixed(2)}%</TableCell>
-                  <TableCell className="text-right">{fmtCurrency(row.cpc)}</TableCell>
-                </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </div>
-    </div>
+                </SelectContent>
+              </Select>
+            );
+          })}
+          {hasActiveFilters && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setSegmentFilters({})}
+              className="gap-1 h-8 text-xs"
+            >
+              <X className="h-3 w-3" />
+              Clear
+            </Button>
+          )}
+        </>
+      }
+    >
+      <Table className="min-w-[900px]">
+        <TableHeader>
+          <TableRow className="border-border hover:bg-transparent bg-secondary/40">
+            <TableHead className="min-w-[200px]">Campaign Name</TableHead>
+            <TableHead>Compliance</TableHead>
+            {segments.map(seg => (
+              <TableHead key={seg} className="capitalize">{seg}</TableHead>
+            ))}
+            <TableHead className="text-right">Impressions</TableHead>
+            <TableHead className="text-right">Clicks</TableHead>
+            <TableHead className="text-right">Spend</TableHead>
+            <TableHead className="text-right">Leads</TableHead>
+            <TableHead className="text-right">CTR</TableHead>
+            <TableHead className="text-right">CPC</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {filtered.length === 0 ? (
+            <TableRow>
+              <TableCell colSpan={7 + segments.length} className="text-center py-10 text-muted-foreground">
+                No campaigns match the selected filters
+              </TableCell>
+            </TableRow>
+          ) : (
+            filtered.map(row => (
+              <TableRow key={row.campaignId} className="hover:bg-secondary/30 [&>td]:py-2.5">
+                <TableCell className="font-medium">
+                  <div className="break-words">{row.campaignName}</div>
+                  <div className="text-[11px] text-muted-foreground font-mono">ID: {row.campaignId}</div>
+                </TableCell>
+                <TableCell>
+                  {row.isFullMatch
+                    ? <StatusPill tone="success" label="Compliant" />
+                    : <StatusPill tone="warning" label="Partial" />}
+                </TableCell>
+                {segments.map(seg => (
+                  <TableCell key={seg} className="text-sm">
+                    {row.parsedSegments[seg] || <span className="text-muted-foreground/50">—</span>}
+                  </TableCell>
+                ))}
+                <TableCell className="text-right tabular-nums">{fmt(row.impressions)}</TableCell>
+                <TableCell className="text-right tabular-nums">{fmt(row.clicks)}</TableCell>
+                <TableCell className="text-right tabular-nums">{fmtCurrency(row.spent)}</TableCell>
+                <TableCell className="text-right tabular-nums">{fmt(row.leads)}</TableCell>
+                <TableCell className="text-right tabular-nums">{row.ctr.toFixed(2)}%</TableCell>
+                <TableCell className="text-right tabular-nums">{fmtCurrency(row.cpc)}</TableCell>
+              </TableRow>
+            ))
+          )}
+        </TableBody>
+      </Table>
+    </WidgetCard>
   );
 }
 
@@ -328,52 +338,52 @@ function GroupedView({
   }, [rows, groupBy]);
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-3">
-        <Label className="shrink-0">Group by</Label>
+    <WidgetCard
+      noPadding
+      title="Grouped Performance"
+      subtitle={`Aggregated by ${groupBy}`}
+      toolbar={
         <Select value={groupBy} onValueChange={setGroupBy}>
-          <SelectTrigger className="w-[160px]">
+          <SelectTrigger className="h-8 w-[150px] text-sm bg-card border-border capitalize">
             <SelectValue />
           </SelectTrigger>
-          <SelectContent>
+          <SelectContent className="bg-card border-border">
             {segments.map(seg => (
               <SelectItem key={seg} value={seg}>{seg}</SelectItem>
             ))}
           </SelectContent>
         </Select>
-      </div>
-
-      <div className="rounded-lg border border-border overflow-x-auto">
-        <Table className="min-w-[700px]">
-          <TableHeader>
-            <TableRow className="bg-muted/30">
-              <TableHead className="capitalize">{groupBy} value</TableHead>
-              <TableHead className="text-right"># Campaigns</TableHead>
-              <TableHead className="text-right">Impressions</TableHead>
-              <TableHead className="text-right">Clicks</TableHead>
-              <TableHead className="text-right">Spend</TableHead>
-              <TableHead className="text-right">Leads</TableHead>
-              <TableHead className="text-right">Avg CTR</TableHead>
-              <TableHead className="text-right">Avg CPC</TableHead>
+      }
+    >
+      <Table className="min-w-[700px]">
+        <TableHeader>
+          <TableRow className="border-border hover:bg-transparent bg-secondary/40">
+            <TableHead className="capitalize">{groupBy} value</TableHead>
+            <TableHead className="text-right"># Campaigns</TableHead>
+            <TableHead className="text-right">Impressions</TableHead>
+            <TableHead className="text-right">Clicks</TableHead>
+            <TableHead className="text-right">Spend</TableHead>
+            <TableHead className="text-right">Leads</TableHead>
+            <TableHead className="text-right">Avg CTR</TableHead>
+            <TableHead className="text-right">Avg CPC</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {grouped.map(row => (
+            <TableRow key={row.value} className="hover:bg-secondary/30 [&>td]:py-2.5">
+              <TableCell className="font-medium">{row.value}</TableCell>
+              <TableCell className="text-right tabular-nums">{row.count}</TableCell>
+              <TableCell className="text-right tabular-nums">{fmt(row.impressions)}</TableCell>
+              <TableCell className="text-right tabular-nums">{fmt(row.clicks)}</TableCell>
+              <TableCell className="text-right tabular-nums">{fmtCurrency(row.spent)}</TableCell>
+              <TableCell className="text-right tabular-nums">{fmt(row.leads)}</TableCell>
+              <TableCell className="text-right tabular-nums">{row.ctr.toFixed(2)}%</TableCell>
+              <TableCell className="text-right tabular-nums">{fmtCurrency(row.cpc)}</TableCell>
             </TableRow>
-          </TableHeader>
-          <TableBody>
-            {grouped.map(row => (
-              <TableRow key={row.value} className="hover:bg-muted/20">
-                <TableCell className="font-medium">{row.value}</TableCell>
-                <TableCell className="text-right">{row.count}</TableCell>
-                <TableCell className="text-right">{fmt(row.impressions)}</TableCell>
-                <TableCell className="text-right">{fmt(row.clicks)}</TableCell>
-                <TableCell className="text-right">{fmtCurrency(row.spent)}</TableCell>
-                <TableCell className="text-right">{fmt(row.leads)}</TableCell>
-                <TableCell className="text-right">{row.ctr.toFixed(2)}%</TableCell>
-                <TableCell className="text-right">{fmtCurrency(row.cpc)}</TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
-    </div>
+          ))}
+        </TableBody>
+      </Table>
+    </WidgetCard>
   );
 }
 
@@ -452,9 +462,13 @@ export function NamingConventionReport({
 
   if (!selectedAccount) {
     return (
-      <div className="text-center py-16 text-muted-foreground">
-        Select an account to use naming convention reports.
-      </div>
+      <WidgetCard noPadding>
+        <EmptyState
+          icon={Tags}
+          title="No account selected"
+          description="Select an account to use naming convention reports."
+        />
+      </WidgetCard>
     );
   }
 
@@ -492,15 +506,15 @@ export function NamingConventionReport({
 
   // Report view (convention defined)
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {/* Header: pattern + controls */}
-      <div className="flex flex-wrap items-center justify-between gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3 flex-wrap">
           <div className="flex items-center gap-1 text-sm font-medium">
             {convention.segments.map((seg, i) => (
               <span key={seg} className="flex items-center gap-1">
                 {i > 0 && (
-                  <span className="text-muted-foreground font-mono px-1">
+                  <span className="text-muted-foreground font-mono px-0.5">
                     {convention.separator}
                   </span>
                 )}
@@ -508,11 +522,11 @@ export function NamingConventionReport({
               </span>
             ))}
           </div>
-          <Button variant="outline" size="sm" onClick={() => setIsEditing(true)} className="gap-1">
+          <Button variant="outline" size="sm" onClick={() => setIsEditing(true)} className="gap-1 h-8 text-xs">
             <Pencil className="h-3 w-3" />
             Edit
           </Button>
-          <Button variant="ghost" size="sm" onClick={handleDelete} className="gap-1 text-destructive hover:text-destructive">
+          <Button variant="ghost" size="sm" onClick={handleDelete} className="gap-1 h-8 text-xs text-destructive hover:text-destructive">
             <Trash2 className="h-3 w-3" />
             Delete
           </Button>
@@ -521,10 +535,10 @@ export function NamingConventionReport({
         <div className="flex items-center gap-2">
           {/* Time frame picker */}
           <Select value={selectedTimeFrame} onValueChange={handleTimeFrameChange}>
-            <SelectTrigger className="w-[140px]">
+            <SelectTrigger className="h-8 w-[140px] text-sm bg-card border-border">
               <SelectValue />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent className="bg-card border-border">
               {timeFrameOptions.map(o => (
                 <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
               ))}
@@ -535,33 +549,23 @@ export function NamingConventionReport({
           <Button
             variant="outline"
             size="icon"
+            className="h-8 w-8"
             onClick={() => fetchCampaignReport(selectedAccount)}
             disabled={isLoadingCampaigns}
           >
-            <RefreshCw className={`h-4 w-4 ${isLoadingCampaigns ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`h-3.5 w-3.5 ${isLoadingCampaigns ? 'animate-spin' : ''}`} />
           </Button>
 
           {/* View toggle */}
-          <div className="flex rounded-md border border-border overflow-hidden">
-            <Button
-              variant={viewMode === 'flat' ? 'default' : 'ghost'}
-              size="sm"
-              className="rounded-none gap-1"
-              onClick={() => setViewMode('flat')}
-            >
-              <LayoutList className="h-4 w-4" />
-              Flat
-            </Button>
-            <Button
-              variant={viewMode === 'grouped' ? 'default' : 'ghost'}
-              size="sm"
-              className="rounded-none gap-1"
-              onClick={() => setViewMode('grouped')}
-            >
-              <BarChart3 className="h-4 w-4" />
-              Grouped
-            </Button>
-          </div>
+          <SegmentedControl
+            size="sm"
+            value={viewMode}
+            onChange={setViewMode}
+            options={[
+              { value: 'flat', label: 'Flat' },
+              { value: 'grouped', label: 'Grouped' },
+            ]}
+          />
         </div>
       </div>
 
@@ -572,9 +576,13 @@ export function NamingConventionReport({
           <Skeleton className="h-[400px] w-full" />
         </div>
       ) : campaignData.length === 0 ? (
-        <div className="text-center py-12 text-muted-foreground">
-          No campaign data available for the selected time period.
-        </div>
+        <WidgetCard noPadding>
+          <EmptyState
+            icon={Inbox}
+            title="No campaign data"
+            description="No campaign data available for the selected time period."
+          />
+        </WidgetCard>
       ) : viewMode === 'flat' ? (
         <FlatView rows={flatRows} segments={convention.segments} />
       ) : (

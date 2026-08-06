@@ -3,6 +3,7 @@ import { useAccountHealthCheck } from '@/hooks/useAccountHealthCheck';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
+import { WidgetCard, EmptyState, StatusPill } from './widgets';
 import {
   Sparkles, Send, Loader2, RefreshCw, AlertTriangle,
   CheckCircle2, Activity, DollarSign, Zap, TrendingDown,
@@ -14,6 +15,25 @@ import { cn } from '@/lib/utils';
 interface AccountHealthCheckProps {
   accessToken: string | null;
   selectedAccount: string | null;
+}
+
+/* Severity → semantic tone mapping (critical→danger, warning→warning, ok→success) */
+type Tone = 'danger' | 'warning' | 'success' | 'info';
+
+const TONE_STYLES: Record<Tone, { text: string; chip: string }> = {
+  danger: { text: 'text-destructive', chip: 'bg-destructive/[0.07]' },
+  warning: { text: 'text-warning', chip: 'bg-warning/[0.07]' },
+  success: { text: 'text-success', chip: 'bg-success/[0.07]' },
+  info: { text: 'text-primary', chip: 'bg-primary/[0.07]' },
+};
+
+interface SummaryCard {
+  label: string;
+  value: string;
+  icon: React.ElementType;
+  tone: Tone;
+  pill?: { tone: 'success' | 'warning' | 'danger' | 'info' | 'neutral'; label: string };
+  sub?: string;
 }
 
 export function AccountHealthCheck({ accessToken, selectedAccount }: AccountHealthCheckProps) {
@@ -58,7 +78,7 @@ export function AccountHealthCheck({ accessToken, selectedAccount }: AccountHeal
   ];
 
   // Summary cards from health data
-  const summaryCards = [];
+  const summaryCards: SummaryCard[] = [];
   if (healthData) {
     const fatigue = healthData.creativeFatigue?.creatives || [];
     const fatiguedCount = fatigue.filter((c: any) => c.status === 'fatigued').length;
@@ -72,36 +92,40 @@ export function AccountHealthCheck({ accessToken, selectedAccount }: AccountHeal
         label: 'Creative Health',
         value: fatiguedCount === 0 && warningCount === 0 ? 'Healthy' : `${fatiguedCount + warningCount} issues`,
         icon: fatiguedCount > 0 ? ShieldAlert : warningCount > 0 ? Shield : ShieldCheck,
-        color: fatiguedCount > 0 ? 'text-red-600' : warningCount > 0 ? 'text-amber-600' : 'text-green-600',
-        bgColor: fatiguedCount > 0 ? 'bg-red-500/7' : warningCount > 0 ? 'bg-amber-500/7' : 'bg-green-500/7',
-        sub: fatiguedCount > 0 ? `${fatiguedCount} fatigued` : warningCount > 0 ? `${warningCount} warning` : 'All clear',
+        tone: fatiguedCount > 0 ? 'danger' : warningCount > 0 ? 'warning' : 'success',
+        pill: fatiguedCount > 0
+          ? { tone: 'danger', label: `${fatiguedCount} fatigued` }
+          : warningCount > 0
+            ? { tone: 'warning', label: `${warningCount} warning` }
+            : { tone: 'success', label: 'All clear' },
       },
       {
         label: 'Budget Pacing',
         value: pacing?.spentThisMonth != null ? `$${Math.round(pacing.spentThisMonth).toLocaleString()}` : '—',
         icon: DollarSign,
-        color: 'text-primary',
-        bgColor: 'bg-primary/7',
+        tone: 'info',
         sub: pacing?.daysRemaining != null ? `${pacing.daysRemaining} days left` : undefined,
       },
     );
 
     if (leadGen) {
+      const cplWorsening = leadGen.cpl7d > leadGen.cpl30d * 1.1;
       summaryCards.push(
         {
           label: 'Leads (30d)',
           value: leadGen.totalLeads?.toLocaleString() || '0',
           icon: Zap,
-          color: 'text-primary',
-          bgColor: 'bg-primary/7',
+          tone: 'info',
           sub: leadGen.avgCpl > 0 ? `$${leadGen.avgCpl.toFixed(2)} CPL` : undefined,
         },
         {
           label: 'CPL Trend',
           value: leadGen.cpl7d > 0 ? `$${leadGen.cpl7d.toFixed(2)}` : '—',
-          icon: leadGen.cpl7d > leadGen.cpl30d * 1.1 ? TrendingDown : Activity,
-          color: leadGen.cpl7d > leadGen.cpl30d * 1.1 ? 'text-red-600' : 'text-green-600',
-          bgColor: leadGen.cpl7d > leadGen.cpl30d * 1.1 ? 'bg-red-500/7' : 'bg-green-500/7',
+          icon: cplWorsening ? TrendingDown : Activity,
+          tone: cplWorsening ? 'danger' : 'success',
+          pill: cplWorsening
+            ? { tone: 'danger', label: 'Rising' }
+            : { tone: 'success', label: 'On track' },
           sub: '7d average',
         },
       );
@@ -111,7 +135,7 @@ export function AccountHealthCheck({ accessToken, selectedAccount }: AccountHeal
   // Loading
   if (isLoadingData && !healthData) {
     return (
-      <div className="space-y-5 animate-in fade-in-50 duration-300">
+      <div className="space-y-5 animate-fade-in">
         <div className="flex items-center gap-3 pb-1">
           <div className="h-9 w-9 rounded-lg bg-primary/10 flex items-center justify-center">
             <Activity className="h-4.5 w-4.5 text-primary animate-pulse" />
@@ -123,10 +147,10 @@ export function AccountHealthCheck({ accessToken, selectedAccount }: AccountHeal
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {[...Array(4)].map((_, i) => (
-            <Skeleton key={i} className="h-[76px] rounded-lg" style={{ animationDelay: `${i * 80}ms` }} />
+            <Skeleton key={i} className="h-[84px] rounded-xl" style={{ animationDelay: `${i * 80}ms` }} />
           ))}
         </div>
-        <Skeleton className="h-80 rounded-lg" />
+        <Skeleton className="h-80 rounded-xl" />
       </div>
     );
   }
@@ -134,90 +158,106 @@ export function AccountHealthCheck({ accessToken, selectedAccount }: AccountHeal
   // Error
   if (dataError && !healthData) {
     return (
-      <div className="border border-destructive/20 rounded-lg p-8 bg-destructive/5 text-center">
-        <AlertTriangle className="h-8 w-8 text-destructive mx-auto mb-3" />
-        <p className="font-medium text-destructive mb-1">Health check failed</p>
-        <p className="text-sm text-muted-foreground mb-4">{dataError}</p>
-        <Button variant="outline" size="sm" onClick={handleRefresh}>
-          <RefreshCw className="h-3.5 w-3.5 mr-1.5" /> Retry
-        </Button>
-      </div>
+      <WidgetCard noPadding>
+        <EmptyState
+          icon={AlertTriangle}
+          title="Health check failed"
+          description={dataError}
+          action={
+            <Button variant="outline" size="sm" onClick={handleRefresh}>
+              <RefreshCw className="h-3.5 w-3.5 mr-1.5" /> Retry
+            </Button>
+          }
+        />
+      </WidgetCard>
     );
   }
 
   return (
     <div className="space-y-5">
 
-      {/* Summary cards */}
+      {/* Summary stat tiles */}
       {summaryCards.length > 0 && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {summaryCards.map(({ label, value, icon: Icon, color, bgColor, sub }) => (
-            <div key={label} className="border border-border/60 rounded-lg px-3.5 py-3 bg-card shadow-sm flex items-start gap-3">
-              <div className={cn('p-1.5 rounded-md border border-border/20 mt-0.5 shrink-0', bgColor)}>
-                <Icon className={cn('h-3.5 w-3.5', color)} />
+          {summaryCards.map(({ label, value, icon: Icon, tone, pill, sub }) => {
+            const t = TONE_STYLES[tone];
+            return (
+              <div
+                key={label}
+                className="bg-card rounded-xl border border-border/70 px-4 py-3.5 flex flex-col gap-2"
+                style={{ boxShadow: 'var(--shadow-xs)' }}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className={cn('h-7 w-7 rounded-lg flex items-center justify-center shrink-0 border border-border/40', t.chip)}>
+                      <Icon className={cn('h-3.5 w-3.5', t.text)} />
+                    </div>
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground truncate">{label}</p>
+                  </div>
+                </div>
+                <p className={cn('text-lg font-bold tabular-nums leading-none', t.text)}>{value}</p>
+                <div className="flex items-center gap-2 min-h-[18px]">
+                  {pill && <StatusPill tone={pill.tone} label={pill.label} />}
+                  {sub && <p className="text-[10px] text-muted-foreground tabular-nums">{sub}</p>}
+                </div>
               </div>
-              <div className="min-w-0">
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground leading-none">{label}</p>
-                <p className={cn('text-lg font-bold tabular-nums mt-1 leading-none', color)}>{value}</p>
-                {sub && <p className="text-[10px] text-muted-foreground mt-1">{sub}</p>}
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
       {/* AI Analysis Panel */}
-      <div className={cn(
-        'border rounded-xl bg-card shadow-sm overflow-hidden transition-all duration-300',
-        isLoading ? 'border-primary/40 shadow-[0_0_0_1px_hsl(221_83%_53%_/_0.08)]' : 'border-primary/20',
-      )}>
-        <div className="flex items-center justify-between px-5 py-3 border-b border-primary/10 bg-primary/[0.03]">
-          <div className="flex items-center gap-2.5">
-            <div className={cn('h-6 w-6 rounded-md flex items-center justify-center transition-colors', isLoading ? 'bg-primary/20' : 'bg-primary/10')}>
+      <WidgetCard
+        noPadding
+        className={cn('transition-colors duration-300', isLoading && 'border-primary/40')}
+        title={
+          <span className="flex items-center gap-2.5">
+            <span className={cn('h-6 w-6 rounded-md flex items-center justify-center transition-colors', isLoading ? 'bg-primary/20' : 'bg-primary/10')}>
               <Sparkles className={cn('h-3.5 w-3.5 text-primary', isLoading && 'animate-pulse')} />
-            </div>
-            <span className="text-sm font-semibold">AI Health Diagnosis</span>
+            </span>
+            AI Health Diagnosis
             {isLoading && (
-              <div className="flex gap-0.5 items-center ml-0.5">
+              <span className="flex gap-0.5 items-center">
                 {[0, 1, 2].map(i => (
                   <span key={i} className="h-1 w-1 rounded-full bg-primary/50 animate-bounce"
                     style={{ animationDelay: `${i * 160}ms`, animationDuration: '900ms' }} />
                 ))}
-              </div>
+              </span>
             )}
-          </div>
+          </span>
+        }
+        toolbar={
           <Button variant="ghost" size="sm" onClick={handleRefresh} disabled={isLoadingData} className="h-7 text-xs">
             <RefreshCw className={cn('h-3 w-3 mr-1', isLoadingData && 'animate-spin')} /> Re-check
           </Button>
-        </div>
-
+        }
+      >
         {isLoading && (
           <div className="h-0.5 bg-primary/10 overflow-hidden">
             <div className="h-full bg-primary/40 animate-pulse w-full" />
           </div>
         )}
 
-        <div className="relative">
+        <div className="relative border-t border-border/60">
           <div ref={scrollRef} className="h-[500px] overflow-y-auto scroll-smooth" style={{ scrollbarWidth: 'thin' }}>
             <div className="px-5 py-4 space-y-5">
               {messages.length === 0 && !isLoading && (
-                <div className="h-full flex flex-col items-center justify-center py-20 text-center">
-                  <div className="h-10 w-10 rounded-xl bg-primary/8 border border-primary/15 flex items-center justify-center mb-3">
-                    <Activity className="h-4.5 w-4.5 text-primary/60" />
-                  </div>
-                  <p className="text-sm text-muted-foreground">Health check results will appear here</p>
-                  <p className="text-xs text-muted-foreground/60 mt-1">Budget pacing, creative fatigue, CPL trends — all in one diagnosis</p>
-                </div>
+                <EmptyState
+                  icon={Activity}
+                  title="Health check results will appear here"
+                  description="Budget pacing, creative fatigue, CPL trends — all in one diagnosis"
+                  className="py-20"
+                />
               )}
 
               {messages.map((msg, i) => (
                 <div key={i} className={msg.role === 'user' ? 'flex justify-end' : 'flex flex-col gap-0'}>
                   {msg.role === 'user' ? (
-                    <div className="bg-primary text-primary-foreground rounded-2xl rounded-tr-sm px-4 py-2.5 text-sm max-w-[75%] shadow-sm">
+                    <div className="bg-primary text-primary-foreground rounded-2xl rounded-tr-sm px-4 py-2.5 text-sm max-w-[75%]" style={{ boxShadow: 'var(--shadow-xs)' }}>
                       {msg.content}
                     </div>
                   ) : (
-                    <div className="rounded-2xl rounded-tl-sm bg-muted/30 border border-border/40 px-4 py-3.5">
+                    <div className="rounded-2xl rounded-tl-sm bg-secondary/40 border border-border/40 px-4 py-3.5">
                       <div className="prose prose-sm dark:prose-invert max-w-none
                         [&>*:first-child]:mt-0 [&>*:last-child]:mb-0
                         [&_h1]:text-base [&_h1]:font-bold [&_h1]:mt-5 [&_h1]:mb-2
@@ -227,7 +267,7 @@ export function AccountHealthCheck({ accessToken, selectedAccount }: AccountHeal
                         [&_strong]:text-foreground
                         [&_table]:text-xs [&_th]:py-1.5 [&_td]:py-1.5 [&_th]:px-2 [&_td]:px-2
                         [&_table]:border-collapse [&_th]:border [&_td]:border [&_th]:border-border/50 [&_td]:border-border/50
-                        [&_th]:bg-muted/40 [&_th]:font-semibold
+                        [&_th]:bg-secondary/40 [&_th]:font-semibold
                         [&_ul]:space-y-0.5 [&_ol]:space-y-0.5
                       ">
                         <ReactMarkdown>{msg.content}</ReactMarkdown>
@@ -244,7 +284,7 @@ export function AccountHealthCheck({ accessToken, selectedAccount }: AccountHeal
                       'inline-flex items-center gap-2 text-[11px] px-3 py-1.5 rounded-full border w-fit transition-all duration-300',
                       evt.status === 'running' ? 'bg-primary/5 border-primary/25 text-primary'
                         : evt.status === 'error' ? 'bg-destructive/5 border-destructive/20 text-destructive/70 opacity-60'
-                        : 'bg-green-500/5 border-green-500/20 text-green-600 dark:text-green-400 opacity-70',
+                        : 'bg-success/5 border-success/20 text-success opacity-70',
                     )}>
                       {evt.status === 'running' ? <Loader2 className="h-3 w-3 animate-spin shrink-0" />
                         : evt.status === 'error' ? <AlertTriangle className="h-3 w-3 shrink-0" />
@@ -256,7 +296,7 @@ export function AccountHealthCheck({ accessToken, selectedAccount }: AccountHeal
               )}
 
               {isLoading && (messages.length === 0 || messages[messages.length - 1]?.role !== 'assistant') && (
-                <div className="rounded-2xl rounded-tl-sm bg-muted/20 border border-border/30 px-4 py-3">
+                <div className="rounded-2xl rounded-tl-sm bg-secondary/30 border border-border/30 px-4 py-3">
                   <div className="flex gap-1 items-center h-4">
                     {[0, 1, 2].map(i => (
                       <span key={i} className="h-1.5 w-1.5 rounded-full bg-primary/50 animate-bounce"
@@ -273,7 +313,7 @@ export function AccountHealthCheck({ accessToken, selectedAccount }: AccountHeal
         </div>
 
         {messages.length > 0 && !isLoading && (
-          <div className="px-5 py-3 border-t border-border/40 bg-muted/10">
+          <div className="px-5 py-3 border-t border-border/40">
             <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 mb-2">Follow-up</p>
             <div className="flex flex-wrap gap-1.5">
               {followUpQuestions.map(q => (
@@ -293,7 +333,7 @@ export function AccountHealthCheck({ accessToken, selectedAccount }: AccountHeal
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="flex gap-2 px-4 py-3 border-t border-border/40 bg-muted/5">
+        <form onSubmit={handleSubmit} className="flex gap-2 px-4 py-3 border-t border-border/40">
           <Input value={input} onChange={e => setInput(e.target.value)}
             placeholder="Ask about your account health, campaigns, budget, or creatives..."
             disabled={isLoading || isLoadingData} className="flex-1 h-9 text-sm" />
@@ -307,7 +347,7 @@ export function AccountHealthCheck({ accessToken, selectedAccount }: AccountHeal
             </Button>
           )}
         </form>
-      </div>
+      </WidgetCard>
     </div>
   );
 }

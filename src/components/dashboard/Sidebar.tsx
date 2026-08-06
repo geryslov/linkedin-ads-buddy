@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
 import {
   LayoutDashboard,
@@ -31,6 +30,8 @@ import {
   Target,
   Layers,
   Bot,
+  CopyPlus,
+  Pencil,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -48,6 +49,9 @@ interface NavItem {
   id: string;
   label: string;
   icon: React.ElementType;
+  // Frozen: kept as a working route/tab but hidden from the sidebar and
+  // command palette. Flip to false (or remove) to bring it back.
+  hidden?: boolean;
 }
 
 interface NavGroup {
@@ -56,7 +60,7 @@ interface NavGroup {
   items: NavItem[];
 }
 
-const navGroups: NavGroup[] = [
+export const navGroups: NavGroup[] = [
   {
     id: "main",
     items: [
@@ -67,9 +71,17 @@ const navGroups: NavGroup[] = [
     id: "campaigns",
     label: "Campaigns",
     items: [
-      { id: "campaigns", label: "Campaigns", icon: Megaphone },
+      { id: "campaigns", label: "Campaigns", icon: Megaphone, hidden: true },
       { id: "budget_pacing", label: "Budget Pacing", icon: Wallet },
-      { id: "creatives", label: "Creatives", icon: ImageIcon },
+      { id: "creatives", label: "Creatives", icon: ImageIcon, hidden: true },
+    ],
+  },
+  {
+    id: "bulk_editing",
+    label: "Bulk Editing",
+    items: [
+      { id: "bulk_add_creatives", label: "Add Ads to Campaigns", icon: CopyPlus },
+      { id: "campaign_editor", label: "Campaign Editor", icon: Pencil },
     ],
   },
   {
@@ -81,11 +93,11 @@ const navGroups: NavGroup[] = [
       { id: "creative_reports", label: "Creative Reports", icon: TrendingUp },
       { id: "reports", label: "Reports", icon: FileBarChart },
       { id: "weekly_report", label: "Weekly Report", icon: CalendarRange },
-      { id: "conv_breakdown", label: "Conv. Breakdown", icon: Grid3x3 },
-      { id: "activity_report", label: "Activity Report", icon: ClipboardList },
+      { id: "conv_breakdown", label: "Conv. Breakdown", icon: Grid3x3, hidden: true },
+      { id: "activity_report", label: "Activity Report", icon: ClipboardList, hidden: true },
       { id: "creative_analyzer", label: "Creative Analyzer", icon: Sparkles },
       { id: "lead_gen_analyzer", label: "Lead Gen Analyzer", icon: Target },
-      { id: "account_health", label: "Account Health", icon: Shield },
+      { id: "account_health", label: "Account Health", icon: Shield, hidden: true },
       { id: "segmentation", label: "Segmentation", icon: Layers },
     ],
   },
@@ -93,7 +105,7 @@ const navGroups: NavGroup[] = [
     id: "audience",
     label: "Audience",
     items: [
-      { id: "audiences", label: "Audiences", icon: Users },
+      { id: "audiences", label: "Audiences", icon: Users, hidden: true },
       { id: "company_timeline", label: "Company Timeline", icon: Building2 },
       { id: "influence_matcher", label: "Influence Matcher", icon: Crosshair },
     ],
@@ -103,7 +115,7 @@ const navGroups: NavGroup[] = [
     label: "Tools",
     items: [
       { id: "title_checker", label: "Title Checker", icon: Crown },
-      { id: "standardized_titles", label: "Titles", icon: BookOpen },
+      { id: "standardized_titles", label: "Titles", icon: BookOpen, hidden: true },
       { id: "name_report", label: "Name Report", icon: Tags },
     ],
   },
@@ -124,6 +136,50 @@ function getActiveGroupId(activeTab: string): string {
     }
   }
   return "main";
+}
+
+/* Sidebar nav row — colors come from the sidebar token set. */
+function NavRow({
+  icon: Icon,
+  label,
+  active,
+  collapsed,
+  onClick,
+  className,
+}: {
+  icon: React.ElementType;
+  label: string;
+  active?: boolean;
+  collapsed?: boolean;
+  onClick: () => void;
+  className?: string;
+}) {
+  return (
+    <button
+      title={collapsed ? label : undefined}
+      onClick={onClick}
+      className={cn(
+        "relative w-full flex items-center rounded-md h-8 text-[13px] transition-colors duration-150 outline-none",
+        "focus-visible:ring-2 focus-visible:ring-sidebar-ring/60",
+        collapsed ? "justify-center px-0" : "gap-2.5 px-2.5",
+        active
+          ? "bg-primary/[0.08] text-sidebar-primary font-medium"
+          : "text-sidebar-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent",
+        className
+      )}
+    >
+      {active && !collapsed && (
+        <span className="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-r-full bg-sidebar-primary" />
+      )}
+      <Icon
+        className={cn(
+          "h-4 w-4 shrink-0",
+          active ? "text-sidebar-primary" : "text-sidebar-foreground/70"
+        )}
+      />
+      {!collapsed && <span className="truncate">{label}</span>}
+    </button>
+  );
 }
 
 export function Sidebar({
@@ -149,30 +205,40 @@ export function Sidebar({
     setCollapsedGroups((prev) => ({ ...prev, [groupId]: !prev[groupId] }));
   };
 
+  const initials = profileName
+    ? profileName.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase()
+    : null;
+
   return (
     <aside
       className={cn(
-        "fixed left-0 top-0 h-screen bg-sidebar border-r border-sidebar-border flex flex-col transition-all duration-300",
+        "fixed left-0 top-0 h-screen bg-sidebar border-r border-sidebar-border flex flex-col transition-all duration-300 z-30",
         collapsed ? "w-16" : "w-64"
       )}
     >
-      {/* ── Logo ──────────────────────────────────────────────── */}
-      <div className={cn(
-        "border-b border-sidebar-border flex items-center",
-        collapsed ? "p-3 justify-center h-14" : "px-5 py-4 h-14"
-      )}>
+      {/* ── Brand ─────────────────────────────────────────────── */}
+      <div
+        className={cn(
+          "border-b border-sidebar-border flex items-center shrink-0",
+          collapsed ? "p-3 justify-center h-14" : "px-4 h-14"
+        )}
+      >
         {collapsed ? (
-          <div className="p-1.5 rounded-md gradient-primary">
+          <div className="h-8 w-8 rounded-lg gradient-primary glow-primary flex items-center justify-center">
             <Linkedin className="h-4 w-4 text-primary-foreground" />
           </div>
         ) : (
-          <div className="flex items-center gap-2.5">
-            <div className="p-1.5 rounded-md gradient-primary shrink-0">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="h-8 w-8 rounded-lg gradient-primary glow-primary flex items-center justify-center shrink-0">
               <Linkedin className="h-4 w-4 text-primary-foreground" />
             </div>
             <div className="min-w-0">
-              <p className="font-bold text-sm leading-tight truncate">LinkedIn Ads</p>
-              <p className="text-[11px] text-muted-foreground leading-tight">Manager</p>
+              <p className="font-bold text-[13px] leading-tight truncate text-foreground">
+                LinkedIn Ads
+              </p>
+              <p className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground leading-tight">
+                Manager
+              </p>
             </div>
           </div>
         )}
@@ -183,14 +249,17 @@ export function Sidebar({
         {navGroups.map((group, groupIdx) => {
           const isGroupCollapsed = collapsedGroups[group.id] ?? false;
           const hasLabel = !!group.label;
+          const visibleItems = group.items.filter((item) => !item.hidden);
+
+          // Whole group is frozen — render nothing (no orphan header)
+          if (visibleItems.length === 0) return null;
 
           return (
-            <div key={group.id} className={groupIdx > 0 ? "mt-1" : ""}>
-              {/* Group header — hidden in icon-only mode */}
+            <div key={group.id} className={groupIdx > 0 ? "mt-3" : ""}>
               {hasLabel && !collapsed && (
                 <button
                   onClick={() => toggleGroup(group.id)}
-                  className="w-full flex items-center justify-between px-2 py-1 mb-0.5 rounded text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70 hover:text-muted-foreground transition-colors cursor-pointer select-none"
+                  className="w-full flex items-center justify-between px-2.5 py-1 mb-0.5 rounded text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/60 hover:text-muted-foreground transition-colors cursor-pointer select-none"
                 >
                   {group.label}
                   <ChevronDown
@@ -202,144 +271,90 @@ export function Sidebar({
                 </button>
               )}
 
-              {/* Group items */}
               {(!isGroupCollapsed || collapsed) && (
                 <div className="space-y-px">
-                  {group.items.map((item) => {
-                    const isActive = activeTab === item.id;
-                    return (
-                      <div key={item.id} className="relative">
-                        {/* Active left-border indicator */}
-                        {isActive && !collapsed && (
-                          <span className="absolute left-0 top-1 bottom-1 w-0.5 rounded-r bg-primary z-10" />
-                        )}
-                        <Button
-                          variant="ghost"
-                          title={collapsed ? item.label : undefined}
-                          className={cn(
-                            "w-full h-8 text-sm rounded-md transition-colors duration-150",
-                            collapsed ? "justify-center px-0" : "justify-start gap-2.5",
-                            !collapsed && hasLabel && "pl-3.5",
-                            isActive
-                              ? "bg-primary/8 text-primary font-medium hover:bg-primary/10"
-                              : "text-muted-foreground hover:text-foreground hover:bg-sidebar-accent"
-                          )}
-                          style={isActive ? { background: "hsl(221 83% 53% / 0.08)" } : undefined}
-                          onClick={() => onTabChange(item.id)}
-                        >
-                          <item.icon className={cn("h-4 w-4 shrink-0", isActive && "text-primary")} />
-                          {!collapsed && item.label}
-                        </Button>
-                      </div>
-                    );
-                  })}
+                  {visibleItems.map((item) => (
+                    <NavRow
+                      key={item.id}
+                      icon={item.icon}
+                      label={item.label}
+                      active={activeTab === item.id}
+                      collapsed={collapsed}
+                      onClick={() => onTabChange(item.id)}
+                    />
+                  ))}
                 </div>
-              )}
-
-              {/* Separator after each group (except last) */}
-              {hasLabel && !collapsed && groupIdx < navGroups.length - 1 && (
-                <div className="mt-1 border-b border-sidebar-border/50" />
               )}
             </div>
           );
         })}
 
         {/* Social Listener */}
-        <div className="mt-2 pt-2 border-t border-sidebar-border">
-          <Button
-            variant="ghost"
-            title={collapsed ? "Social Listener" : undefined}
-            className={cn(
-              "w-full h-8 text-sm font-normal text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-900/20",
-              collapsed ? "justify-center px-0" : "justify-start gap-2.5"
-            )}
+        <div className="mt-3 pt-3 border-t border-sidebar-border">
+          <NavRow
+            icon={Radio}
+            label="Social Listener"
+            collapsed={collapsed}
             onClick={() => navigate("/social-listener")}
-          >
-            <Radio className="h-4 w-4 shrink-0" />
-            {!collapsed && "Social Listener"}
-          </Button>
+            className="text-emerald-600 hover:!text-emerald-700 hover:!bg-emerald-50 [&>svg]:text-emerald-600"
+          />
         </div>
 
         {/* Admin */}
         {isAdmin && (
-          <div className="mt-2 pt-2 border-t border-sidebar-border">
-            <Button
-              variant="ghost"
-              title={collapsed ? "Admin Panel" : undefined}
-              className={cn(
-                "w-full h-8 text-sm font-normal text-primary hover:text-primary hover:bg-primary/8",
-                collapsed ? "justify-center px-0" : "justify-start gap-2.5"
-              )}
+          <div className="mt-2">
+            <NavRow
+              icon={Shield}
+              label="Admin Panel"
+              collapsed={collapsed}
               onClick={() => navigate("/admin")}
-            >
-              <Shield className="h-4 w-4 shrink-0" />
-              {!collapsed && "Admin Panel"}
-            </Button>
+              className="text-sidebar-primary hover:text-sidebar-primary [&>svg]:text-sidebar-primary"
+            />
           </div>
         )}
       </nav>
 
       {/* ── Footer ────────────────────────────────────────────── */}
-      <div className={cn(
-        "border-t border-sidebar-border space-y-0.5",
-        collapsed ? "p-2" : "p-3"
-      )}>
-        {/* Collapse toggle */}
+      <div className={cn("border-t border-sidebar-border shrink-0", collapsed ? "p-2 space-y-1" : "p-3 space-y-1")}>
+        {onConnectClaude && (
+          <NavRow
+            icon={Bot}
+            label="Connect to Claude"
+            collapsed={collapsed}
+            onClick={onConnectClaude}
+          />
+        )}
+
+        <NavRow
+          icon={LogOut}
+          label="Disconnect"
+          collapsed={collapsed}
+          onClick={onLogout}
+          className="hover:!text-destructive hover:!bg-destructive/[0.06] [&:hover>svg]:text-destructive"
+        />
+
         {onCollapsedChange && (
-          <Button
-            variant="ghost"
-            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-            className={cn(
-              "w-full h-8 text-xs text-muted-foreground hover:text-foreground",
-              collapsed ? "justify-center px-0" : "justify-start gap-2.5"
-            )}
+          <NavRow
+            icon={collapsed ? PanelLeftOpen : PanelLeftClose}
+            label="Collapse"
+            collapsed={collapsed}
             onClick={() => onCollapsedChange(!collapsed)}
-          >
-            {collapsed ? (
-              <PanelLeftOpen className="h-4 w-4 shrink-0" />
-            ) : (
-              <>
-                <PanelLeftClose className="h-4 w-4 shrink-0" />
-                Collapse
-              </>
-            )}
-          </Button>
+          />
         )}
 
         {!collapsed && profileName && (
-          <div className="px-2 py-1.5 rounded-md bg-muted/50">
-            <p className="text-[11px] text-muted-foreground">Connected as</p>
-            <p className="text-xs font-medium truncate">{profileName}</p>
+          <div className="flex items-center gap-2.5 px-2 pt-2 mt-1 border-t border-sidebar-border">
+            <div className="h-7 w-7 rounded-full gradient-primary flex items-center justify-center text-[10px] font-bold text-white shrink-0">
+              {initials}
+            </div>
+            <div className="min-w-0 py-1.5">
+              <p className="text-[10px] text-muted-foreground leading-tight">Connected as</p>
+              <p className="text-xs font-medium text-foreground truncate leading-tight">
+                {profileName}
+              </p>
+            </div>
           </div>
         )}
-
-        {onConnectClaude && (
-          <Button
-            variant="ghost"
-            title={collapsed ? "Connect to Claude" : undefined}
-            className={cn(
-              "w-full text-xs text-muted-foreground hover:text-foreground",
-              collapsed ? "justify-center px-0 h-8" : "justify-start gap-2.5 h-8"
-            )}
-            onClick={onConnectClaude}
-          >
-            <Bot className="h-4 w-4 shrink-0" />
-            {!collapsed && "Connect to Claude"}
-          </Button>
-        )}
-
-        <Button
-          variant="ghost"
-          title={collapsed ? "Disconnect" : undefined}
-          className={cn(
-            "w-full text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/8",
-            collapsed ? "justify-center px-0 h-8" : "justify-start gap-2.5 h-8"
-          )}
-          onClick={onLogout}
-        >
-          <LogOut className="h-4 w-4 shrink-0" />
-          {!collapsed && "Disconnect"}
-        </Button>
       </div>
     </aside>
   );

@@ -32,10 +32,10 @@ export function AgenticChatDrawer({ accessToken, selectedAccount }: AgenticChatD
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [ai.messages, ai.toolEvents]);
 
-  // Keyboard shortcut: Cmd/Ctrl + K
+  // Keyboard shortcut: Cmd/Ctrl + J (⌘K belongs to the command palette)
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'j') {
         e.preventDefault();
         setIsOpen(prev => !prev);
       }
@@ -70,8 +70,8 @@ export function AgenticChatDrawer({ accessToken, selectedAccount }: AgenticChatD
     return (
       <button
         onClick={() => setIsOpen(true)}
-        className="fixed bottom-6 right-6 z-50 h-12 w-12 rounded-full bg-primary text-primary-foreground shadow-lg hover:shadow-xl hover:scale-105 transition-all duration-200 flex items-center justify-center group"
-        title="AI Campaign Advisor (⌘K)"
+        className="fixed bottom-6 right-6 z-50 h-12 w-12 rounded-full gradient-primary glow-primary text-primary-foreground hover:scale-105 hover:brightness-110 transition-all duration-200 flex items-center justify-center group"
+        title="AI Campaign Advisor (⌘J)"
       >
         <Sparkles className="h-5 w-5 group-hover:animate-pulse" />
       </button>
@@ -95,7 +95,7 @@ export function AgenticChatDrawer({ accessToken, selectedAccount }: AgenticChatD
           </div>
           <div>
             <span className="text-sm font-semibold">AI Advisor</span>
-            <span className="text-[10px] text-muted-foreground ml-2">⌘K</span>
+            <span className="text-[10px] text-muted-foreground ml-2">⌘J</span>
           </div>
           {ai.isLoading && (
             <div className="flex gap-0.5 items-center ml-1">

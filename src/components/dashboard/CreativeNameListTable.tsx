@@ -9,7 +9,8 @@ import {
 } from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Input } from '@/components/ui/input';
-import { ArrowUp, ArrowDown, Search } from 'lucide-react';
+import { ArrowUp, ArrowDown, Search, List } from 'lucide-react';
+import { WidgetCard, EmptyState } from './widgets';
 import { CreativeData } from '@/hooks/useCreativeReporting';
 
 interface CreativeNameListTableProps {
@@ -45,78 +46,80 @@ export function CreativeNameListTable({ data, isLoading }: CreativeNameListTable
       const aVal = a.creativeName;
       const bVal = b.creativeName;
       const modifier = sortOrder === 'asc' ? 1 : -1;
-      
+
       return aVal.localeCompare(bVal) * modifier;
     });
   }, [filteredData, sortOrder]);
 
   if (isLoading) {
     return (
-      <div className="space-y-3">
-        {[...Array(5)].map((_, i) => (
-          <Skeleton key={i} className="h-10 w-full" />
-        ))}
-      </div>
+      <WidgetCard title="Creative names">
+        <div className="space-y-3">
+          {[...Array(5)].map((_, i) => (
+            <Skeleton key={i} className="h-10 w-full" />
+          ))}
+        </div>
+      </WidgetCard>
     );
   }
 
   return (
-    <div className="space-y-4">
-      {/* Search Input */}
-      <div className="relative max-w-lg">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <Input
-          placeholder="Search creative names..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          className="pl-9"
+    <WidgetCard
+      noPadding
+      title="Creative names"
+      subtitle={`${filteredData.length} of ${data.length} creative names`}
+      toolbar={
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+          <Input
+            placeholder="Search creative names…"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="h-8 w-[220px] pl-8 text-sm"
+          />
+        </div>
+      }
+    >
+      {sortedData.length === 0 ? (
+        <EmptyState
+          icon={List}
+          title="No creative names"
+          description={
+            searchQuery
+              ? 'No creative names match your search.'
+              : 'No creative names available yet.'
+          }
         />
-      </div>
-
-      {/* Results count */}
-      <div className="text-sm text-muted-foreground">
-        Showing {filteredData.length} of {data.length} creative names
-      </div>
-
-      {/* Table */}
-      <div className="rounded-md border border-border/50 overflow-x-auto">
+      ) : (
         <Table>
           <TableHeader>
-            <TableRow className="bg-muted/30">
-              <TableHead 
-                className="cursor-pointer hover:bg-muted/50 transition-colors whitespace-nowrap"
-                onClick={handleSort}
-              >
-                <div className="flex items-center gap-1 font-semibold text-foreground">
+            <TableRow className="border-border hover:bg-transparent bg-secondary/40">
+              <TableHead>
+                <button
+                  onClick={handleSort}
+                  className="inline-flex items-center gap-1 font-semibold text-muted-foreground hover:text-foreground transition-colors"
+                >
                   Creative Name
                   {sortOrder === 'desc' ? (
-                    <ArrowDown className="h-3 w-3 text-primary" />
+                    <ArrowDown className="h-3 w-3" />
                   ) : (
-                    <ArrowUp className="h-3 w-3 text-primary" />
+                    <ArrowUp className="h-3 w-3" />
                   )}
-                </div>
+                </button>
               </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {sortedData.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={1} className="text-center py-8 text-muted-foreground">
-                  No creative names match your search
+            {sortedData.map((row, index) => (
+              <TableRow key={`${row.creativeId}-${index}`} className="border-border hover:bg-secondary/30 [&>td]:py-2.5">
+                <TableCell className="font-medium">
+                  <span className="break-words">{row.creativeName}</span>
                 </TableCell>
               </TableRow>
-            ) : (
-              sortedData.map((row, index) => (
-                <TableRow key={`${row.creativeId}-${index}`} className="hover:bg-muted/20">
-                  <TableCell className="font-medium">
-                    <span className="break-words">{row.creativeName}</span>
-                  </TableCell>
-                </TableRow>
-              ))
-            )}
+            ))}
           </TableBody>
         </Table>
-      </div>
-    </div>
+      )}
+    </WidgetCard>
   );
 }

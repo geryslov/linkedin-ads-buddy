@@ -1,14 +1,14 @@
 import { useState, useEffect } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
 import { Skeleton } from '@/components/ui/skeleton';
-import { DollarSign, TrendingUp, TrendingDown, AlertTriangle, CheckCircle, RefreshCw, Save } from 'lucide-react';
-import { useBudgetPacing, BudgetPacingData } from '@/hooks/useBudgetPacing';
+import { WidgetCard, EmptyState, StatusPill, ChartLegend } from './widgets';
+import { DollarSign, TrendingUp, TrendingDown, AlertTriangle, CheckCircle, RefreshCw, Save, Lightbulb } from 'lucide-react';
+import { useBudgetPacing } from '@/hooks/useBudgetPacing';
 import { useToast } from '@/hooks/use-toast';
-import { formatNumber, formatCurrency } from '@/lib/utils';
+import { formatNumber, formatCurrency, cn } from '@/lib/utils';
 import {
   LineChart,
   Line,
@@ -17,13 +17,14 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  ReferenceLine,
 } from 'recharts';
 
 interface BudgetPacingDashboardProps {
   accessToken: string | null;
   selectedAccount: string | null;
 }
+
+const axisTick = { fontSize: 11, fill: 'hsl(var(--muted-foreground))' };
 
 export function BudgetPacingDashboard({ accessToken, selectedAccount }: BudgetPacingDashboardProps) {
   const { data, isLoading, error, fetchBudgetPacing, saveBudget } = useBudgetPacing(accessToken);
@@ -77,29 +78,31 @@ export function BudgetPacingDashboard({ accessToken, selectedAccount }: BudgetPa
 
   if (isLoading) {
     return (
-      <div className="space-y-4">
-        <Skeleton className="h-32 w-full" />
-        <Skeleton className="h-64 w-full" />
+      <div className="space-y-6">
+        <div className="grid gap-6 md:grid-cols-2">
+          <Skeleton className="h-40 w-full rounded-xl bg-secondary" />
+          <Skeleton className="h-40 w-full rounded-xl bg-secondary" />
+        </div>
+        <Skeleton className="h-72 w-full rounded-xl bg-secondary" />
       </div>
     );
   }
 
   if (error) {
     return (
-      <Card className="bg-destructive/10 border-destructive/30">
-        <CardContent className="pt-4">
-          <p className="text-destructive">{error}</p>
-        </CardContent>
-      </Card>
+      <WidgetCard noPadding>
+        <EmptyState icon={AlertTriangle} title="Couldn't load budget pacing" description={error} />
+      </WidgetCard>
     );
   }
 
-  const pacingColor = data?.pacing?.status === 'on_track' ? 'text-green-600' :
-                      data?.pacing?.status === 'underspend' ? 'text-yellow-600' : 'text-red-600';
-
-  const pacingIcon = data?.pacing?.status === 'on_track' ? <CheckCircle className="h-5 w-5" /> :
-                     data?.pacing?.status === 'underspend' ? <TrendingDown className="h-5 w-5" /> :
-                     <AlertTriangle className="h-5 w-5" />;
+  const status = data?.pacing?.status;
+  const statusTone = status === 'on_track' ? 'success' : status === 'underspend' ? 'warning' : 'danger';
+  const statusColor = status === 'on_track' ? 'text-success' : status === 'underspend' ? 'text-warning' : 'text-destructive';
+  const statusIcon = status === 'on_track' ? <CheckCircle className="h-5 w-5" />
+    : status === 'underspend' ? <TrendingDown className="h-5 w-5" />
+    : <AlertTriangle className="h-5 w-5" />;
+  const statusLabel = status === 'on_track' ? 'On track' : status === 'underspend' ? 'Underspending' : 'Overspending';
 
   // Prepare chart data with cumulative spend
   const chartData = data?.spending?.daily?.map((d, i, arr) => {
@@ -115,200 +118,160 @@ export function BudgetPacingDashboard({ accessToken, selectedAccount }: BudgetPa
     };
   }) || [];
 
+  const metrics = [
+    { label: 'Total spent', value: formatCurrency(data?.spending?.total || 0) },
+    { label: 'Avg daily', value: formatCurrency(data?.spending?.avgDaily || 0) },
+    { label: 'Projected', value: formatCurrency(data?.spending?.projected || 0, 0) },
+    { label: 'Days left', value: formatNumber(data?.pacing?.daysRemaining || 0) },
+    { label: 'Total leads', value: formatNumber(data?.performance?.leads || 0) },
+    { label: 'CPL', value: formatCurrency(data?.performance?.cpl || 0) },
+  ];
+
   return (
     <div className="space-y-6">
       {/* Budget Input & Pacing Status */}
-      <div className="grid gap-4 md:grid-cols-2">
-        <Card className="bg-card/50 backdrop-blur-sm border-border/50">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
-              <DollarSign className="h-4 w-4" />
-              Monthly Budget
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex gap-2">
-              <div className="flex-1">
-                <Label htmlFor="budget" className="sr-only">Budget</Label>
-                <Input
-                  id="budget"
-                  type="number"
-                  placeholder="Enter monthly budget"
-                  value={budgetInput}
-                  onChange={(e) => setBudgetInput(e.target.value)}
-                />
-              </div>
-              <Button onClick={handleSaveBudget} disabled={isSaving}>
-                <Save className="h-4 w-4 mr-2" />
-                Save
-              </Button>
-              <Button variant="outline" onClick={handleRefresh}>
-                <RefreshCw className="h-4 w-4" />
-              </Button>
+      <div className="grid gap-6 md:grid-cols-2">
+        <WidgetCard title={<span className="inline-flex items-center gap-2"><DollarSign className="h-4 w-4 text-primary" /> Monthly budget</span>}>
+          <div className="flex gap-2">
+            <div className="flex-1">
+              <Label htmlFor="budget" className="sr-only">Budget</Label>
+              <Input
+                id="budget"
+                type="number"
+                placeholder="Enter monthly budget"
+                value={budgetInput}
+                onChange={(e) => setBudgetInput(e.target.value)}
+                className="h-9"
+              />
             </div>
-            {data?.budget?.isSet && (
-              <div className="text-sm text-muted-foreground">
-                Budget for {data.period.month}: {formatCurrency(data.budget.amount)} {data.budget.currency}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card className="bg-card/50 backdrop-blur-sm border-border/50">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Pacing Status</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {data?.budget?.isSet ? (
-              <div className="space-y-3">
-                <div className={`flex items-center gap-2 text-lg font-semibold ${pacingColor}`}>
-                  {pacingIcon}
-                  {data.pacing.status === 'on_track' && 'On Track'}
-                  {data.pacing.status === 'underspend' && 'Underspending'}
-                  {data.pacing.status === 'overspend' && 'Overspending'}
-                  <span className="text-sm font-normal">({data.pacing.percent.toFixed(0)}% of pace)</span>
-                </div>
-                <Progress value={Math.min(data.pacing.percent, 150)} className="h-2" />
-                <div className="grid grid-cols-2 gap-2 text-sm">
-                  <div>
-                    <span className="text-muted-foreground">Spent to date:</span>
-                    <span className="ml-2 font-medium">{formatCurrency(data.spending.total)}</span>
-                  </div>
-                  <div>
-                    <span className="text-muted-foreground">Ideal pace:</span>
-                    <span className="ml-2 font-medium">{formatCurrency(data.pacing.idealSpentToDate)}</span>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <p className="text-muted-foreground text-sm">Set a budget to see pacing status</p>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Key Metrics */}
-      <div className="grid gap-4 grid-cols-2 md:grid-cols-4 lg:grid-cols-6">
-        <Card className="bg-card/50">
-          <CardContent className="pt-4">
-            <div className="text-xs text-muted-foreground">Total Spent</div>
-            <div className="text-2xl font-bold">{formatCurrency(data?.spending?.total || 0)}</div>
-          </CardContent>
-        </Card>
-        <Card className="bg-card/50">
-          <CardContent className="pt-4">
-            <div className="text-xs text-muted-foreground">Avg Daily</div>
-            <div className="text-2xl font-bold">{formatCurrency(data?.spending?.avgDaily || 0)}</div>
-          </CardContent>
-        </Card>
-        <Card className="bg-card/50">
-          <CardContent className="pt-4">
-            <div className="text-xs text-muted-foreground">Projected</div>
-            <div className="text-2xl font-bold">{formatCurrency(data?.spending?.projected || 0, 0)}</div>
-          </CardContent>
-        </Card>
-        <Card className="bg-card/50">
-          <CardContent className="pt-4">
-            <div className="text-xs text-muted-foreground">Days Left</div>
-            <div className="text-2xl font-bold">{formatNumber(data?.pacing?.daysRemaining || 0)}</div>
-          </CardContent>
-        </Card>
-        <Card className="bg-card/50">
-          <CardContent className="pt-4">
-            <div className="text-xs text-muted-foreground">Total Leads</div>
-            <div className="text-2xl font-bold">{formatNumber(data?.performance?.leads || 0)}</div>
-          </CardContent>
-        </Card>
-        <Card className="bg-card/50">
-          <CardContent className="pt-4">
-            <div className="text-xs text-muted-foreground">CPL</div>
-            <div className="text-2xl font-bold">{formatCurrency(data?.performance?.cpl || 0)}</div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Spend Chart */}
-      <Card className="bg-card/50 backdrop-blur-sm border-border/50">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <TrendingUp className="h-5 w-5" />
-            Daily Spend vs Budget Pace
-          </CardTitle>
-          <CardDescription>
-            Cumulative spend compared to ideal budget pacing
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {chartData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={300}>
-              <LineChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                <XAxis dataKey="date" className="text-xs" />
-                <YAxis className="text-xs" />
-                <Tooltip
-                  contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))' }}
-                  formatter={(value: number, name: string) => [
-                    formatCurrency(value),
-                    name === 'cumulative' ? 'Actual Spend' : name === 'idealPace' ? 'Ideal Pace' : 'Daily'
-                  ]}
-                />
-                <Line type="monotone" dataKey="cumulative" stroke="hsl(var(--primary))" strokeWidth={2} dot={false} />
-                {data?.budget?.isSet && (
-                  <Line type="monotone" dataKey="idealPace" stroke="hsl(var(--muted-foreground))" strokeDasharray="5 5" dot={false} />
-                )}
-                <Line type="monotone" dataKey="spend" stroke="hsl(var(--chart-2))" strokeWidth={1} dot={false} opacity={0.5} />
-              </LineChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="h-[300px] flex items-center justify-center text-muted-foreground">
-              No spend data available
-            </div>
+            <Button onClick={handleSaveBudget} disabled={isSaving} className="h-9">
+              <Save className="h-4 w-4" />
+              Save
+            </Button>
+            <Button variant="outline" size="icon" className="h-9 w-9" onClick={handleRefresh}>
+              <RefreshCw className="h-4 w-4" />
+            </Button>
+          </div>
+          {data?.budget?.isSet && (
+            <p className="text-sm text-muted-foreground mt-3">
+              Budget for {data.period.month}: <span className="font-medium text-foreground tabular-nums">{formatCurrency(data.budget.amount)}</span> {data.budget.currency}
+            </p>
           )}
-        </CardContent>
-      </Card>
+        </WidgetCard>
+
+        <WidgetCard title="Pacing status" toolbar={data?.budget?.isSet ? <StatusPill tone={statusTone} label={statusLabel} /> : undefined}>
+          {data?.budget?.isSet ? (
+            <div className="space-y-3">
+              <div className={cn('flex items-center gap-2 text-lg font-semibold', statusColor)}>
+                {statusIcon}
+                {statusLabel}
+                <span className="text-sm font-normal text-muted-foreground tabular-nums">
+                  ({data.pacing.percent.toFixed(0)}% of pace)
+                </span>
+              </div>
+              <Progress value={Math.min(data.pacing.percent, 150)} className="h-2" />
+              <div className="grid grid-cols-2 gap-2 text-sm pt-1">
+                <div>
+                  <span className="text-muted-foreground">Spent to date:</span>
+                  <span className="ml-2 font-medium tabular-nums">{formatCurrency(data.spending.total)}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Ideal pace:</span>
+                  <span className="ml-2 font-medium tabular-nums">{formatCurrency(data.pacing.idealSpentToDate)}</span>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <p className="text-muted-foreground text-sm">Set a budget to see pacing status.</p>
+          )}
+        </WidgetCard>
+      </div>
+
+      {/* Key Metrics — clean stat strip */}
+      <WidgetCard noPadding>
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 divide-x divide-y lg:divide-y-0 divide-border/60">
+          {metrics.map((m) => (
+            <div key={m.label} className="px-5 py-4">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">{m.label}</p>
+              <p className="text-xl font-bold tabular-nums mt-1">{m.value}</p>
+            </div>
+          ))}
+        </div>
+      </WidgetCard>
+
+      {/* Spend Chart — cumulative vs ideal pace (shared axis, a legit comparison) */}
+      <WidgetCard
+        title={<span className="inline-flex items-center gap-2"><TrendingUp className="h-4 w-4 text-primary" /> Daily spend vs. budget pace</span>}
+        subtitle="Cumulative spend compared to ideal budget pacing"
+        toolbar={
+          <ChartLegend
+            items={[
+              { label: 'Actual spend', color: 'hsl(var(--chart-1))' },
+              ...(data?.budget?.isSet ? [{ label: 'Ideal pace', color: 'hsl(var(--muted-foreground))' }] : []),
+              { label: 'Daily', color: 'hsl(var(--chart-2))' },
+            ]}
+          />
+        }
+      >
+        {chartData.length > 0 ? (
+          <ResponsiveContainer width="100%" height={300}>
+            <LineChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+              <XAxis dataKey="date" tick={axisTick} axisLine={false} tickLine={false} />
+              <YAxis tick={axisTick} axisLine={false} tickLine={false} />
+              <Tooltip
+                contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 8, fontSize: 12 }}
+                formatter={(value: number, name: string) => [
+                  formatCurrency(value),
+                  name === 'cumulative' ? 'Actual Spend' : name === 'idealPace' ? 'Ideal Pace' : 'Daily'
+                ]}
+              />
+              <Line type="monotone" dataKey="cumulative" stroke="hsl(var(--chart-1))" strokeWidth={2} dot={false} />
+              {data?.budget?.isSet && (
+                <Line type="monotone" dataKey="idealPace" stroke="hsl(var(--muted-foreground))" strokeDasharray="5 5" dot={false} />
+              )}
+              <Line type="monotone" dataKey="spend" stroke="hsl(var(--chart-2))" strokeWidth={1} dot={false} opacity={0.5} />
+            </LineChart>
+          </ResponsiveContainer>
+        ) : (
+          <div className="h-[300px] flex items-center justify-center text-muted-foreground text-sm">
+            No spend data available
+          </div>
+        )}
+      </WidgetCard>
 
       {/* Recommendations */}
       {data?.recommendations && data.recommendations.length > 0 && (
-        <Card className="bg-card/50 backdrop-blur-sm border-border/50">
-          <CardHeader>
-            <CardTitle className="text-sm font-medium">Recommendations</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ul className="space-y-2">
-              {data.recommendations.map((rec, i) => (
-                <li key={i} className="flex items-start gap-2 text-sm">
-                  <span className="text-primary">-</span>
-                  {rec}
-                </li>
-              ))}
-            </ul>
-          </CardContent>
-        </Card>
+        <WidgetCard title={<span className="inline-flex items-center gap-2"><Lightbulb className="h-4 w-4 text-warning" /> Recommendations</span>}>
+          <ul className="space-y-2">
+            {data.recommendations.map((rec, i) => (
+              <li key={i} className="flex items-start gap-2 text-sm">
+                <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-primary shrink-0" />
+                {rec}
+              </li>
+            ))}
+          </ul>
+        </WidgetCard>
       )}
 
       {/* 7-Day Trend */}
       {data?.trends && (
-        <Card className="bg-card/50 backdrop-blur-sm border-border/50">
-          <CardHeader>
-            <CardTitle className="text-sm font-medium">7-Day Trend</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center gap-4">
-              <div>
-                <span className="text-muted-foreground text-sm">Last 7 days:</span>
-                <span className="ml-2 font-medium">{formatCurrency(data.trends.last7DaysSpend)}</span>
-              </div>
-              <div>
-                <span className="text-muted-foreground text-sm">Previous 7 days:</span>
-                <span className="ml-2 font-medium">{formatCurrency(data.trends.prev7DaysSpend)}</span>
-              </div>
-              <div className={`flex items-center gap-1 ${data.trends.spendTrendPercent >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                {data.trends.spendTrendPercent >= 0 ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
-                {Math.abs(data.trends.spendTrendPercent).toFixed(0)}%
-              </div>
+        <WidgetCard title="7-day trend">
+          <div className="flex items-center gap-6 flex-wrap">
+            <div className="text-sm">
+              <span className="text-muted-foreground">Last 7 days:</span>
+              <span className="ml-2 font-medium tabular-nums">{formatCurrency(data.trends.last7DaysSpend)}</span>
             </div>
-          </CardContent>
-        </Card>
+            <div className="text-sm">
+              <span className="text-muted-foreground">Previous 7 days:</span>
+              <span className="ml-2 font-medium tabular-nums">{formatCurrency(data.trends.prev7DaysSpend)}</span>
+            </div>
+            <div className={cn('flex items-center gap-1 text-sm font-semibold', data.trends.spendTrendPercent >= 0 ? 'text-success' : 'text-destructive')}>
+              {data.trends.spendTrendPercent >= 0 ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
+              {Math.abs(data.trends.spendTrendPercent).toFixed(0)}%
+            </div>
+          </div>
+        </WidgetCard>
       )}
     </div>
   );

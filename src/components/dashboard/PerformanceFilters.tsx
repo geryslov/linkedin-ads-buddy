@@ -112,11 +112,11 @@ export function PerformanceFilters({
     <div className="flex flex-wrap gap-2 items-center">
       {showCampaignType && (
         <Select value={campaignType} onValueChange={onCampaignTypeChange}>
-          <SelectTrigger className="w-[180px]">
-            <Target className="h-4 w-4 mr-2" />
+          <SelectTrigger className="h-8 w-[180px] text-sm bg-card border-border">
+            <Target className="h-3.5 w-3.5 mr-2 shrink-0 text-muted-foreground" />
             <SelectValue placeholder="Campaign Type" />
           </SelectTrigger>
-          <SelectContent>
+          <SelectContent className="bg-card border-border">
             {CAMPAIGN_TYPE_OPTIONS.map((opt) => (
               <SelectItem key={opt.value} value={opt.value}>
                 {opt.label}
@@ -129,20 +129,20 @@ export function PerformanceFilters({
       {/* Metric Filters Popover */}
       <Popover open={isMetricFilterOpen} onOpenChange={setIsMetricFilterOpen}>
         <PopoverTrigger asChild>
-          <Button variant="outline" size="sm" className="gap-2">
-            <SlidersHorizontal className="h-4 w-4" />
+          <Button variant="outline" size="sm" className="h-8 gap-1.5">
+            <SlidersHorizontal className="h-3.5 w-3.5" />
             Performance Filters
             {metricFilters.length > 0 && (
-              <Badge variant="secondary" className="ml-1 px-1.5 py-0.5 text-xs">
+              <span className="inline-flex items-center justify-center h-4 min-w-4 px-1 rounded-full bg-primary/[0.08] text-primary text-[11px] font-semibold">
                 {metricFilters.length}
-              </Badge>
+              </span>
             )}
           </Button>
         </PopoverTrigger>
-        <PopoverContent className="w-[400px] p-4" align="start">
+        <PopoverContent className="w-[400px] p-4 bg-card border-border" align="start">
           <div className="space-y-4">
             <div className="flex items-center justify-between">
-              <h4 className="font-medium text-sm">Metric Filters</h4>
+              <h4 className="font-semibold text-sm">Metric filters</h4>
               <Button variant="ghost" size="sm" onClick={addMetricFilter} className="gap-1 h-7">
                 <Plus className="h-3 w-3" />
                 Add Filter
@@ -161,10 +161,10 @@ export function PerformanceFilters({
                       value={filter.metric}
                       onValueChange={(v) => updateMetricFilter(filter.id, { metric: v })}
                     >
-                      <SelectTrigger className="w-[120px] h-8 text-xs">
+                      <SelectTrigger className="w-[120px] h-8 text-xs bg-card border-border">
                         <SelectValue />
                       </SelectTrigger>
-                      <SelectContent>
+                      <SelectContent className="bg-card border-border">
                         {METRIC_OPTIONS.map((m) => (
                           <SelectItem key={m.value} value={m.value}>
                             {m.label}
@@ -179,10 +179,10 @@ export function PerformanceFilters({
                         updateMetricFilter(filter.id, { operator: v as MetricOperator })
                       }
                     >
-                      <SelectTrigger className="w-[60px] h-8 text-xs">
+                      <SelectTrigger className="w-[60px] h-8 text-xs bg-card border-border">
                         <SelectValue />
                       </SelectTrigger>
-                      <SelectContent>
+                      <SelectContent className="bg-card border-border">
                         {OPERATOR_OPTIONS.map((o) => (
                           <SelectItem key={o.value} value={o.value}>
                             {o.symbol}
@@ -197,7 +197,7 @@ export function PerformanceFilters({
                       onChange={(e) =>
                         updateMetricFilter(filter.id, { value: parseFloat(e.target.value) || 0 })
                       }
-                      className="w-[80px] h-8 text-xs"
+                      className="w-[80px] h-8 text-xs tabular-nums"
                       step="0.01"
                     />
 
@@ -214,7 +214,7 @@ export function PerformanceFilters({
               </div>
             )}
 
-            <div className="text-xs text-muted-foreground pt-2 border-t">
+            <div className="text-xs text-muted-foreground pt-2 border-t border-border/60">
               <p className="font-medium mb-1">Examples:</p>
               <ul className="space-y-0.5">
                 <li>• CTR &lt; 1% (find underperforming ads)</li>
@@ -231,7 +231,7 @@ export function PerformanceFilters({
         <Badge
           key={filter.id}
           variant="secondary"
-          className="gap-1 pr-1 cursor-pointer hover:bg-destructive/20"
+          className="gap-1 pr-1 cursor-pointer hover:bg-destructive/10 hover:text-destructive"
           onClick={() => removeMetricFilter(filter.id)}
         >
           {formatFilterBadge(filter)}

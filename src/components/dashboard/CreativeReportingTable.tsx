@@ -3,6 +3,7 @@ import {
   Table,
   TableBody,
   TableCell,
+  TableFooter,
   TableHead,
   TableHeader,
   TableRow,
@@ -10,10 +11,12 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { ArrowUpDown, ArrowUp, ArrowDown, Search, Filter, X, Layers } from 'lucide-react';
+import { ArrowUpDown, ArrowUp, ArrowDown, Search, Filter, X, Layers, Images } from 'lucide-react';
 import { CreativeData } from '@/hooks/useCreativeReporting';
 import { CreativeTypeBadge } from './CreativeTypeBadge';
 import { CreativeThumbnail } from './CreativeThumbnail';
+import { WidgetCard, EmptyState } from './widgets';
+import { cn } from '@/lib/utils';
 import {
   Select,
   SelectContent,
@@ -75,7 +78,7 @@ export function CreativeReportingTable({ data, isLoading }: CreativeReportingTab
     // Apply search filter
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
-      result = result.filter(item => 
+      result = result.filter(item =>
         item.creativeName.toLowerCase().includes(query) ||
         item.campaignName.toLowerCase().includes(query) ||
         item.type.toLowerCase().includes(query)
@@ -117,7 +120,7 @@ export function CreativeReportingTable({ data, isLoading }: CreativeReportingTab
       const aVal = a[sortKey];
       const bVal = b[sortKey];
       const modifier = sortOrder === 'asc' ? 1 : -1;
-      
+
       if (typeof aVal === 'string' && typeof bVal === 'string') {
         return aVal.localeCompare(bVal) * modifier;
       }
@@ -125,7 +128,7 @@ export function CreativeReportingTable({ data, isLoading }: CreativeReportingTab
     });
   }, [filteredData, sortKey, sortOrder]);
 
-  const totals = useMemo(() => 
+  const totals = useMemo(() =>
     filteredData.reduce(
       (acc, item) => ({
         impressions: acc.impressions + item.impressions,
@@ -139,19 +142,19 @@ export function CreativeReportingTable({ data, isLoading }: CreativeReportingTab
     [filteredData]
   );
 
-  const totalCtr = totals.impressions > 0 
-    ? ((totals.clicks / totals.impressions) * 100).toFixed(2) 
-    : '0.00';
-  
-  const totalCpc = totals.clicks > 0 
-    ? (totals.spent / totals.clicks).toFixed(2) 
-    : '0.00';
-    
-  const totalCpm = totals.impressions > 0 
-    ? ((totals.spent / totals.impressions) * 1000).toFixed(2) 
+  const totalCtr = totals.impressions > 0
+    ? ((totals.clicks / totals.impressions) * 100).toFixed(2)
     : '0.00';
 
-  const totalLgfRate = totals.lgfFormOpens > 0 
+  const totalCpc = totals.clicks > 0
+    ? (totals.spent / totals.clicks).toFixed(2)
+    : '0.00';
+
+  const totalCpm = totals.impressions > 0
+    ? ((totals.spent / totals.impressions) * 1000).toFixed(2)
+    : '0.00';
+
+  const totalLgfRate = totals.lgfFormOpens > 0
     ? ((totals.leads / totals.lgfFormOpens) * 100).toFixed(1)
     : '-';
 
@@ -165,173 +168,178 @@ export function CreativeReportingTable({ data, isLoading }: CreativeReportingTab
 
   const hasActiveFilters = searchQuery.trim() !== '' || filterType !== 'all' || creativeTypeFilter !== 'all' || campaignTypeFilter !== 'all' || metricFilters.length > 0;
 
+  const SortHeader = ({ label, sortKeyName, align }: { label: string; sortKeyName: SortKey; align?: 'right' }) => (
+    <button
+      onClick={() => handleSort(sortKeyName)}
+      className={cn(
+        'inline-flex items-center gap-1 font-semibold text-muted-foreground hover:text-foreground transition-colors',
+        align === 'right' && 'flex-row-reverse'
+      )}
+    >
+      {label}
+      {sortKey === sortKeyName ? (
+        sortOrder === 'asc' ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+      ) : (
+        <ArrowUpDown className="h-3 w-3 opacity-40" />
+      )}
+    </button>
+  );
+
   if (isLoading) {
     return (
-      <div className="space-y-3">
-        {[...Array(5)].map((_, i) => (
-          <Skeleton key={i} className="h-12 w-full" />
-        ))}
-      </div>
+      <WidgetCard title="Creative performance">
+        <div className="space-y-3">
+          {[...Array(5)].map((_, i) => (
+            <Skeleton key={i} className="h-12 w-full" />
+          ))}
+        </div>
+      </WidgetCard>
     );
   }
 
   if (data.length === 0) {
     return (
-      <div className="text-center py-8 text-muted-foreground">
-        No creative data available for the selected time period
-      </div>
+      <WidgetCard noPadding title="Creative performance">
+        <EmptyState
+          icon={Images}
+          title="No creative data"
+          description="No creative data available for the selected time period."
+        />
+      </WidgetCard>
     );
   }
 
-  const SortableHeader = ({ label, sortKeyName }: { label: string; sortKeyName: SortKey }) => {
-    const isActive = sortKey === sortKeyName;
-    return (
-      <TableHead 
-        className="cursor-pointer hover:bg-muted/50 transition-colors whitespace-nowrap"
-        onClick={() => handleSort(sortKeyName)}
-      >
-        <div className="flex items-center gap-1">
-          {label}
-          {isActive ? (
-            sortOrder === 'desc' ? <ArrowDown className="h-3 w-3 text-primary" /> : <ArrowUp className="h-3 w-3 text-primary" />
-          ) : (
-            <ArrowUpDown className="h-3 w-3 opacity-50" />
-          )}
-        </div>
-      </TableHead>
-    );
-  };
-
   return (
-    <div className="space-y-4">
-      {/* Performance Filters */}
-      <PerformanceFilters
-        campaignType={campaignTypeFilter}
-        onCampaignTypeChange={setCampaignTypeFilter}
-        metricFilters={metricFilters}
-        onMetricFiltersChange={setMetricFilters}
-      />
-
-      {/* Filters */}
-      <div className="flex flex-col sm:flex-row gap-3">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search by creative name, campaign, or type..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-9"
-          />
-        </div>
-        <Select value={creativeTypeFilter} onValueChange={setCreativeTypeFilter}>
-          <SelectTrigger className="w-full sm:w-[180px]">
-            <Layers className="h-4 w-4 mr-2" />
-            <SelectValue placeholder="Creative Type" />
-          </SelectTrigger>
-          <SelectContent>
-            {CREATIVE_TYPE_OPTIONS.map(opt => (
-              <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={filterType} onValueChange={(v) => setFilterType(v as FilterType)}>
-          <SelectTrigger className="w-full sm:w-[160px]">
-            <Filter className="h-4 w-4 mr-2" />
-            <SelectValue placeholder="Filter by" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Metrics</SelectItem>
-            <SelectItem value="with_spend">With Spend</SelectItem>
-            <SelectItem value="with_impressions">With Impressions</SelectItem>
-            <SelectItem value="with_clicks">With Clicks</SelectItem>
-            <SelectItem value="with_leads">With Leads</SelectItem>
-          </SelectContent>
-        </Select>
+    <WidgetCard
+      noPadding
+      title="Creative performance"
+      subtitle={`${filteredData.length} of ${data.length} creatives`}
+      toolbar={
+        <>
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+            <Input
+              placeholder="Search creatives…"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="h-8 w-[220px] pl-8 text-sm"
+            />
+          </div>
+          <Select value={creativeTypeFilter} onValueChange={setCreativeTypeFilter}>
+            <SelectTrigger className="h-8 w-[170px] text-sm bg-card border-border">
+              <Layers className="h-3.5 w-3.5 mr-2 shrink-0 text-muted-foreground" />
+              <SelectValue placeholder="Creative Type" />
+            </SelectTrigger>
+            <SelectContent className="bg-card border-border">
+              {CREATIVE_TYPE_OPTIONS.map(opt => (
+                <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={filterType} onValueChange={(v) => setFilterType(v as FilterType)}>
+            <SelectTrigger className="h-8 w-[160px] text-sm bg-card border-border">
+              <Filter className="h-3.5 w-3.5 mr-2 shrink-0 text-muted-foreground" />
+              <SelectValue placeholder="Filter by" />
+            </SelectTrigger>
+            <SelectContent className="bg-card border-border">
+              <SelectItem value="all">All Metrics</SelectItem>
+              <SelectItem value="with_spend">With Spend</SelectItem>
+              <SelectItem value="with_impressions">With Impressions</SelectItem>
+              <SelectItem value="with_clicks">With Clicks</SelectItem>
+              <SelectItem value="with_leads">With Leads</SelectItem>
+            </SelectContent>
+          </Select>
+        </>
+      }
+    >
+      {/* Secondary filter row */}
+      <div className="px-5 pb-3 flex flex-wrap items-center gap-2">
+        <PerformanceFilters
+          campaignType={campaignTypeFilter}
+          onCampaignTypeChange={setCampaignTypeFilter}
+          metricFilters={metricFilters}
+          onMetricFiltersChange={setMetricFilters}
+        />
         {hasActiveFilters && (
-          <Button variant="ghost" size="sm" onClick={clearFilters} className="gap-1">
-            <X className="h-4 w-4" />
+          <Button variant="ghost" size="sm" onClick={clearFilters} className="h-7 gap-1 text-xs">
+            <X className="h-3 w-3" />
             Clear
           </Button>
         )}
       </div>
 
-      {/* Results count */}
-      <div className="text-sm text-muted-foreground">
-        Showing {filteredData.length} of {data.length} creatives
-      </div>
-
-      {/* Table */}
-      <div className="rounded-md border border-border/50 overflow-x-auto">
-        <Table className="min-w-[1000px]">
-          <TableHeader>
-            <TableRow className="bg-muted/30">
-              <TableHead className="w-[50px]"></TableHead>
-              <SortableHeader label="Creative Name" sortKeyName="creativeName" />
-              <SortableHeader label="Campaign" sortKeyName="campaignName" />
-              <SortableHeader label="Type" sortKeyName="type" />
-              <SortableHeader label="Impressions" sortKeyName="impressions" />
-              <SortableHeader label="Clicks" sortKeyName="clicks" />
-              <SortableHeader label="Spent" sortKeyName="spent" />
-              <SortableHeader label="Leads" sortKeyName="leads" />
-              <SortableHeader label="LGF Rate" sortKeyName="lgfCompletionRate" />
-              <SortableHeader label="CTR" sortKeyName="ctr" />
-              <SortableHeader label="CPC" sortKeyName="cpc" />
-              <SortableHeader label="CPM" sortKeyName="cpm" />
+      <Table className="min-w-[1000px]">
+        <TableHeader>
+          <TableRow className="border-border hover:bg-transparent bg-secondary/40">
+            <TableHead className="w-[50px]"></TableHead>
+            <TableHead><SortHeader label="Creative Name" sortKeyName="creativeName" /></TableHead>
+            <TableHead><SortHeader label="Campaign" sortKeyName="campaignName" /></TableHead>
+            <TableHead><SortHeader label="Type" sortKeyName="type" /></TableHead>
+            <TableHead className="text-right"><SortHeader label="Impressions" sortKeyName="impressions" align="right" /></TableHead>
+            <TableHead className="text-right"><SortHeader label="Clicks" sortKeyName="clicks" align="right" /></TableHead>
+            <TableHead className="text-right"><SortHeader label="Spent" sortKeyName="spent" align="right" /></TableHead>
+            <TableHead className="text-right"><SortHeader label="Leads" sortKeyName="leads" align="right" /></TableHead>
+            <TableHead className="text-right"><SortHeader label="LGF Rate" sortKeyName="lgfCompletionRate" align="right" /></TableHead>
+            <TableHead className="text-right"><SortHeader label="CTR" sortKeyName="ctr" align="right" /></TableHead>
+            <TableHead className="text-right"><SortHeader label="CPC" sortKeyName="cpc" align="right" /></TableHead>
+            <TableHead className="text-right"><SortHeader label="CPM" sortKeyName="cpm" align="right" /></TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {sortedData.length === 0 ? (
+            <TableRow>
+              <TableCell colSpan={12} className="text-center py-10 text-muted-foreground">
+                No creatives match your filters
+              </TableCell>
             </TableRow>
-          </TableHeader>
-          <TableBody>
-            {sortedData.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={12} className="text-center py-8 text-muted-foreground">
-                  No creatives match your filters
+          ) : (
+            sortedData.map((row, index) => (
+              <TableRow key={`${row.creativeId}-${index}`} className="border-border hover:bg-secondary/30 [&>td]:py-2.5">
+                <TableCell>
+                  <CreativeThumbnail imageUrl={row.imageUrl} creativeName={row.creativeName} />
                 </TableCell>
+                <TableCell className="font-medium min-w-[150px]">
+                  <span className="break-words">{row.creativeName}</span>
+                </TableCell>
+                <TableCell className="min-w-[120px] text-muted-foreground">
+                  <span className="break-words">{row.campaignName || <span className="text-muted-foreground/50">—</span>}</span>
+                </TableCell>
+                <TableCell>
+                  <CreativeTypeBadge type={row.type} />
+                </TableCell>
+                <TableCell className="tabular-nums text-right">{row.impressions.toLocaleString()}</TableCell>
+                <TableCell className="tabular-nums text-right">{row.clicks.toLocaleString()}</TableCell>
+                <TableCell className="tabular-nums text-right">${row.spent.toFixed(2)}</TableCell>
+                <TableCell className="tabular-nums text-right">{row.leads.toLocaleString()}</TableCell>
+                <TableCell className="tabular-nums text-right">
+                  {row.lgfCompletionRate > 0 ? `${row.lgfCompletionRate.toFixed(1)}%` : <span className="text-muted-foreground/50">—</span>}
+                </TableCell>
+                <TableCell className="tabular-nums text-right">{row.ctr.toFixed(2)}%</TableCell>
+                <TableCell className="tabular-nums text-right">${row.cpc.toFixed(2)}</TableCell>
+                <TableCell className="tabular-nums text-right">${row.cpm.toFixed(2)}</TableCell>
               </TableRow>
-            ) : (
-              <>
-                {sortedData.map((row, index) => (
-                  <TableRow key={`${row.creativeId}-${index}`} className="hover:bg-muted/20">
-                    <TableCell>
-                      <CreativeThumbnail imageUrl={row.imageUrl} creativeName={row.creativeName} />
-                    </TableCell>
-                    <TableCell className="font-medium min-w-[150px]">
-                      <span className="break-words">{row.creativeName}</span>
-                    </TableCell>
-                    <TableCell className="min-w-[120px]">
-                      <span className="break-words">{row.campaignName || '-'}</span>
-                    </TableCell>
-                    <TableCell>
-                      <CreativeTypeBadge type={row.type} />
-                    </TableCell>
-                    <TableCell>{row.impressions.toLocaleString()}</TableCell>
-                    <TableCell>{row.clicks.toLocaleString()}</TableCell>
-                    <TableCell>${row.spent.toFixed(2)}</TableCell>
-                    <TableCell>{row.leads.toLocaleString()}</TableCell>
-                    <TableCell>{row.lgfCompletionRate > 0 ? `${row.lgfCompletionRate.toFixed(1)}%` : '-'}</TableCell>
-                    <TableCell>{row.ctr.toFixed(2)}%</TableCell>
-                    <TableCell>${row.cpc.toFixed(2)}</TableCell>
-                    <TableCell>${row.cpm.toFixed(2)}</TableCell>
-                  </TableRow>
-                ))}
-                {/* Totals Row */}
-                <TableRow className="bg-muted/50 font-semibold border-t-2">
-                  <TableCell></TableCell>
-                  <TableCell>Total ({filteredData.length} creatives)</TableCell>
-                  <TableCell></TableCell>
-                  <TableCell></TableCell>
-                  <TableCell>{totals.impressions.toLocaleString()}</TableCell>
-                  <TableCell>{totals.clicks.toLocaleString()}</TableCell>
-                  <TableCell>${totals.spent.toFixed(2)}</TableCell>
-                  <TableCell>{totals.leads.toLocaleString()}</TableCell>
-                  <TableCell>{totalLgfRate === '-' ? '-' : `${totalLgfRate}%`}</TableCell>
-                  <TableCell>{totalCtr}%</TableCell>
-                  <TableCell>${totalCpc}</TableCell>
-                  <TableCell>${totalCpm}</TableCell>
-                </TableRow>
-              </>
-            )}
-          </TableBody>
-        </Table>
-      </div>
-    </div>
+            ))
+          )}
+        </TableBody>
+        {sortedData.length > 0 && (
+          <TableFooter>
+            <TableRow className="hover:bg-transparent font-semibold [&>td]:py-2.5">
+              <TableCell></TableCell>
+              <TableCell>Total ({filteredData.length} creatives)</TableCell>
+              <TableCell></TableCell>
+              <TableCell></TableCell>
+              <TableCell className="tabular-nums text-right">{totals.impressions.toLocaleString()}</TableCell>
+              <TableCell className="tabular-nums text-right">{totals.clicks.toLocaleString()}</TableCell>
+              <TableCell className="tabular-nums text-right">${totals.spent.toFixed(2)}</TableCell>
+              <TableCell className="tabular-nums text-right">{totals.leads.toLocaleString()}</TableCell>
+              <TableCell className="tabular-nums text-right">{totalLgfRate === '-' ? '—' : `${totalLgfRate}%`}</TableCell>
+              <TableCell className="tabular-nums text-right">{totalCtr}%</TableCell>
+              <TableCell className="tabular-nums text-right">${totalCpc}</TableCell>
+              <TableCell className="tabular-nums text-right">${totalCpm}</TableCell>
+            </TableRow>
+          </TableFooter>
+        )}
+      </Table>
+    </WidgetCard>
   );
 }

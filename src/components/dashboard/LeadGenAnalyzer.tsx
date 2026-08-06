@@ -48,7 +48,7 @@ function ctaLabel(cta: string) {
 
 function ctaColor(cta: string): string {
   if (['DOWNLOAD','GET_QUOTE','REQUEST_DEMO'].includes(cta)) return 'bg-blue-500/10 text-blue-600 border-blue-500/20';
-  if (['SIGN_UP','REGISTER','APPLY_NOW','JOIN_NOW'].includes(cta)) return 'bg-green-500/10 text-green-600 border-green-500/20';
+  if (['SIGN_UP','REGISTER','APPLY_NOW','JOIN_NOW'].includes(cta)) return 'bg-success/10 text-success border-success/20';
   if (['SUBSCRIBE','LEARN_MORE'].includes(cta)) return 'bg-violet-500/10 text-violet-600 border-violet-500/20';
   return 'bg-muted text-muted-foreground border-border/60';
 }
@@ -60,7 +60,7 @@ function TrendBadge({ value, invert }: { value: number; invert?: boolean }) {
   if (abs < 1) return <span className="text-[11px] text-muted-foreground">—</span>;
   return (
     <span className={`inline-flex items-center gap-0.5 text-[11px] font-semibold tabular-nums ${
-      isPos ? 'text-green-600' : isNeg ? 'text-red-500' : 'text-muted-foreground'
+      isPos ? 'text-success' : isNeg ? 'text-destructive' : 'text-muted-foreground'
     }`}>
       {isPos ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
       {abs.toFixed(0)}%
@@ -105,7 +105,7 @@ function CplTrendChart({ forms }: { forms: LeadGenForm[] }) {
             formatter={(v: number) => [`$${v.toFixed(2)}`, '']}
           />
           <Bar dataKey="CPL 30d" fill="hsl(var(--muted-foreground)/0.5)" radius={[3, 3, 0, 0]} barSize={14} />
-          <Bar dataKey="CPL 7d" fill="hsl(221 83% 53%)" radius={[3, 3, 0, 0]} barSize={14} />
+          <Bar dataKey="CPL 7d" fill="hsl(var(--chart-1))" radius={[3, 3, 0, 0]} barSize={14} />
         </BarChart>
       </ResponsiveContainer>
       <div className="flex gap-4 mt-2 text-[10px] text-muted-foreground">
@@ -171,12 +171,12 @@ function FormCard({ form }: { form: LeadGenForm }) {
                 </Badge>
               )}
               {isFatigued && (
-                <Badge variant="outline" className="text-[10px] px-1.5 py-0.5 h-auto bg-red-500/8 border-red-500/25 text-red-600 shrink-0">
+                <Badge variant="outline" className="text-[10px] px-1.5 py-0.5 h-auto bg-destructive/10 text-destructive border-destructive/20 shrink-0">
                   CPL Rising
                 </Badge>
               )}
               {isImproving && (
-                <Badge variant="outline" className="text-[10px] px-1.5 py-0.5 h-auto bg-green-500/8 border-green-500/25 text-green-600 shrink-0">
+                <Badge variant="outline" className="text-[10px] px-1.5 py-0.5 h-auto bg-success/10 text-success border-success/20 shrink-0">
                   Improving
                 </Badge>
               )}
@@ -256,7 +256,7 @@ function FormCard({ form }: { form: LeadGenForm }) {
                     <tr key={i} className="border-b border-border/20 hover:bg-muted/10">
                       <td className="px-4 py-1.5 max-w-[200px]">
                         <span className="truncate block">{c.name}</span>
-                        <span className={cn('text-[9px]', c.status === 'ACTIVE' ? 'text-green-600' : 'text-muted-foreground/60')}>
+                        <span className={cn('text-[9px]', c.status === 'ACTIVE' ? 'text-success' : 'text-muted-foreground/60')}>
                           {c.status}
                         </span>
                       </td>
@@ -450,7 +450,7 @@ export function LeadGenAnalyzer({ accessToken, selectedAccount }: LeadGenAnalyze
                 <TableRow key={i} className="text-xs hover:bg-muted/30">
                   <TableCell className="max-w-[200px] py-2">
                     <div className="truncate font-medium">{c.name}</div>
-                    <div className={cn('text-[10px]', c.status === 'ACTIVE' ? 'text-green-600' : 'text-muted-foreground/60')}>
+                    <div className={cn('text-[10px]', c.status === 'ACTIVE' ? 'text-success' : 'text-muted-foreground/60')}>
                       {c.status}
                     </div>
                   </TableCell>
@@ -597,7 +597,7 @@ export function LeadGenAnalyzer({ accessToken, selectedAccount }: LeadGenAnalyze
                           ? 'bg-primary/5 border-primary/25 text-primary'
                           : evt.status === 'error'
                           ? 'bg-destructive/5 border-destructive/20 text-destructive/70 opacity-60'
-                          : 'bg-green-500/5 border-green-500/20 text-green-600 dark:text-green-400 opacity-70',
+                          : 'bg-success/10 text-success border-success/20 opacity-70',
                       )}
                     >
                       {evt.status === 'running' ? (

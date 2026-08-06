@@ -1,9 +1,8 @@
 import { useState, useCallback } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Loader2, Search, Crown, Tag, CheckCircle, Info, ArrowRight } from 'lucide-react';
+import { WidgetCard, EmptyState, StatusPill } from './widgets';
+import { Loader2, Search, Crown, Tag, Info, ArrowRight } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 
@@ -113,59 +112,38 @@ export function TitleCheckerPage({ accessToken, selectedAccount }: TitleCheckerP
   const standardTitleCount = results.filter(t => !t.isSuperTitle).length;
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div>
-        <h2 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-          <Crown className="h-6 w-6 text-purple-500" />
-          Title Checker
-        </h2>
-        <p className="text-muted-foreground">
-          Search LinkedIn job titles to check if they are Super Titles or Standard Titles
-        </p>
-      </div>
-
-      {/* Info Card */}
-      <Card className="bg-muted/50 border-muted">
-        <CardContent className="pt-4">
-          <div className="flex gap-3">
-            <Info className="h-5 w-5 text-muted-foreground flex-shrink-0 mt-0.5" />
-            <div className="space-y-2 text-sm">
-              <p><strong>What are Super Titles?</strong></p>
-              <p className="text-muted-foreground">
-                LinkedIn uses a hierarchy for job titles in ad targeting:
+    <div className="space-y-4">
+      <WidgetCard
+        title="Title Checker"
+        subtitle="Check whether a LinkedIn job title is a Super Title or a Standard Title"
+        toolbar={
+          results.length > 0 ? (
+            <div className="flex items-center gap-2">
+              <StatusPill tone="info" label={`${superTitleCount} Super`} />
+              <StatusPill tone="neutral" label={`${standardTitleCount} Standard`} />
+            </div>
+          ) : undefined
+        }
+      >
+        <div className="space-y-4">
+          {/* Explainer */}
+          <div className="rounded-lg bg-secondary/50 border border-border/60 px-4 py-3 flex gap-3">
+            <Info className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
+            <div className="text-xs text-muted-foreground space-y-1">
+              <p>
+                <Crown className="h-3 w-3 text-primary inline mr-1" />
+                <strong className="text-foreground">Super Titles</strong> are broad job categories
+                (e.g. "Engineer", "Manager") — wider audience.
               </p>
-              <ul className="list-disc list-inside space-y-1 text-muted-foreground ml-2">
-                <li>
-                  <span className="inline-flex items-center gap-1">
-                    <Crown className="h-3 w-3 text-purple-500" />
-                    <strong className="text-foreground">Super Titles</strong>
-                  </span>
-                  {' '}- Broad job categories (e.g., "Engineer", "Manager", "Director"). These target a wider audience.
-                </li>
-                <li>
-                  <span className="inline-flex items-center gap-1">
-                    <Tag className="h-3 w-3 text-blue-500" />
-                    <strong className="text-foreground">Standard Titles</strong>
-                  </span>
-                  {' '}- Specific job roles (e.g., "Software Engineer", "Marketing Manager"). These offer more precise targeting.
-                </li>
-              </ul>
+              <p>
+                <Tag className="h-3 w-3 text-muted-foreground inline mr-1" />
+                <strong className="text-foreground">Standard Titles</strong> are specific roles
+                (e.g. "Software Engineer", "Marketing Manager") — more precise targeting.
+              </p>
             </div>
           </div>
-        </CardContent>
-      </Card>
 
-      {/* Search Card */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Search Job Titles</CardTitle>
-          <CardDescription>
-            Enter a job title to check if it's a Super Title or Standard Title
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {/* Search Input */}
+          {/* Search input */}
           <div className="flex gap-2">
             <Input
               placeholder="Enter job title (e.g., Engineer, Marketing Manager, CEO)"
@@ -173,11 +151,12 @@ export function TitleCheckerPage({ accessToken, selectedAccount }: TitleCheckerP
               onChange={(e) => setQuery(e.target.value)}
               onKeyPress={handleKeyPress}
               disabled={isLoading}
-              className="flex-1"
+              className="flex-1 h-9"
             />
             <Button
               onClick={handleSearch}
               disabled={isLoading || !accessToken || query.trim().length < 2}
+              className="h-9"
             >
               {isLoading ? (
                 <>
@@ -195,22 +174,8 @@ export function TitleCheckerPage({ accessToken, selectedAccount }: TitleCheckerP
 
           {/* Error Display */}
           {error && (
-            <div className="flex items-center gap-2 p-3 bg-destructive/10 text-destructive rounded-md">
+            <div className="flex items-center gap-2 px-3 py-2 bg-destructive/[0.06] border border-destructive/20 text-destructive rounded-lg">
               <span className="text-sm">{error}</span>
-            </div>
-          )}
-
-          {/* Summary Stats */}
-          {results.length > 0 && (
-            <div className="flex gap-4 p-3 bg-muted/50 rounded-lg">
-              <div className="flex items-center gap-2">
-                <Crown className="h-4 w-4 text-purple-500" />
-                <span className="text-sm font-medium">{superTitleCount} Super Title{superTitleCount !== 1 ? 's' : ''}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <Tag className="h-4 w-4 text-blue-500" />
-                <span className="text-sm font-medium">{standardTitleCount} Standard Title{standardTitleCount !== 1 ? 's' : ''}</span>
-              </div>
             </div>
           )}
 
@@ -220,62 +185,48 @@ export function TitleCheckerPage({ accessToken, selectedAccount }: TitleCheckerP
               {results.map((title, index) => (
                 <div
                   key={title.urn || index}
-                  className={`p-4 rounded-lg border transition-colors ${
-                    title.isSuperTitle
-                      ? 'bg-purple-50 border-purple-200 dark:bg-purple-950/30 dark:border-purple-800'
-                      : 'bg-blue-50 border-blue-200 dark:bg-blue-950/30 dark:border-blue-800'
-                  }`}
+                  className="px-4 py-3 rounded-lg border border-border/70 bg-card transition-colors hover:border-primary/25"
+                  style={{ boxShadow: 'var(--shadow-xs)' }}
                 >
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex-1 min-w-0">
-                      {/* Title Name and Type Badge */}
-                      <div className="flex items-center gap-3 flex-wrap">
-                        <span className="font-semibold text-lg">{title.name}</span>
+                      {/* Title name and type */}
+                      <div className="flex items-center gap-2.5 flex-wrap">
+                        <span className="font-semibold text-sm text-foreground">{title.name}</span>
                         {title.isSuperTitle ? (
-                          <Badge className="flex items-center gap-1 bg-purple-600 hover:bg-purple-700 text-white">
-                            <Crown className="h-3 w-3" />
-                            Super Title
-                          </Badge>
+                          <StatusPill tone="info" label="Super Title" />
                         ) : (
-                          <Badge variant="secondary" className="flex items-center gap-1 bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300">
-                            <Tag className="h-3 w-3" />
-                            Standard Title
-                          </Badge>
+                          <StatusPill tone="neutral" label="Standard Title" />
                         )}
                       </div>
 
                       {/* Description */}
-                      <p className="mt-2 text-sm text-muted-foreground">
+                      <p className="mt-1.5 text-xs text-muted-foreground">
                         {title.isSuperTitle
-                          ? 'This is a Super Title - it represents a broad job category and will target a wider audience.'
-                          : 'This is a Standard Title - it represents a specific job role and offers more precise targeting.'}
+                          ? 'Broad job category — targets a wider audience.'
+                          : 'Specific job role — offers more precise targeting.'}
                       </p>
 
                       {/* Parent Super Title (for standard titles) */}
                       {!title.isSuperTitle && title.parentSuperTitle?.name && (
-                        <div className="mt-2 flex items-center gap-2 text-sm">
-                          <span className="text-muted-foreground">Belongs to:</span>
-                          <ArrowRight className="h-3 w-3 text-muted-foreground" />
-                          <div className="flex items-center gap-1.5 bg-purple-100 dark:bg-purple-900/30 px-2 py-0.5 rounded">
-                            <Crown className="h-3 w-3 text-purple-600 dark:text-purple-400" />
-                            <span className="font-medium text-purple-700 dark:text-purple-300">{title.parentSuperTitle.name}</span>
-                          </div>
+                        <div className="mt-1.5 flex items-center gap-1.5 text-xs">
+                          <span className="text-muted-foreground">Belongs to</span>
+                          <ArrowRight className="h-3 w-3 text-muted-foreground/60" />
+                          <span className="inline-flex items-center gap-1 bg-primary/[0.06] border border-primary/10 px-1.5 py-0.5 rounded font-medium text-primary">
+                            <Crown className="h-3 w-3" />
+                            {title.parentSuperTitle.name}
+                          </span>
                         </div>
                       )}
 
                       {/* URN Reference */}
-                      <div className="mt-2 text-xs text-muted-foreground font-mono bg-muted/50 px-2 py-1 rounded w-fit">
+                      <div className="mt-2 text-[11px] text-muted-foreground font-mono bg-muted px-2 py-0.5 rounded w-fit">
                         {title.urn}
                       </div>
                     </div>
 
-                    {/* Targetable Badge */}
-                    {title.targetable && (
-                      <Badge variant="outline" className="flex items-center gap-1 text-green-600 border-green-300 shrink-0">
-                        <CheckCircle className="h-3 w-3" />
-                        Targetable
-                      </Badge>
-                    )}
+                    {/* Targetable */}
+                    {title.targetable && <StatusPill tone="success" label="Targetable" className="shrink-0" />}
                   </div>
                 </div>
               ))}
@@ -284,13 +235,14 @@ export function TitleCheckerPage({ accessToken, selectedAccount }: TitleCheckerP
 
           {/* No Results State */}
           {hasSearched && !isLoading && !error && results.length === 0 && (
-            <div className="text-center py-8 text-muted-foreground">
-              <Search className="h-12 w-12 mx-auto mb-4 opacity-50" />
-              <p>No job titles found matching "{query}"</p>
-            </div>
+            <EmptyState
+              icon={Search}
+              title="No matching titles"
+              description={`No job titles found matching "${query}". Try a broader term.`}
+            />
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </WidgetCard>
     </div>
   );
 }
