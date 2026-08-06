@@ -8,8 +8,10 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "start:remote": "node dist/server.js",
+    "start:product": "node dist/server-product.js",
     "dev": "tsx src/index.ts",
-    "dev:remote": "tsx src/server.ts"
+    "dev:remote": "tsx src/server.ts",
+    "dev:product": "tsx src/server-product.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",

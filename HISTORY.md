@@ -91,6 +91,104 @@ Stages 1–3 of the feature (compatibility rules, `copy_creatives_to_campaigns`,
 
 ---
 
+## Aug 2026 — Making the MCP a product
+
+The MCP was built as a single-tenant convenience and the auth model said so out loud. The
+`mcp_api_keys` migration comment read *"the api_key (UUID) is the secret — possessing it is the
+auth."* The table had no `user_id`, no expiry, no revoked flag; RLS was `using(true)` and four
+separate migrations had granted `anon` SELECT/INSERT/UPDATE. Net effect: the published anon key —
+hardcoded in `mcp-server/src/server.ts` — could dump every user's LinkedIn access token.
+
+Deciding to split rather than gate. The alternative was opening the existing dashboard to users and
+hiding everything but the MCP. Rejected because the expensive work (owner-scoped keys, a locked-down
+resolver, SSO, revocation, expiry) is identical either way, while gating meant retrofitting access
+control onto an app that has **none** — all 8 routes in `App.tsx` are public — across ~25 dashboard
+tabs, in the daily driver, where one miss leaks internal tooling.
+
+**The first attempt was wrong, and the correction is the lesson.** It hardened the *existing* server
+in place, with the new resolver behind an `MCP_RESOLVER` env flag so behaviour only changed when the
+flag flipped. That felt safe. It wasn't: the passthrough allowlist, the session-key binding, the
+`DELETE`/`GET` auth checks, and the 401 body shape all applied unconditionally, and the planned
+lockdown migration would have revoked the very anon grants the running resolver reads through. "Safe
+behind a flag" was true of one change and false of five. A feature flag protects a behaviour; it does
+not protect an architecture.
+
+Rebuilt as genuine separation instead:
+
+| | Legacy | Product |
+|---|---|---|
+| Entrypoint | `src/server.ts` (reverted, byte-identical) | `src/server-product.ts` |
+| Table | `mcp_api_keys` (untouched) | `mcp_keys` (new) |
+| Resolution | anon PostgREST select | `resolve_mcp_key()` RPC |
+
+Shared: only the 16 tool definitions, with every new behaviour behind `mode: "product"` defaulting to
+`"legacy"`. Two Railway services, one source folder. The sibling `linkedin-ads-mcp` repo — stale, no
+remote, predating OAuth — is the argument against forking the code instead.
+
+What that bought: the pre-existing holes on the legacy side (`mcp_api_keys` anon-readable,
+`sync_mcp_token` unauthenticated) stay open rather than being "fixed" in a way that breaks a working
+integration. They're now documented as scoped to the legacy system, to be closed when nothing depends
+on it. A new table meant no lockdown migration, no legacy-key sunset date, and no backfill problem —
+three pieces of the original plan that simply evaporated once the tables were separate.
+
+Kept from the first pass: `resolve_mcp_key` returning a *status* rather than just a token, so
+"expired, go reconnect" and "no such key" are distinguishable; the `mcp_server` role instead of
+granting the RPC to `anon`, which would have swapped a readable table for a public token-exchange
+oracle; and `SessionAuth` re-resolving on a 60s TTL instead of freezing the token in a closure, which
+is what makes revocation actually revoke. Also deleted `create-test-user`, a public
+`verify_jwt = false` endpoint that minted email-confirmed accounts with the service role — unrelated
+to the MCP split, so it carried over untouched.
+
+Two things learned rather than assumed. `linkedin_oidc` **is** in supabase-js's `Provider` union, so
+real LinkedIn SSO is available — but `signInWithIdToken` supports only google/apple/azure/facebook/
+kakao, so the one-consent-screen ID-token shortcut is not on the table. And single-consent via
+`provider_token` was demoted from foundation to optimization: it exists for one instant, lands in the
+browser, and buys one click once — while the server-side exchange path it would replace is needed
+anyway as the day-60 reconnect.
+
+Verified by running both servers side by side before any migration exists: legacy still falls through
+on an unknown key and still accepts an unauthenticated `DELETE` (its original behaviour, preserved);
+product fails closed with a reconnect URL and refuses the same `DELETE`.
+
+### The SSO detour
+
+The plan assumed Supabase's `linkedin_oidc` provider. Enabling it produced
+`Unsupported provider: provider is not enabled`, repeatedly. Rather than guess, reading
+`/auth/v1/settings` settled it — `email` was the only enabled provider, and stayed that way across
+several attempts.
+
+So sign-in was rebuilt to not need it. `linkedin_signin` does the exchange server-side, reads
+`/v2/userinfo`, finds-or-creates the user, stores the ads token, and returns a `generateLink`
+`hashed_token` the browser redeems with `verifyOtp`. It is unauthenticated by necessity — the caller
+is signing in — with the LinkedIn authorization code as the credential. The result is strictly better
+than the original plan: one consent screen, the access token never touches the browser, and a
+dashboard toggle stops being a dependency. Worth remembering that a failing config step is sometimes
+a hint the dependency was optional.
+
+### Two credential dead ends, one of them informative
+
+Deploying and migrating both stalled on Supabase access tokens that authenticate but see nothing —
+`[]` from `/v1/projects`, 403 on the project. That is the signature of a *restricted* token, and it
+almost certainly explains the edge-function CI failure that has been blamed on an expired secret
+since June. Same symptom, same fix: an unrestricted token.
+
+`scripts/setup-product.py` exists because of this — it verifies project access *first* and explains
+the failure, rather than letting a 403 three steps later be the symptom, then applies both
+migrations, deploys the function, and mints the `mcp_server` JWT.
+
+### The hole that turned out to be public
+
+`mcp_api_keys` being anon-readable was logged as a known-and-accepted legacy issue. Checking the repo
+visibility changed that: `linkedin-ads-buddy` is **public**, and the anon key is committed in `.env`
+and hardcoded in `tools.ts`. Verified live — 2 rows, `linkedin_token` readable, 350-char values, each
+valid for `rw_ads`. Accepted-risk reasoning depends on assumptions that decay; this one had already
+decayed and nobody had re-checked.
+
+The fix is written and unapplied, because closing it breaks the legacy resolver by design. That is a
+sequencing decision, not a defect — but it is now recorded as urgent rather than as background.
+
+---
+
 ## Recurring themes
 
 - **URN resolution is the project's tax.** Creative names, job titles, super titles, company names — each needed multiple rounds of encoding fixes, batch fetchers, and caches.

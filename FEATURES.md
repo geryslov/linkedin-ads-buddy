@@ -84,7 +84,7 @@ Agency → client publishing flow.
 | Publish dialog | [GenerateClientReportDialog](src/components/dashboard/GenerateClientReportDialog.tsx) |
 | Public view | [PublishedReportView](src/components/dashboard/PublishedReportView.tsx) |
 | Data assembly | [useWeeklyReport](src/hooks/useWeeklyReport.ts) → [serializeReportForClaude](src/lib/serializeReportForClaude.ts) |
-| Table + RPC | [migration](supabase/migrations/20260705000000_published_reports.sql) — `published_reports`, `get_published_report(token)` |
+| Table + RPC | [migration](supabase/migrations/20260705130557_34183441-072a-4dde-b818-8b93628e8cb2.sql) — `published_reports`, `get_published_report(token)` |
 | Edge actions | `publish_weekly_report`, `list_published_reports`, `revoke_published_report` |
 | Claude prompt | `client_weekly_report` reportType in [analyze-data](supabase/functions/analyze-data/index.ts) |
 
@@ -92,14 +92,17 @@ Agency → client publishing flow.
 
 | Function | Purpose |
 |---|---|
-| `linkedin-api` | Monolith (~13.4k lines), **65 actions**. All LinkedIn API access |
+| `linkedin-api` | Monolith (~13.6k lines), **69 actions**. All LinkedIn API access |
 | `analyze-data` | Claude calls. `DEFAULT_MODEL` = `claude-sonnet-4-20250514`, overridden per report type via `MODEL_BY_REPORT_TYPE` |
 | `apify-proxy` | Apify passthrough for Social Listener. Needs `APIFY_TOKEN` |
-| `create-test-user` | Test login flow |
 
-### `linkedin-api` actions (65)
+`create-test-user` was **deleted 2026-08-05** — a public `verify_jwt = false` endpoint that minted email-confirmed accounts with the service role for anyone who knew the URL. ⚠️ Deleting the folder does not undeploy it; remove it in the Supabase dashboard (or `npx supabase functions delete create-test-user`) or it stays live.
+
+### `linkedin-api` actions (69)
 
 **Auth & accounts** — `get_auth_url`, `exchange_token`, `get_profile`, `get_ad_accounts`, `sync_ad_accounts`, `sync_mcp_token`
+
+**MCP product auth** (new 2026-08-05) — `linkedin_signin` (unauthenticated; sign-in), `link_mcp_key`, `connect_linkedin`, `revoke_mcp_key` (all JWT-scoped)
 
 **Campaigns & creatives** — `get_campaigns`, `get_campaign_report`, `get_campaign_group_performance`, `get_campaign_performance_report`, `get_creatives`, `get_creative_report`, `get_creative_names_report`, `get_creative_performance_report`, `get_creative_analytics`, `get_creative_fatigue`, `get_account_structure`, `update_campaign_status`, `update_campaign_targeting`
 
@@ -136,13 +139,74 @@ Three things it does that nothing else in the codebase does — all needed by th
 
 Production: `https://linkedin-ads-buddy-production.up.railway.app/mcp`. Registry in [mcp-server/src/tools.ts](mcp-server/src/tools.ts).
 
-16 tools exposed: `get_ad_accounts`, `get_campaigns`, `get_analytics`, `get_campaign_analytics`, `get_creative_analytics`, `get_demographic_analytics`, `get_creatives`, `get_audiences`, `update_campaign_status`, `get_lead_gen_forms`, `search_job_titles`, `get_budget_pacing`, `get_creative_performance_report`, `get_creative_fatigue`, `update_campaign_budget`, and `call_linkedin_action` — the passthrough that reaches every edge action *except* those behind the JWT gate (`update_campaign_targeting`, `probe_creative_create`).
+16 tools exposed: `get_ad_accounts`, `get_campaigns`, `get_analytics`, `get_campaign_analytics`, `get_creative_analytics`, `get_demographic_analytics`, `get_creatives`, `get_audiences`, `update_campaign_status`, `get_lead_gen_forms`, `search_job_titles`, `get_budget_pacing`, `get_creative_performance_report`, `get_creative_fatigue`, `update_campaign_budget`, and `call_linkedin_action`.
+
+In the legacy server `call_linkedin_action` is unrestricted, as it has always been. In the product server it is **allowlist-gated** (`PASSTHROUGH_READ` / `PASSTHROUGH_WRITE` in [mcp-server/src/tools.ts](mcp-server/src/tools.ts)) — an allowlist rather than a blocklist, so adding a `case` to the edge function's switch does not silently widen the MCP surface. Blocked: `sync_mcp_token`, `override_title_mapping`, `update_company_name` (service-role writes to tables with no `user_id` — cross-tenant in a shared server), `probe_creative_create`, `get_auth_url`, `exchange_token`.
+
+## Standalone MCP product (separate service)
+
+A second Railway service, [src/server-product.ts](mcp-server/src/server-product.ts), sharing only the tool definitions. The legacy server, its URL, and `mcp_api_keys` are untouched — that separation is structural, not a flag.
+
+| | Legacy | Product |
+|---|---|---|
+| Entrypoint | `src/server.ts` | `src/server-product.ts` |
+| Table | `mcp_api_keys` | `mcp_keys` |
+| Resolution | anon PostgREST select, falls through to raw token | `resolve_mcp_key()` RPC, fail-closed |
+| Keys | UUID in browser localStorage, no owner | owner-scoped, revocable, expiry-aware |
+
+Everything new in `tools.ts` sits behind `mode: "product"` and defaults to `"legacy"`, so the single-arg call used by `src/server.ts` and `src/index.ts` behaves exactly as before.
+
+**`mcp_keys`** — `user_id` (FK to `auth.users`), `status`, `allow_writes`, `last_used_at`, `linkedin_token_expires_at`, refresh-token columns. RLS-locked from creation: no anon grants, owner-scoped SELECT with column-level grants that keep `linkedin_token` unreadable from the browser, admin SELECT via `has_role`, one active key per user via a partial unique index.
+
+**`resolve_mcp_key(text)`** — SECURITY DEFINER, returns a *status* alongside the token so "expired, go reconnect" is distinguishable from "no such key". Checks key lifecycle, the owner's `profiles.access_status`, and token expiry. Executable only by the dedicated `mcp_server` role — **not** `anon`, which would make it a public token-exchange oracle.
+
+**Revocation is live.** `SessionAuth` re-resolves on a 60s TTL rather than freezing the token in a closure, sessions are bound to the key that opened them, and `GET`/`DELETE /mcp` verify that key.
+
+Key lifecycle actions are JWT-scoped: `link_mcp_key` (mint/rotate, derives `user_id` from the JWT), `connect_linkedin` (server-side code exchange; the token is stored, never returned to the browser — also the day-60 reconnect path), `revoke_mcp_key`.
+
+### Sign-in — `linkedin_signin`
+
+Does **not** use `signInWithOAuth({provider: "linkedin_oidc"})`. That needs the LinkedIn provider enabled in the Supabase dashboard, and enabling it repeatedly failed with `Unsupported provider: provider is not enabled` — confirmed against `/auth/v1/settings`, which showed `email` as the only enabled provider. Since the credentials it wants already exist as edge secrets, the flow runs through our own function instead:
+
+```
+get_auth_url (scopeSet "oidc") → LinkedIn consent → /auth/callback?code=…
+  → linkedin_signin  (unauthenticated by necessity — the caller is signing in;
+                      the LinkedIn authorization code is the credential)
+       exchange code → /v2/userinfo → find-or-create user → store token in mcp_keys
+       → generateLink → one-time hashed_token
+  → supabase.auth.verifyOtp({token_hash}) → session
+```
+
+One consent screen covers identity and ads scopes, the access token never reaches the browser, and `linkedin_oidc` can stay disabled forever.
+
+### Product site
+
+Lives in a **separate repo**: `geryslov/ads-manager-hub-2bd81d31` (Lovable — TanStack Router, shadcn/ui, Nitro SSR). Routes: `/`, `/auth/callback`, `/linkedin/callback`, `/setup`, `/admin`, `/privacy`, `/terms`. Reads `mcp_keys`; expects `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_MCP_SERVER_URL` (the **product** Railway service), `VITE_MCP_CLIENT_ID` (`linkedin-ads-mcp`).
+
+### Rollout status — nothing below is live yet
+
+| Piece | State |
+|---|---|
+| Migrations `20260805120000` / `120100` | written, **not applied** — `mcp_keys` returns 404 |
+| `linkedin_signin` + `link_mcp_key` + `connect_linkedin` | written, **not deployed** — production returns `Unknown action` |
+| `src/server-product.ts` | written, **no Railway service exists** |
+| Product site | built and pushed; blocked on the three above |
+
+All four are blocked on one thing: a Supabase access token with project access. [scripts/setup-product.py](scripts/setup-product.py) does the token-dependent half in one command.
 
 ## Known gaps
 
-- **Edge function CI deploy is broken.** [deploy-functions.yml](.github/workflows/deploy-functions.yml) has failed on every run since at least 2026-06-24, dying at the "Deploy linkedin-api function" step — most likely a stale `SUPABASE_ACCESS_TOKEN` repo secret. Pushing to `main` does not deploy. Verify in the Actions tab after any push, or deploy manually.
+- **Edge function CI deploy is broken.** [deploy-functions.yml](.github/workflows/deploy-functions.yml) has failed on every run since at least 2026-06-24, dying at the "Deploy linkedin-api function" step. Pushing to `main` does not deploy. **Revised diagnosis (2026-08-05):** not an expired token, as previously assumed — an *under-privileged* one. A restricted Supabase access token authenticates fine but returns `[]` from `/v1/projects` and 403s on deploy, which is exactly this failure. Reproduced by hand with a fresh token. Fix the repo secret with an **unrestricted** personal access token and CI should recover.
 - **Creative thumbnails** are unavailable for most creatives (LinkedIn Partner-gated `/rest/posts/`). Gallery splits into "with images" / "No Preview Available". See CLAUDE.md.
 - **Demographic analytics** returns empty below LinkedIn's 300-impression privacy threshold.
 - **Influence Matcher CSV export** has no creative-level toggle. The plan in [.lovable/plan.md](.lovable/plan.md) specified an "Include creative breakdown" export option; the fetch, cache, and UI shipped but `getExportData` ([useCompanyInfluenceMatcher.ts:459](src/hooks/useCompanyInfluenceMatcher.ts#L459)) still exports at campaign level.
 - **`bulk_set_custom_fields` is dead code** — no frontend caller; `useCustomFields.ts` only exposes the singular `setCustomField`.
 - **README.md** is unmodified Lovable boilerplate.
+- 🔴 **`mcp_api_keys` leaks live LinkedIn tokens to anyone. VERIFIED 2026-08-05, not theoretical.** Four migrations granted `anon` SELECT/INSERT/UPDATE and both RLS policies are `using(true)`. This repo is **public** and the anon key is committed in `.env` *and* hardcoded in [mcp-server/src/tools.ts:5](mcp-server/src/tools.ts#L5), so the credential needed is already published. Confirmed live: 2 rows returned, `linkedin_token` readable, 350-char values — each valid for reading **and writing** real campaigns (`rw_ads`).
+  ```bash
+  curl "$SUPABASE_URL/rest/v1/mcp_api_keys?select=*" -H "apikey: $ANON_KEY"
+  ```
+  Fix is written and **deliberately unapplied**: [20260805130000_close_mcp_api_keys_anon_read.sql](supabase/migrations/20260805130000_close_mcp_api_keys_anon_read.sql). It breaks the legacy resolver — an anon-readable table *is* that resolver's mechanism, so there is no version that closes the hole and keeps that path. Run it once your own Claude integration is on the product MCP service. The new `mcp_keys` table was locked down from creation and is unaffected.
+- **`sync_mcp_token` has no caller auth.** Service-role upsert, `verify_jwt = false`, so anyone can overwrite any key's LinkedIn token. Same reasoning: the old dashboard depends on it. Blocked from the product passthrough.
+- **No LinkedIn token refresh.** Access tokens die at ~60 days; refresh tokens are Marketing Developer Platform partner-gated. `connect_linkedin` reports `hasRefreshToken` so the answer is observable on the next real connect.
+- **`get_profile` still calls `/v2/me`**, which requires the deprecated `r_liteprofile`. That is why `get_auth_url` keeps two mutually-exclusive scope sets (`legacy` and `oidc`) instead of one — OIDC callers should read identity from `/v2/userinfo`.
