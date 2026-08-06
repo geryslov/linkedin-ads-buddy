@@ -193,6 +193,10 @@ Everything new in `tools.ts` sits behind `mode: "product"` and defaults to `"leg
 
 **Revocation is live.** `SessionAuth` re-resolves on a 60s TTL rather than freezing the token in a closure, sessions are bound to the key that opened them, and `GET`/`DELETE /mcp` verify that key.
 
+**Signup is approval-gated.** `profiles.access_status` defaults to `'pending'`, so a LinkedIn signup on the product site gets a profile and a key but `resolve_mcp_key` returns `access_denied` until an admin approves — the key is inert in the meantime. The migration adds the column with `default 'active'` and *then* flips the default, so pre-existing dashboard users are backfilled as active and only new signups are gated. Approve from `/admin` on the product site.
+
+⚠️ **Nothing seeds the first admin.** No migration inserts a `user_roles` row with `role = 'admin'`, so `/admin` is unreachable until you add one by hand after your first sign-in — `scripts/setup-product.py` prints the SQL. Without it, pending users cannot be approved by anyone.
+
 Key lifecycle actions are JWT-scoped: `link_mcp_key` (mint/rotate, derives `user_id` from the JWT), `connect_linkedin` (server-side code exchange; the token is stored, never returned to the browser — also the day-60 reconnect path), `revoke_mcp_key`.
 
 ### Sign-in — `linkedin_signin`

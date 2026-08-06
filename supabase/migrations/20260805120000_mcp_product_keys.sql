@@ -89,6 +89,13 @@ alter table public.profiles
   add column if not exists stripe_customer_id text,
   add column if not exists trial_ends_at timestamptz;
 
+-- Two steps on purpose. The `add column` above backfills every PRE-EXISTING
+-- profile as 'active', so nobody already using the old dashboard is locked out.
+-- Flipping the default afterwards gates only NEW signups: handle_new_user()
+-- does not name access_status, so a LinkedIn signup on the product site takes
+-- this default and lands in the admin approval queue.
+alter table public.profiles alter column access_status set default 'pending';
+
 alter table public.profiles
   drop constraint if exists profiles_access_status_check;
 alter table public.profiles

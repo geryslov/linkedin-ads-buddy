@@ -223,6 +223,18 @@ def main():
         print(f"{INFO} set SUPABASE_ANON_KEY to enable verification")
 
     # ── Next ─────────────────────────────────────────────────────────────────
+    # Signups land in 'pending'. Without an admin row nobody can approve them,
+    # so this is the first thing to run after the first LinkedIn sign-in.
+    print("\n\033[1mNext — make yourself admin (once, after your first sign-in)\033[0m")
+    print("  Supabase SQL Editor:")
+    print("    insert into public.user_roles (user_id, role)")
+    print("    select user_id, 'admin' from public.profiles")
+    print("     where email = '<your-linkedin-email>'")
+    print("    on conflict (user_id, role) do nothing;")
+    print("")
+    print("    update public.profiles set access_status = 'active'")
+    print("     where email = '<your-linkedin-email>';")
+
     print("\n\033[1mNext — Railway (manual)\033[0m")
     print("  New service from geryslov/linkedin-ads-buddy")
     print("    Root Directory : mcp-server")
