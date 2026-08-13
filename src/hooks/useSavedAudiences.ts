@@ -14,7 +14,7 @@ export interface TargetingEntity {
   id: string;
   urn: string;
   name: string;
-  type: 'title' | 'skill';
+  type: 'title' | 'skill' | 'company';
   targetable: boolean;
 }
 
