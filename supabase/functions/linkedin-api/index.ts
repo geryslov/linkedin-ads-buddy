@@ -7512,6 +7512,73 @@ serve(async (req) => {
         });
       }
 
+      case 'search_companies': {
+        const { query } = params;
+
+        if (!query || query.trim().length < 2) {
+          return new Response(JSON.stringify({
+            companies: [],
+            message: 'Query must be at least 2 characters'
+          }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        console.log(`[search_companies] Searching for companies matching "${query}"`);
+
+        // adTargetingEntities typeahead with the employers facet (company targeting)
+        const companySearchUrl = `https://api.linkedin.com/rest/adTargetingEntities?q=typeahead&facet=urn%3Ali%3AadTargetingFacet%3Aemployers&query=${encodeURIComponent(query.trim())}&count=50`;
+
+        const companyResponse = await fetch(companySearchUrl, {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'X-Restli-Protocol-Version': '2.0.0',
+            'LinkedIn-Version': '202511',
+          },
+        });
+
+        if (!companyResponse.ok) {
+          const errorText = await companyResponse.text();
+          console.error(`[search_companies] API error ${companyResponse.status}:`, errorText);
+          return new Response(JSON.stringify({
+            error: `LinkedIn API error: ${companyResponse.status}`,
+            details: errorText,
+            companies: []
+          }), {
+            status: companyResponse.status,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+
+        const companyData = await companyResponse.json();
+        console.log(`[search_companies] Typeahead returned ${companyData.elements?.length || 0} results`);
+
+        const companies = (companyData.elements || []).map((el: any) => {
+          const urn = el.urn || el.entity || '';
+          const rawName = el.name?.localized?.en_US ||
+            el.name?.localized?.[Object.keys(el.name?.localized || {})[0]] ||
+            el.displayName ||
+            el.name ||
+            'Unknown Company';
+          const idMatch = urn.match(/:(\d+)$/);
+          return {
+            id: idMatch ? idMatch[1] : '',
+            urn,
+            name: typeof rawName === 'string' ? rawName : JSON.stringify(rawName),
+            targetable: true,
+            facetUrn: el.facetUrn || 'urn:li:adTargetingFacet:employers',
+          };
+        }).filter((c: any) => !!c.urn);
+
+        return new Response(JSON.stringify({
+          companies,
+          source: 'adTargetingEntities',
+          count: companies.length
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+
+
       case 'sync_ad_accounts': {
         // Sync all ad accounts to database for the authenticated user
         // This reuses get_ad_accounts logic but also persists to DB
@@ -8228,10 +8295,12 @@ serve(async (req) => {
       case 'update_campaign_targeting': {
         // Support both single campaignId and array of campaignIds
         // NOTE: accountId is no longer required - derived from campaign
-        let { campaignId, campaignIds, titleUrns, skillUrns, mode } = params;
+        let { campaignId, campaignIds, titleUrns, skillUrns, companyUrns, mode } = params;
         // Dedupe URNs — LinkedIn rejects targeting facets with duplicate values (INVALID_VALUE_DUPLICATE_EXIST)
         if (Array.isArray(titleUrns)) titleUrns = Array.from(new Set(titleUrns));
         if (Array.isArray(skillUrns)) skillUrns = Array.from(new Set(skillUrns));
+        if (Array.isArray(companyUrns)) companyUrns = Array.from(new Set(companyUrns));
+
         
         // Normalize to array
         const idsToUpdate: string[] = campaignIds && Array.isArray(campaignIds) 
@@ -8449,6 +8518,9 @@ serve(async (req) => {
               if (skillUrns && skillUrns.length > 0) {
                 mergeFacet('urn:li:adTargetingFacet:skills', skillUrns);
               }
+              if (companyUrns && companyUrns.length > 0) {
+                mergeFacet('urn:li:adTargetingFacet:employers', companyUrns);
+              }
 
               targetingCriteria = {
                 include: existingTargeting?.include || { and: [] },
@@ -8463,6 +8535,7 @@ serve(async (req) => {
               const replacedFacets = [
                 ...(titleUrns ? ['urn:li:adTargetingFacet:titles'] : []),
                 ...(skillUrns ? ['urn:li:adTargetingFacet:skills'] : []),
+                ...(companyUrns ? ['urn:li:adTargetingFacet:employers'] : []),
               ];
 
               const preservedClauses = existingAndClauses.filter((clause: any) => {
@@ -8486,6 +8559,12 @@ serve(async (req) => {
                 });
               }
 
+              if (companyUrns && companyUrns.length > 0) {
+                newAndClauses.push({
+                  or: { 'urn:li:adTargetingFacet:employers': companyUrns }
+                });
+              }
+
               targetingCriteria = {
                 include: { and: newAndClauses },
                 exclude: existingTargeting?.exclude || {}
@@ -8506,6 +8585,13 @@ serve(async (req) => {
                   or: { 'urn:li:adTargetingFacet:skills': skillUrns }
                 });
               }
+
+              if (companyUrns && companyUrns.length > 0) {
+                newAndClauses.push({
+                  or: { 'urn:li:adTargetingFacet:employers': companyUrns }
+                });
+              }
+
               
               targetingCriteria = {
                 include: { and: newAndClauses },

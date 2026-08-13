@@ -23,6 +23,7 @@ import {
   Plus,
   X,
   Briefcase,
+  Building2,
   Sparkles,
   ShoppingCart,
   Loader2,
@@ -63,7 +64,7 @@ export function CampaignTargetingEditor({
   const { toast } = useToast();
   
   // Search state
-  const [searchType, setSearchType] = useState<'titles' | 'skills'>('titles');
+  const [searchType, setSearchType] = useState<'titles' | 'skills' | 'companies'>('titles');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<TargetingEntity[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -131,7 +132,7 @@ export function CampaignTargetingEditor({
     setSearchError(null);
     
     try {
-      const action = searchType === 'titles' ? 'search_job_titles' : 'search_skills';
+      const action = searchType === 'titles' ? 'search_job_titles' : searchType === 'skills' ? 'search_skills' : 'search_companies';
       const { data, error } = await supabase.functions.invoke('linkedin-api', {
         body: { 
           action, 
@@ -142,12 +143,12 @@ export function CampaignTargetingEditor({
       
       if (error) throw error;
       
-      const items = searchType === 'titles' ? data.titles : data.skills;
+      const items = searchType === 'titles' ? data.titles : searchType === 'skills' ? data.skills : data.companies;
       const entities: TargetingEntity[] = (items || []).map((item: any) => ({
         id: item.id,
         urn: item.urn,
         name: item.name,
-        type: searchType === 'titles' ? 'title' : 'skill',
+        type: searchType === 'titles' ? 'title' : searchType === 'skills' ? 'skill' : 'company',
         targetable: item.targetable,
       }));
       
@@ -420,6 +421,7 @@ export function CampaignTargetingEditor({
     try {
       const titleUrns = selectedEntities.filter(e => e.type === 'title').map(e => e.urn);
       const skillUrns = selectedEntities.filter(e => e.type === 'skill').map(e => e.urn);
+      const companyUrns = selectedEntities.filter(e => e.type === 'company').map(e => e.urn);
       
       // NOTE: accountId is no longer sent - backend derives it from campaign
       const { data, error } = await supabase.functions.invoke('linkedin-api', {
@@ -430,6 +432,7 @@ export function CampaignTargetingEditor({
             campaignIds: selectedCampaignIds,
             titleUrns,
             skillUrns,
+            companyUrns,
             mode: updateMode,
           }
         }
@@ -497,6 +500,7 @@ export function CampaignTargetingEditor({
   
   const titleCount = selectedEntities.filter(e => e.type === 'title').length;
   const skillCount = selectedEntities.filter(e => e.type === 'skill').length;
+  const companyCount = selectedEntities.filter(e => e.type === 'company').length;
 
   const formatAudienceSize = (n: number) => {
     if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -552,7 +556,7 @@ export function CampaignTargetingEditor({
                     <TooltipContent side="top" className="max-w-[200px] text-xs">
                       <p><strong>Append</strong> — AND with existing targeting (narrows audience).</p>
                       <p className="mt-1"><strong>Replace</strong> — overwrites the titles/skills facets.</p>
-                      <p className="mt-1"><strong>Exclude</strong> — adds them to the campaign's exclusions.</p>
+                      <p className="mt-1"><strong>Exclude</strong> — adds titles / skills / companies to the campaign's exclusions.</p>
                     </TooltipContent>
                   </Tooltip>
                 </label>
@@ -635,7 +639,9 @@ export function CampaignTargetingEditor({
                     <Button variant="outline" className="w-32 justify-between shrink-0">
                       {searchType === 'titles'
                         ? <><Briefcase className="h-3.5 w-3.5 text-blue-500" /><span>Titles</span></>
-                        : <><Sparkles className="h-3.5 w-3.5 text-purple-500" /><span>Skills</span></>
+                        : searchType === 'skills'
+                          ? <><Sparkles className="h-3.5 w-3.5 text-purple-500" /><span>Skills</span></>
+                          : <><Building2 className="h-3.5 w-3.5 text-emerald-600" /><span>Companies</span></>
                       }
                       <ChevronDown className="h-3.5 w-3.5 text-muted-foreground ml-auto" />
                     </Button>
@@ -647,11 +653,14 @@ export function CampaignTargetingEditor({
                     <DropdownMenuItem onClick={() => { setSearchType('skills'); setSearchResults([]); }} className="gap-2">
                       <Sparkles className="h-4 w-4 text-purple-500" /> Skills
                     </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => { setSearchType('companies'); setSearchResults([]); }} className="gap-2">
+                      <Building2 className="h-4 w-4 text-emerald-600" /> Companies
+                    </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
 
                 <Input
-                  placeholder={`Search ${searchType === 'titles' ? 'job titles' : 'skills'}…`}
+                  placeholder={`Search ${searchType === 'titles' ? 'job titles' : searchType === 'skills' ? 'skills' : 'company names'}…`}
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   onKeyPress={handleKeyPress}
@@ -665,11 +674,18 @@ export function CampaignTargetingEditor({
 
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Button variant="outline" size="icon" onClick={() => searchType === 'titles' ? setShowBulkImport(true) : setShowBulkSkillsImport(true)}>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      disabled={searchType === 'companies'}
+                      onClick={() => searchType === 'titles' ? setShowBulkImport(true) : setShowBulkSkillsImport(true)}
+                    >
                       <Upload className="h-4 w-4" />
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent>Bulk import {searchType === 'titles' ? 'job titles' : 'skills'}</TooltipContent>
+                  <TooltipContent>
+                    {searchType === 'companies' ? 'Bulk import not available for companies' : `Bulk import ${searchType === 'titles' ? 'job titles' : 'skills'}`}
+                  </TooltipContent>
                 </Tooltip>
               </div>
 
@@ -703,7 +719,9 @@ export function CampaignTargetingEditor({
                         >
                           {entity.type === 'title'
                             ? <Briefcase className={`h-3.5 w-3.5 shrink-0 ${isSelected ? 'text-muted-foreground/50' : 'text-blue-500'}`} />
-                            : <Sparkles className={`h-3.5 w-3.5 shrink-0 ${isSelected ? 'text-muted-foreground/50' : 'text-purple-500'}`} />
+                            : entity.type === 'skill'
+                              ? <Sparkles className={`h-3.5 w-3.5 shrink-0 ${isSelected ? 'text-muted-foreground/50' : 'text-purple-500'}`} />
+                              : <Building2 className={`h-3.5 w-3.5 shrink-0 ${isSelected ? 'text-muted-foreground/50' : 'text-emerald-600'}`} />
                           }
                           <span className="flex-1 truncate">{entity.name}</span>
                           {isSelected
@@ -717,7 +735,7 @@ export function CampaignTargetingEditor({
                 ) : (
                   <div className="flex flex-col items-center justify-center h-full text-muted-foreground py-8">
                     <Search className="h-8 w-8 mb-2 opacity-20" />
-                    <p className="text-sm">Search {searchType === 'titles' ? 'job titles' : 'skills'} above</p>
+                    <p className="text-sm">Search {searchType === 'titles' ? 'job titles' : searchType === 'skills' ? 'skills' : 'companies'} above</p>
                   </div>
                 )}
               </ScrollArea>
@@ -818,6 +836,23 @@ export function CampaignTargetingEditor({
                             {selectedEntities.filter(e => e.type === 'title').map(entity => (
                               <div key={entity.urn} className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-blue-50 border border-blue-100 group hover:border-blue-200 transition-colors">
                                 <span className="flex-1 text-xs text-blue-800 truncate font-medium">{entity.name}</span>
+                                <button onClick={() => removeFromSelection(entity.urn)} className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all shrink-0">
+                                  <X className="h-3 w-3" />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {companyCount > 0 && (
+                        <div>
+                          <p className={`${sectionLabel} flex items-center gap-1.5 mb-1.5`}>
+                            <Building2 className="h-3 w-3 text-emerald-600" /> Companies ({companyCount})
+                          </p>
+                          <div className="space-y-1">
+                            {selectedEntities.filter(e => e.type === 'company').map(entity => (
+                              <div key={entity.urn} className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-emerald-50 border border-emerald-100 group hover:border-emerald-200 transition-colors">
+                                <span className="flex-1 text-xs text-emerald-800 truncate font-medium">{entity.name}</span>
                                 <button onClick={() => removeFromSelection(entity.urn)} className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all shrink-0">
                                   <X className="h-3 w-3" />
                                 </button>
