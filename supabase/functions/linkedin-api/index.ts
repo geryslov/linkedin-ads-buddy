@@ -8518,6 +8518,9 @@ serve(async (req) => {
               if (skillUrns && skillUrns.length > 0) {
                 mergeFacet('urn:li:adTargetingFacet:skills', skillUrns);
               }
+              if (companyUrns && companyUrns.length > 0) {
+                mergeFacet('urn:li:adTargetingFacet:employers', companyUrns);
+              }
 
               targetingCriteria = {
                 include: existingTargeting?.include || { and: [] },
@@ -8532,6 +8535,7 @@ serve(async (req) => {
               const replacedFacets = [
                 ...(titleUrns ? ['urn:li:adTargetingFacet:titles'] : []),
                 ...(skillUrns ? ['urn:li:adTargetingFacet:skills'] : []),
+                ...(companyUrns ? ['urn:li:adTargetingFacet:employers'] : []),
               ];
 
               const preservedClauses = existingAndClauses.filter((clause: any) => {
@@ -8555,6 +8559,12 @@ serve(async (req) => {
                 });
               }
 
+              if (companyUrns && companyUrns.length > 0) {
+                newAndClauses.push({
+                  or: { 'urn:li:adTargetingFacet:employers': companyUrns }
+                });
+              }
+
               targetingCriteria = {
                 include: { and: newAndClauses },
                 exclude: existingTargeting?.exclude || {}
@@ -8575,6 +8585,13 @@ serve(async (req) => {
                   or: { 'urn:li:adTargetingFacet:skills': skillUrns }
                 });
               }
+
+              if (companyUrns && companyUrns.length > 0) {
+                newAndClauses.push({
+                  or: { 'urn:li:adTargetingFacet:employers': companyUrns }
+                });
+              }
+
               
               targetingCriteria = {
                 include: { and: newAndClauses },
