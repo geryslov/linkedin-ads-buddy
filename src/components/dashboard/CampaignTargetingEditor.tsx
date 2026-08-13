@@ -23,6 +23,7 @@ import {
   Plus,
   X,
   Briefcase,
+  Building2,
   Sparkles,
   ShoppingCart,
   Loader2,
