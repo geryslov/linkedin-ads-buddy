@@ -858,7 +858,19 @@ export function AudienceTemplates({ accessToken, selectedAccount, campaigns, can
             )}
           </CardContent>
         </Card>
+
+        <BulkFacetImportDialog
+          open={showBulk}
+          onOpenChange={setShowBulk}
+          accessToken={accessToken}
+          facet={activeFacet}
+          facetLabel={facetLabel(activeFacet)}
+          typeahead={activeFacetDef?.typeahead !== false}
+          bucket={bucket}
+          onAdd={addEntities}
+        />
       </div>
+
     </div>
   );
 }
