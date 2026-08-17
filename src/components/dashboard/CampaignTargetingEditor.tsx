@@ -78,7 +78,7 @@ export function CampaignTargetingEditor({
   const [selectedCampaignIds, setSelectedCampaignIds] = useState<string[]>([]);
   const [updateMode, setUpdateMode] = useState<'append' | 'replace' | 'exclude'>('append');
   const [isUpdating, setIsUpdating] = useState(false);
-  const hadOrganizationTargetingRef = useRef(false);
+  
   
   // Saved audiences
   const { audiences, isLoading: isLoadingAudiences, fetchAudiences, saveAudience, deleteAudience } = useSavedAudiences(selectedAccount);
@@ -111,19 +111,10 @@ export function CampaignTargetingEditor({
     }
   }, [selectedAccount, fetchAudiences]);
 
-  // Company and industry targeting is most often used as an exclusion. Default the
-  // first organization selection to Exclude, while still allowing an explicit mode change.
-  useEffect(() => {
-    const hasOrganizationTargeting = selectedEntities.some(
-      entity => entity.type === 'company' || entity.type === 'industry'
-    );
+  // Note: mode is always user-controlled. "Add" merges companies/industries into the
+  // campaign's existing facet as an OR (widening the audience), so a one-off company
+  // request can be added on top of an existing company list without narrowing it.
 
-    if (hasOrganizationTargeting && !hadOrganizationTargetingRef.current) {
-      setUpdateMode('exclude');
-    }
-
-    hadOrganizationTargetingRef.current = hasOrganizationTargeting;
-  }, [selectedEntities]);
   
   const handleSearch = useCallback(async () => {
     if (!accessToken || !searchQuery.trim()) {
@@ -584,10 +575,11 @@ export function CampaignTargetingEditor({
                     <TooltipTrigger asChild>
                       <Info className="h-3.5 w-3.5 cursor-help" />
                     </TooltipTrigger>
-                    <TooltipContent side="top" className="max-w-[200px] text-xs">
-                      <p><strong>Add</strong> — adds the selection to included targeting.</p>
+                    <TooltipContent side="top" className="max-w-[240px] text-xs">
+                      <p><strong>Add</strong> — merges into the campaign's existing facet as an OR, so extra companies/industries widen the list instead of narrowing it. If the campaign has no such facet yet, it becomes a new AND layer.</p>
                       <p className="mt-1"><strong>Replace</strong> — overwrites only the facets you selected.</p>
                       <p className="mt-1"><strong>Exclude</strong> — adds the selection to exclusions as OR values without changing included targeting.</p>
+
                     </TooltipContent>
                   </Tooltip>
                 </label>
