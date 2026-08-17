@@ -450,7 +450,69 @@ export function CampaignTargetingEditor({
     setSelectedEntities(entities);
     toast({ title: 'Audience loaded', description: `${entities.length} entities loaded into selection.` });
   };
-  
+
+  const campaignName = useCallback(
+    (id: string) => campaigns.find(c => c.id === id)?.name || `Campaign ${id}`,
+    [campaigns]
+  );
+
+  const buildUrnParams = useCallback(() => ({
+    titleUrns: selectedEntities.filter(e => e.type === 'title').map(e => e.urn),
+    skillUrns: selectedEntities.filter(e => e.type === 'skill').map(e => e.urn),
+    companyUrns: selectedEntities.filter(e => e.type === 'company').map(e => e.urn),
+    industryUrns: selectedEntities.filter(e => e.type === 'industry').map(e => e.urn),
+  }), [selectedEntities]);
+
+  // ── Capacity pre-check: read-only, runs before the user clicks Apply ──
+  useEffect(() => {
+    if (preflightDebounceRef.current) clearTimeout(preflightDebounceRef.current);
+    if (!accessToken || selectedCampaignIds.length === 0 || selectedEntities.length === 0) {
+      setPreflight(null);
+      return;
+    }
+
+    preflightDebounceRef.current = setTimeout(async () => {
+      setIsPreflighting(true);
+      try {
+        const { data, error } = await supabase.functions.invoke('linkedin-api', {
+          body: {
+            action: 'preflight_campaign_targeting',
+            accessToken,
+            params: {
+              campaignIds: selectedCampaignIds,
+              ...buildUrnParams(),
+              mode: updateMode,
+            },
+          },
+        });
+        if (error) throw error;
+        setPreflight((data?.results || []) as TargetingUpdateResult[]);
+      } catch {
+        setPreflight(null);
+      } finally {
+        setIsPreflighting(false);
+      }
+    }, 700);
+
+    return () => {
+      if (preflightDebounceRef.current) clearTimeout(preflightDebounceRef.current);
+    };
+  }, [accessToken, selectedCampaignIds, selectedEntities, updateMode, buildUrnParams]);
+
+  const overLimitPreflight = (preflight || []).filter(r => r.errorCode === 'FACET_LIMIT_EXCEEDED');
+
+  const copyReport = useCallback((rows: TargetingUpdateResult[]) => {
+    const text = rows
+      .map(r => {
+        const status = r.success ? 'UPDATED' : r.errorCode === 'FACET_LIMIT_EXCEEDED' ? 'SKIPPED (over limit)' : 'FAILED';
+        return `${status}\t${campaignName(r.campaignId)}\t${r.message}`;
+      })
+      .join('\n');
+    navigator.clipboard.writeText(text);
+    toast({ title: 'Report copied', description: `${rows.length} row(s) copied to clipboard.` });
+  }, [campaignName, toast]);
+
+
   const handleApplyTargeting = async () => {
     // NOTE: selectedAccount no longer required for API call - account is derived from campaign
     if (!accessToken || selectedCampaignIds.length === 0) {
