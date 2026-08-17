@@ -78,6 +78,7 @@ export function CampaignTargetingEditor({
   const [selectedCampaignIds, setSelectedCampaignIds] = useState<string[]>([]);
   const [updateMode, setUpdateMode] = useState<'append' | 'replace' | 'exclude'>('append');
   const [isUpdating, setIsUpdating] = useState(false);
+  const hadOrganizationTargetingRef = useRef(false);
   
   // Saved audiences
   const { audiences, isLoading: isLoadingAudiences, fetchAudiences, saveAudience, deleteAudience } = useSavedAudiences(selectedAccount);
@@ -109,6 +110,20 @@ export function CampaignTargetingEditor({
       fetchAudiences();
     }
   }, [selectedAccount, fetchAudiences]);
+
+  // Company and industry targeting is most often used as an exclusion. Default the
+  // first organization selection to Exclude, while still allowing an explicit mode change.
+  useEffect(() => {
+    const hasOrganizationTargeting = selectedEntities.some(
+      entity => entity.type === 'company' || entity.type === 'industry'
+    );
+
+    if (hasOrganizationTargeting && !hadOrganizationTargetingRef.current) {
+      setUpdateMode('exclude');
+    }
+
+    hadOrganizationTargetingRef.current = hasOrganizationTargeting;
+  }, [selectedEntities]);
   
   const handleSearch = useCallback(async () => {
     if (!accessToken || !searchQuery.trim()) {
@@ -570,9 +585,9 @@ export function CampaignTargetingEditor({
                       <Info className="h-3.5 w-3.5 cursor-help" />
                     </TooltipTrigger>
                     <TooltipContent side="top" className="max-w-[200px] text-xs">
-                      <p><strong>Append</strong> — ORs into the same facet if it already exists (widens), otherwise adds it.</p>
+                      <p><strong>Add</strong> — adds the selection to included targeting.</p>
                       <p className="mt-1"><strong>Replace</strong> — overwrites only the facets you selected.</p>
-                      <p className="mt-1"><strong>Exclude</strong> — ORs titles / skills / companies / industries into the campaign's exclusions.</p>
+                      <p className="mt-1"><strong>Exclude</strong> — adds the selection to exclusions as OR values without changing included targeting.</p>
                     </TooltipContent>
                   </Tooltip>
                 </label>
@@ -588,7 +603,7 @@ export function CampaignTargetingEditor({
                       }`}
                     >
                       {mode === 'append' ? <PlusCircle className="h-3.5 w-3.5" /> : mode === 'replace' ? <Replace className="h-3.5 w-3.5" /> : <MinusCircle className="h-3.5 w-3.5" />}
-                      {mode === 'append' ? 'Append' : mode === 'replace' ? 'Replace' : 'Exclude'}
+                      {mode === 'append' ? 'Add' : mode === 'replace' ? 'Replace' : 'Exclude'}
                     </button>
                   ))}
                 </div>
@@ -621,7 +636,7 @@ export function CampaignTargetingEditor({
                   <><AlertCircle className="mr-2 h-4 w-4" />Read Only</>
                 ) : (
                   <><CheckCircle2 className="mr-2 h-4 w-4" />
-                    Apply{selectedCampaignIds.length > 0 ? ` to ${selectedCampaignIds.length} Campaign${selectedCampaignIds.length !== 1 ? 's' : ''}` : ''}
+                    {updateMode === 'exclude' ? 'Exclude from' : updateMode === 'replace' ? 'Replace on' : 'Add to'}{selectedCampaignIds.length > 0 ? ` ${selectedCampaignIds.length} Campaign${selectedCampaignIds.length !== 1 ? 's' : ''}` : ''}
                   </>
                 )}
               </Button>
