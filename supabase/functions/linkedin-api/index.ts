@@ -8622,10 +8622,28 @@ serve(async (req) => {
                 clause?.or ? { ...clause, or: { ...clause.or } } : clause
               );
 
+              // LinkedIn stores uploaded company lists as an audience/segment facet, not as
+              // `employers`. A newly selected company must be ORed into that same organization
+              // clause; adding a separate employers clause would mean
+              // "company list AND employer" and can collapse the audience below 300.
+              const organizationFacets = new Set([FACET_EMPLOYERS, FACET_INDUSTRIES]);
+              const isOrganizationClause = (clause: any) => {
+                const facetKeys = Object.keys(clause?.or || {});
+                return facetKeys.some((key) =>
+                  organizationFacets.has(key) || /audience|segment|employer|industr/i.test(key)
+                );
+              };
+
               for (const [facet, urns] of facetPayload) {
-                const target = newAndClauses.find((clause: any) => clause?.or && Array.isArray(clause.or[facet]));
+                const exactTarget = newAndClauses.find((clause: any) => clause?.or && Array.isArray(clause.or[facet]));
+                const target = exactTarget || (
+                  organizationFacets.has(facet)
+                    ? newAndClauses.find(isOrganizationClause)
+                    : undefined
+                );
                 if (target) {
-                  target.or[facet] = Array.from(new Set([...target.or[facet], ...urns]));
+                  const current = Array.isArray(target.or[facet]) ? target.or[facet] : [];
+                  target.or[facet] = Array.from(new Set([...current, ...urns]));
                 } else {
                   newAndClauses.push({ or: { [facet]: urns } });
                 }
