@@ -78,6 +78,15 @@ export function CampaignTargetingEditor({
   const [selectedCampaignIds, setSelectedCampaignIds] = useState<string[]>([]);
   const [updateMode, setUpdateMode] = useState<'append' | 'replace' | 'exclude'>('append');
   const [isUpdating, setIsUpdating] = useState(false);
+
+  // LinkedIn caps each targeting facet at 100 values per campaign — capacity UX
+  const [fillToLimit, setFillToLimit] = useState(false);
+  const [applyResults, setApplyResults] = useState<TargetingUpdateResult[] | null>(null);
+  const [preflight, setPreflight] = useState<TargetingUpdateResult[] | null>(null);
+  const [isPreflighting, setIsPreflighting] = useState(false);
+  const [showPreflightDetail, setShowPreflightDetail] = useState(false);
+  const preflightDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  
   
   
   // Saved audiences
