@@ -18,6 +18,7 @@ import { MegaBudgetPacingDashboard } from "@/components/dashboard/MegaBudgetPaci
 import { CreativeGallery } from "@/components/dashboard/CreativeGallery";
 import { BulkCreativeCopy } from "@/components/dashboard/BulkCreativeCopy";
 import { CampaignTargetingEditor } from "@/components/dashboard/CampaignTargetingEditor";
+import { AudienceTemplates } from "@/components/dashboard/AudienceTemplates";
 import { CreativePerformanceReport } from "@/components/dashboard/CreativePerformanceReport";
 import { CampaignPerformanceReport } from "@/components/dashboard/CampaignPerformanceReport";
 import { CompanyInfluenceMatcher } from "@/components/dashboard/CompanyInfluenceMatcher";
