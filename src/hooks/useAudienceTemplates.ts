@@ -28,8 +28,28 @@ export interface SyncResult {
   message: string;
 }
 
-const urnsOf = (entities: TargetingEntity[], type: TargetingEntity['type']) =>
-  entities.filter((e) => e.type === type).map((e) => e.urn);
+/** Legacy short kinds → full LinkedIn facet URNs (older templates have no `facet` field). */
+export const FACET_BY_LEGACY_KIND: Record<string, string> = {
+  title: 'urn:li:adTargetingFacet:titles',
+  skill: 'urn:li:adTargetingFacet:skills',
+  company: 'urn:li:adTargetingFacet:employers',
+  industry: 'urn:li:adTargetingFacet:industries',
+};
+
+export const facetOf = (e: TargetingEntity) =>
+  e.facet || FACET_BY_LEGACY_KIND[e.type] || `urn:li:adTargetingFacet:${e.type}`;
+
+/** Group entities into { facetUrn: [urn, ...] } for the edge function. */
+const facetMap = (entities: TargetingEntity[]) => {
+  const out: Record<string, string[]> = {};
+  for (const e of entities) {
+    const f = facetOf(e);
+    if (!out[f]) out[f] = [];
+    if (!out[f].includes(e.urn)) out[f].push(e.urn);
+  }
+  return out;
+};
+
 
 export function useAudienceTemplates(accountId: string | null) {
   const { toast } = useToast();
@@ -193,10 +213,8 @@ export function useAudienceTemplates(accountId: string | null) {
             params: {
               campaignIds,
               mode,
-              titleUrns: urnsOf(entities, 'title'),
-              skillUrns: urnsOf(entities, 'skill'),
-              companyUrns: urnsOf(entities, 'company'),
-              industryUrns: urnsOf(entities, 'industry'),
+              facets: facetMap(entities),
+
             },
           };
           const { data, error } = await supabase.functions.invoke('linkedin-api', { body });

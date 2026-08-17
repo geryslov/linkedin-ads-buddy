@@ -5,6 +5,16 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { CampaignSearchSelect } from './CampaignSearchSelect';
@@ -38,21 +48,82 @@ interface Props {
   canWrite: boolean;
 }
 
-type EntityKind = 'title' | 'skill' | 'company' | 'industry';
+type FacetDef = {
+  facet: string;
+  label: string;
+  group: 'Job' | 'Company' | 'Lists & audiences' | 'Education' | 'Interests' | 'Demographics';
+  /** Free-text typeahead vs. a fixed value list LinkedIn returns whole. */
+  typeahead: boolean;
+};
 
-const KINDS: { key: EntityKind; label: string; action: string; field: string }[] = [
-  { key: 'title', label: 'Titles', action: 'search_job_titles', field: 'titles' },
-  { key: 'skill', label: 'Skills', action: 'search_skills', field: 'skills' },
-  { key: 'company', label: 'Companies', action: 'search_companies', field: 'companies' },
-  { key: 'industry', label: 'Industries', action: 'search_industries', field: 'industries' },
+const FACETS: FacetDef[] = [
+  // Job
+  { facet: 'urn:li:adTargetingFacet:titles', label: 'Job titles (current)', group: 'Job', typeahead: true },
+  { facet: 'urn:li:adTargetingFacet:titlesPast', label: 'Job titles (past)', group: 'Job', typeahead: true },
+  { facet: 'urn:li:adTargetingFacet:seniorities', label: 'Job seniority', group: 'Job', typeahead: false },
+  { facet: 'urn:li:adTargetingFacet:jobFunctions', label: 'Job function', group: 'Job', typeahead: false },
+  { facet: 'urn:li:adTargetingFacet:yearsOfExperience', label: 'Years of experience', group: 'Job', typeahead: false },
+  { facet: 'urn:li:adTargetingFacet:skills', label: 'Member skills', group: 'Job', typeahead: true },
+  // Company
+  { facet: 'urn:li:adTargetingFacet:employers', label: 'Company names (current)', group: 'Company', typeahead: true },
+  { facet: 'urn:li:adTargetingFacet:employersPast', label: 'Company names (past)', group: 'Company', typeahead: true },
+  { facet: 'urn:li:adTargetingFacet:industries', label: 'Company industries', group: 'Company', typeahead: true },
+  { facet: 'urn:li:adTargetingFacet:staffCountRanges', label: 'Company size', group: 'Company', typeahead: false },
+  { facet: 'urn:li:adTargetingFacet:revenue', label: 'Company revenue', group: 'Company', typeahead: false },
+  { facet: 'urn:li:adTargetingFacet:growthRate', label: 'Company growth rate', group: 'Company', typeahead: false },
+  { facet: 'urn:li:adTargetingFacet:followedCompanies', label: 'Company followers', group: 'Company', typeahead: true },
+  { facet: 'urn:li:adTargetingFacet:companyCategory', label: 'Company category', group: 'Company', typeahead: false },
+  // Lists & matched audiences
+  { facet: 'urn:li:adTargetingFacet:audienceMatchingSegments', label: 'Matched audiences (company / contact / website lists)', group: 'Lists & audiences', typeahead: false },
+  { facet: 'urn:li:adTargetingFacet:dynamicSegments', label: 'Dynamic & lookalike segments', group: 'Lists & audiences', typeahead: false },
+  { facet: 'urn:li:adTargetingFacet:firstDegreeConnectionCompanies', label: 'Connections of companies', group: 'Lists & audiences', typeahead: true },
+  // Education
+  { facet: 'urn:li:adTargetingFacet:degrees', label: 'Degrees', group: 'Education', typeahead: true },
+  { facet: 'urn:li:adTargetingFacet:fieldsOfStudy', label: 'Fields of study', group: 'Education', typeahead: true },
+  { facet: 'urn:li:adTargetingFacet:schools', label: 'Schools', group: 'Education', typeahead: true },
+  // Interests
+  { facet: 'urn:li:adTargetingFacet:interests', label: 'Member interests', group: 'Interests', typeahead: true },
+  { facet: 'urn:li:adTargetingFacet:memberBehaviors', label: 'Member traits / behaviors', group: 'Interests', typeahead: true },
+  { facet: 'urn:li:adTargetingFacet:groups', label: 'Member groups', group: 'Interests', typeahead: true },
+  // Demographics
+  { facet: 'urn:li:adTargetingFacet:ageRanges', label: 'Age ranges', group: 'Demographics', typeahead: false },
+  { facet: 'urn:li:adTargetingFacet:genders', label: 'Gender', group: 'Demographics', typeahead: false },
+  { facet: 'urn:li:adTargetingFacet:locations', label: 'Locations', group: 'Demographics', typeahead: true },
+  { facet: 'urn:li:adTargetingFacet:profileLocations', label: 'Profile locations', group: 'Demographics', typeahead: true },
+  { facet: 'urn:li:adTargetingFacet:interfaceLocales', label: 'Profile language', group: 'Demographics', typeahead: false },
 ];
 
-const kindColor: Record<EntityKind, string> = {
-  title: 'bg-primary/15 text-primary border-primary/30',
-  skill: 'bg-accent/15 text-accent-foreground border-accent/30',
-  company: 'bg-secondary text-secondary-foreground border-border',
-  industry: 'bg-muted text-muted-foreground border-border',
+const FACET_GROUPS = ['Job', 'Company', 'Lists & audiences', 'Education', 'Interests', 'Demographics'] as const;
+
+const shortOf = (facetUrn: string) => facetUrn.split(':').pop() || facetUrn;
+
+const LEGACY_KIND_FACET: Record<string, string> = {
+  title: 'urn:li:adTargetingFacet:titles',
+  skill: 'urn:li:adTargetingFacet:skills',
+  company: 'urn:li:adTargetingFacet:employers',
+  industry: 'urn:li:adTargetingFacet:industries',
 };
+
+const entityFacet = (e: TargetingEntity) =>
+  e.facet || LEGACY_KIND_FACET[e.type] || `urn:li:adTargetingFacet:${e.type}`;
+
+const facetLabel = (facetUrn: string) =>
+  FACETS.find((f) => f.facet === facetUrn)?.label ||
+  shortOf(facetUrn).replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase());
+
+const groupColor: Record<string, string> = {
+  Job: 'bg-primary/15 text-primary border-primary/30',
+  Company: 'bg-accent/15 text-accent-foreground border-accent/30',
+  'Lists & audiences': 'bg-secondary text-secondary-foreground border-border',
+  Education: 'bg-muted text-muted-foreground border-border',
+  Interests: 'bg-muted text-muted-foreground border-border',
+  Demographics: 'bg-muted text-muted-foreground border-border',
+};
+
+const colorForFacet = (facetUrn: string) =>
+  groupColor[FACETS.find((f) => f.facet === facetUrn)?.group || ''] ||
+  'bg-muted text-muted-foreground border-border';
+
 
 export function AudienceTemplates({ accessToken, selectedAccount, campaigns, canWrite }: Props) {
   const { toast } = useToast();
@@ -74,7 +145,7 @@ export function AudienceTemplates({ accessToken, selectedAccount, campaigns, can
   const [include, setInclude] = useState<TargetingEntity[]>([]);
   const [exclude, setExclude] = useState<TargetingEntity[]>([]);
   const [bucket, setBucket] = useState<'include' | 'exclude'>('include');
-  const [kind, setKind] = useState<EntityKind>('title');
+  const [activeFacet, setActiveFacet] = useState<string>(FACETS[0].facet);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<TargetingEntity[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -166,29 +237,44 @@ export function AudienceTemplates({ accessToken, selectedAccount, campaigns, can
     setSyncResults(null);
   };
 
+  const activeFacetDef = FACETS.find((f) => f.facet === activeFacet);
+
   const runSearch = async () => {
-    if (!accessToken || query.trim().length < 2) {
+    if (!accessToken) return;
+    if (activeFacetDef?.typeahead && query.trim().length < 2) {
       toast({ title: 'Enter at least 2 characters', variant: 'destructive' });
       return;
     }
-    const cfg = KINDS.find((k) => k.key === kind)!;
     setIsSearching(true);
     try {
       const { data, error } = await supabase.functions.invoke('linkedin-api', {
-        body: { action: cfg.action, accessToken, params: { query: query.trim() } },
+        body: {
+          action: 'search_targeting_entities',
+          accessToken,
+          params: { facet: activeFacet, query: query.trim() },
+        },
       });
       if (error) throw error;
-      const items = (data?.[cfg.field] || []) as any[];
+      if (data?.error && !(data?.entities || []).length) throw new Error(data.error);
+      const items = (data?.entities || []) as any[];
       setResults(
         items.map((i) => ({
           id: i.id,
           urn: i.urn,
           name: i.name,
-          type: kind,
-          targetable: i.targetable,
+          facet: activeFacet,
+          type: shortOf(activeFacet),
+          targetable: i.targetable !== false,
         })),
       );
-      if (!items.length) toast({ title: 'No results', description: `Nothing found for "${query}".` });
+      if (!items.length) {
+        toast({
+          title: 'No results',
+          description: query.trim()
+            ? `Nothing found for "${query}" in ${facetLabel(activeFacet)}.`
+            : `${facetLabel(activeFacet)} returned no values for this account.`,
+        });
+      }
     } catch (err) {
       toast({
         title: 'Search failed',
@@ -199,6 +285,7 @@ export function AudienceTemplates({ accessToken, selectedAccount, campaigns, can
       setIsSearching(false);
     }
   };
+
 
   const addEntity = (e: TargetingEntity) => {
     const setter = bucket === 'include' ? setInclude : setExclude;
@@ -379,16 +466,30 @@ export function AudienceTemplates({ accessToken, selectedAccount, campaigns, can
             {/* Search */}
             <div className="space-y-2 rounded-lg border border-border p-3">
               <div className="flex flex-wrap items-center gap-2">
-                {KINDS.map((k) => (
-                  <Button
-                    key={k.key}
-                    size="sm"
-                    variant={kind === k.key ? 'default' : 'outline'}
-                    onClick={() => setKind(k.key)}
-                  >
-                    {k.label}
-                  </Button>
-                ))}
+                <Select
+                  value={activeFacet}
+                  onValueChange={(v) => {
+                    setActiveFacet(v);
+                    setResults([]);
+                    setQuery('');
+                  }}
+                >
+                  <SelectTrigger className="w-[280px]">
+                    <SelectValue placeholder="Targeting field" />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-72">
+                    {FACET_GROUPS.map((g) => (
+                      <SelectGroup key={g}>
+                        <SelectLabel>{g}</SelectLabel>
+                        {FACETS.filter((f) => f.group === g).map((f) => (
+                          <SelectItem key={f.facet} value={f.facet}>
+                            {f.label}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <Separator orientation="vertical" className="mx-1 h-6" />
                 <Button
                   size="sm"
@@ -410,13 +511,26 @@ export function AudienceTemplates({ accessToken, selectedAccount, campaigns, can
 
               <div className="flex gap-2">
                 <Input
-                  placeholder={`Search ${kind}s…`}
+                  placeholder={
+                    activeFacetDef?.typeahead
+                      ? `Search ${facetLabel(activeFacet).toLowerCase()}…`
+                      : `Browse all ${facetLabel(activeFacet).toLowerCase()} values — optional filter`
+                  }
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && runSearch()}
                 />
                 <Button onClick={runSearch} disabled={isSearching}>
-                  {isSearching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                  {isSearching ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : activeFacetDef?.typeahead ? (
+                    <Search className="h-4 w-4" />
+                  ) : (
+                    <>
+                      <Layers className="mr-1 h-4 w-4" />
+                      Load values
+                    </>
+                  )}
                 </Button>
               </div>
 
@@ -441,6 +555,11 @@ export function AudienceTemplates({ accessToken, selectedAccount, campaigns, can
             <div className="grid gap-3 md:grid-cols-2">
               {(['include', 'exclude'] as const).map((b) => {
                 const list = b === 'include' ? include : exclude;
+                const byFacet = list.reduce<Record<string, TargetingEntity[]>>((acc, e) => {
+                  const f = entityFacet(e);
+                  (acc[f] ||= []).push(e);
+                  return acc;
+                }, {});
                 return (
                   <div key={b} className="rounded-lg border border-border p-3">
                     <div className="mb-2 flex items-center justify-between">
@@ -455,20 +574,29 @@ export function AudienceTemplates({ accessToken, selectedAccount, campaigns, can
                         </Button>
                       )}
                     </div>
-                    <ScrollArea className="max-h-40">
-                      <div className="flex flex-wrap gap-1.5 pr-2">
-                        {list.map((e) => (
-                          <Badge
-                            key={e.urn}
-                            variant="outline"
-                            className={`gap-1 ${kindColor[e.type as EntityKind]}`}
-                          >
-                            {e.name}
-                            <X
-                              className="h-3 w-3 cursor-pointer"
-                              onClick={() => removeEntity(e.urn, b)}
-                            />
-                          </Badge>
+                    <ScrollArea className="max-h-56">
+                      <div className="space-y-2 pr-2">
+                        {Object.entries(byFacet).map(([f, items]) => (
+                          <div key={f}>
+                            <div className="mb-1 text-[11px] uppercase tracking-wide text-muted-foreground">
+                              {facetLabel(f)} ({items.length})
+                            </div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {items.map((e) => (
+                                <Badge
+                                  key={`${f}-${e.urn}`}
+                                  variant="outline"
+                                  className={`gap-1 ${colorForFacet(f)}`}
+                                >
+                                  {e.name}
+                                  <X
+                                    className="h-3 w-3 cursor-pointer"
+                                    onClick={() => removeEntity(e.urn, b)}
+                                  />
+                                </Badge>
+                              ))}
+                            </div>
+                          </div>
                         ))}
                         {!list.length && (
                           <span className="text-xs text-muted-foreground">Nothing yet.</span>
@@ -479,6 +607,7 @@ export function AudienceTemplates({ accessToken, selectedAccount, campaigns, can
                 );
               })}
             </div>
+
 
             <div className="flex flex-wrap gap-2">
               <Button onClick={handleSave} disabled={!draftName.trim()}>
