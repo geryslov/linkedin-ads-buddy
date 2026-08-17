@@ -213,10 +213,8 @@ export function useAudienceTemplates(accountId: string | null) {
             params: {
               campaignIds,
               mode,
-              titleUrns: urnsOf(entities, 'title'),
-              skillUrns: urnsOf(entities, 'skill'),
-              companyUrns: urnsOf(entities, 'company'),
-              industryUrns: urnsOf(entities, 'industry'),
+              facets: facetMap(entities),
+
             },
           };
           const { data, error } = await supabase.functions.invoke('linkedin-api', { body });
