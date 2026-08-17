@@ -7577,6 +7577,71 @@ serve(async (req) => {
         });
       }
 
+      case 'search_industries': {
+        const { query } = params;
+
+        if (!query || query.trim().length < 2) {
+          return new Response(JSON.stringify({
+            industries: [],
+            message: 'Query must be at least 2 characters'
+          }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        console.log(`[search_industries] Searching for industries matching "${query}"`);
+
+        const industrySearchUrl = `https://api.linkedin.com/rest/adTargetingEntities?q=typeahead&facet=urn%3Ali%3AadTargetingFacet%3Aindustries&query=${encodeURIComponent(query.trim())}&count=50`;
+
+        const industryResponse = await fetch(industrySearchUrl, {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'X-Restli-Protocol-Version': '2.0.0',
+            'LinkedIn-Version': '202511',
+          },
+        });
+
+        if (!industryResponse.ok) {
+          const errorText = await industryResponse.text();
+          console.error(`[search_industries] API error ${industryResponse.status}:`, errorText);
+          return new Response(JSON.stringify({
+            error: `LinkedIn API error: ${industryResponse.status}`,
+            details: errorText,
+            industries: []
+          }), {
+            status: industryResponse.status,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+
+        const industryData = await industryResponse.json();
+        console.log(`[search_industries] Typeahead returned ${industryData.elements?.length || 0} results`);
+
+        const industries = (industryData.elements || []).map((el: any) => {
+          const urn = el.urn || el.entity || '';
+          const rawName = el.name?.localized?.en_US ||
+            el.name?.localized?.[Object.keys(el.name?.localized || {})[0]] ||
+            el.displayName ||
+            el.name ||
+            'Unknown Industry';
+          const idMatch = urn.match(/:(\d+)$/);
+          return {
+            id: idMatch ? idMatch[1] : '',
+            urn,
+            name: typeof rawName === 'string' ? rawName : JSON.stringify(rawName),
+            targetable: true,
+            facetUrn: el.facetUrn || 'urn:li:adTargetingFacet:industries',
+          };
+        }).filter((c: any) => !!c.urn);
+
+        return new Response(JSON.stringify({
+          industries,
+          source: 'adTargetingEntities',
+          count: industries.length
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+
 
 
       case 'sync_ad_accounts': {
@@ -8295,11 +8360,12 @@ serve(async (req) => {
       case 'update_campaign_targeting': {
         // Support both single campaignId and array of campaignIds
         // NOTE: accountId is no longer required - derived from campaign
-        let { campaignId, campaignIds, titleUrns, skillUrns, companyUrns, mode } = params;
+        let { campaignId, campaignIds, titleUrns, skillUrns, companyUrns, industryUrns, mode } = params;
         // Dedupe URNs — LinkedIn rejects targeting facets with duplicate values (INVALID_VALUE_DUPLICATE_EXIST)
         if (Array.isArray(titleUrns)) titleUrns = Array.from(new Set(titleUrns));
         if (Array.isArray(skillUrns)) skillUrns = Array.from(new Set(skillUrns));
         if (Array.isArray(companyUrns)) companyUrns = Array.from(new Set(companyUrns));
+        if (Array.isArray(industryUrns)) industryUrns = Array.from(new Set(industryUrns));
 
         
         // Normalize to array
@@ -8501,25 +8567,27 @@ serve(async (req) => {
             
             // Step 5: Build targeting criteria
             let targetingCriteria: any;
-            
+
+            const FACET_TITLES = 'urn:li:adTargetingFacet:titles';
+            const FACET_SKILLS = 'urn:li:adTargetingFacet:skills';
+            const FACET_EMPLOYERS = 'urn:li:adTargetingFacet:employers';
+            const FACET_INDUSTRIES = 'urn:li:adTargetingFacet:industries';
+
+            const facetPayload: Array<[string, string[]]> = [
+              [FACET_TITLES, titleUrns || []],
+              [FACET_SKILLS, skillUrns || []],
+              [FACET_EMPLOYERS, companyUrns || []],
+              [FACET_INDUSTRIES, industryUrns || []],
+            ].filter(([, urns]) => Array.isArray(urns) && urns.length > 0) as Array<[string, string[]]>;
+
             if (mode === 'exclude') {
-              // EXCLUDE MODE — leave include untouched, merge into exclusion facets.
+              // EXCLUDE MODE — leave include untouched, merge into exclusion facets (single OR map).
               const existingExcludeOr: Record<string, string[]> = existingTargeting?.exclude?.or || {};
               const mergedOr: Record<string, string[]> = { ...existingExcludeOr };
 
-              const mergeFacet = (facet: string, urns: string[]) => {
+              for (const [facet, urns] of facetPayload) {
                 const current = Array.isArray(mergedOr[facet]) ? mergedOr[facet] : [];
                 mergedOr[facet] = Array.from(new Set([...current, ...urns]));
-              };
-
-              if (titleUrns && titleUrns.length > 0) {
-                mergeFacet('urn:li:adTargetingFacet:titles', titleUrns);
-              }
-              if (skillUrns && skillUrns.length > 0) {
-                mergeFacet('urn:li:adTargetingFacet:skills', skillUrns);
-              }
-              if (companyUrns && companyUrns.length > 0) {
-                mergeFacet('urn:li:adTargetingFacet:employers', companyUrns);
               }
 
               targetingCriteria = {
@@ -8528,41 +8596,18 @@ serve(async (req) => {
               };
             } else if (mode === 'replace') {
               // Preserve ALL existing facets except the ones we're explicitly replacing.
-              // Previous logic dropped any clause that wasn't a "required" facet, which broke
-              // Message/Conversation Ads campaigns that require industries/seniorities/etc to stay.
               const existingAndClauses: any[] = existingTargeting?.include?.and || [];
-
-              const replacedFacets = [
-                ...(titleUrns ? ['urn:li:adTargetingFacet:titles'] : []),
-                ...(skillUrns ? ['urn:li:adTargetingFacet:skills'] : []),
-                ...(companyUrns ? ['urn:li:adTargetingFacet:employers'] : []),
-              ];
+              const replacedFacets = facetPayload.map(([facet]) => facet);
 
               const preservedClauses = existingAndClauses.filter((clause: any) => {
                 if (!clause.or) return true;
                 const facetKeys = Object.keys(clause.or);
-                // Drop only the facets we're replacing; keep everything else intact.
                 return !facetKeys.some(key => replacedFacets.includes(key));
               });
 
               const newAndClauses = [...preservedClauses];
-
-              if (titleUrns && titleUrns.length > 0) {
-                newAndClauses.push({
-                  or: { 'urn:li:adTargetingFacet:titles': titleUrns }
-                });
-              }
-
-              if (skillUrns && skillUrns.length > 0) {
-                newAndClauses.push({
-                  or: { 'urn:li:adTargetingFacet:skills': skillUrns }
-                });
-              }
-
-              if (companyUrns && companyUrns.length > 0) {
-                newAndClauses.push({
-                  or: { 'urn:li:adTargetingFacet:employers': companyUrns }
-                });
+              for (const [facet, urns] of facetPayload) {
+                newAndClauses.push({ or: { [facet]: urns } });
               }
 
               targetingCriteria = {
@@ -8570,29 +8615,22 @@ serve(async (req) => {
                 exclude: existingTargeting?.exclude || {}
               };
             } else {
-              // APPEND MODE
+              // APPEND MODE — widen an existing facet (OR within the same facet) instead of
+              // pushing a brand new AND clause, which would intersect and collapse the audience.
               const existingAndClauses: any[] = existingTargeting?.include?.and || [];
-              const newAndClauses = [...existingAndClauses];
-              
-              if (titleUrns && titleUrns.length > 0) {
-                newAndClauses.push({
-                  or: { 'urn:li:adTargetingFacet:titles': titleUrns }
-                });
-              }
-              
-              if (skillUrns && skillUrns.length > 0) {
-                newAndClauses.push({
-                  or: { 'urn:li:adTargetingFacet:skills': skillUrns }
-                });
+              const newAndClauses = existingAndClauses.map((clause: any) =>
+                clause?.or ? { ...clause, or: { ...clause.or } } : clause
+              );
+
+              for (const [facet, urns] of facetPayload) {
+                const target = newAndClauses.find((clause: any) => clause?.or && Array.isArray(clause.or[facet]));
+                if (target) {
+                  target.or[facet] = Array.from(new Set([...target.or[facet], ...urns]));
+                } else {
+                  newAndClauses.push({ or: { [facet]: urns } });
+                }
               }
 
-              if (companyUrns && companyUrns.length > 0) {
-                newAndClauses.push({
-                  or: { 'urn:li:adTargetingFacet:employers': companyUrns }
-                });
-              }
-
-              
               targetingCriteria = {
                 include: { and: newAndClauses },
                 exclude: existingTargeting?.exclude || {}
