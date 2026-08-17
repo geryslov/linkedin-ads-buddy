@@ -288,6 +288,42 @@ export function AudienceTemplates({ accessToken, selectedAccount, campaigns, can
               />
             </div>
 
+            {/* Import from an existing campaign */}
+            <div className="space-y-2 rounded-lg border border-dashed border-border p-3">
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <Download className="h-4 w-4 text-primary" />
+                Start from an existing campaign
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Pulls that campaign's current titles, skills, companies and industries — including its
+                exclusions — into the editor below so you can tweak instead of rebuild.
+              </p>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <div className="flex-1">
+                  <CampaignSearchSelect
+                    campaigns={campaigns}
+                    selectedCampaignIds={importCampaignId ? [importCampaignId] : []}
+                    onChange={(ids) => setImportCampaignId(ids.length ? ids[ids.length - 1] : null)}
+                    disabled={isImporting}
+                  />
+                </div>
+                <Button
+                  variant="outline"
+                  onClick={importFromCampaign}
+                  disabled={!importCampaignId || isImporting}
+                >
+                  {isImporting ? (
+                    <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Download className="mr-1 h-3.5 w-3.5" />
+                  )}
+                  Import targeting
+                </Button>
+              </div>
+            </div>
+
+
+
             {/* Search */}
             <div className="space-y-2 rounded-lg border border-border p-3">
               <div className="flex flex-wrap items-center gap-2">
