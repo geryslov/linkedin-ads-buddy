@@ -446,6 +446,17 @@ export default function Dashboard() {
           />
         )}
 
+        {activeTab === "audience_templates" && (
+          <AudienceTemplates
+            accessToken={accessToken}
+            selectedAccount={selectedAccount}
+            campaigns={campaigns.map((c) => ({ id: c.id, name: c.name, status: c.status }))}
+            canWrite={currentAccountCanWrite}
+          />
+        )}
+
+
+
         {activeTab === "reports" && (
           <ReportingSection
             accessToken={accessToken}
