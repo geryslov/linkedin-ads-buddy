@@ -113,6 +113,8 @@ The probe was deployed out-of-band (via Lovable, not CI) and verified live — `
 
 ## Aug 2026 — Making the MCP a product
 
+**Aug 17 — Audience Template exclusion sync corrected.** Templates with exactly 100 visible titles could still fail because their exclusion call used additive Campaign Editor semantics: a campaign's existing exclusions were merged with the template, producing more than 100. Audience Template exclusions now replace the supplied exclusion facets, preflight the final replacement independently from includes, and save/apply the visible editor draft so removed chips cannot be bypassed by a stale saved template. Campaign Editor exclusion remains additive.
+
 The MCP was built as a single-tenant convenience and the auth model said so out loud. The
 `mcp_api_keys` migration comment read *"the api_key (UUID) is the secret — possessing it is the
 auth."* The table had no `user_id`, no expiry, no revoked flag; RLS was `using(true)` and four

@@ -367,7 +367,31 @@ export function AudienceTemplates({ accessToken, selectedAccount, campaigns, can
       toast({ title: 'Pick at least one campaign', variant: 'destructive' });
       return;
     }
-    const res = await syncAudience(accessToken, activeTemplate, targets);
+    const draftTemplate: AudienceTemplate = {
+      ...activeTemplate,
+      name: draftName.trim(),
+      description: draftDescription || null,
+      entities: include,
+      exclude_entities: exclude,
+    };
+    const hasUnsavedChanges =
+      draftTemplate.name !== activeTemplate.name ||
+      draftTemplate.description !== activeTemplate.description ||
+      JSON.stringify(draftTemplate.entities) !== JSON.stringify(activeTemplate.entities) ||
+      JSON.stringify(draftTemplate.exclude_entities) !== JSON.stringify(activeTemplate.exclude_entities);
+
+    if (hasUnsavedChanges) {
+      const saved = await saveTemplate({
+        id: activeTemplate.id,
+        name: draftTemplate.name,
+        description: draftDescription,
+        entities: draftTemplate.entities,
+        exclude_entities: draftTemplate.exclude_entities,
+      });
+      if (!saved) return;
+    }
+
+    const res = await syncAudience(accessToken, draftTemplate, targets);
     setSyncResults(res);
     const okCount = res.filter((r) => r.success).length;
     toast({
@@ -691,8 +715,12 @@ export function AudienceTemplates({ accessToken, selectedAccount, campaigns, can
                         {facetLabel(f)}
                       </span>
                       <span className="flex shrink-0 items-center gap-2 text-[11px] text-muted-foreground">
-                        <span className="text-primary">{inc.length} incl.</span>
-                        <span className="text-destructive">{exc.length} excl.</span>
+                        <span className={inc.length > 100 ? 'font-semibold text-destructive' : 'text-primary'}>
+                          Include {inc.length} / 100
+                        </span>
+                        <span className={exc.length > 100 ? 'font-semibold text-destructive' : 'text-destructive'}>
+                          Exclude {exc.length} / 100
+                        </span>
                       </span>
                     </button>
 

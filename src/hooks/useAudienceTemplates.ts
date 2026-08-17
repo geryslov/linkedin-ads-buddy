@@ -26,6 +26,17 @@ export interface SyncResult {
   campaignId: string;
   success: boolean;
   message: string;
+  errorCode?: string;
+  facets?: Array<{
+    facet: string;
+    existing: number;
+    requested: number;
+    willAdd: number;
+    total: number;
+    room: number;
+    overLimit: boolean;
+    dropped: number;
+  }>;
 }
 
 /** Legacy short kinds → full LinkedIn facet URNs (older templates have no `facet` field). */
@@ -206,9 +217,13 @@ export function useAudienceTemplates(accountId: string | null) {
       try {
         const campaignIds = campaigns.map((c) => c.id);
 
-        const call = async (mode: 'replace' | 'exclude', entities: TargetingEntity[]) => {
+        const call = async (
+          action: 'preflight_campaign_targeting' | 'update_campaign_targeting',
+          mode: 'replace' | 'replace_exclude',
+          entities: TargetingEntity[],
+        ) => {
           const body = {
-            action: 'update_campaign_targeting',
+            action,
             accessToken,
             params: {
               campaignIds,
@@ -222,10 +237,32 @@ export function useAudienceTemplates(accountId: string | null) {
           return (data?.results || []) as SyncResult[];
         };
 
-        let results: SyncResult[] = [];
-        if (template.entities.length) results = await call('replace', template.entities);
+        const preflightResults: SyncResult[] = [];
+        if (template.entities.length) {
+          preflightResults.push(...await call('preflight_campaign_targeting', 'replace', template.entities));
+        }
         if (template.exclude_entities.length) {
-          const excl = await call('exclude', template.exclude_entities);
+          preflightResults.push(...await call('preflight_campaign_targeting', 'replace_exclude', template.exclude_entities));
+        }
+
+        const blockedByCampaign = new Map<string, SyncResult>();
+        for (const result of preflightResults) {
+          if (result.success) continue;
+          const previous = blockedByCampaign.get(result.campaignId);
+          blockedByCampaign.set(result.campaignId, {
+            ...result,
+            message: [previous?.message, result.message].filter(Boolean).join(' · '),
+            facets: [...(previous?.facets || []), ...(result.facets || [])],
+          });
+        }
+        if (blockedByCampaign.size) return Array.from(blockedByCampaign.values());
+
+        let results: SyncResult[] = [];
+        if (template.entities.length) {
+          results = await call('update_campaign_targeting', 'replace', template.entities);
+        }
+        if (template.exclude_entities.length) {
+          const excl = await call('update_campaign_targeting', 'replace_exclude', template.exclude_entities);
           const byId = new Map(results.map((r) => [r.campaignId, r]));
           excl.forEach((r) => {
             const prev = byId.get(r.campaignId);

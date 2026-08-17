@@ -8836,6 +8836,10 @@ serve(async (req) => {
 
               if (mode === 'exclude') {
                 existingValues = (existingTargeting?.exclude?.or || {})[facet] || [];
+              } else if (mode === 'replace_exclude') {
+                // Audience templates are authoritative for the facets they contain.
+                // Replacing exclusions must not count the campaign's old values.
+                existingValues = [];
               } else if (mode !== 'replace') {
                 // Append: the destination is whichever include clause already holds this facet.
                 const clauses: any[] = existingTargeting?.include?.and || [];
@@ -8921,6 +8925,20 @@ serve(async (req) => {
               targetingCriteria = {
                 include: existingTargeting?.include || { and: [] },
                 exclude: { or: mergedOr }
+              };
+            } else if (mode === 'replace_exclude') {
+              // AUDIENCE TEMPLATE EXCLUSION REPLACE — preserve exclusion facets not supplied
+              // by this template, but make every supplied facet exactly match the template.
+              const existingExcludeOr: Record<string, string[]> = existingTargeting?.exclude?.or || {};
+              const replacedOr: Record<string, string[]> = { ...existingExcludeOr };
+
+              for (const [facet, urns] of facetPayload) {
+                replacedOr[facet] = urns;
+              }
+
+              targetingCriteria = {
+                include: existingTargeting?.include || { and: [] },
+                exclude: { or: replacedOr }
               };
             } else if (mode === 'replace') {
               // Preserve ALL existing facets except the ones we're explicitly replacing.
