@@ -310,6 +310,19 @@ export function AudienceTemplates({ accessToken, selectedAccount, campaigns, can
     setter([...list, e]);
   };
 
+  const addEntities = (items: TargetingEntity[], to: 'include' | 'exclude') => {
+    const list = to === 'include' ? include : exclude;
+    const existing = new Set(list.map((x) => x.urn));
+    const fresh = items.filter((e) => !existing.has(e.urn));
+    if (!fresh.length) {
+      toast({ title: 'Already added', description: 'All of those values are in the list.' });
+      return;
+    }
+    (to === 'include' ? setInclude : setExclude)([...list, ...fresh]);
+    toast({ title: `Added ${fresh.length} to ${to}` });
+  };
+
+
   const removeEntity = (urn: string, from: 'include' | 'exclude') => {
     if (from === 'include') setInclude(include.filter((e) => e.urn !== urn));
     else setExclude(exclude.filter((e) => e.urn !== urn));
