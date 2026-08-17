@@ -8388,34 +8388,37 @@ serve(async (req) => {
         const campJson = await campResp.json();
         const tc = campJson.targetingCriteria || {};
 
-        const FACET_MAP: Record<string, 'title' | 'skill' | 'company' | 'industry'> = {
+        // Legacy short names kept for the four original kinds so saved templates keep working.
+        const LEGACY_KIND: Record<string, string> = {
           'urn:li:adTargetingFacet:titles': 'title',
           'urn:li:adTargetingFacet:skills': 'skill',
           'urn:li:adTargetingFacet:employers': 'company',
           'urn:li:adTargetingFacet:industries': 'industry',
         };
+        const kindOf = (facet: string) => LEGACY_KIND[facet] || (facet.split(':').pop() || facet);
 
-        const collect = (orMap: any, out: Map<string, 'title' | 'skill' | 'company' | 'industry'>) => {
+        type Row = { urn: string; facet: string };
+        const collect = (orMap: any, out: Map<string, Row>) => {
           if (!orMap) return;
           for (const [facet, values] of Object.entries(orMap)) {
-            const kind = FACET_MAP[facet];
-            if (!kind || !Array.isArray(values)) continue;
-            for (const v of values as string[]) if (typeof v === 'string') out.set(v, kind);
+            if (!Array.isArray(values)) continue;
+            for (const v of values as string[]) if (typeof v === 'string') out.set(v, { urn: v, facet });
           }
         };
 
-        const includeMap = new Map<string, 'title' | 'skill' | 'company' | 'industry'>();
-        const excludeMap = new Map<string, 'title' | 'skill' | 'company' | 'industry'>();
+        const includeMap = new Map<string, Row>();
+        const excludeMap = new Map<string, Row>();
         for (const clause of (tc?.include?.and || [])) collect(clause?.or, includeMap);
         collect(tc?.exclude?.or, excludeMap);
 
-        const allUrns = [...new Set([...includeMap.keys(), ...excludeMap.keys()])];
+        const allRows = [...new Map([...includeMap, ...excludeMap]).values()];
+        const allUrns = allRows.map((r) => r.urn);
         const names = new Map<string, string>();
 
         // 1) Titles via standardizedTitles batch
-        const titleIds = allUrns
-          .filter((u) => (includeMap.get(u) || excludeMap.get(u)) === 'title')
-          .map((u) => u.split(':').pop() as string);
+        const titleIds = allRows
+          .filter((r) => r.facet === 'urn:li:adTargetingFacet:titles')
+          .map((r) => r.urn.split(':').pop() as string);
         for (let i = 0; i < titleIds.length; i += 50) {
           const batch = titleIds.slice(i, i + 50);
           try {
@@ -8457,12 +8460,35 @@ serve(async (req) => {
           }
         }
 
-        const toEntities = (m: Map<string, 'title' | 'skill' | 'company' | 'industry'>) =>
-          [...m.entries()].map(([urn, type]) => ({
+        // 3) Enumerable facets (seniorities, company size, revenue, functions, degrees…)
+        //    don't resolve through q=urns — pull the facet's full value list and map by urn.
+        const stillMissing = allRows.filter((r) => !names.has(r.urn));
+        const missingFacets = [...new Set(stillMissing.map((r) => r.facet))];
+        for (const facet of missingFacets) {
+          try {
+            const r = await fetch(
+              `https://api.linkedin.com/rest/adTargetingEntities?q=adTargetingFacet&facet=${encodeURIComponent(facet)}&count=1000`,
+              { headers: liHeaders }
+            );
+            if (!r.ok) continue;
+            const d = await r.json();
+            for (const el of (d.elements || [])) {
+              const urn = el?.urn || el?.facetUrn;
+              const nm = el?.name || el?.localizedName;
+              if (urn && nm && !names.has(urn)) names.set(urn, nm);
+            }
+          } catch (e) {
+            console.error('[get_campaign_targeting_entities] facet list resolve error:', facet, e);
+          }
+        }
+
+        const toEntities = (m: Map<string, Row>) =>
+          [...m.values()].map(({ urn, facet }) => ({
             id: urn.split(':').pop() as string,
             urn,
+            facet,
             name: names.get(urn) || urn.split(':').pop() as string,
-            type,
+            type: kindOf(facet),
             targetable: true,
           }));
 
@@ -8471,9 +8497,85 @@ serve(async (req) => {
           campaignName: campJson.name || null,
           include: toEntities(includeMap),
           exclude: toEntities(excludeMap),
+          facets: [...new Set(allRows.map((r) => r.facet))],
           unresolved: allUrns.filter((u) => !names.has(u)).length,
         }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
+
+      // Generic targeting-entity search across ANY LinkedIn facet.
+      // Typeahead facets use q=typeahead; enumerable ones (seniority, company size,
+      // revenue, function, degrees, matched-audience lists…) return their full value set.
+      case 'search_targeting_entities': {
+        const { facet, query } = params || {};
+        if (!facet || typeof facet !== 'string') {
+          return new Response(JSON.stringify({ error: 'facet is required' }), {
+            status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+
+        const liHeaders = {
+          'Authorization': `Bearer ${accessToken}`,
+          'X-Restli-Protocol-Version': '2.0.0',
+          'LinkedIn-Version': '202511',
+        };
+
+        const TYPEAHEAD = new Set([
+          'urn:li:adTargetingFacet:titles',
+          'urn:li:adTargetingFacet:skills',
+          'urn:li:adTargetingFacet:employers',
+          'urn:li:adTargetingFacet:industries',
+          'urn:li:adTargetingFacet:schools',
+          'urn:li:adTargetingFacet:fieldsOfStudy',
+          'urn:li:adTargetingFacet:degrees',
+          'urn:li:adTargetingFacet:groups',
+          'urn:li:adTargetingFacet:followedCompanies',
+          'urn:li:adTargetingFacet:memberBehaviors',
+          'urn:li:adTargetingFacet:interests',
+          'urn:li:adTargetingFacet:locations',
+          'urn:li:adTargetingFacet:profileLocations',
+          'urn:li:adTargetingFacet:interfaceLocales',
+          'urn:li:adTargetingFacet:employersPast',
+          'urn:li:adTargetingFacet:employersAll',
+          'urn:li:adTargetingFacet:titlesPast',
+          'urn:li:adTargetingFacet:titlesAll',
+          'urn:li:adTargetingFacet:jobTitles',
+        ]);
+
+        const q = typeof query === 'string' ? query.trim() : '';
+        const useTypeahead = TYPEAHEAD.has(facet) && q.length >= 2;
+
+        const url = useTypeahead
+          ? `https://api.linkedin.com/rest/adTargetingEntities?q=typeahead&facet=${encodeURIComponent(facet)}&query=${encodeURIComponent(q)}&count=50`
+          : `https://api.linkedin.com/rest/adTargetingEntities?q=adTargetingFacet&facet=${encodeURIComponent(facet)}&count=1000`;
+
+        const r = await fetch(url, { headers: liHeaders });
+        if (!r.ok) {
+          const t = await r.text();
+          console.error(`[search_targeting_entities] ${facet} ${r.status}: ${t.slice(0, 300)}`);
+          return new Response(JSON.stringify({
+            entities: [],
+            error: `LinkedIn returned ${r.status} for ${facet.split(':').pop()}`,
+          }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+        const d = await r.json();
+        let entities = (d.elements || [])
+          .map((el: any) => {
+            const urn = el?.urn || el?.facetUrn;
+            const name = el?.name || el?.localizedName || (urn ? String(urn).split(':').pop() : '');
+            return urn ? { id: String(urn).split(':').pop(), urn, facet, name, targetable: el?.targetable !== false } : null;
+          })
+          .filter(Boolean);
+
+        if (!useTypeahead && q.length) {
+          const needle = q.toLowerCase();
+          entities = entities.filter((e: any) => String(e.name).toLowerCase().includes(needle));
+        }
+
+        return new Response(JSON.stringify({ facet, entities: entities.slice(0, 300) }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
 
 
       case 'preflight_campaign_targeting':
