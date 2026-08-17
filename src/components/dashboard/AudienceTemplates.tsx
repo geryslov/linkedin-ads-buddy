@@ -227,29 +227,44 @@ export function AudienceTemplates({ accessToken, selectedAccount, campaigns, can
     setSyncResults(null);
   };
 
+  const activeFacetDef = FACETS.find((f) => f.facet === activeFacet);
+
   const runSearch = async () => {
-    if (!accessToken || query.trim().length < 2) {
+    if (!accessToken) return;
+    if (activeFacetDef?.typeahead && query.trim().length < 2) {
       toast({ title: 'Enter at least 2 characters', variant: 'destructive' });
       return;
     }
-    const cfg = KINDS.find((k) => k.key === kind)!;
     setIsSearching(true);
     try {
       const { data, error } = await supabase.functions.invoke('linkedin-api', {
-        body: { action: cfg.action, accessToken, params: { query: query.trim() } },
+        body: {
+          action: 'search_targeting_entities',
+          accessToken,
+          params: { facet: activeFacet, query: query.trim() },
+        },
       });
       if (error) throw error;
-      const items = (data?.[cfg.field] || []) as any[];
+      if (data?.error && !(data?.entities || []).length) throw new Error(data.error);
+      const items = (data?.entities || []) as any[];
       setResults(
         items.map((i) => ({
           id: i.id,
           urn: i.urn,
           name: i.name,
-          type: kind,
-          targetable: i.targetable,
+          facet: activeFacet,
+          type: shortOf(activeFacet),
+          targetable: i.targetable !== false,
         })),
       );
-      if (!items.length) toast({ title: 'No results', description: `Nothing found for "${query}".` });
+      if (!items.length) {
+        toast({
+          title: 'No results',
+          description: query.trim()
+            ? `Nothing found for "${query}" in ${facetLabel(activeFacet)}.`
+            : `${facetLabel(activeFacet)} returned no values for this account.`,
+        });
+      }
     } catch (err) {
       toast({
         title: 'Search failed',
@@ -260,6 +275,7 @@ export function AudienceTemplates({ accessToken, selectedAccount, campaigns, can
       setIsSearching(false);
     }
   };
+
 
   const addEntity = (e: TargetingEntity) => {
     const setter = bucket === 'include' ? setInclude : setExclude;
