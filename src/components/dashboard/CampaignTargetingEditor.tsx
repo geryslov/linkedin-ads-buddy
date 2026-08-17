@@ -733,6 +733,94 @@ export function CampaignTargetingEditor({
                 Viewer access only — contact your Campaign Manager for write permissions.
               </div>
             )}
+
+            {/* ── CAPACITY PRE-CHECK (LinkedIn caps each facet at 100 values per campaign) ── */}
+            {isPreflighting && (
+              <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Checking campaign capacity…
+              </div>
+            )}
+
+            {!isPreflighting && overLimitPreflight.length > 0 && (
+              <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="flex items-center gap-2 font-medium">
+                    <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                    {overLimitPreflight.length} of {selectedCampaignIds.length} campaigns will exceed LinkedIn's 100-value facet limit.
+                  </span>
+                  <button
+                    className="underline underline-offset-2 shrink-0"
+                    onClick={() => setShowPreflightDetail(v => !v)}
+                  >
+                    {showPreflightDetail ? 'Hide' : 'Show'} details
+                  </button>
+                </div>
+
+                {showPreflightDetail && (
+                  <ul className="mt-2 space-y-1">
+                    {overLimitPreflight.map(r => (
+                      <li key={r.campaignId} className="leading-snug">
+                        <span className="font-medium">{campaignName(r.campaignId)}</span>
+                        {' — '}
+                        {(r.facets || []).filter(f => f.overLimit).map(f =>
+                          `${facetLabel(f.facet)}: ${f.existing} existing + ${f.willAdd} new = ${f.total} (room for ${f.room})`
+                        ).join('; ')}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+
+                <label className="mt-2 flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={fillToLimit}
+                    onChange={(e) => setFillToLimit(e.target.checked)}
+                    className="h-3.5 w-3.5 accent-amber-600"
+                  />
+                  Fill to the limit instead of skipping — add as many as fit, in selection order
+                </label>
+              </div>
+            )}
+
+            {/* ── PER-CAMPAIGN RESULT REPORT ── */}
+            {applyResults && applyResults.length > 0 && (
+              <div className="mt-3 rounded-lg border border-border bg-muted/40 px-3 py-2">
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <span className="text-xs font-semibold">
+                    Result — {applyResults.filter(r => r.success).length} updated
+                    {applyResults.some(r => r.errorCode === 'FACET_LIMIT_EXCEEDED') && `, ${applyResults.filter(r => r.errorCode === 'FACET_LIMIT_EXCEEDED').length} skipped`}
+                    {applyResults.some(r => !r.success && r.errorCode !== 'FACET_LIMIT_EXCEEDED') && `, ${applyResults.filter(r => !r.success && r.errorCode !== 'FACET_LIMIT_EXCEEDED').length} failed`}
+                  </span>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => copyReport(applyResults)}>
+                      Copy report
+                    </Button>
+                    <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setApplyResults(null)}>
+                      Dismiss
+                    </Button>
+                  </div>
+                </div>
+                <ScrollArea className="max-h-48">
+                  <ul className="space-y-1 pr-2">
+                    {applyResults.map(r => {
+                      const skipped = r.errorCode === 'FACET_LIMIT_EXCEEDED';
+                      const tone = r.success
+                        ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
+                        : skipped
+                          ? 'text-amber-800 bg-amber-50 border-amber-200'
+                          : 'text-destructive bg-destructive/5 border-destructive/20';
+                      return (
+                        <li key={r.campaignId} className={`rounded-md border px-2 py-1.5 text-xs leading-snug ${tone}`}>
+                          <span className="font-medium">{campaignName(r.campaignId)}</span>
+                          {' — '}
+                          {r.success ? 'Updated' : skipped ? r.message : r.message}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </ScrollArea>
+              </div>
+            )}
           </CardContent>
         </Card>
 
