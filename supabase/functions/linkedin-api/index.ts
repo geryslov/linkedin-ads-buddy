@@ -8808,12 +8808,22 @@ serve(async (req) => {
             const FACET_EMPLOYERS = 'urn:li:adTargetingFacet:employers';
             const FACET_INDUSTRIES = 'urn:li:adTargetingFacet:industries';
 
-            const facetPayload: Array<[string, string[]]> = [
-              [FACET_TITLES, titleUrns || []],
-              [FACET_SKILLS, skillUrns || []],
-              [FACET_EMPLOYERS, companyUrns || []],
-              [FACET_INDUSTRIES, industryUrns || []],
-            ].filter(([, urns]) => Array.isArray(urns) && urns.length > 0) as Array<[string, string[]]>;
+            const mergedFacets = new Map<string, string[]>();
+            const addFacet = (facet: string, urns: unknown) => {
+              if (!facet || !Array.isArray(urns) || !urns.length) return;
+              const clean = Array.from(new Set(urns.filter((u) => typeof u === 'string'))) as string[];
+              if (!clean.length) return;
+              const prev = mergedFacets.get(facet) || [];
+              mergedFacets.set(facet, Array.from(new Set([...prev, ...clean])));
+            };
+            addFacet(FACET_TITLES, titleUrns);
+            addFacet(FACET_SKILLS, skillUrns);
+            addFacet(FACET_EMPLOYERS, companyUrns);
+            addFacet(FACET_INDUSTRIES, industryUrns);
+            for (const [facet, urns] of Object.entries(genericFacets)) addFacet(facet, urns);
+
+            const facetPayload: Array<[string, string[]]> = [...mergedFacets.entries()];
+
 
             // Step 5a: Capacity check — LinkedIn caps each facet at 100 values per campaign.
             // Compute the merged size BEFORE touching LinkedIn so we can report or trim.
