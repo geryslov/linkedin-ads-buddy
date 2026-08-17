@@ -38,21 +38,82 @@ interface Props {
   canWrite: boolean;
 }
 
-type EntityKind = 'title' | 'skill' | 'company' | 'industry';
+type FacetDef = {
+  facet: string;
+  label: string;
+  group: 'Job' | 'Company' | 'Lists & audiences' | 'Education' | 'Interests' | 'Demographics';
+  /** Free-text typeahead vs. a fixed value list LinkedIn returns whole. */
+  typeahead: boolean;
+};
 
-const KINDS: { key: EntityKind; label: string; action: string; field: string }[] = [
-  { key: 'title', label: 'Titles', action: 'search_job_titles', field: 'titles' },
-  { key: 'skill', label: 'Skills', action: 'search_skills', field: 'skills' },
-  { key: 'company', label: 'Companies', action: 'search_companies', field: 'companies' },
-  { key: 'industry', label: 'Industries', action: 'search_industries', field: 'industries' },
+const FACETS: FacetDef[] = [
+  // Job
+  { facet: 'urn:li:adTargetingFacet:titles', label: 'Job titles (current)', group: 'Job', typeahead: true },
+  { facet: 'urn:li:adTargetingFacet:titlesPast', label: 'Job titles (past)', group: 'Job', typeahead: true },
+  { facet: 'urn:li:adTargetingFacet:seniorities', label: 'Job seniority', group: 'Job', typeahead: false },
+  { facet: 'urn:li:adTargetingFacet:jobFunctions', label: 'Job function', group: 'Job', typeahead: false },
+  { facet: 'urn:li:adTargetingFacet:yearsOfExperience', label: 'Years of experience', group: 'Job', typeahead: false },
+  { facet: 'urn:li:adTargetingFacet:skills', label: 'Member skills', group: 'Job', typeahead: true },
+  // Company
+  { facet: 'urn:li:adTargetingFacet:employers', label: 'Company names (current)', group: 'Company', typeahead: true },
+  { facet: 'urn:li:adTargetingFacet:employersPast', label: 'Company names (past)', group: 'Company', typeahead: true },
+  { facet: 'urn:li:adTargetingFacet:industries', label: 'Company industries', group: 'Company', typeahead: true },
+  { facet: 'urn:li:adTargetingFacet:staffCountRanges', label: 'Company size', group: 'Company', typeahead: false },
+  { facet: 'urn:li:adTargetingFacet:revenue', label: 'Company revenue', group: 'Company', typeahead: false },
+  { facet: 'urn:li:adTargetingFacet:growthRate', label: 'Company growth rate', group: 'Company', typeahead: false },
+  { facet: 'urn:li:adTargetingFacet:followedCompanies', label: 'Company followers', group: 'Company', typeahead: true },
+  { facet: 'urn:li:adTargetingFacet:companyCategory', label: 'Company category', group: 'Company', typeahead: false },
+  // Lists & matched audiences
+  { facet: 'urn:li:adTargetingFacet:audienceMatchingSegments', label: 'Matched audiences (company / contact / website lists)', group: 'Lists & audiences', typeahead: false },
+  { facet: 'urn:li:adTargetingFacet:dynamicSegments', label: 'Dynamic & lookalike segments', group: 'Lists & audiences', typeahead: false },
+  { facet: 'urn:li:adTargetingFacet:firstDegreeConnectionCompanies', label: 'Connections of companies', group: 'Lists & audiences', typeahead: true },
+  // Education
+  { facet: 'urn:li:adTargetingFacet:degrees', label: 'Degrees', group: 'Education', typeahead: true },
+  { facet: 'urn:li:adTargetingFacet:fieldsOfStudy', label: 'Fields of study', group: 'Education', typeahead: true },
+  { facet: 'urn:li:adTargetingFacet:schools', label: 'Schools', group: 'Education', typeahead: true },
+  // Interests
+  { facet: 'urn:li:adTargetingFacet:interests', label: 'Member interests', group: 'Interests', typeahead: true },
+  { facet: 'urn:li:adTargetingFacet:memberBehaviors', label: 'Member traits / behaviors', group: 'Interests', typeahead: true },
+  { facet: 'urn:li:adTargetingFacet:groups', label: 'Member groups', group: 'Interests', typeahead: true },
+  // Demographics
+  { facet: 'urn:li:adTargetingFacet:ageRanges', label: 'Age ranges', group: 'Demographics', typeahead: false },
+  { facet: 'urn:li:adTargetingFacet:genders', label: 'Gender', group: 'Demographics', typeahead: false },
+  { facet: 'urn:li:adTargetingFacet:locations', label: 'Locations', group: 'Demographics', typeahead: true },
+  { facet: 'urn:li:adTargetingFacet:profileLocations', label: 'Profile locations', group: 'Demographics', typeahead: true },
+  { facet: 'urn:li:adTargetingFacet:interfaceLocales', label: 'Profile language', group: 'Demographics', typeahead: false },
 ];
 
-const kindColor: Record<EntityKind, string> = {
-  title: 'bg-primary/15 text-primary border-primary/30',
-  skill: 'bg-accent/15 text-accent-foreground border-accent/30',
-  company: 'bg-secondary text-secondary-foreground border-border',
-  industry: 'bg-muted text-muted-foreground border-border',
+const FACET_GROUPS = ['Job', 'Company', 'Lists & audiences', 'Education', 'Interests', 'Demographics'] as const;
+
+const shortOf = (facetUrn: string) => facetUrn.split(':').pop() || facetUrn;
+
+const LEGACY_KIND_FACET: Record<string, string> = {
+  title: 'urn:li:adTargetingFacet:titles',
+  skill: 'urn:li:adTargetingFacet:skills',
+  company: 'urn:li:adTargetingFacet:employers',
+  industry: 'urn:li:adTargetingFacet:industries',
 };
+
+const entityFacet = (e: TargetingEntity) =>
+  e.facet || LEGACY_KIND_FACET[e.type] || `urn:li:adTargetingFacet:${e.type}`;
+
+const facetLabel = (facetUrn: string) =>
+  FACETS.find((f) => f.facet === facetUrn)?.label ||
+  shortOf(facetUrn).replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase());
+
+const groupColor: Record<string, string> = {
+  Job: 'bg-primary/15 text-primary border-primary/30',
+  Company: 'bg-accent/15 text-accent-foreground border-accent/30',
+  'Lists & audiences': 'bg-secondary text-secondary-foreground border-border',
+  Education: 'bg-muted text-muted-foreground border-border',
+  Interests: 'bg-muted text-muted-foreground border-border',
+  Demographics: 'bg-muted text-muted-foreground border-border',
+};
+
+const colorForFacet = (facetUrn: string) =>
+  groupColor[FACETS.find((f) => f.facet === facetUrn)?.group || ''] ||
+  'bg-muted text-muted-foreground border-border';
+
 
 export function AudienceTemplates({ accessToken, selectedAccount, campaigns, canWrite }: Props) {
   const { toast } = useToast();
