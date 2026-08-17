@@ -78,7 +78,7 @@ export function CampaignTargetingEditor({
   const [selectedCampaignIds, setSelectedCampaignIds] = useState<string[]>([]);
   const [updateMode, setUpdateMode] = useState<'append' | 'replace' | 'exclude'>('append');
   const [isUpdating, setIsUpdating] = useState(false);
-  const hadOrganizationTargetingRef = useRef(false);
+  
   
   // Saved audiences
   const { audiences, isLoading: isLoadingAudiences, fetchAudiences, saveAudience, deleteAudience } = useSavedAudiences(selectedAccount);
