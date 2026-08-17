@@ -135,7 +135,7 @@ export function AudienceTemplates({ accessToken, selectedAccount, campaigns, can
   const [include, setInclude] = useState<TargetingEntity[]>([]);
   const [exclude, setExclude] = useState<TargetingEntity[]>([]);
   const [bucket, setBucket] = useState<'include' | 'exclude'>('include');
-  const [kind, setKind] = useState<EntityKind>('title');
+  const [activeFacet, setActiveFacet] = useState<string>(FACETS[0].facet);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<TargetingEntity[]>([]);
   const [isSearching, setIsSearching] = useState(false);
