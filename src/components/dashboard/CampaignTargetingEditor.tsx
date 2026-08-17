@@ -534,13 +534,9 @@ export function CampaignTargetingEditor({
     }
     
     setIsUpdating(true);
-    
+    setApplyResults(null);
+
     try {
-      const titleUrns = selectedEntities.filter(e => e.type === 'title').map(e => e.urn);
-      const skillUrns = selectedEntities.filter(e => e.type === 'skill').map(e => e.urn);
-      const companyUrns = selectedEntities.filter(e => e.type === 'company').map(e => e.urn);
-      const industryUrns = selectedEntities.filter(e => e.type === 'industry').map(e => e.urn);
-      
       // NOTE: accountId is no longer sent - backend derives it from campaign
       const { data, error } = await supabase.functions.invoke('linkedin-api', {
         body: {
@@ -548,21 +544,21 @@ export function CampaignTargetingEditor({
           accessToken,
           params: {
             campaignIds: selectedCampaignIds,
-            titleUrns,
-            skillUrns,
-            companyUrns,
-            industryUrns,
+            ...buildUrnParams(),
             mode: updateMode,
+            fillToLimit,
           }
         }
       });
       
       if (error) throw error;
       
-      const results = data.results || [];
-      const successCount = results.filter((r: any) => r.success).length;
+      const results = (data?.results || []) as TargetingUpdateResult[];
+      const successCount = results.filter(r => r.success).length;
       const totalCount = selectedCampaignIds.length;
-      
+
+      setApplyResults(results);
+
       if (successCount === totalCount) {
         toast({ 
           title: 'Targeting Updated', 
@@ -572,18 +568,14 @@ export function CampaignTargetingEditor({
         setSelectedCampaignIds([]);
         onRefreshCampaigns();
       } else {
-        // Extract actual error messages and codes from failed results
-        const failedResults = results.filter((r: any) => !r.success);
-        const errorCodes = failedResults.map((r: any) => r.errorCode).filter(Boolean);
-        const errorMessages = failedResults
-          .map((r: any) => r.message || 'Unknown error')
-          .filter((msg: string, idx: number, arr: string[]) => arr.indexOf(msg) === idx);
-        
-        // Check for specific error codes and provide actionable CTAs
+        const failedResults = results.filter(r => !r.success);
+        const errorCodes = failedResults.map(r => r.errorCode).filter(Boolean);
+
         const hasAllowlistError = errorCodes.includes('APP_NOT_AUTHORIZED_FOR_ACCOUNT');
         const hasTokenError = errorCodes.includes('TOKEN_EXPIRED');
         const hasRoleError = errorCodes.includes('ROLE_INSUFFICIENT');
-        
+        const limitCount = errorCodes.filter(c => c === 'FACET_LIMIT_EXCEEDED').length;
+
         let toastTitle = 'Update Failed';
         let toastDescription = '';
         
@@ -596,14 +588,17 @@ export function CampaignTargetingEditor({
         } else if (hasRoleError) {
           toastTitle = 'Insufficient Permissions';
           toastDescription = 'You need Account Manager or Campaign Manager role on this ad account to make changes.';
+        } else if (limitCount === failedResults.length) {
+          toastTitle = 'Some campaigns skipped';
+          toastDescription = `${successCount}/${totalCount} updated. ${limitCount} skipped — they'd exceed LinkedIn's 100-value facet limit. See the report below.`;
         } else {
-          toastDescription = `${successCount}/${totalCount} campaigns updated. ${errorMessages.join('; ') || 'Check console for details'}`;
+          toastDescription = `${successCount}/${totalCount} campaigns updated. See the report below for per-campaign details.`;
         }
         
         toast({ 
           title: toastTitle, 
           description: toastDescription,
-          variant: 'destructive'
+          variant: limitCount === failedResults.length ? 'default' : 'destructive'
         });
         
         // Log detailed results for debugging
