@@ -8357,6 +8357,125 @@ serve(async (req) => {
         });
       }
 
+      // Read a campaign's current targeting and return it as named entities
+      // (titles / skills / companies / industries, split into include + exclude)
+      // so the UI can seed an Audience Template from an existing campaign.
+      case 'get_campaign_targeting_entities': {
+        const { campaignId } = params || {};
+        if (!campaignId) {
+          return new Response(JSON.stringify({ error: 'campaignId is required' }), {
+            status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+
+        const liHeaders = {
+          'Authorization': `Bearer ${accessToken}`,
+          'X-Restli-Protocol-Version': '2.0.0',
+          'LinkedIn-Version': '202511',
+        };
+
+        const campResp = await fetch(
+          `https://api.linkedin.com/v2/adCampaignsV2/${campaignId}?fields=id,name,targetingCriteria`,
+          { headers: liHeaders }
+        );
+        if (!campResp.ok) {
+          const errText = await campResp.text();
+          console.error(`[get_campaign_targeting_entities] campaign fetch ${campResp.status}: ${errText.slice(0, 300)}`);
+          return new Response(JSON.stringify({ error: `Could not fetch campaign (${campResp.status})` }), {
+            status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+        const campJson = await campResp.json();
+        const tc = campJson.targetingCriteria || {};
+
+        const FACET_MAP: Record<string, 'title' | 'skill' | 'company' | 'industry'> = {
+          'urn:li:adTargetingFacet:titles': 'title',
+          'urn:li:adTargetingFacet:skills': 'skill',
+          'urn:li:adTargetingFacet:employers': 'company',
+          'urn:li:adTargetingFacet:industries': 'industry',
+        };
+
+        const collect = (orMap: any, out: Map<string, 'title' | 'skill' | 'company' | 'industry'>) => {
+          if (!orMap) return;
+          for (const [facet, values] of Object.entries(orMap)) {
+            const kind = FACET_MAP[facet];
+            if (!kind || !Array.isArray(values)) continue;
+            for (const v of values as string[]) if (typeof v === 'string') out.set(v, kind);
+          }
+        };
+
+        const includeMap = new Map<string, 'title' | 'skill' | 'company' | 'industry'>();
+        const excludeMap = new Map<string, 'title' | 'skill' | 'company' | 'industry'>();
+        for (const clause of (tc?.include?.and || [])) collect(clause?.or, includeMap);
+        collect(tc?.exclude?.or, excludeMap);
+
+        const allUrns = [...new Set([...includeMap.keys(), ...excludeMap.keys()])];
+        const names = new Map<string, string>();
+
+        // 1) Titles via standardizedTitles batch
+        const titleIds = allUrns
+          .filter((u) => (includeMap.get(u) || excludeMap.get(u)) === 'title')
+          .map((u) => u.split(':').pop() as string);
+        for (let i = 0; i < titleIds.length; i += 50) {
+          const batch = titleIds.slice(i, i + 50);
+          try {
+            const r = await fetch(
+              `https://api.linkedin.com/v2/standardizedTitles?ids=List(${batch.join(',')})`,
+              { headers: { 'Authorization': `Bearer ${accessToken}`, 'X-Restli-Protocol-Version': '2.0.0' } }
+            );
+            if (!r.ok) continue;
+            const d = await r.json();
+            for (const [id, info] of Object.entries(d.results || {})) {
+              const i2 = info as any;
+              const nm = i2?.name?.localized?.en_US || i2?.name?.preferredLocale?.name;
+              if (nm) names.set(`urn:li:title:${id}`, nm);
+            }
+          } catch (e) {
+            console.error('[get_campaign_targeting_entities] title resolve error:', e);
+          }
+        }
+
+        // 2) Everything else via adTargetingEntities batch-by-urn
+        const remaining = allUrns.filter((u) => !names.has(u));
+        for (let i = 0; i < remaining.length; i += 30) {
+          const batch = remaining.slice(i, i + 30);
+          try {
+            const listParam = batch.map((u) => encodeURIComponent(u)).join(',');
+            const r = await fetch(
+              `https://api.linkedin.com/rest/adTargetingEntities?q=urns&urns=List(${listParam})`,
+              { headers: liHeaders }
+            );
+            if (!r.ok) continue;
+            const d = await r.json();
+            for (const el of (d.elements || [])) {
+              const urn = el?.urn || el?.facetUrn;
+              const nm = el?.name || el?.localizedName;
+              if (urn && nm) names.set(urn, nm);
+            }
+          } catch (e) {
+            console.error('[get_campaign_targeting_entities] entity resolve error:', e);
+          }
+        }
+
+        const toEntities = (m: Map<string, 'title' | 'skill' | 'company' | 'industry'>) =>
+          [...m.entries()].map(([urn, type]) => ({
+            id: urn.split(':').pop() as string,
+            urn,
+            name: names.get(urn) || urn.split(':').pop() as string,
+            type,
+            targetable: true,
+          }));
+
+        return new Response(JSON.stringify({
+          campaignId: String(campaignId),
+          campaignName: campJson.name || null,
+          include: toEntities(includeMap),
+          exclude: toEntities(excludeMap),
+          unresolved: allUrns.filter((u) => !names.has(u)).length,
+        }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+
       case 'preflight_campaign_targeting':
       case 'update_campaign_targeting': {
         // Support both single campaignId and array of campaignIds
