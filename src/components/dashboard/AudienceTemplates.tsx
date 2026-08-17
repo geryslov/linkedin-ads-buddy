@@ -19,7 +19,9 @@ import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { CampaignSearchSelect } from './CampaignSearchSelect';
 import { useAudienceTemplates, AudienceTemplate, SyncResult } from '@/hooks/useAudienceTemplates';
+import { BulkFacetImportDialog } from './BulkFacetImportDialog';
 import type { TargetingEntity } from '@/hooks/useSavedAudiences';
+
 import {
   Layers,
   Plus,
@@ -33,8 +35,10 @@ import {
   Users,
   Ban,
   Download,
+  Upload,
   ChevronDown,
   ChevronRight,
+
 
 } from 'lucide-react';
 
@@ -158,6 +162,8 @@ export function AudienceTemplates({ accessToken, selectedAccount, campaigns, can
   const [isImporting, setIsImporting] = useState(false);
   const [facetFilter, setFacetFilter] = useState('');
   const [collapsedFacets, setCollapsedFacets] = useState<string[]>([]);
+  const [showBulk, setShowBulk] = useState(false);
+
 
   const usedFacets = useMemo(() => {
     const order = FACETS.map((f) => f.facet);
@@ -309,6 +315,19 @@ export function AudienceTemplates({ accessToken, selectedAccount, campaigns, can
     if (list.some((x) => x.urn === e.urn)) return;
     setter([...list, e]);
   };
+
+  const addEntities = (items: TargetingEntity[], to: 'include' | 'exclude') => {
+    const list = to === 'include' ? include : exclude;
+    const existing = new Set(list.map((x) => x.urn));
+    const fresh = items.filter((e) => !existing.has(e.urn));
+    if (!fresh.length) {
+      toast({ title: 'Already added', description: 'All of those values are in the list.' });
+      return;
+    }
+    (to === 'include' ? setInclude : setExclude)([...list, ...fresh]);
+    toast({ title: `Added ${fresh.length} to ${to}` });
+  };
+
 
   const removeEntity = (urn: string, from: 'include' | 'exclude') => {
     if (from === 'include') setInclude(include.filter((e) => e.urn !== urn));
@@ -548,7 +567,16 @@ export function AudienceTemplates({ accessToken, selectedAccount, campaigns, can
                     </>
                   )}
                 </Button>
+                <Button variant="outline" onClick={() => setShowBulk(true)} disabled={!accessToken}>
+                  <Upload className="mr-1 h-4 w-4" />
+                  Bulk add
+                </Button>
               </div>
+              <p className="text-[11px] text-muted-foreground">
+                Bulk add pastes a whole list of {facetLabel(activeFacet).toLowerCase()} at once into the{' '}
+                <span className={bucket === 'exclude' ? 'text-destructive' : 'text-primary'}>{bucket}</span> layer.
+              </p>
+
 
               {results.length > 0 && (
                 <ScrollArea className="max-h-40">
@@ -830,7 +858,19 @@ export function AudienceTemplates({ accessToken, selectedAccount, campaigns, can
             )}
           </CardContent>
         </Card>
+
+        <BulkFacetImportDialog
+          open={showBulk}
+          onOpenChange={setShowBulk}
+          accessToken={accessToken}
+          facet={activeFacet}
+          facetLabel={facetLabel(activeFacet)}
+          typeahead={activeFacetDef?.typeahead !== false}
+          bucket={bucket}
+          onAdd={addEntities}
+        />
       </div>
+
     </div>
   );
 }
