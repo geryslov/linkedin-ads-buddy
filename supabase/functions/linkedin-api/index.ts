@@ -8357,10 +8357,17 @@ serve(async (req) => {
         });
       }
 
+      case 'preflight_campaign_targeting':
       case 'update_campaign_targeting': {
         // Support both single campaignId and array of campaignIds
         // NOTE: accountId is no longer required - derived from campaign
         let { campaignId, campaignIds, titleUrns, skillUrns, companyUrns, industryUrns, mode } = params;
+        // Read-only capacity check: same merge math, no write to LinkedIn.
+        const isPreflight = action === 'preflight_campaign_targeting';
+        // "Fill to the limit instead of skipping" — trim additions to what fits.
+        const fillToLimit = params?.fillToLimit === true;
+        // LinkedIn hard-caps each targeting facet at 100 values per campaign.
+        const MAX_FACET_VALUES = 100;
         // Dedupe URNs — LinkedIn rejects targeting facets with duplicate values (INVALID_VALUE_DUPLICATE_EXIST)
         if (Array.isArray(titleUrns)) titleUrns = Array.from(new Set(titleUrns));
         if (Array.isArray(skillUrns)) skillUrns = Array.from(new Set(skillUrns));
