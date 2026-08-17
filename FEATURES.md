@@ -45,6 +45,8 @@ Groups and items:
 
 **Campaign Editor** — bulk targeting edits across multiple campaigns. Job titles, skills, companies, and industries can be added, replaced, or excluded. Add mode merges companies/industries into the campaign's existing organization OR clause, including uploaded company-list audience facets, so one-off additions widen that organization targeting instead of creating a new AND constraint. Backend `update_campaign_targeting`. Moved here from Reports (it is a bulk operation).
 
+**Facet capacity (100-value limit)** — LinkedIn caps each targeting facet at 100 values per campaign, so a bulk exclusion can fail per campaign with `titles length 117 cannot exceeded maximum 100`. The backend now computes the merged facet size before the PATCH and, when it would exceed 100, skips that campaign with a `FACET_LIMIT_EXCEEDED` result carrying existing/adding/total/room counts (no LinkedIn call). A read-only companion action `preflight_campaign_targeting` runs the same merge math and powers the inline "N of M campaigns will exceed the 100-value limit" warning above Apply. An optional `fillToLimit` flag adds only as many values as fit (selection order) instead of skipping. The editor shows a per-campaign result report (updated / skipped / failed) with Copy report, replacing the wall-of-text toast.
+
 ### Analytics
 | Item | Component | Notes |
 |---|---|---|

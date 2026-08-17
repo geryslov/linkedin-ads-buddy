@@ -8357,10 +8357,17 @@ serve(async (req) => {
         });
       }
 
+      case 'preflight_campaign_targeting':
       case 'update_campaign_targeting': {
         // Support both single campaignId and array of campaignIds
         // NOTE: accountId is no longer required - derived from campaign
         let { campaignId, campaignIds, titleUrns, skillUrns, companyUrns, industryUrns, mode } = params;
+        // Read-only capacity check: same merge math, no write to LinkedIn.
+        const isPreflight = action === 'preflight_campaign_targeting';
+        // "Fill to the limit instead of skipping" — trim additions to what fits.
+        const fillToLimit = params?.fillToLimit === true;
+        // LinkedIn hard-caps each targeting facet at 100 values per campaign.
+        const MAX_FACET_VALUES = 100;
         // Dedupe URNs — LinkedIn rejects targeting facets with duplicate values (INVALID_VALUE_DUPLICATE_EXIST)
         if (Array.isArray(titleUrns)) titleUrns = Array.from(new Set(titleUrns));
         if (Array.isArray(skillUrns)) skillUrns = Array.from(new Set(skillUrns));
@@ -8407,7 +8414,8 @@ serve(async (req) => {
           });
         }
         
-        const results: { campaignId: string; success: boolean; message: string; errorCode?: string; accountId?: string }[] = [];
+        type FacetStat = { facet: string; existing: number; requested: number; willAdd: number; total: number; room: number; overLimit: boolean; dropped: number };
+        const results: { campaignId: string; success: boolean; message: string; errorCode?: string; accountId?: string; facets?: FacetStat[] }[] = [];
         
         for (const currentCampaignId of idsToUpdate) {
           try {
@@ -8579,6 +8587,89 @@ serve(async (req) => {
               [FACET_EMPLOYERS, companyUrns || []],
               [FACET_INDUSTRIES, industryUrns || []],
             ].filter(([, urns]) => Array.isArray(urns) && urns.length > 0) as Array<[string, string[]]>;
+
+            // Step 5a: Capacity check — LinkedIn caps each facet at 100 values per campaign.
+            // Compute the merged size BEFORE touching LinkedIn so we can report or trim.
+            const facetStats: FacetStat[] = [];
+            let campaignOverLimit = false;
+
+            for (const entry of facetPayload) {
+              const [facet, urns] = entry;
+              let existingValues: string[] = [];
+
+              if (mode === 'exclude') {
+                existingValues = (existingTargeting?.exclude?.or || {})[facet] || [];
+              } else if (mode !== 'replace') {
+                // Append: the destination is whichever include clause already holds this facet.
+                const clauses: any[] = existingTargeting?.include?.and || [];
+                const holder = clauses.find((c: any) => c?.or && Array.isArray(c.or[facet]));
+                existingValues = holder ? holder.or[facet] : [];
+              }
+              // Replace mode overwrites the facet, so existing values don't count.
+
+              const existingSet = new Set(existingValues);
+              const netNew = urns.filter((u) => !existingSet.has(u));
+              const room = Math.max(0, MAX_FACET_VALUES - existingSet.size);
+              const total = existingSet.size + netNew.length;
+              const overLimit = total > MAX_FACET_VALUES;
+              let dropped = 0;
+
+              if (overLimit && fillToLimit) {
+                const kept = netNew.slice(0, room);
+                dropped = netNew.length - kept.length;
+                // Keep already-present values (harmless) plus only what fits.
+                entry[1] = [...urns.filter((u) => existingSet.has(u)), ...kept];
+              } else if (overLimit) {
+                campaignOverLimit = true;
+              }
+
+              facetStats.push({
+                facet,
+                existing: existingSet.size,
+                requested: urns.length,
+                willAdd: netNew.length,
+                total,
+                room,
+                overLimit,
+                dropped,
+              });
+            }
+
+            const facetLabel = (f: string) => f.split(':').pop() || f;
+
+            if (campaignOverLimit && !isPreflight) {
+              const offenders = facetStats.filter((s) => s.overLimit);
+              results.push({
+                campaignId: currentCampaignId,
+                success: false,
+                errorCode: 'FACET_LIMIT_EXCEEDED',
+                accountId: derivedAccountId,
+                facets: facetStats,
+                message: offenders
+                  .map((s) => `Would exceed LinkedIn's ${MAX_FACET_VALUES}-value limit for ${facetLabel(s.facet)} (currently ${s.existing}, adding ${s.willAdd} → ${s.total}). Room for ${s.room} more.`)
+                  .join(' '),
+              });
+              continue;
+            }
+
+            if (isPreflight) {
+              const offenders = facetStats.filter((s) => s.overLimit);
+              results.push({
+                campaignId: currentCampaignId,
+                success: offenders.length === 0,
+                errorCode: offenders.length ? 'FACET_LIMIT_EXCEEDED' : undefined,
+                accountId: derivedAccountId,
+                facets: facetStats,
+                message: offenders.length
+                  ? offenders
+                      .map((s) => `${facetLabel(s.facet)}: ${s.existing} existing + ${s.willAdd} new = ${s.total} (max ${MAX_FACET_VALUES}, room for ${s.room})`)
+                      .join('; ')
+                  : 'Fits within LinkedIn limits',
+              });
+              continue;
+            }
+
+
 
             if (mode === 'exclude') {
               // EXCLUDE MODE — leave include untouched, merge into exclusion facets (single OR map).
@@ -8759,22 +8850,30 @@ serve(async (req) => {
             results.push({ campaignId: currentCampaignId, success: false, message });
           }
           
-          // Small delay between campaign updates
-          if (idsToUpdate.length > 1) {
+          // Small delay between campaign updates (not needed for read-only preflight)
+          if (idsToUpdate.length > 1 && !isPreflight) {
             await new Promise(resolve => setTimeout(resolve, 200));
           }
         }
         
         const successCount = results.filter(r => r.success).length;
         const allSuccess = successCount === idsToUpdate.length;
+        const overLimitCount = results.filter(r => r.errorCode === 'FACET_LIMIT_EXCEEDED').length;
         
-        console.log(`[update_campaign_targeting] Completed: ${successCount}/${idsToUpdate.length} successful`);
+        console.log(`[${action}] Completed: ${successCount}/${idsToUpdate.length} successful (${overLimitCount} over facet limit)`);
         
         return new Response(JSON.stringify({ 
           success: allSuccess,
-          message: allSuccess 
-            ? `Targeting ${mode === 'append' ? 'appended' : mode === 'exclude' ? 'excluded' : 'replaced'} on ${successCount} campaign(s)`
-            : `${successCount}/${idsToUpdate.length} campaigns updated`,
+          preflight: isPreflight,
+          overLimitCount,
+          maxFacetValues: MAX_FACET_VALUES,
+          message: isPreflight
+            ? (overLimitCount
+                ? `${overLimitCount} of ${idsToUpdate.length} campaigns would exceed LinkedIn's ${MAX_FACET_VALUES}-value facet limit`
+                : `All ${idsToUpdate.length} campaigns fit within LinkedIn limits`)
+            : allSuccess 
+              ? `Targeting ${mode === 'append' ? 'appended' : mode === 'exclude' ? 'excluded' : 'replaced'} on ${successCount} campaign(s)`
+              : `${successCount}/${idsToUpdate.length} campaigns updated`,
           results,
           titlesAdded: titleUrns?.length || 0,
           skillsAdded: skillUrns?.length || 0,

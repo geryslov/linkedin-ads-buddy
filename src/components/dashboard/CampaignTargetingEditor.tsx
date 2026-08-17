@@ -47,6 +47,33 @@ interface Campaign {
   status: string;
 }
 
+// Per-facet capacity info returned by the backend (LinkedIn caps each facet at 100 values).
+interface FacetStat {
+  facet: string;
+  existing: number;
+  requested: number;
+  willAdd: number;
+  total: number;
+  room: number;
+  overLimit: boolean;
+  dropped: number;
+}
+
+interface TargetingUpdateResult {
+  campaignId: string;
+  success: boolean;
+  message: string;
+  errorCode?: string;
+  accountId?: string;
+  facets?: FacetStat[];
+}
+
+const facetLabel = (facet: string) => {
+  const key = facet.split(':').pop() || facet;
+  return key.charAt(0).toUpperCase() + key.slice(1);
+};
+
+
 interface CampaignTargetingEditorProps {
   accessToken: string | null;
   selectedAccount: string | null;
@@ -78,6 +105,15 @@ export function CampaignTargetingEditor({
   const [selectedCampaignIds, setSelectedCampaignIds] = useState<string[]>([]);
   const [updateMode, setUpdateMode] = useState<'append' | 'replace' | 'exclude'>('append');
   const [isUpdating, setIsUpdating] = useState(false);
+
+  // LinkedIn caps each targeting facet at 100 values per campaign — capacity UX
+  const [fillToLimit, setFillToLimit] = useState(false);
+  const [applyResults, setApplyResults] = useState<TargetingUpdateResult[] | null>(null);
+  const [preflight, setPreflight] = useState<TargetingUpdateResult[] | null>(null);
+  const [isPreflighting, setIsPreflighting] = useState(false);
+  const [showPreflightDetail, setShowPreflightDetail] = useState(false);
+  const preflightDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  
   
   
   // Saved audiences
@@ -414,7 +450,69 @@ export function CampaignTargetingEditor({
     setSelectedEntities(entities);
     toast({ title: 'Audience loaded', description: `${entities.length} entities loaded into selection.` });
   };
-  
+
+  const campaignName = useCallback(
+    (id: string) => campaigns.find(c => c.id === id)?.name || `Campaign ${id}`,
+    [campaigns]
+  );
+
+  const buildUrnParams = useCallback(() => ({
+    titleUrns: selectedEntities.filter(e => e.type === 'title').map(e => e.urn),
+    skillUrns: selectedEntities.filter(e => e.type === 'skill').map(e => e.urn),
+    companyUrns: selectedEntities.filter(e => e.type === 'company').map(e => e.urn),
+    industryUrns: selectedEntities.filter(e => e.type === 'industry').map(e => e.urn),
+  }), [selectedEntities]);
+
+  // ── Capacity pre-check: read-only, runs before the user clicks Apply ──
+  useEffect(() => {
+    if (preflightDebounceRef.current) clearTimeout(preflightDebounceRef.current);
+    if (!accessToken || selectedCampaignIds.length === 0 || selectedEntities.length === 0) {
+      setPreflight(null);
+      return;
+    }
+
+    preflightDebounceRef.current = setTimeout(async () => {
+      setIsPreflighting(true);
+      try {
+        const { data, error } = await supabase.functions.invoke('linkedin-api', {
+          body: {
+            action: 'preflight_campaign_targeting',
+            accessToken,
+            params: {
+              campaignIds: selectedCampaignIds,
+              ...buildUrnParams(),
+              mode: updateMode,
+            },
+          },
+        });
+        if (error) throw error;
+        setPreflight((data?.results || []) as TargetingUpdateResult[]);
+      } catch {
+        setPreflight(null);
+      } finally {
+        setIsPreflighting(false);
+      }
+    }, 700);
+
+    return () => {
+      if (preflightDebounceRef.current) clearTimeout(preflightDebounceRef.current);
+    };
+  }, [accessToken, selectedCampaignIds, selectedEntities, updateMode, buildUrnParams]);
+
+  const overLimitPreflight = (preflight || []).filter(r => r.errorCode === 'FACET_LIMIT_EXCEEDED');
+
+  const copyReport = useCallback((rows: TargetingUpdateResult[]) => {
+    const text = rows
+      .map(r => {
+        const status = r.success ? 'UPDATED' : r.errorCode === 'FACET_LIMIT_EXCEEDED' ? 'SKIPPED (over limit)' : 'FAILED';
+        return `${status}\t${campaignName(r.campaignId)}\t${r.message}`;
+      })
+      .join('\n');
+    navigator.clipboard.writeText(text);
+    toast({ title: 'Report copied', description: `${rows.length} row(s) copied to clipboard.` });
+  }, [campaignName, toast]);
+
+
   const handleApplyTargeting = async () => {
     // NOTE: selectedAccount no longer required for API call - account is derived from campaign
     if (!accessToken || selectedCampaignIds.length === 0) {
@@ -436,13 +534,9 @@ export function CampaignTargetingEditor({
     }
     
     setIsUpdating(true);
-    
+    setApplyResults(null);
+
     try {
-      const titleUrns = selectedEntities.filter(e => e.type === 'title').map(e => e.urn);
-      const skillUrns = selectedEntities.filter(e => e.type === 'skill').map(e => e.urn);
-      const companyUrns = selectedEntities.filter(e => e.type === 'company').map(e => e.urn);
-      const industryUrns = selectedEntities.filter(e => e.type === 'industry').map(e => e.urn);
-      
       // NOTE: accountId is no longer sent - backend derives it from campaign
       const { data, error } = await supabase.functions.invoke('linkedin-api', {
         body: {
@@ -450,21 +544,21 @@ export function CampaignTargetingEditor({
           accessToken,
           params: {
             campaignIds: selectedCampaignIds,
-            titleUrns,
-            skillUrns,
-            companyUrns,
-            industryUrns,
+            ...buildUrnParams(),
             mode: updateMode,
+            fillToLimit,
           }
         }
       });
       
       if (error) throw error;
       
-      const results = data.results || [];
-      const successCount = results.filter((r: any) => r.success).length;
+      const results = (data?.results || []) as TargetingUpdateResult[];
+      const successCount = results.filter(r => r.success).length;
       const totalCount = selectedCampaignIds.length;
-      
+
+      setApplyResults(results);
+
       if (successCount === totalCount) {
         toast({ 
           title: 'Targeting Updated', 
@@ -474,18 +568,14 @@ export function CampaignTargetingEditor({
         setSelectedCampaignIds([]);
         onRefreshCampaigns();
       } else {
-        // Extract actual error messages and codes from failed results
-        const failedResults = results.filter((r: any) => !r.success);
-        const errorCodes = failedResults.map((r: any) => r.errorCode).filter(Boolean);
-        const errorMessages = failedResults
-          .map((r: any) => r.message || 'Unknown error')
-          .filter((msg: string, idx: number, arr: string[]) => arr.indexOf(msg) === idx);
-        
-        // Check for specific error codes and provide actionable CTAs
+        const failedResults = results.filter(r => !r.success);
+        const errorCodes = failedResults.map(r => r.errorCode).filter(Boolean);
+
         const hasAllowlistError = errorCodes.includes('APP_NOT_AUTHORIZED_FOR_ACCOUNT');
         const hasTokenError = errorCodes.includes('TOKEN_EXPIRED');
         const hasRoleError = errorCodes.includes('ROLE_INSUFFICIENT');
-        
+        const limitCount = errorCodes.filter(c => c === 'FACET_LIMIT_EXCEEDED').length;
+
         let toastTitle = 'Update Failed';
         let toastDescription = '';
         
@@ -498,14 +588,17 @@ export function CampaignTargetingEditor({
         } else if (hasRoleError) {
           toastTitle = 'Insufficient Permissions';
           toastDescription = 'You need Account Manager or Campaign Manager role on this ad account to make changes.';
+        } else if (limitCount === failedResults.length) {
+          toastTitle = 'Some campaigns skipped';
+          toastDescription = `${successCount}/${totalCount} updated. ${limitCount} skipped — they'd exceed LinkedIn's 100-value facet limit. See the report below.`;
         } else {
-          toastDescription = `${successCount}/${totalCount} campaigns updated. ${errorMessages.join('; ') || 'Check console for details'}`;
+          toastDescription = `${successCount}/${totalCount} campaigns updated. See the report below for per-campaign details.`;
         }
         
         toast({ 
           title: toastTitle, 
           description: toastDescription,
-          variant: 'destructive'
+          variant: limitCount === failedResults.length ? 'default' : 'destructive'
         });
         
         // Log detailed results for debugging
@@ -638,6 +731,94 @@ export function CampaignTargetingEditor({
               <div className="mt-3 flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
                 <AlertCircle className="h-3.5 w-3.5 shrink-0" />
                 Viewer access only — contact your Campaign Manager for write permissions.
+              </div>
+            )}
+
+            {/* ── CAPACITY PRE-CHECK (LinkedIn caps each facet at 100 values per campaign) ── */}
+            {isPreflighting && (
+              <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Checking campaign capacity…
+              </div>
+            )}
+
+            {!isPreflighting && overLimitPreflight.length > 0 && (
+              <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="flex items-center gap-2 font-medium">
+                    <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                    {overLimitPreflight.length} of {selectedCampaignIds.length} campaigns will exceed LinkedIn's 100-value facet limit.
+                  </span>
+                  <button
+                    className="underline underline-offset-2 shrink-0"
+                    onClick={() => setShowPreflightDetail(v => !v)}
+                  >
+                    {showPreflightDetail ? 'Hide' : 'Show'} details
+                  </button>
+                </div>
+
+                {showPreflightDetail && (
+                  <ul className="mt-2 space-y-1">
+                    {overLimitPreflight.map(r => (
+                      <li key={r.campaignId} className="leading-snug">
+                        <span className="font-medium">{campaignName(r.campaignId)}</span>
+                        {' — '}
+                        {(r.facets || []).filter(f => f.overLimit).map(f =>
+                          `${facetLabel(f.facet)}: ${f.existing} existing + ${f.willAdd} new = ${f.total} (room for ${f.room})`
+                        ).join('; ')}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+
+                <label className="mt-2 flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={fillToLimit}
+                    onChange={(e) => setFillToLimit(e.target.checked)}
+                    className="h-3.5 w-3.5 accent-amber-600"
+                  />
+                  Fill to the limit instead of skipping — add as many as fit, in selection order
+                </label>
+              </div>
+            )}
+
+            {/* ── PER-CAMPAIGN RESULT REPORT ── */}
+            {applyResults && applyResults.length > 0 && (
+              <div className="mt-3 rounded-lg border border-border bg-muted/40 px-3 py-2">
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <span className="text-xs font-semibold">
+                    Result — {applyResults.filter(r => r.success).length} updated
+                    {applyResults.some(r => r.errorCode === 'FACET_LIMIT_EXCEEDED') && `, ${applyResults.filter(r => r.errorCode === 'FACET_LIMIT_EXCEEDED').length} skipped`}
+                    {applyResults.some(r => !r.success && r.errorCode !== 'FACET_LIMIT_EXCEEDED') && `, ${applyResults.filter(r => !r.success && r.errorCode !== 'FACET_LIMIT_EXCEEDED').length} failed`}
+                  </span>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => copyReport(applyResults)}>
+                      Copy report
+                    </Button>
+                    <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setApplyResults(null)}>
+                      Dismiss
+                    </Button>
+                  </div>
+                </div>
+                <ScrollArea className="max-h-48">
+                  <ul className="space-y-1 pr-2">
+                    {applyResults.map(r => {
+                      const skipped = r.errorCode === 'FACET_LIMIT_EXCEEDED';
+                      const tone = r.success
+                        ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
+                        : skipped
+                          ? 'text-amber-800 bg-amber-50 border-amber-200'
+                          : 'text-destructive bg-destructive/5 border-destructive/20';
+                      return (
+                        <li key={r.campaignId} className={`rounded-md border px-2 py-1.5 text-xs leading-snug ${tone}`}>
+                          <span className="font-medium">{campaignName(r.campaignId)}</span>
+                          {' — '}
+                          {r.success ? 'Updated' : skipped ? r.message : r.message}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </ScrollArea>
               </div>
             )}
           </CardContent>
