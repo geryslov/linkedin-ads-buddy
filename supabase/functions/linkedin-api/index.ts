@@ -8850,22 +8850,30 @@ serve(async (req) => {
             results.push({ campaignId: currentCampaignId, success: false, message });
           }
           
-          // Small delay between campaign updates
-          if (idsToUpdate.length > 1) {
+          // Small delay between campaign updates (not needed for read-only preflight)
+          if (idsToUpdate.length > 1 && !isPreflight) {
             await new Promise(resolve => setTimeout(resolve, 200));
           }
         }
         
         const successCount = results.filter(r => r.success).length;
         const allSuccess = successCount === idsToUpdate.length;
+        const overLimitCount = results.filter(r => r.errorCode === 'FACET_LIMIT_EXCEEDED').length;
         
-        console.log(`[update_campaign_targeting] Completed: ${successCount}/${idsToUpdate.length} successful`);
+        console.log(`[${action}] Completed: ${successCount}/${idsToUpdate.length} successful (${overLimitCount} over facet limit)`);
         
         return new Response(JSON.stringify({ 
           success: allSuccess,
-          message: allSuccess 
-            ? `Targeting ${mode === 'append' ? 'appended' : mode === 'exclude' ? 'excluded' : 'replaced'} on ${successCount} campaign(s)`
-            : `${successCount}/${idsToUpdate.length} campaigns updated`,
+          preflight: isPreflight,
+          overLimitCount,
+          maxFacetValues: MAX_FACET_VALUES,
+          message: isPreflight
+            ? (overLimitCount
+                ? `${overLimitCount} of ${idsToUpdate.length} campaigns would exceed LinkedIn's ${MAX_FACET_VALUES}-value facet limit`
+                : `All ${idsToUpdate.length} campaigns fit within LinkedIn limits`)
+            : allSuccess 
+              ? `Targeting ${mode === 'append' ? 'appended' : mode === 'exclude' ? 'excluded' : 'replaced'} on ${successCount} campaign(s)`
+              : `${successCount}/${idsToUpdate.length} campaigns updated`,
           results,
           titlesAdded: titleUrns?.length || 0,
           skillsAdded: skillUrns?.length || 0,
