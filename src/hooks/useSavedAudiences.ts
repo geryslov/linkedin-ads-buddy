@@ -14,9 +14,13 @@ export interface TargetingEntity {
   id: string;
   urn: string;
   name: string;
-  type: 'title' | 'skill' | 'company' | 'industry';
+  /** Short kind — legacy values 'title'|'skill'|'company'|'industry', otherwise the facet's last segment. */
+  type: 'title' | 'skill' | 'company' | 'industry' | (string & {});
+  /** Full LinkedIn facet URN, e.g. urn:li:adTargetingFacet:seniorities. */
+  facet?: string;
   targetable: boolean;
 }
+
 
 export function useSavedAudiences(accountId: string | null) {
   const { toast } = useToast();
