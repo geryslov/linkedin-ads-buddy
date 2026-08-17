@@ -158,6 +158,8 @@ export function AudienceTemplates({ accessToken, selectedAccount, campaigns, can
   const [isImporting, setIsImporting] = useState(false);
   const [facetFilter, setFacetFilter] = useState('');
   const [collapsedFacets, setCollapsedFacets] = useState<string[]>([]);
+  const [showBulk, setShowBulk] = useState(false);
+
 
   const usedFacets = useMemo(() => {
     const order = FACETS.map((f) => f.facet);
