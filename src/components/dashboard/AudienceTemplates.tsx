@@ -563,7 +563,16 @@ export function AudienceTemplates({ accessToken, selectedAccount, campaigns, can
                     </>
                   )}
                 </Button>
+                <Button variant="outline" onClick={() => setShowBulk(true)} disabled={!accessToken}>
+                  <Upload className="mr-1 h-4 w-4" />
+                  Bulk add
+                </Button>
               </div>
+              <p className="text-[11px] text-muted-foreground">
+                Bulk add pastes a whole list of {facetLabel(activeFacet).toLowerCase()} at once into the{' '}
+                <span className={bucket === 'exclude' ? 'text-destructive' : 'text-primary'}>{bucket}</span> layer.
+              </p>
+
 
               {results.length > 0 && (
                 <ScrollArea className="max-h-40">
