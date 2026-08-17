@@ -8414,7 +8414,8 @@ serve(async (req) => {
           });
         }
         
-        const results: { campaignId: string; success: boolean; message: string; errorCode?: string; accountId?: string }[] = [];
+        type FacetStat = { facet: string; existing: number; requested: number; willAdd: number; total: number; room: number; overLimit: boolean; dropped: number };
+        const results: { campaignId: string; success: boolean; message: string; errorCode?: string; accountId?: string; facets?: FacetStat[] }[] = [];
         
         for (const currentCampaignId of idsToUpdate) {
           try {
