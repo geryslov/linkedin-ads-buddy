@@ -456,16 +456,30 @@ export function AudienceTemplates({ accessToken, selectedAccount, campaigns, can
             {/* Search */}
             <div className="space-y-2 rounded-lg border border-border p-3">
               <div className="flex flex-wrap items-center gap-2">
-                {KINDS.map((k) => (
-                  <Button
-                    key={k.key}
-                    size="sm"
-                    variant={kind === k.key ? 'default' : 'outline'}
-                    onClick={() => setKind(k.key)}
-                  >
-                    {k.label}
-                  </Button>
-                ))}
+                <Select
+                  value={activeFacet}
+                  onValueChange={(v) => {
+                    setActiveFacet(v);
+                    setResults([]);
+                    setQuery('');
+                  }}
+                >
+                  <SelectTrigger className="w-[280px]">
+                    <SelectValue placeholder="Targeting field" />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-72">
+                    {FACET_GROUPS.map((g) => (
+                      <SelectGroup key={g}>
+                        <SelectLabel>{g}</SelectLabel>
+                        {FACETS.filter((f) => f.group === g).map((f) => (
+                          <SelectItem key={f.facet} value={f.facet}>
+                            {f.label}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <Separator orientation="vertical" className="mx-1 h-6" />
                 <Button
                   size="sm"
@@ -487,13 +501,26 @@ export function AudienceTemplates({ accessToken, selectedAccount, campaigns, can
 
               <div className="flex gap-2">
                 <Input
-                  placeholder={`Search ${kind}s…`}
+                  placeholder={
+                    activeFacetDef?.typeahead
+                      ? `Search ${facetLabel(activeFacet).toLowerCase()}…`
+                      : `Browse all ${facetLabel(activeFacet).toLowerCase()} values — optional filter`
+                  }
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && runSearch()}
                 />
                 <Button onClick={runSearch} disabled={isSearching}>
-                  {isSearching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                  {isSearching ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : activeFacetDef?.typeahead ? (
+                    <Search className="h-4 w-4" />
+                  ) : (
+                    <>
+                      <Layers className="mr-1 h-4 w-4" />
+                      Load values
+                    </>
+                  )}
                 </Button>
               </div>
 
@@ -518,6 +545,11 @@ export function AudienceTemplates({ accessToken, selectedAccount, campaigns, can
             <div className="grid gap-3 md:grid-cols-2">
               {(['include', 'exclude'] as const).map((b) => {
                 const list = b === 'include' ? include : exclude;
+                const byFacet = list.reduce<Record<string, TargetingEntity[]>>((acc, e) => {
+                  const f = entityFacet(e);
+                  (acc[f] ||= []).push(e);
+                  return acc;
+                }, {});
                 return (
                   <div key={b} className="rounded-lg border border-border p-3">
                     <div className="mb-2 flex items-center justify-between">
@@ -532,20 +564,29 @@ export function AudienceTemplates({ accessToken, selectedAccount, campaigns, can
                         </Button>
                       )}
                     </div>
-                    <ScrollArea className="max-h-40">
-                      <div className="flex flex-wrap gap-1.5 pr-2">
-                        {list.map((e) => (
-                          <Badge
-                            key={e.urn}
-                            variant="outline"
-                            className={`gap-1 ${kindColor[e.type as EntityKind]}`}
-                          >
-                            {e.name}
-                            <X
-                              className="h-3 w-3 cursor-pointer"
-                              onClick={() => removeEntity(e.urn, b)}
-                            />
-                          </Badge>
+                    <ScrollArea className="max-h-56">
+                      <div className="space-y-2 pr-2">
+                        {Object.entries(byFacet).map(([f, items]) => (
+                          <div key={f}>
+                            <div className="mb-1 text-[11px] uppercase tracking-wide text-muted-foreground">
+                              {facetLabel(f)} ({items.length})
+                            </div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {items.map((e) => (
+                                <Badge
+                                  key={`${f}-${e.urn}`}
+                                  variant="outline"
+                                  className={`gap-1 ${colorForFacet(f)}`}
+                                >
+                                  {e.name}
+                                  <X
+                                    className="h-3 w-3 cursor-pointer"
+                                    onClick={() => removeEntity(e.urn, b)}
+                                  />
+                                </Badge>
+                              ))}
+                            </div>
+                          </div>
                         ))}
                         {!list.length && (
                           <span className="text-xs text-muted-foreground">Nothing yet.</span>
@@ -556,6 +597,7 @@ export function AudienceTemplates({ accessToken, selectedAccount, campaigns, can
                 );
               })}
             </div>
+
 
             <div className="flex flex-wrap gap-2">
               <Button onClick={handleSave} disabled={!draftName.trim()}>
