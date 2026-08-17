@@ -22,6 +22,7 @@ import {
   AlertCircle,
   Users,
   Ban,
+  Download,
 } from 'lucide-react';
 
 interface Campaign {
@@ -79,6 +80,57 @@ export function AudienceTemplates({ accessToken, selectedAccount, campaigns, can
   const [isSearching, setIsSearching] = useState(false);
   const [selectedCampaignIds, setSelectedCampaignIds] = useState<string[]>([]);
   const [syncResults, setSyncResults] = useState<SyncResult[] | null>(null);
+  const [importCampaignId, setImportCampaignId] = useState<string | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
+
+  const importFromCampaign = async () => {
+    if (!accessToken || !importCampaignId) return;
+    setIsImporting(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('linkedin-api', {
+        body: {
+          action: 'get_campaign_targeting_entities',
+          accessToken,
+          params: { campaignId: importCampaignId },
+        },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+
+      const inc = (data?.include || []) as TargetingEntity[];
+      const exc = (data?.exclude || []) as TargetingEntity[];
+
+      setInclude(inc);
+      setExclude(exc);
+      if (!draftName.trim()) {
+        const src = campaigns.find((c) => c.id === importCampaignId)?.name || data?.campaignName;
+        if (src) setDraftName(`${src} – audience`);
+      }
+
+      if (!inc.length && !exc.length) {
+        toast({
+          title: 'Nothing to import',
+          description: 'That campaign has no title, skill, company or industry targeting.',
+        });
+      } else {
+        toast({
+          title: 'Targeting imported',
+          description: `${inc.length} included, ${exc.length} excluded${
+            data?.unresolved ? ` · ${data.unresolved} shown by ID` : ''
+          }.`,
+        });
+      }
+    } catch (err) {
+      toast({
+        title: 'Import failed',
+        description: err instanceof Error ? err.message : 'Unknown error',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
 
   useEffect(() => {
     if (selectedAccount) fetchAll();
@@ -287,6 +339,42 @@ export function AudienceTemplates({ accessToken, selectedAccount, campaigns, can
                 onChange={(e) => setDraftDescription(e.target.value)}
               />
             </div>
+
+            {/* Import from an existing campaign */}
+            <div className="space-y-2 rounded-lg border border-dashed border-border p-3">
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <Download className="h-4 w-4 text-primary" />
+                Start from an existing campaign
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Pulls that campaign's current titles, skills, companies and industries — including its
+                exclusions — into the editor below so you can tweak instead of rebuild.
+              </p>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <div className="flex-1">
+                  <CampaignSearchSelect
+                    campaigns={campaigns}
+                    selectedCampaignIds={importCampaignId ? [importCampaignId] : []}
+                    onChange={(ids) => setImportCampaignId(ids.length ? ids[ids.length - 1] : null)}
+                    disabled={isImporting}
+                  />
+                </div>
+                <Button
+                  variant="outline"
+                  onClick={importFromCampaign}
+                  disabled={!importCampaignId || isImporting}
+                >
+                  {isImporting ? (
+                    <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Download className="mr-1 h-3.5 w-3.5" />
+                  )}
+                  Import targeting
+                </Button>
+              </div>
+            </div>
+
+
 
             {/* Search */}
             <div className="space-y-2 rounded-lg border border-border p-3">
