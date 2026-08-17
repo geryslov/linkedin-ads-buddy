@@ -80,6 +80,57 @@ export function AudienceTemplates({ accessToken, selectedAccount, campaigns, can
   const [isSearching, setIsSearching] = useState(false);
   const [selectedCampaignIds, setSelectedCampaignIds] = useState<string[]>([]);
   const [syncResults, setSyncResults] = useState<SyncResult[] | null>(null);
+  const [importCampaignId, setImportCampaignId] = useState<string | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
+
+  const importFromCampaign = async () => {
+    if (!accessToken || !importCampaignId) return;
+    setIsImporting(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('linkedin-api', {
+        body: {
+          action: 'get_campaign_targeting_entities',
+          accessToken,
+          params: { campaignId: importCampaignId },
+        },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+
+      const inc = (data?.include || []) as TargetingEntity[];
+      const exc = (data?.exclude || []) as TargetingEntity[];
+
+      setInclude(inc);
+      setExclude(exc);
+      if (!draftName.trim()) {
+        const src = campaigns.find((c) => c.id === importCampaignId)?.name || data?.campaignName;
+        if (src) setDraftName(`${src} – audience`);
+      }
+
+      if (!inc.length && !exc.length) {
+        toast({
+          title: 'Nothing to import',
+          description: 'That campaign has no title, skill, company or industry targeting.',
+        });
+      } else {
+        toast({
+          title: 'Targeting imported',
+          description: `${inc.length} included, ${exc.length} excluded${
+            data?.unresolved ? ` · ${data.unresolved} shown by ID` : ''
+          }.`,
+        });
+      }
+    } catch (err) {
+      toast({
+        title: 'Import failed',
+        description: err instanceof Error ? err.message : 'Unknown error',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
 
   useEffect(() => {
     if (selectedAccount) fetchAll();
