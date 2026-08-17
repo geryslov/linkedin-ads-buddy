@@ -111,19 +111,10 @@ export function CampaignTargetingEditor({
     }
   }, [selectedAccount, fetchAudiences]);
 
-  // Company and industry targeting is most often used as an exclusion. Default the
-  // first organization selection to Exclude, while still allowing an explicit mode change.
-  useEffect(() => {
-    const hasOrganizationTargeting = selectedEntities.some(
-      entity => entity.type === 'company' || entity.type === 'industry'
-    );
+  // Note: mode is always user-controlled. "Add" merges companies/industries into the
+  // campaign's existing facet as an OR (widening the audience), so a one-off company
+  // request can be added on top of an existing company list without narrowing it.
 
-    if (hasOrganizationTargeting && !hadOrganizationTargetingRef.current) {
-      setUpdateMode('exclude');
-    }
-
-    hadOrganizationTargetingRef.current = hasOrganizationTargeting;
-  }, [selectedEntities]);
   
   const handleSearch = useCallback(async () => {
     if (!accessToken || !searchQuery.trim()) {
