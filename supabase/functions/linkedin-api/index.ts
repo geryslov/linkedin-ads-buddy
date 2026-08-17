@@ -7577,6 +7577,71 @@ serve(async (req) => {
         });
       }
 
+      case 'search_industries': {
+        const { query } = params;
+
+        if (!query || query.trim().length < 2) {
+          return new Response(JSON.stringify({
+            industries: [],
+            message: 'Query must be at least 2 characters'
+          }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        console.log(`[search_industries] Searching for industries matching "${query}"`);
+
+        const industrySearchUrl = `https://api.linkedin.com/rest/adTargetingEntities?q=typeahead&facet=urn%3Ali%3AadTargetingFacet%3Aindustries&query=${encodeURIComponent(query.trim())}&count=50`;
+
+        const industryResponse = await fetch(industrySearchUrl, {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'X-Restli-Protocol-Version': '2.0.0',
+            'LinkedIn-Version': '202511',
+          },
+        });
+
+        if (!industryResponse.ok) {
+          const errorText = await industryResponse.text();
+          console.error(`[search_industries] API error ${industryResponse.status}:`, errorText);
+          return new Response(JSON.stringify({
+            error: `LinkedIn API error: ${industryResponse.status}`,
+            details: errorText,
+            industries: []
+          }), {
+            status: industryResponse.status,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+
+        const industryData = await industryResponse.json();
+        console.log(`[search_industries] Typeahead returned ${industryData.elements?.length || 0} results`);
+
+        const industries = (industryData.elements || []).map((el: any) => {
+          const urn = el.urn || el.entity || '';
+          const rawName = el.name?.localized?.en_US ||
+            el.name?.localized?.[Object.keys(el.name?.localized || {})[0]] ||
+            el.displayName ||
+            el.name ||
+            'Unknown Industry';
+          const idMatch = urn.match(/:(\d+)$/);
+          return {
+            id: idMatch ? idMatch[1] : '',
+            urn,
+            name: typeof rawName === 'string' ? rawName : JSON.stringify(rawName),
+            targetable: true,
+            facetUrn: el.facetUrn || 'urn:li:adTargetingFacet:industries',
+          };
+        }).filter((c: any) => !!c.urn);
+
+        return new Response(JSON.stringify({
+          industries,
+          source: 'adTargetingEntities',
+          count: industries.length
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+
 
 
       case 'sync_ad_accounts': {
