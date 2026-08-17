@@ -575,10 +575,11 @@ export function CampaignTargetingEditor({
                     <TooltipTrigger asChild>
                       <Info className="h-3.5 w-3.5 cursor-help" />
                     </TooltipTrigger>
-                    <TooltipContent side="top" className="max-w-[200px] text-xs">
-                      <p><strong>Add</strong> — adds the selection to included targeting.</p>
+                    <TooltipContent side="top" className="max-w-[240px] text-xs">
+                      <p><strong>Add</strong> — merges into the campaign's existing facet as an OR, so extra companies/industries widen the list instead of narrowing it. If the campaign has no such facet yet, it becomes a new AND layer.</p>
                       <p className="mt-1"><strong>Replace</strong> — overwrites only the facets you selected.</p>
                       <p className="mt-1"><strong>Exclude</strong> — adds the selection to exclusions as OR values without changing included targeting.</p>
+
                     </TooltipContent>
                   </Tooltip>
                 </label>
