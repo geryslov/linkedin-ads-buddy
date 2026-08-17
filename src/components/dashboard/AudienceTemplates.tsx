@@ -19,7 +19,9 @@ import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { CampaignSearchSelect } from './CampaignSearchSelect';
 import { useAudienceTemplates, AudienceTemplate, SyncResult } from '@/hooks/useAudienceTemplates';
+import { BulkFacetImportDialog } from './BulkFacetImportDialog';
 import type { TargetingEntity } from '@/hooks/useSavedAudiences';
+
 import {
   Layers,
   Plus,
