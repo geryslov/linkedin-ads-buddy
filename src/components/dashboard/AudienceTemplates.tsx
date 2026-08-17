@@ -156,6 +156,19 @@ export function AudienceTemplates({ accessToken, selectedAccount, campaigns, can
   const [syncResults, setSyncResults] = useState<SyncResult[] | null>(null);
   const [importCampaignId, setImportCampaignId] = useState<string | null>(null);
   const [isImporting, setIsImporting] = useState(false);
+  const [facetFilter, setFacetFilter] = useState('');
+  const [collapsedFacets, setCollapsedFacets] = useState<string[]>([]);
+
+  const usedFacets = useMemo(() => {
+    const order = FACETS.map((f) => f.facet);
+    const set = new Set<string>([...include, ...exclude].map((e) => entityFacet(e)));
+    return Array.from(set).sort((a, b) => {
+      const ia = order.indexOf(a);
+      const ib = order.indexOf(b);
+      return (ia < 0 ? 999 : ia) - (ib < 0 ? 999 : ib);
+    });
+  }, [include, exclude]);
+
 
   const importFromCampaign = async () => {
     if (!accessToken || !importCampaignId) return;
