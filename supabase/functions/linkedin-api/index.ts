@@ -8583,6 +8583,12 @@ serve(async (req) => {
         // Support both single campaignId and array of campaignIds
         // NOTE: accountId is no longer required - derived from campaign
         let { campaignId, campaignIds, titleUrns, skillUrns, companyUrns, industryUrns, mode } = params;
+        // Generic facet map: { "urn:li:adTargetingFacet:seniorities": ["urn:li:seniority:7", ...] }
+        // Any LinkedIn facet can be pushed through this — the four legacy params are just shortcuts.
+        const genericFacets: Record<string, string[]> = (params?.facets && typeof params.facets === 'object')
+          ? params.facets as Record<string, string[]>
+          : {};
+
         // Read-only capacity check: same merge math, no write to LinkedIn.
         const isPreflight = action === 'preflight_campaign_targeting';
         // "Fill to the limit instead of skipping" — trim additions to what fits.
