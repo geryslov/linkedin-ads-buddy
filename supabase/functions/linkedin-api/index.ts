@@ -8588,6 +8588,89 @@ serve(async (req) => {
               [FACET_INDUSTRIES, industryUrns || []],
             ].filter(([, urns]) => Array.isArray(urns) && urns.length > 0) as Array<[string, string[]]>;
 
+            // Step 5a: Capacity check — LinkedIn caps each facet at 100 values per campaign.
+            // Compute the merged size BEFORE touching LinkedIn so we can report or trim.
+            const facetStats: FacetStat[] = [];
+            let campaignOverLimit = false;
+
+            for (const entry of facetPayload) {
+              const [facet, urns] = entry;
+              let existingValues: string[] = [];
+
+              if (mode === 'exclude') {
+                existingValues = (existingTargeting?.exclude?.or || {})[facet] || [];
+              } else if (mode !== 'replace') {
+                // Append: the destination is whichever include clause already holds this facet.
+                const clauses: any[] = existingTargeting?.include?.and || [];
+                const holder = clauses.find((c: any) => c?.or && Array.isArray(c.or[facet]));
+                existingValues = holder ? holder.or[facet] : [];
+              }
+              // Replace mode overwrites the facet, so existing values don't count.
+
+              const existingSet = new Set(existingValues);
+              const netNew = urns.filter((u) => !existingSet.has(u));
+              const room = Math.max(0, MAX_FACET_VALUES - existingSet.size);
+              const total = existingSet.size + netNew.length;
+              const overLimit = total > MAX_FACET_VALUES;
+              let dropped = 0;
+
+              if (overLimit && fillToLimit) {
+                const kept = netNew.slice(0, room);
+                dropped = netNew.length - kept.length;
+                // Keep already-present values (harmless) plus only what fits.
+                entry[1] = [...urns.filter((u) => existingSet.has(u)), ...kept];
+              } else if (overLimit) {
+                campaignOverLimit = true;
+              }
+
+              facetStats.push({
+                facet,
+                existing: existingSet.size,
+                requested: urns.length,
+                willAdd: netNew.length,
+                total,
+                room,
+                overLimit,
+                dropped,
+              });
+            }
+
+            const facetLabel = (f: string) => f.split(':').pop() || f;
+
+            if (campaignOverLimit && !isPreflight) {
+              const offenders = facetStats.filter((s) => s.overLimit);
+              results.push({
+                campaignId: currentCampaignId,
+                success: false,
+                errorCode: 'FACET_LIMIT_EXCEEDED',
+                accountId: derivedAccountId,
+                facets: facetStats,
+                message: offenders
+                  .map((s) => `Would exceed LinkedIn's ${MAX_FACET_VALUES}-value limit for ${facetLabel(s.facet)} (currently ${s.existing}, adding ${s.willAdd} → ${s.total}). Room for ${s.room} more.`)
+                  .join(' '),
+              });
+              continue;
+            }
+
+            if (isPreflight) {
+              const offenders = facetStats.filter((s) => s.overLimit);
+              results.push({
+                campaignId: currentCampaignId,
+                success: offenders.length === 0,
+                errorCode: offenders.length ? 'FACET_LIMIT_EXCEEDED' : undefined,
+                accountId: derivedAccountId,
+                facets: facetStats,
+                message: offenders.length
+                  ? offenders
+                      .map((s) => `${facetLabel(s.facet)}: ${s.existing} existing + ${s.willAdd} new = ${s.total} (max ${MAX_FACET_VALUES}, room for ${s.room})`)
+                      .join('; ')
+                  : 'Fits within LinkedIn limits',
+              });
+              continue;
+            }
+
+
+
             if (mode === 'exclude') {
               // EXCLUDE MODE — leave include untouched, merge into exclusion facets (single OR map).
               const existingExcludeOr: Record<string, string[]> = existingTargeting?.exclude?.or || {};
