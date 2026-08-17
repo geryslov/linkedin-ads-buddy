@@ -18,9 +18,11 @@ interface TargetingEntity {
   id: string;
   urn: string;
   name: string;
-  type: 'title' | 'skill' | 'company' | 'industry';
+  type: 'title' | 'skill' | 'company' | 'industry' | (string & {});
+  facet?: string;
   targetable: boolean;
 }
+
 
 interface BulkImportDialogProps {
   open: boolean;
