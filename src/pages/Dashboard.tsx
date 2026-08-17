@@ -18,6 +18,7 @@ import { MegaBudgetPacingDashboard } from "@/components/dashboard/MegaBudgetPaci
 import { CreativeGallery } from "@/components/dashboard/CreativeGallery";
 import { BulkCreativeCopy } from "@/components/dashboard/BulkCreativeCopy";
 import { CampaignTargetingEditor } from "@/components/dashboard/CampaignTargetingEditor";
+import { AudienceTemplates } from "@/components/dashboard/AudienceTemplates";
 import { CreativePerformanceReport } from "@/components/dashboard/CreativePerformanceReport";
 import { CampaignPerformanceReport } from "@/components/dashboard/CampaignPerformanceReport";
 import { CompanyInfluenceMatcher } from "@/components/dashboard/CompanyInfluenceMatcher";
@@ -57,6 +58,7 @@ const tabMeta: Record<string, { group: string; title: string; subtitle: string }
   creatives:           { group: "Campaigns",  title: "Ad Creatives",                subtitle: "Browse and analyze your creative assets" },
   bulk_add_creatives:  { group: "Bulk Editing", title: "Add Ads to Campaigns",       subtitle: "Copy existing ads into other campaigns in bulk" },
   campaign_editor:     { group: "Bulk Editing", title: "Campaign Editor",             subtitle: "Bulk-edit targeting across multiple campaigns" },
+  audience_templates:  { group: "Bulk Editing", title: "Audience Templates",          subtitle: "Save reusable audiences and run them on chosen campaigns" },
   analytics:           { group: "Analytics",  title: "Analytics",                   subtitle: "Performance metrics and key insights" },
   campaign_reports:    { group: "Analytics",  title: "Campaign Reports",            subtitle: "Detailed campaign performance breakdown" },
   creative_reports:    { group: "Analytics",  title: "Creative Reports",            subtitle: "Creative-level performance analysis" },
@@ -444,6 +446,17 @@ export default function Dashboard() {
             onRefreshCampaigns={() => selectedAccount && fetchCampaigns(selectedAccount)}
           />
         )}
+
+        {activeTab === "audience_templates" && (
+          <AudienceTemplates
+            accessToken={accessToken}
+            selectedAccount={selectedAccount}
+            campaigns={campaigns.map((c) => ({ id: c.id, name: c.name, status: c.status }))}
+            canWrite={currentAccountCanWrite}
+          />
+        )}
+
+
 
         {activeTab === "reports" && (
           <ReportingSection

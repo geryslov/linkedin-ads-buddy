@@ -77,6 +77,56 @@ export type Database = {
         }
         Relationships: []
       }
+      audience_campaign_assignments: {
+        Row: {
+          account_id: string
+          audience_id: string
+          campaign_id: string
+          campaign_name: string | null
+          created_at: string
+          id: string
+          last_sync_message: string | null
+          last_sync_status: string | null
+          last_synced_at: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          account_id: string
+          audience_id: string
+          campaign_id: string
+          campaign_name?: string | null
+          created_at?: string
+          id?: string
+          last_sync_message?: string | null
+          last_sync_status?: string | null
+          last_synced_at?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          account_id?: string
+          audience_id?: string
+          campaign_id?: string
+          campaign_name?: string | null
+          created_at?: string
+          id?: string
+          last_sync_message?: string | null
+          last_sync_status?: string | null
+          last_synced_at?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "audience_campaign_assignments_audience_id_fkey"
+            columns: ["audience_id"]
+            isOneToOne: false
+            referencedRelation: "saved_targeting_audiences"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       custom_fields: {
         Row: {
           account_id: string
@@ -326,6 +376,7 @@ export type Database = {
           created_at: string | null
           description: string | null
           entities: Json
+          exclude_entities: Json
           id: string
           name: string
           updated_at: string | null
@@ -336,6 +387,7 @@ export type Database = {
           created_at?: string | null
           description?: string | null
           entities?: Json
+          exclude_entities?: Json
           id?: string
           name: string
           updated_at?: string | null
@@ -346,6 +398,7 @@ export type Database = {
           created_at?: string | null
           description?: string | null
           entities?: Json
+          exclude_entities?: Json
           id?: string
           name?: string
           updated_at?: string | null
