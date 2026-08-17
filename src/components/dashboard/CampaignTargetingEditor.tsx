@@ -47,6 +47,33 @@ interface Campaign {
   status: string;
 }
 
+// Per-facet capacity info returned by the backend (LinkedIn caps each facet at 100 values).
+interface FacetStat {
+  facet: string;
+  existing: number;
+  requested: number;
+  willAdd: number;
+  total: number;
+  room: number;
+  overLimit: boolean;
+  dropped: number;
+}
+
+interface TargetingUpdateResult {
+  campaignId: string;
+  success: boolean;
+  message: string;
+  errorCode?: string;
+  accountId?: string;
+  facets?: FacetStat[];
+}
+
+const facetLabel = (facet: string) => {
+  const key = facet.split(':').pop() || facet;
+  return key.charAt(0).toUpperCase() + key.slice(1);
+};
+
+
 interface CampaignTargetingEditorProps {
   accessToken: string | null;
   selectedAccount: string | null;
