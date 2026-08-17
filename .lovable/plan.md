@@ -1,27 +1,25 @@
-# Fix "titles length 109 cannot exceed maximum 100" in Audience Templates
+# Fix Audience Template sync at the 100-title limit
 
-## What is happening
+## Confirmed cause
 
-Applying the audience `gradeA-t1-t2` to `financial_wv_feed_titles-all_ABM-AI4-company-list_na` failed with LinkedIn's hard cap: a single targeting facet may hold at most **100 values**, and this audience carries **109 job titles**.
+The audience shows **10 included + 90 excluded current titles**, but LinkedIn’s limit is evaluated per targeting bucket/facet—not as the visible template total.
 
-The sync runs in two calls: first `replace` for the include layer, then `exclude` for the exclusion layer. The logs show the replace call reported success and the exclude call came back with the 400 — LinkedIn validates the whole `targetingCriteria`, so the oversized include titles list surfaces on the second call.
+For exclusions, the current sync uses **merge/add** behavior. The selected campaign already has 58 excluded titles; 43 overlap with the template and 47 are new, so the outgoing exclusion becomes **58 + 47 = 105**. That is why reducing the template itself to 100 values still fails.
 
-The backend already has a capacity guard (`MAX_FACET_VALUES = 100`, plus a `preflight_campaign_targeting` action and a `fillToLimit` option), and the Campaign Editor uses it. **Audience Templates does not** — `syncAudience` calls `update_campaign_targeting` directly with no preflight and no trimming, so an oversized template goes straight to LinkedIn. The logs also report "0 over facet limit" for a request that LinkedIn then rejected at 109, so whether the deployed function actually enforces the guard on this path needs to be confirmed before anything else.
+There is also a state mismatch: **Apply** uses the last saved `activeTemplate`, not the chips currently visible in the editor. Removing values and applying before clicking **Save changes** can therefore send the older audience.
 
 ## Plan
 
-1. **Verify the guard on the live function.** Redeploy `linkedin-api` and re-run the same audience through `preflight_campaign_targeting`. Confirm it reports titles = 109 / over limit. If it reports "fits", the merge math for the generic `facets` map is the bug and gets fixed there.
-2. **Add a preflight to Audience Templates.** Before syncing, call `preflight_campaign_targeting` for both the include set and the exclude set across the selected campaigns, and show a warning banner: which campaigns exceed which field, current count, and room left.
-3. **Block or trim, user's choice.** Same controls as the Campaign Editor: an over-limit sync is blocked by default, with a "Fill to the limit" option that trims the additions to what fits and reports how many values were dropped.
-4. **Surface capacity in the editor itself.** In the Audience breakdown panel, show a per-field count with an over-limit marker (for example `Job titles (current) — 109 / 100`) so the audience can be trimmed at edit time instead of at apply time.
-5. **Report results per campaign.** Replace the single red toast with the per-campaign result rows already used by the Campaign Editor, so a partial failure is readable.
+1. **Add an audience-specific exclusion replacement mode.** Extend `update_campaign_targeting` with a mode that replaces the selected exclusion facets instead of merging them. Keep the Campaign Editor’s existing `exclude` behavior unchanged, because that tool is intentionally additive.
+2. **Sync the template as the source of truth.** Audience Templates will replace each exclusion facet represented in the template, so 90 excluded titles produces 90 excluded titles on the campaign—not the campaign’s previous 58 plus the template’s new values.
+3. **Apply the visible draft.** Build the sync payload from the editor’s current include/exclude lists. If those differ from the saved template, save them before applying so the campaign, assignment record, and template stay consistent.
+4. **Preflight the final replacement payload.** Run the same backend capacity calculation before the write and show the actual outgoing count per campaign/facet. Block only when the replacement itself exceeds 100.
+5. **Make counts unambiguous.** Show separate capacity labels such as `Include 10 / 100` and `Exclude 90 / 100`; do not imply that include + exclude is one shared 100-value allowance.
+6. **Verify and deploy.** Test a campaign with existing title exclusions and this 10-include/90-exclude template, confirm the final campaign has exactly those 90 exclusions, then deploy `linkedin-api` and update `FEATURES.md` / `HISTORY.md`.
 
-## Technical notes
+## Technical details
 
-- `src/hooks/useAudienceTemplates.ts` — add a `preflightAudience()` that posts `action: 'preflight_campaign_targeting'` with the same `facets` map `syncAudience` builds; thread a `fillToLimit` flag through `syncAudience`.
-- `src/components/dashboard/AudienceTemplates.tsx` — debounced preflight on campaign-selection change, warning banner, "Fill to the limit" checkbox, per-campaign results list, per-facet count badges in the breakdown.
-- `supabase/functions/linkedin-api/index.ts` — only touched if step 1 shows the generic-facet merge miscounts; redeploy either way.
-
-## Note on this audience
-
-Even after the guard lands, `gradeA-t1-t2` cannot be applied as-is: 109 titles will not fit in one campaign. It has to be trimmed to 100, or split into two audiences applied to different campaigns.
+- `supabase/functions/linkedin-api/index.ts`: add a distinct exclusion-replace mode and reuse it for preflight; deduplicate URNs before counting and writing.
+- `src/hooks/useAudienceTemplates.ts`: send replacement mode for template exclusions, expose preflight, and accept the current draft payload.
+- `src/components/dashboard/AudienceTemplates.tsx`: save/apply the visible draft atomically and display separate per-layer capacity.
+- Preserve all existing Campaign Editor add/replace/exclude semantics.
