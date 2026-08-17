@@ -33,6 +33,9 @@ import {
   Users,
   Ban,
   Download,
+  ChevronDown,
+  ChevronRight,
+
 } from 'lucide-react';
 
 interface Campaign {
@@ -153,6 +156,19 @@ export function AudienceTemplates({ accessToken, selectedAccount, campaigns, can
   const [syncResults, setSyncResults] = useState<SyncResult[] | null>(null);
   const [importCampaignId, setImportCampaignId] = useState<string | null>(null);
   const [isImporting, setIsImporting] = useState(false);
+  const [facetFilter, setFacetFilter] = useState('');
+  const [collapsedFacets, setCollapsedFacets] = useState<string[]>([]);
+
+  const usedFacets = useMemo(() => {
+    const order = FACETS.map((f) => f.facet);
+    const set = new Set<string>([...include, ...exclude].map((e) => entityFacet(e)));
+    return Array.from(set).sort((a, b) => {
+      const ia = order.indexOf(a);
+      const ib = order.indexOf(b);
+      return (ia < 0 ? 999 : ia) - (ib < 0 ? 999 : ib);
+    });
+  }, [include, exclude]);
+
 
   const importFromCampaign = async () => {
     if (!accessToken || !importCampaignId) return;
@@ -551,62 +567,152 @@ export function AudienceTemplates({ accessToken, selectedAccount, campaigns, can
               )}
             </div>
 
-            {/* Buckets */}
-            <div className="grid gap-3 md:grid-cols-2">
-              {(['include', 'exclude'] as const).map((b) => {
-                const list = b === 'include' ? include : exclude;
-                const byFacet = list.reduce<Record<string, TargetingEntity[]>>((acc, e) => {
-                  const f = entityFacet(e);
-                  (acc[f] ||= []).push(e);
-                  return acc;
-                }, {});
+            {/* Audience breakdown — one row per targeting field, include vs exclude */}
+            <div className="rounded-lg border border-border">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-2">
+                <div className="flex items-center gap-2 text-sm font-medium">
+                  <Layers className="h-4 w-4 text-primary" />
+                  Audience breakdown
+                  <Badge variant="secondary" className="text-[10px]">
+                    {include.length} included
+                  </Badge>
+                  <Badge variant="secondary" className="text-[10px]">
+                    {exclude.length} excluded
+                  </Badge>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Input
+                    className="h-8 w-56"
+                    placeholder="Filter values…"
+                    value={facetFilter}
+                    onChange={(e) => setFacetFilter(e.target.value)}
+                  />
+                  {(include.length > 0 || exclude.length > 0) && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => {
+                        setInclude([]);
+                        setExclude([]);
+                      }}
+                    >
+                      Clear all
+                    </Button>
+                  )}
+                </div>
+              </div>
+
+              {!usedFacets.length && (
+                <div className="px-3 py-6 text-center text-xs text-muted-foreground">
+                  Nothing yet — import from a campaign or search a field above.
+                </div>
+              )}
+
+              {usedFacets.map((f) => {
+                const inc = include.filter((e) => entityFacet(e) === f);
+                const exc = exclude.filter((e) => entityFacet(e) === f);
+                const isOpen = !collapsedFacets.includes(f);
+                const q = facetFilter.trim().toLowerCase();
+                const match = (e: TargetingEntity) => !q || e.name?.toLowerCase().includes(q);
+                const incF = inc.filter(match);
+                const excF = exc.filter(match);
+                if (q && !incF.length && !excF.length) return null;
+
+                const chips = (items: TargetingEntity[], from: 'include' | 'exclude') => (
+                  <div className="flex flex-wrap gap-1.5">
+                    {items.length === 0 && (
+                      <span className="text-[11px] text-muted-foreground">—</span>
+                    )}
+                    {items.map((e) => (
+                      <Badge
+                        key={`${from}-${f}-${e.urn}`}
+                        variant="outline"
+                        className={`max-w-full gap-1 ${
+                          from === 'exclude'
+                            ? 'border-destructive/30 bg-destructive/10 text-destructive'
+                            : colorForFacet(f)
+                        }`}
+                        title={e.name || e.urn}
+                      >
+                        <span className="truncate">{e.name || e.urn}</span>
+                        <X
+                          className="h-3 w-3 shrink-0 cursor-pointer"
+                          onClick={() => removeEntity(e.urn, from)}
+                        />
+                      </Badge>
+                    ))}
+                  </div>
+                );
+
                 return (
-                  <div key={b} className="rounded-lg border border-border p-3">
-                    <div className="mb-2 flex items-center justify-between">
-                      <span className="text-sm font-medium capitalize">{b} ({list.length})</span>
-                      {list.length > 0 && (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => (b === 'include' ? setInclude([]) : setExclude([]))}
-                        >
-                          Clear
-                        </Button>
-                      )}
-                    </div>
-                    <ScrollArea className="max-h-56">
-                      <div className="space-y-2 pr-2">
-                        {Object.entries(byFacet).map(([f, items]) => (
-                          <div key={f}>
-                            <div className="mb-1 text-[11px] uppercase tracking-wide text-muted-foreground">
-                              {facetLabel(f)} ({items.length})
-                            </div>
-                            <div className="flex flex-wrap gap-1.5">
-                              {items.map((e) => (
-                                <Badge
-                                  key={`${f}-${e.urn}`}
-                                  variant="outline"
-                                  className={`gap-1 ${colorForFacet(f)}`}
-                                >
-                                  {e.name}
-                                  <X
-                                    className="h-3 w-3 cursor-pointer"
-                                    onClick={() => removeEntity(e.urn, b)}
-                                  />
-                                </Badge>
-                              ))}
-                            </div>
-                          </div>
-                        ))}
-                        {!list.length && (
-                          <span className="text-xs text-muted-foreground">Nothing yet.</span>
+                  <div key={f} className="border-b border-border last:border-0">
+                    <button
+                      onClick={() =>
+                        setCollapsedFacets((prev) =>
+                          prev.includes(f) ? prev.filter((x) => x !== f) : [...prev, f],
+                        )
+                      }
+                      className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left hover:bg-muted/40"
+                    >
+                      <span className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide">
+                        {isOpen ? (
+                          <ChevronDown className="h-3.5 w-3.5" />
+                        ) : (
+                          <ChevronRight className="h-3.5 w-3.5" />
                         )}
+                        {facetLabel(f)}
+                      </span>
+                      <span className="flex shrink-0 items-center gap-2 text-[11px] text-muted-foreground">
+                        <span className="text-primary">{inc.length} incl.</span>
+                        <span className="text-destructive">{exc.length} excl.</span>
+                      </span>
+                    </button>
+
+                    {isOpen && (
+                      <div className="grid gap-3 px-3 pb-3 md:grid-cols-2">
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between text-[11px] font-medium text-muted-foreground">
+                            <span className="flex items-center gap-1">
+                              <Users className="h-3 w-3" /> Include ({incF.length})
+                            </span>
+                            {inc.length > 0 && (
+                              <button
+                                className="hover:text-foreground"
+                                onClick={() =>
+                                  setInclude(include.filter((e) => entityFacet(e) !== f))
+                                }
+                              >
+                                Clear
+                              </button>
+                            )}
+                          </div>
+                          {chips(incF, 'include')}
+                        </div>
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between text-[11px] font-medium text-muted-foreground">
+                            <span className="flex items-center gap-1">
+                              <Ban className="h-3 w-3" /> Exclude ({excF.length})
+                            </span>
+                            {exc.length > 0 && (
+                              <button
+                                className="hover:text-foreground"
+                                onClick={() =>
+                                  setExclude(exclude.filter((e) => entityFacet(e) !== f))
+                                }
+                              >
+                                Clear
+                              </button>
+                            )}
+                          </div>
+                          {chips(excF, 'exclude')}
+                        </div>
                       </div>
-                    </ScrollArea>
+                    )}
                   </div>
                 );
               })}
             </div>
+
 
 
             <div className="flex flex-wrap gap-2">
