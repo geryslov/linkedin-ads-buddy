@@ -15,19 +15,24 @@ const REQUIRED_SCOPE_VERSION = '2026-03-10-leadgen-scope-v2';
 const MCP_API_KEY_STORAGE = 'linkedin_mcp_api_key';
 
 // Upsert the latest LinkedIn token so the MCP server always has a fresh copy.
+// Non-fatal: a sync failure must never block signing in to the app.
 async function syncMcpToken(linkedinToken: string): Promise<void> {
-  let apiKey = localStorage.getItem(MCP_API_KEY_STORAGE);
-  if (!apiKey) {
-    apiKey = crypto.randomUUID();
-    localStorage.setItem(MCP_API_KEY_STORAGE, apiKey);
-  }
+  try {
+    let apiKey = localStorage.getItem(MCP_API_KEY_STORAGE);
+    if (!apiKey) {
+      apiKey = crypto.randomUUID();
+      localStorage.setItem(MCP_API_KEY_STORAGE, apiKey);
+    }
 
-  const { data, error } = await supabase.functions.invoke('linkedin-api', {
-    body: { action: 'sync_mcp_token', params: { apiKey, linkedinToken } },
-  });
+    const { data, error } = await supabase.functions.invoke('linkedin-api', {
+      body: { action: 'sync_mcp_token', params: { apiKey, linkedinToken } },
+    });
 
-  if (error || data?.error) {
-    throw new Error(error?.message || data?.error || 'Failed to sync LinkedIn token');
+    if (error || data?.error) {
+      console.warn('MCP token sync failed (non-fatal):', error?.message || data?.error);
+    }
+  } catch (err) {
+    console.warn('MCP token sync failed (non-fatal):', err);
   }
 }
 
