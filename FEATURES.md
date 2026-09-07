@@ -137,7 +137,7 @@ Agency → client publishing flow.
 
 `create-test-user` was **deleted 2026-08-05** — a public `verify_jwt = false` endpoint that minted email-confirmed accounts with the service role for anyone who knew the URL. ⚠️ Deleting the folder does not undeploy it; remove it in the Supabase dashboard (or `npx supabase functions delete create-test-user`) or it stays live.
 
-### `linkedin-api` actions (68)
+### `linkedin-api` actions (73)
 
 **Auth & accounts** — `get_auth_url`, `exchange_token`, `get_profile`, `get_ad_accounts`, `sync_ad_accounts`, `sync_mcp_token`
 
@@ -148,6 +148,8 @@ Agency → client publishing flow.
 **Company analysis** — `get_company_demographic`, `get_company_intelligence`, `get_company_influence`, `get_company_campaign_breakdown`, `get_company_conversion_breakdown`, `get_company_engagement_report`, `get_company_engagement_timeline`, `get_creative_company_breakdown`, `exclude_companies_from_campaigns`, `update_company_name`
 
 **Leads** — `get_lead_gen_forms`, `get_lead_gen_overview`, `get_lead_form_responses`, `get_lead_company_journey`
+
+**Targeting** — `get_campaign_targeting_entities`, `preflight_campaign_targeting`, `search_targeting_entities`, `search_companies`, `search_industries`
 
 **Titles & skills** — `search_job_titles`, `bulk_search_titles`, `get_title_suggestions`, `get_title_details`, `get_job_titles_index`, `get_job_seniority_matrix`, `resolve_titles_to_functions`, `override_title_mapping`, `test_titles_api`, `search_skills`, `bulk_search_skills`, `get_skill_suggestions`, `get_skills_for_titles`
 
