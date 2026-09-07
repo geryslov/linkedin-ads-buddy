@@ -1150,6 +1150,262 @@ serve(async (req) => {
         });
       }
 
+      case 'get_ad_copy': {
+        // Ad copy per creative: intro text (the post commentary), headline,
+        // description, destination URL and CTA label.
+        //
+        // For sponsored content the copy lives on the underlying post, not on the
+        // creative, so references are resolved through /v2/ugcPosts and /v2/shares —
+        // the non-partner-gated endpoints. (/rest/posts returns 403
+        // partnerApiPostsExternal without Marketing Partner status; see CLAUDE.md →
+        // Known constraints. That gate costs us thumbnails, not text.)
+        // For non-post formats (text, spotlight, follower, jobs, message ads) the
+        // copy is on the creative itself, in variables.data.
+        const {
+          accountId: copyAccountId,
+          status: copyStatus,
+          campaignIds: copyCampaignIds,
+          creativeIds: copyCreativeIds,
+          limit: copyLimit,
+        } = params || {};
+
+        if (!copyAccountId) {
+          return new Response(JSON.stringify({ error: 'accountId is required' }), {
+            status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+
+        const copyMax = Math.min(Math.max(Number(copyLimit) || 100, 1), 500);
+        const idOf = (v: any) => String(v ?? '').split(':').pop() || '';
+        const wantCampaigns = new Set(
+          (Array.isArray(copyCampaignIds) ? copyCampaignIds : []).map(idOf).filter(Boolean),
+        );
+        const wantCreatives = new Set(
+          (Array.isArray(copyCreativeIds) ? copyCreativeIds : []).map(idOf).filter(Boolean),
+        );
+
+        // ── 1. List creatives (paginated, same shape as get_creatives) ──────────
+        const copyBase = `https://api.linkedin.com/v2/adCreativesV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${copyAccountId}` +
+          (copyStatus ? `&search.status.values[0]=${copyStatus}` : '');
+        const copyAll: any[] = [];
+        for (let i = 0, start = 0; i < 100; i++, start += 100) {
+          const r = await fetch(`${copyBase}&start=${start}&count=100`, {
+            headers: { 'Authorization': `Bearer ${accessToken}` },
+          });
+          if (!r.ok) {
+            const errText = await r.text();
+            if (start === 0) {
+              return new Response(JSON.stringify({
+                error: `LinkedIn adCreativesV2 error ${r.status}`,
+                details: errText.slice(0, 300),
+              }), { status: r.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+            }
+            break;
+          }
+          const p = await r.json();
+          const els = p?.elements || [];
+          copyAll.push(...els);
+          if (els.length < 100) break;
+        }
+
+        const copySelected = copyAll.filter((c: any) => {
+          const cid = idOf(c?.id);
+          const campId = idOf(c?.campaign);
+          if (wantCreatives.size && !wantCreatives.has(cid)) return false;
+          if (wantCampaigns.size && !wantCampaigns.has(campId)) return false;
+          return true;
+        }).slice(0, copyMax);
+
+        console.log(`[get_ad_copy] ${copyAll.length} creatives fetched, ${copySelected.length} selected`);
+
+        const extractCopyRef = (c: any): string => {
+          if (typeof c?.reference === 'string' && c.reference) return c.reference;
+          if (typeof c?.content?.reference === 'string') return c.content.reference;
+          try {
+            const m = JSON.stringify(c ?? {}).match(/urn:li:(?:ugcPost|share|activity):[0-9]+/);
+            if (m) return m[0];
+          } catch { /* ignore */ }
+          return '';
+        };
+        const clean = (v: any): string => (typeof v === 'string' ? v.replace(/\r/g, '').trim() : '');
+
+        // Copy carried directly on the creative — everything that is not a
+        // sponsored post. Each variant stores its text under its own key.
+        const copyFromVariables = (c: any) => {
+          const d = c?.variables?.data || {};
+          const v = (k: string) => d[`com.linkedin.ads.${k}`];
+          const out: any = { adType: c?.type || 'UNKNOWN' };
+
+          const textAd = v('TextAdCreativeVariables');
+          const spotlight = v('SpotlightCreativeVariables');
+          const follower = v('FollowerCreativeVariables');
+          const jobs = v('JobsCreativeVariables');
+          const inMail = v('SponsoredInMailCreativeVariables') || v('MessageAdCreativeVariables');
+          const carousel = v('CarouselCreativeVariables') || v('CarouselAdCreativeVariables');
+
+          if (textAd) {
+            out.adType = 'TEXT_AD';
+            out.headline = clean(textAd.title);
+            out.introText = clean(textAd.text);
+            out.destinationUrl = clean(textAd.landingPage);
+          } else if (spotlight) {
+            out.adType = 'SPOTLIGHT_AD';
+            out.headline = clean(spotlight.headline);
+            out.introText = clean(spotlight.description);
+            out.ctaLabel = clean(spotlight.callToAction || spotlight.ctaLabel);
+            out.destinationUrl = clean(spotlight.landingPage);
+          } else if (follower) {
+            out.adType = 'FOLLOWER_AD';
+            out.headline = clean(follower.headline);
+            out.introText = clean(follower.description);
+            out.ctaLabel = clean(follower.callToAction || follower.ctaLabel);
+          } else if (jobs) {
+            out.adType = 'JOBS_AD';
+            out.headline = clean(jobs.headline);
+            out.introText = clean(jobs.description);
+          } else if (inMail) {
+            out.adType = 'MESSAGE_AD';
+            out.headline = clean(inMail.subject);
+            out.introText = clean(inMail.body);
+            out.ctaLabel = clean(inMail.ctaLabel || inMail.actionButtonLabel);
+          } else if (carousel) {
+            out.adType = 'CAROUSEL_AD';
+            out.headline = clean(carousel.headline);
+            out.cardCount = Array.isArray(carousel.cards) ? carousel.cards.length : undefined;
+          }
+          return out;
+        };
+
+        // ── 2. REST creatives: friendly name + the lead gen CTA label ───────────
+        const copyRestById: Record<string, { name?: string; ctaLabel?: string; destination?: string }> = {};
+        try {
+          const restHeaders = {
+            'Authorization': `Bearer ${accessToken}`,
+            'LinkedIn-Version': '202511',
+            'X-Restli-Protocol-Version': '2.0.0',
+          };
+          const copyIds = copySelected.map((c: any) => idOf(c?.id)).filter(Boolean);
+          for (let i = 0; i < copyIds.length; i += 50) {
+            const idList = copyIds.slice(i, i + 50)
+              .map((id: string) => encodeURIComponent(`urn:li:sponsoredCreative:${id}`))
+              .join(',');
+            const resp = await fetch(
+              `https://api.linkedin.com/rest/adAccounts/${copyAccountId}/creatives?ids=List(${idList})`,
+              { headers: restHeaders },
+            );
+            if (!resp.ok) {
+              console.log(`[get_ad_copy] REST batch-get failed: HTTP ${resp.status}`);
+              await resp.text();
+              continue;
+            }
+            const json = await resp.json();
+            for (const [urn, obj] of Object.entries<any>(json?.results || {})) {
+              const cid = idOf(urn);
+              if (!cid) continue;
+              copyRestById[cid] = {
+                name: clean(obj?.name) || undefined,
+                ctaLabel: clean(obj?.leadgenCallToAction?.label) || undefined,
+                destination: clean(obj?.leadgenCallToAction?.destination) || undefined,
+              };
+            }
+          }
+        } catch (e) {
+          console.error('[get_ad_copy] REST creative lookup error:', e);
+        }
+
+        // ── 3. Resolve post copy per unique content reference ───────────────────
+        type PostCopy = {
+          introText: string; headline: string; description: string; destinationUrl: string;
+        };
+        const copyByRef = new Map<string, PostCopy>();
+        const copyRefs = [...new Set(
+          copySelected.map(extractCopyRef).filter((r: string) =>
+            r.includes('ugcPost') || r.includes('share') || r.includes('activity')),
+        )] as string[];
+
+        const CONCURRENCY = 8;
+        let copyRefFailures = 0;
+        for (let i = 0; i < copyRefs.length; i += CONCURRENCY) {
+          await Promise.all(copyRefs.slice(i, i + CONCURRENCY).map(async (ref) => {
+            const isUgc = ref.includes('ugcPost');
+            const url = isUgc
+              ? `https://api.linkedin.com/v2/ugcPosts/${encodeURIComponent(ref)}`
+              : `https://api.linkedin.com/v2/shares/${encodeURIComponent(ref)}`;
+            try {
+              const r = await fetch(url, { headers: { 'Authorization': `Bearer ${accessToken}` } });
+              if (!r.ok) {
+                await r.text();
+                copyRefFailures++;
+                return;
+              }
+              const d = await r.json();
+              let entry: PostCopy;
+              if (isUgc) {
+                const sc = d?.specificContent?.['com.linkedin.ugc.ShareContent'];
+                const media = sc?.media?.[0] || {};
+                entry = {
+                  introText: clean(sc?.shareCommentary?.text),
+                  headline: clean(media?.title?.text),
+                  description: clean(media?.description?.text),
+                  destinationUrl: clean(media?.originalUrl),
+                };
+              } else {
+                const ce = d?.content?.contentEntities?.[0] || {};
+                entry = {
+                  introText: clean(d?.text?.text || d?.commentary),
+                  headline: clean(d?.content?.title || ce?.title),
+                  description: clean(d?.content?.description || ce?.description),
+                  destinationUrl: clean(ce?.entityLocation || d?.content?.landingPageUrl),
+                };
+              }
+              copyByRef.set(ref, entry);
+            } catch {
+              copyRefFailures++;
+            }
+          }));
+        }
+        console.log(`[get_ad_copy] resolved ${copyByRef.size}/${copyRefs.length} post references (${copyRefFailures} failed)`);
+
+        // ── 4. Merge ───────────────────────────────────────────────────────────
+        const copyElements = copySelected.map((c: any) => {
+          const creativeId = idOf(c?.id);
+          const ref = extractCopyRef(c);
+          const fromVars = copyFromVariables(c);
+          const post = copyByRef.get(ref);
+          const rest = copyRestById[creativeId] || {};
+
+          const introText = post?.introText || fromVars.introText || '';
+          const headline = post?.headline || fromVars.headline || '';
+          return {
+            creativeId,
+            campaignId: idOf(c?.campaign),
+            status: c?.status || '',
+            adType: fromVars.adType,
+            name: rest.name || '',
+            reference: ref || undefined,
+            introText,
+            headline,
+            description: post?.description || '',
+            destinationUrl: post?.destinationUrl || fromVars.destinationUrl || '',
+            ctaLabel: rest.ctaLabel || fromVars.ctaLabel || '',
+            leadFormUrn: rest.destination && rest.destination.includes('adForm') ? rest.destination : undefined,
+            cardCount: fromVars.cardCount,
+            // A creative with a reference we could not resolve is not "no copy" —
+            // say so, so callers do not report an empty ad as an empty ad.
+            copyResolved: !!(introText || headline) ,
+          };
+        });
+
+        return new Response(JSON.stringify({
+          accountId: String(copyAccountId),
+          count: copyElements.length,
+          totalCreatives: copyAll.length,
+          truncated: copyAll.length > copySelected.length && !wantCreatives.size && !wantCampaigns.size,
+          unresolvedReferences: copyRefFailures,
+          elements: copyElements,
+        }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
       case 'get_creative_analytics': {
         const { accountId, dateRange, timeGranularity, campaignIds } = params || {};
         const startDate = dateRange?.start || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];

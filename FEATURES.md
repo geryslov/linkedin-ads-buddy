@@ -137,11 +137,11 @@ Agency → client publishing flow.
 
 `create-test-user` was **deleted 2026-08-05** — a public `verify_jwt = false` endpoint that minted email-confirmed accounts with the service role for anyone who knew the URL. ⚠️ Deleting the folder does not undeploy it; remove it in the Supabase dashboard (or `npx supabase functions delete create-test-user`) or it stays live.
 
-### `linkedin-api` actions (67)
+### `linkedin-api` actions (68)
 
 **Auth & accounts** — `get_auth_url`, `exchange_token`, `get_profile`, `get_ad_accounts`, `sync_ad_accounts`, `sync_mcp_token`
 
-**Campaigns & creatives** — `get_campaigns`, `get_campaign_report`, `get_campaign_group_performance`, `get_campaign_performance_report`, `get_creatives`, `get_creative_report`, `get_creative_names_report`, `get_creative_performance_report`, `get_creative_analytics`, `get_creative_fatigue`, `get_account_structure`, `update_campaign_status`, `update_campaign_targeting`, `bulk_copy_creatives`, `list_lead_forms`
+**Campaigns & creatives** — `get_campaigns`, `get_campaign_report`, `get_campaign_group_performance`, `get_campaign_performance_report`, `get_creatives`, `get_creative_report`, `get_creative_names_report`, `get_creative_performance_report`, `get_creative_analytics`, `get_creative_fatigue`, `get_account_structure`, `update_campaign_status`, `update_campaign_targeting`, `bulk_copy_creatives`, `list_lead_forms`, `get_ad_copy`
 
 **Analytics** — `get_analytics`, `get_ad_analytics`, `get_demographic_analytics`, `get_objective_breakdowns`, `get_form_creative_analytics`
 
@@ -176,7 +176,9 @@ Three things it does that nothing else in the codebase does — all needed by th
 
 Production: `https://linkedin-ads-buddy-production.up.railway.app/mcp`. Registry in [mcp-server/src/tools.ts](mcp-server/src/tools.ts).
 
-16 tools exposed: `get_ad_accounts`, `get_campaigns`, `get_analytics`, `get_campaign_analytics`, `get_creative_analytics`, `get_demographic_analytics`, `get_creatives`, `get_audiences`, `update_campaign_status`, `get_lead_gen_forms`, `search_job_titles`, `get_budget_pacing`, `get_creative_performance_report`, `get_creative_fatigue`, `update_campaign_budget`, and `call_linkedin_action`.
+17 tools exposed: `get_ad_accounts`, `get_campaigns`, `get_analytics`, `get_campaign_analytics`, `get_creative_analytics`, `get_demographic_analytics`, `get_creatives`, `get_ad_copy`, `get_audiences`, `update_campaign_status`, `get_lead_gen_forms`, `search_job_titles`, `get_budget_pacing`, `get_creative_performance_report`, `get_creative_fatigue`, `update_campaign_budget`, and `call_linkedin_action`.
+
+**`get_ad_copy`** returns the actual ad text — intro text (post commentary), headline, description, destination URL, CTA label — per creative, filterable by status / campaign / creative id. For sponsored content the copy lives on the underlying post, so it resolves references through `/v2/ugcPosts` and `/v2/shares`; the partner-gated `/rest/posts` is not involved, so the 403 that blocks thumbnails does not block text. Non-post formats (text, spotlight, follower, jobs, message, carousel ads) read their copy off `variables.data` on the creative instead. Available in both servers (it is in `PASSTHROUGH_READ` too).
 
 In the legacy server `call_linkedin_action` is unrestricted, as it has always been. In the product server it is **allowlist-gated** (`PASSTHROUGH_READ` / `PASSTHROUGH_WRITE` in [mcp-server/src/tools.ts](mcp-server/src/tools.ts)) — an allowlist rather than a blocklist, so adding a `case` to the edge function's switch does not silently widen the MCP surface. Blocked: `sync_mcp_token`, `override_title_mapping`, `update_company_name` (service-role writes to tables with no `user_id` — cross-tenant in a shared server), `probe_creative_create`, `get_auth_url`, `exchange_token`.
 

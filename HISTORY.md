@@ -213,6 +213,27 @@ sequencing decision, not a defect — but it is now recorded as urgent rather th
 
 ---
 
+## Sep 2026 — Ad copy on the MCP surface
+
+`get_creatives` had always returned IDs, status and a name that was often just the first 80
+characters of the post text — enough to identify an ad, useless for reading or rewriting one. Added
+edge action `get_ad_copy` plus a matching MCP tool so Claude can pull the real intro text, headline,
+description, destination URL and CTA per creative.
+
+The interesting part is that it works at all. Creative *thumbnails* are blocked by
+`/rest/posts` → 403 `partnerApiPostsExternal`, and it was easy to assume ad text was behind the same
+partner gate. It is not: `/v2/ugcPosts` and `/v2/shares` still serve `shareCommentary` (intro text)
+and `media[0].title.text` / `description.text` (headline and description) without Partner status —
+the same endpoints the name-resolution fallbacks have quietly been using since December. Copy is
+reachable; only the images are not.
+
+Formats that are not sponsored posts (text, spotlight, follower, jobs, message, carousel) carry
+their copy on the creative itself under `variables.data`, so those are read there instead of via a
+reference. The lead-gen CTA label comes from the REST creative's `leadgenCallToAction`, the same
+field `bulk_copy_creatives` writes.
+
+---
+
 ## Recurring themes
 
 - **URN resolution is the project's tax.** Creative names, job titles, super titles, company names — each needed multiple rounds of encoding fixes, batch fetchers, and caches.

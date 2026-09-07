@@ -30,7 +30,7 @@ const PASSTHROUGH_READ = new Set([
   "get_company_influence", "get_company_intelligence", "get_creative_analytics",
   "get_creative_company_breakdown", "get_creative_fatigue", "get_creative_names_report",
   "get_creative_performance_report", "get_creative_report", "get_creatives",
-  "get_custom_fields", "get_demographic_analytics", "get_form_creative_analytics",
+  "get_ad_copy", "get_custom_fields", "get_demographic_analytics", "get_form_creative_analytics",
   "get_job_seniority_matrix", "get_job_titles_index", "get_lead_company_journey",
   "get_lead_form_responses", "get_lead_gen_forms", "get_lead_gen_overview",
   "get_objective_breakdowns", "get_profile", "get_skill_suggestions", "get_skills_for_titles",
@@ -190,6 +190,20 @@ export function createLinkedInAdsServer(
     "List ad creatives for a LinkedIn Ad account with their status and campaign references.",
     { accountId: z.string().describe("LinkedIn Ad Account ID") },
     async ({ accountId }) => ok(await callEdge("get_creatives", { accountId }))
+  );
+
+  server.tool(
+    "get_ad_copy",
+    "Get the actual ad copy for creatives in a LinkedIn Ad account: intro text (the post commentary shown above the image), headline, description, destination URL and CTA label. Use this to read, review or rewrite ad text — get_creatives only returns IDs, status and a truncated label.",
+    {
+      accountId: z.string().describe("LinkedIn Ad Account ID (numeric)"),
+      status: z.string().optional().describe("Only creatives with this status: ACTIVE, PAUSED, DRAFT, ARCHIVED, CANCELED"),
+      campaignIds: z.array(z.string()).optional().describe("Only creatives in these campaigns (numeric IDs)"),
+      creativeIds: z.array(z.string()).optional().describe("Only these creatives (numeric IDs)"),
+      limit: z.number().optional().describe("Max creatives to return, 1-500 (default 100)"),
+    },
+    async ({ accountId, status, campaignIds, creativeIds, limit }) =>
+      ok(await callEdge("get_ad_copy", { accountId, status, campaignIds, creativeIds, limit }))
   );
 
   server.tool(
