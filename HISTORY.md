@@ -213,24 +213,44 @@ sequencing decision, not a defect — but it is now recorded as urgent rather th
 
 ---
 
-## Sep 2026 — Ad copy on the MCP surface
+## Sep 2026 — Ad copy on the MCP surface, and the wall behind it
 
 `get_creatives` had always returned IDs, status and a name that was often just the first 80
 characters of the post text — enough to identify an ad, useless for reading or rewriting one. Added
-edge action `get_ad_copy` plus a matching MCP tool so Claude can pull the real intro text, headline,
-description, destination URL and CTA per creative.
+edge action `get_ad_copy` plus a matching MCP tool to pull intro text, headline, description,
+destination URL and CTA per creative.
 
-The interesting part is that it works at all. Creative *thumbnails* are blocked by
-`/rest/posts` → 403 `partnerApiPostsExternal`, and it was easy to assume ad text was behind the same
-partner gate. It is not: `/v2/ugcPosts` and `/v2/shares` still serve `shareCommentary` (intro text)
-and `media[0].title.text` / `description.text` (headline and description) without Partner status —
-the same endpoints the name-resolution fallbacks have quietly been using since December. Copy is
-reachable; only the images are not.
+**It does not work, and the reason is worth recording.** The build rested on an assumption taken
+from this repo's own code: the name-resolution fallbacks call `/v2/ugcPosts`, so that endpoint must
+be reachable. It is not. Those fallbacks treat any non-200 as "this post has no text", so a
+completely blocked endpoint and an untitled post are indistinguishable — the failure had been
+invisible since December. Shipping `get_ad_copy` made it visible, because empty copy is obviously
+wrong in a way that a fallback name never was.
 
-Formats that are not sponsored posts (text, spotlight, follower, jobs, message, carousel) carry
-their copy on the creative itself under `variables.data`, so those are read there instead of via a
-reference. The lead-gen CTA label comes from the REST creative's `leadgenCallToAction`, the same
-field `bulk_copy_creatives` writes.
+`probe_ad_copy_sources` (read-only, one creative, eleven endpoints, status + body for each) settled
+it: `/v2/ugcPosts`, `/v2/shares` and `/v2/activities` all 403 with
+`Not enough permissions to access: …GET.NO_VERSION`; `/rest/posts` 403s as `partnerApiPostsExternal`,
+the same partner gate that blocks thumbnails. Only `/rest/adAccounts/{acct}/creatives` returns 200,
+and it carries the reference, the name and the CTA — no copy. Two independent walls, one scope and
+one partner program.
+
+The premise that ad text "shouldn't be different than the creative name" is the intuitive trap here:
+the name is advertiser-typed metadata on the creative; the copy is on a separate post object with a
+separate ACL. Same screen in Campaign Manager, different permission model. And because these ads are
+`directSponsoredContent: true`, there is no Page post to hold admin rights over.
+
+Left open: a second LinkedIn app with `r_organization_social` approved might read the posts, pending
+a one-command check against two real URNs. Two doubts, both unresolved — the scope wants Page-admin
+rights on each client org (ads access is not that), and DSC may be outside it entirely. If it does
+work, the shape is a `linkedin_social_tokens` table keyed by member id, resolved from the ads token
+via `/v2/me`, used only for post fetches — no MCP contract change. Requesting the scope on the main
+app is the better outcome if it is available.
+
+Also this session: an extended probe (`a9f745c`) is pushed but **not deployed**; the edge-function
+CI failure was confirmed live rather than assumed — `403 Your account does not have the necessary
+privileges`, i.e. a restricted `SUPABASE_ACCESS_TOKEN`, exactly as predicted in Aug; and the
+FEATURES action count was corrected (the Aug targeting work added five actions without touching the
+doc).
 
 ---
 

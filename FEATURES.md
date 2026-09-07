@@ -137,11 +137,11 @@ Agency → client publishing flow.
 
 `create-test-user` was **deleted 2026-08-05** — a public `verify_jwt = false` endpoint that minted email-confirmed accounts with the service role for anyone who knew the URL. ⚠️ Deleting the folder does not undeploy it; remove it in the Supabase dashboard (or `npx supabase functions delete create-test-user`) or it stays live.
 
-### `linkedin-api` actions (73)
+### `linkedin-api` actions (74)
 
 **Auth & accounts** — `get_auth_url`, `exchange_token`, `get_profile`, `get_ad_accounts`, `sync_ad_accounts`, `sync_mcp_token`
 
-**Campaigns & creatives** — `get_campaigns`, `get_campaign_report`, `get_campaign_group_performance`, `get_campaign_performance_report`, `get_creatives`, `get_creative_report`, `get_creative_names_report`, `get_creative_performance_report`, `get_creative_analytics`, `get_creative_fatigue`, `get_account_structure`, `update_campaign_status`, `update_campaign_targeting`, `bulk_copy_creatives`, `list_lead_forms`, `get_ad_copy`
+**Campaigns & creatives** — `get_campaigns`, `get_campaign_report`, `get_campaign_group_performance`, `get_campaign_performance_report`, `get_creatives`, `get_creative_report`, `get_creative_names_report`, `get_creative_performance_report`, `get_creative_analytics`, `get_creative_fatigue`, `get_account_structure`, `update_campaign_status`, `update_campaign_targeting`, `bulk_copy_creatives`, `list_lead_forms`, `get_ad_copy`, `probe_ad_copy_sources`
 
 **Analytics** — `get_analytics`, `get_ad_analytics`, `get_demographic_analytics`, `get_objective_breakdowns`, `get_form_creative_analytics`
 
@@ -180,7 +180,9 @@ Production: `https://linkedin-ads-buddy-production.up.railway.app/mcp`. Registry
 
 17 tools exposed: `get_ad_accounts`, `get_campaigns`, `get_analytics`, `get_campaign_analytics`, `get_creative_analytics`, `get_demographic_analytics`, `get_creatives`, `get_ad_copy`, `get_audiences`, `update_campaign_status`, `get_lead_gen_forms`, `search_job_titles`, `get_budget_pacing`, `get_creative_performance_report`, `get_creative_fatigue`, `update_campaign_budget`, and `call_linkedin_action`.
 
-**`get_ad_copy`** returns the actual ad text — intro text (post commentary), headline, description, destination URL, CTA label — per creative, filterable by status / campaign / creative id. For sponsored content the copy lives on the underlying post, so it resolves references through `/v2/ugcPosts` and `/v2/shares`; the partner-gated `/rest/posts` is not involved, so the 403 that blocks thumbnails does not block text. Non-post formats (text, spotlight, follower, jobs, message, carousel ads) read their copy off `variables.data` on the creative instead. Available in both servers (it is in `PASSTHROUGH_READ` too).
+**`get_ad_copy`** returns per-creative metadata — `name`, `adType`, `status`, `campaignId`, `ctaLabel`, `leadFormUrn`, and the content `reference` — plus fields for `introText`, `headline`, `description` and `destinationUrl` that are **currently always empty**. ⚠️ The copy fields do not work: see *Ad copy is gated* under Known constraints in [CLAUDE.md](CLAUDE.md). The metadata is real and useful; the copy is not retrievable with this app's LinkedIn permissions. `resolutionErrors` carries the HTTP status of each failed post fetch so the emptiness is self-explaining. Non-post formats (text, spotlight, follower, jobs, message ads) read their copy off `variables.data` on the creative and are unaffected by the gate — but every sponsored-content ad, which is nearly all of them, comes back blank. Available in both servers (it is in `PASSTHROUGH_READ`).
+
+**`probe_ad_copy_sources`** is the read-only diagnostic behind that finding: it takes one real creative and reports the HTTP status and body of eleven candidate endpoints — direct GETs, batch `ids=List` finders, Rest.li URN decoration, and owner-scoped DSC/post finders. Use it before assuming anything about what LinkedIn will serve.
 
 In the legacy server `call_linkedin_action` is unrestricted, as it has always been. In the product server it is **allowlist-gated** (`PASSTHROUGH_READ` / `PASSTHROUGH_WRITE` in [mcp-server/src/tools.ts](mcp-server/src/tools.ts)) — an allowlist rather than a blocklist, so adding a `case` to the edge function's switch does not silently widen the MCP surface. Blocked: `sync_mcp_token`, `override_title_mapping`, `update_company_name` (service-role writes to tables with no `user_id` — cross-tenant in a shared server), `probe_creative_create`, `get_auth_url`, `exchange_token`.
 

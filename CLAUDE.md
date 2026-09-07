@@ -191,6 +191,20 @@ Sidebar group with two tools. Both are **platform-only writes** (JWT + can_write
 ## Known constraints
 
 - **Creative thumbnails are not available for most creatives.** LinkedIn's `/rest/posts/{urn}` returns 403 `partnerApiPostsExternal` — that's a Marketing Developer Platform Partner-gated endpoint, not a scope issue. `/v2/shares` is deprecated. Without Partner status, `imageUrl` will be empty for `SPONSORED_STATUS_UPDATE`, `SPONSORED_UPDATE_NATIVE_DOCUMENT`, and `SPONSORED_INMAILS`. The Creative Gallery UI handles this by splitting into "with images" vs "No Preview Available" sections.
+- **Ad copy (intro text / headline) is gated — verified 2026-09-07.** The copy lives on the post a
+  creative references, not on the creative, and every route to that post is refused for this app's
+  token: `/v2/ugcPosts`, `/v2/shares` and `/v2/activities` all return 403 `ACCESS_DENIED`
+  (`Not enough permissions to access: ugcPosts.GET.NO_VERSION`), and `/rest/posts` returns 403
+  `partnerApiPostsExternal` — the same Marketing Partner gate that blocks thumbnails. The creative
+  object itself (`/rest/adAccounts/{acct}/creatives`) returns 200 but carries only
+  `content.reference`, `name` and `leadgenCallToAction`. **This is why `get_creatives` can show a
+  name but no ad text: the name is the advertiser-typed ad name on the creative, a different object
+  with a different ACL — not the post.** The post-text fallbacks scattered through this function
+  (`get_creatives`, `get_creative_report`, `get_creative_fatigue`) have been failing silently for
+  the same reason; they treat any non-200 as "no text". Reproduce with `probe_ad_copy_sources`.
+  Ads are `directSponsoredContent: true`, so there is no Page post to be an admin of. Open avenues,
+  neither validated: `r_organization_social` (needs Page-admin rights per client org, and may still
+  not cover DSC) or Marketing Developer Platform partner status (would fix thumbnails too).
 - **`SPONSORED_INMAILS` ads reference `urn:li:adInMailContent:` URNs**, not posts. Filter these out before calling share content APIs — they will never resolve.
 - **Demographic analytics returns empty below LinkedIn's 300-impression privacy threshold.** Not a bug.
 - **`adAnalyticsV2?q=analytics` `paging.total` lies for demographic pivots** — it reports the underlying record count (campaign×creative×company), not the number of pivot rows, and the finder does not reliably honor `&start=`. Pagination loops must terminate on "page came back not completely full" (+ a duplicate-page guard), never on `paging.total`, or metrics inflate ~10× (see HISTORY, Jul 23).
