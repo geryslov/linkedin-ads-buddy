@@ -1465,15 +1465,40 @@ serve(async (req) => {
         };
         const v2Hdr = { 'Authorization': `Bearer ${accessToken}` };
 
+        // The account's owning organization — several DSC/post finders are
+        // owner-scoped rather than post-scoped, which is a different permission
+        // path than GETting the post directly.
+        let probeOrg = '';
+        try {
+          const accResp = await fetch(`https://api.linkedin.com/v2/adAccountsV2/${probeAccountId}`, { headers: v2Hdr });
+          if (accResp.ok) probeOrg = String((await accResp.json())?.reference || '');
+        } catch { /* org stays unknown */ }
+        const encOrg = encodeURIComponent(probeOrg);
+        const encAcct = encodeURIComponent(`urn:li:sponsoredAccount:${probeAccountId}`);
+        const encCre = encodeURIComponent(`urn:li:sponsoredCreative:${probeCid}`);
+
         const candidates: Array<{ label: string; url: string; headers: Record<string, string> }> = [
+          // --- direct GETs (known 403, kept as the control) ---
           { label: 'v2 ugcPosts (encoded urn)', url: `https://api.linkedin.com/v2/ugcPosts/${probeEnc}`, headers: v2Hdr },
-          { label: 'v2 ugcPosts (numeric id)', url: `https://api.linkedin.com/v2/ugcPosts/${probeNum}`, headers: v2Hdr },
-          { label: 'v2 shares (numeric id)', url: `https://api.linkedin.com/v2/shares/${probeNum}`, headers: v2Hdr },
-          { label: 'v2 shares (encoded urn)', url: `https://api.linkedin.com/v2/shares/${probeEnc}`, headers: v2Hdr },
           { label: 'rest posts (encoded urn)', url: `https://api.linkedin.com/rest/posts/${probeEnc}`, headers: restHdr },
-          { label: 'rest posts (versioned, no header)', url: `https://api.linkedin.com/rest/posts/${probeEnc}`, headers: v2Hdr },
-          { label: 'v2 activities (encoded urn)', url: `https://api.linkedin.com/v2/activities/${probeEnc}`, headers: v2Hdr },
-          { label: 'rest creative (full object)', url: `https://api.linkedin.com/rest/adAccounts/${probeAccountId}/creatives/${encodeURIComponent(`urn:li:sponsoredCreative:${probeCid}`)}`, headers: restHdr },
+
+          // --- batch finders: sometimes a different ACL path than a single GET ---
+          { label: 'v2 ugcPosts ids=List', url: `https://api.linkedin.com/v2/ugcPosts?ids=List(${probeEnc})`, headers: v2Hdr },
+          { label: 'rest posts ids=List', url: `https://api.linkedin.com/rest/posts?ids=List(${probeEnc})`, headers: restHdr },
+
+          // --- URN decoration: ask the ADS api to resolve the post for us, which
+          //     is the same trick that makes related entities appear inline ---
+          { label: 'rest creative + content decoration', url: `https://api.linkedin.com/rest/adAccounts/${probeAccountId}/creatives?ids=List(${encCre})&fields=id,content:(reference~)`, headers: restHdr },
+          { label: 'v2 adCreativesV2 + share decoration', url: `https://api.linkedin.com/v2/adCreativesV2/${probeCid}?projection=(id,variables(data(*(share~(text,content),activity~(text,content)))))`, headers: v2Hdr },
+          { label: 'v2 adCreativesV2 search + decoration', url: `https://api.linkedin.com/v2/adCreativesV2?q=search&search.account.values[0]=${encAcct}&count=1&projection=(elements*(id,variables(data(*(share~(text)))))) `.trim(), headers: v2Hdr },
+
+          // --- direct sponsored content finders (owner-scoped) ---
+          { label: 'v2 adDirectSponsoredContents (account+owner)', url: `https://api.linkedin.com/v2/adDirectSponsoredContents?q=account&account=${encAcct}&owner=${encOrg}`, headers: v2Hdr },
+          { label: 'rest adAccounts/{a}/dscAdAccountPosts', url: `https://api.linkedin.com/rest/adAccounts/${probeAccountId}/dscAdAccountPosts?q=account`, headers: restHdr },
+
+          // --- owner-scoped post finders ---
+          { label: 'rest posts q=author (org)', url: `https://api.linkedin.com/rest/posts?q=author&author=${encOrg}&count=1`, headers: restHdr },
+          { label: 'v2 shares q=owners (org)', url: `https://api.linkedin.com/v2/shares?q=owners&owners=${encOrg}&count=1`, headers: v2Hdr },
         ];
 
         const attempts: any[] = [];
@@ -1500,6 +1525,7 @@ serve(async (req) => {
           reference: probeRef,
           // The legacy creative object as-is: if any copy is carried on the
           // creative rather than the post, it is visible here.
+          ownerOrganization: probeOrg || null,
           creativeVariables: probeTarget?.variables ?? null,
           attempts,
         }, null, 2), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
