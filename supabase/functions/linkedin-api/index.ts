@@ -1325,6 +1325,9 @@ serve(async (req) => {
 
         const CONCURRENCY = 8;
         let copyRefFailures = 0;
+        // Keep the status. "Empty copy" and "LinkedIn refused the post" are very
+        // different answers, and indistinguishable once the response is discarded.
+        const copyRefErrors: Array<{ reference: string; status: number; message: string }> = [];
         for (let i = 0; i < copyRefs.length; i += CONCURRENCY) {
           await Promise.all(copyRefs.slice(i, i + CONCURRENCY).map(async (ref) => {
             const isUgc = ref.includes('ugcPost');
@@ -1334,8 +1337,9 @@ serve(async (req) => {
             try {
               const r = await fetch(url, { headers: { 'Authorization': `Bearer ${accessToken}` } });
               if (!r.ok) {
-                await r.text();
+                const body = await r.text();
                 copyRefFailures++;
+                copyRefErrors.push({ reference: ref, status: r.status, message: body.slice(0, 200) });
                 return;
               }
               const d = await r.json();
@@ -1359,8 +1363,9 @@ serve(async (req) => {
                 };
               }
               copyByRef.set(ref, entry);
-            } catch {
+            } catch (e) {
               copyRefFailures++;
+              copyRefErrors.push({ reference: ref, status: 0, message: String(e).slice(0, 200) });
             }
           }));
         }
@@ -1402,8 +1407,102 @@ serve(async (req) => {
           totalCreatives: copyAll.length,
           truncated: copyAll.length > copySelected.length && !wantCreatives.size && !wantCampaigns.size,
           unresolvedReferences: copyRefFailures,
+          resolutionErrors: copyRefErrors.slice(0, 5),
           elements: copyElements,
         }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      case 'probe_ad_copy_sources': {
+        // Diagnostic for get_ad_copy. Ad copy lives on the post behind a creative's
+        // content reference, and every endpoint we try can fail for a different
+        // reason (deprecated, partner-gated, or missing an OAuth scope) — all of
+        // which look identical from the outside once the status code is discarded.
+        // This action keeps the status and body, so "empty copy" becomes a
+        // specific, quotable failure. Read-only.
+        const { accountId: probeAccountId, creativeId: probeCreativeId } = params || {};
+        if (!probeAccountId) {
+          return new Response(JSON.stringify({ error: 'accountId is required' }), {
+            status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+
+        const probeIdOf = (v: any) => String(v ?? '').split(':').pop() || '';
+        const probeList = await fetch(
+          `https://api.linkedin.com/v2/adCreativesV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${probeAccountId}&count=100`,
+          { headers: { 'Authorization': `Bearer ${accessToken}` } },
+        );
+        if (!probeList.ok) {
+          const t = await probeList.text();
+          return new Response(JSON.stringify({
+            error: `adCreativesV2 failed: ${probeList.status}`, details: t.slice(0, 300),
+          }), { status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+        const probeEls = (await probeList.json())?.elements || [];
+
+        const probeRefOf = (c: any): string => {
+          try {
+            const m = JSON.stringify(c ?? {}).match(/urn:li:(?:ugcPost|share|activity):[0-9]+/);
+            return m ? m[0] : '';
+          } catch { return ''; }
+        };
+        const probeTarget = probeCreativeId
+          ? probeEls.find((c: any) => probeIdOf(c?.id) === probeIdOf(probeCreativeId))
+          : probeEls.find((c: any) => probeRefOf(c));
+        if (!probeTarget) {
+          return new Response(JSON.stringify({ error: 'No creative with a content reference found on this account' }), {
+            status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+
+        const probeRef = probeRefOf(probeTarget);
+        const probeNum = probeIdOf(probeRef);
+        const probeEnc = encodeURIComponent(probeRef);
+        const probeCid = probeIdOf(probeTarget?.id);
+        const restHdr = {
+          'Authorization': `Bearer ${accessToken}`,
+          'LinkedIn-Version': '202511',
+          'X-Restli-Protocol-Version': '2.0.0',
+        };
+        const v2Hdr = { 'Authorization': `Bearer ${accessToken}` };
+
+        const candidates: Array<{ label: string; url: string; headers: Record<string, string> }> = [
+          { label: 'v2 ugcPosts (encoded urn)', url: `https://api.linkedin.com/v2/ugcPosts/${probeEnc}`, headers: v2Hdr },
+          { label: 'v2 ugcPosts (numeric id)', url: `https://api.linkedin.com/v2/ugcPosts/${probeNum}`, headers: v2Hdr },
+          { label: 'v2 shares (numeric id)', url: `https://api.linkedin.com/v2/shares/${probeNum}`, headers: v2Hdr },
+          { label: 'v2 shares (encoded urn)', url: `https://api.linkedin.com/v2/shares/${probeEnc}`, headers: v2Hdr },
+          { label: 'rest posts (encoded urn)', url: `https://api.linkedin.com/rest/posts/${probeEnc}`, headers: restHdr },
+          { label: 'rest posts (versioned, no header)', url: `https://api.linkedin.com/rest/posts/${probeEnc}`, headers: v2Hdr },
+          { label: 'v2 activities (encoded urn)', url: `https://api.linkedin.com/v2/activities/${probeEnc}`, headers: v2Hdr },
+          { label: 'rest creative (full object)', url: `https://api.linkedin.com/rest/adAccounts/${probeAccountId}/creatives/${encodeURIComponent(`urn:li:sponsoredCreative:${probeCid}`)}`, headers: restHdr },
+        ];
+
+        const attempts: any[] = [];
+        for (const c of candidates) {
+          try {
+            const r = await fetch(c.url, { headers: c.headers });
+            const body = await r.text();
+            attempts.push({
+              endpoint: c.label,
+              status: r.status,
+              ok: r.ok,
+              // Enough to see the shape and the error message, not the whole post.
+              bodyPreview: body.slice(0, 400),
+            });
+          } catch (e) {
+            attempts.push({ endpoint: c.label, status: 0, ok: false, bodyPreview: `threw: ${e}` });
+          }
+        }
+
+        return new Response(JSON.stringify({
+          accountId: String(probeAccountId),
+          creativeId: probeCid,
+          creativeType: probeTarget?.type || 'UNKNOWN',
+          reference: probeRef,
+          // The legacy creative object as-is: if any copy is carried on the
+          // creative rather than the post, it is visible here.
+          creativeVariables: probeTarget?.variables ?? null,
+          attempts,
+        }, null, 2), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
       case 'get_creative_analytics': {

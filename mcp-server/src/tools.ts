@@ -34,6 +34,7 @@ const PASSTHROUGH_READ = new Set([
   "get_job_seniority_matrix", "get_job_titles_index", "get_lead_company_journey",
   "get_lead_form_responses", "get_lead_gen_forms", "get_lead_gen_overview",
   "get_objective_breakdowns", "get_profile", "get_skill_suggestions", "get_skills_for_titles",
+  "probe_ad_copy_sources", // read-only diagnostic, scoped to the caller's own token
   "get_title_details", "get_title_suggestions", "get_weekly_report",
   "resolve_titles_to_functions", "search_job_titles", "search_skills", "test_titles_api",
 ]);
