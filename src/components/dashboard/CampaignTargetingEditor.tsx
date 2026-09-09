@@ -533,6 +533,18 @@ export function CampaignTargetingEditor({
       return;
     }
     
+    // Writes require a signed-in app session (the edge function verifies the JWT).
+    // Without this check the failure surfaces as a generic "non-2xx status code".
+    const { data: sessionData } = await supabase.auth.getSession();
+    if (!sessionData.session) {
+      toast({
+        title: 'Sign in required',
+        description: 'Your app session expired. Sign in again, then re-apply the targeting.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     setIsUpdating(true);
     setApplyResults(null);
 
@@ -551,8 +563,9 @@ export function CampaignTargetingEditor({
         }
       });
       
-      if (error) throw error;
-      
+      if (error) throw new Error(await readInvokeError(error));
+      if (data?.message && data?.success === false) throw new Error(data.message);
+
       const results = (data?.results || []) as TargetingUpdateResult[];
       const successCount = results.filter(r => r.success).length;
       const totalCount = selectedCampaignIds.length;
