@@ -298,6 +298,58 @@ export function CampaignTargetingEditor({
     }
   };
 
+  // Companies / industries have no bulk endpoint, and LinkedIn rejects a typeahead
+  // query longer than 100 chars — so resolve one name at a time, a few in parallel.
+  const resolveEntityList = async (
+    names: string[],
+    kind: 'companies' | 'industries',
+  ): Promise<{ results: TargetingEntity[]; notFound: string[] }> => {
+    if (!accessToken) return { results: [], notFound: names };
+    const action = kind === 'companies' ? 'search_companies' : 'search_industries';
+    const key = kind;
+    const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ');
+    const found: TargetingEntity[] = [];
+    const missing: string[] = [];
+    const seen = new Set<string>();
+
+    const lookup = async (name: string) => {
+      const { data, error } = await supabase.functions.invoke('linkedin-api', {
+        body: { action, accessToken, params: { query: name.slice(0, 90) } },
+      });
+      if (error) throw error;
+      const list = (data?.[key] || data?.results || []) as TargetingEntity[];
+      if (!list.length) return null;
+      return (
+        list.find(r => norm(r.name || '') === norm(name)) ||
+        list.find(r => norm(r.name || '').startsWith(norm(name))) ||
+        list[0]
+      );
+    };
+
+    const CHUNK = 4;
+    for (let i = 0; i < names.length; i += CHUNK) {
+      const settled = await Promise.all(
+        names.slice(i, i + CHUNK).map(async (n) => {
+          try {
+            return { n, hit: await lookup(n) };
+          } catch {
+            return { n, hit: null };
+          }
+        }),
+      );
+      for (const { n, hit } of settled) {
+        if (hit && !seen.has(hit.urn)) {
+          seen.add(hit.urn);
+          found.push({ ...hit, type: kind === 'companies' ? 'company' : 'industry' });
+        } else if (!hit) {
+          missing.push(n);
+        }
+      }
+    }
+    return { results: found, notFound: missing };
+  };
+
+
   // Fetch skill suggestions: uses selected skills if any, otherwise derives from selected titles
   const fetchSkillSuggestions = useCallback(async (selectedSkills: TargetingEntity[], selectedTitles: TargetingEntity[]) => {
     if (!accessToken || (selectedSkills.length === 0 && selectedTitles.length === 0)) {
