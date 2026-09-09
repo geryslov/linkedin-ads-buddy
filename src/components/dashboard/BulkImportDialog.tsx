@@ -29,8 +29,31 @@ interface BulkImportDialogProps {
   onOpenChange: (open: boolean) => void;
   onResolve: (names: string[]) => Promise<{ results: TargetingEntity[]; notFound: string[] }>;
   onAddToSelection: (entities: TargetingEntity[]) => void;
-  type?: 'titles' | 'skills';
+  type?: 'titles' | 'skills' | 'companies' | 'industries';
 }
+
+const COPY = {
+  titles: {
+    label: 'Job Title',
+    plural: 'Job Titles',
+    placeholder: 'Chief Marketing Officer\nVP of Sales\nSoftware Engineer\nProduct Manager',
+  },
+  skills: {
+    label: 'Skill',
+    plural: 'Skills',
+    placeholder: 'Python\nMachine Learning\nData Analysis\nProject Management',
+  },
+  companies: {
+    label: 'Company',
+    plural: 'Companies',
+    placeholder: 'Microsoft\nSalesforce\nHubSpot\nZoom Communications',
+  },
+  industries: {
+    label: 'Industry',
+    plural: 'Industries',
+    placeholder: 'Banking\nInsurance\nHospitals and Health Care\nSoftware Development',
+  },
+} as const;
 
 export function BulkImportDialog({
   open,
@@ -39,11 +62,9 @@ export function BulkImportDialog({
   onAddToSelection,
   type = 'titles',
 }: BulkImportDialogProps) {
-  const label = type === 'skills' ? 'Skill' : 'Job Title';
-  const labelPlural = type === 'skills' ? 'Skills' : 'Job Titles';
-  const placeholder = type === 'skills'
-    ? 'Python\nMachine Learning\nData Analysis\nProject Management'
-    : 'Chief Marketing Officer\nVP of Sales\nSoftware Engineer\nProduct Manager';
+  const label = COPY[type].label;
+  const labelPlural = COPY[type].plural;
+  const placeholder = COPY[type].placeholder;
   const [inputText, setInputText] = useState('');
   const [isResolving, setIsResolving] = useState(false);
   const [resolvedEntities, setResolvedEntities] = useState<TargetingEntity[]>([]);

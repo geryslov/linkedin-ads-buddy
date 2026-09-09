@@ -1254,6 +1254,8 @@ export function CampaignTargetingEditor({
         <SaveAudienceDialog open={showSaveDialog} onOpenChange={setShowSaveDialog} onSave={handleSaveAudience} isLoading={isSaving} />
         <BulkImportDialog open={showBulkImport} onOpenChange={setShowBulkImport} onResolve={handleBulkResolve} onAddToSelection={addMultipleToSelection} type="titles" />
         <BulkImportDialog open={showBulkSkillsImport} onOpenChange={setShowBulkSkillsImport} onResolve={handleBulkSkillsResolve} onAddToSelection={addMultipleToSelection} type="skills" />
+        <BulkImportDialog open={showBulkCompanyImport} onOpenChange={setShowBulkCompanyImport} onResolve={(n) => resolveEntityList(n, 'companies')} onAddToSelection={addMultipleToSelection} type="companies" />
+        <BulkImportDialog open={showBulkIndustryImport} onOpenChange={setShowBulkIndustryImport} onResolve={(n) => resolveEntityList(n, 'industries')} onAddToSelection={addMultipleToSelection} type="industries" />
       </div>
     </TooltipProvider>
   );
