@@ -9206,6 +9206,9 @@ serve(async (req) => {
 
 
 
+            // Build the criteria from an arbitrary subset of the requested facets, so a
+            // LinkedIn rejection can be narrowed down to the exact offending facet.
+            const buildCriteria = (payload: Array<[string, string[]]>): any => {
             if (mode === 'exclude') {
               // EXCLUDE MODE — leave include untouched, merge into exclusion facets (single OR map).
               const existingExcludeOr: Record<string, string[]> = existingTargeting?.exclude?.or || {};
