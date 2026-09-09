@@ -9001,25 +9001,30 @@ serve(async (req) => {
         console.log(`[update_campaign_targeting] Updating ${idsToUpdate.length} campaigns, Mode: ${mode}`);
         console.log(`[update_campaign_targeting] Titles: ${titleUrns?.length || 0}, Skills: ${skillUrns?.length || 0}`);
         
-        // Initialize Supabase client for permission checks
-        const authHeader = req.headers.get('Authorization');
-        const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
-        const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!;
-        const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
-        
-        const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-          global: { headers: { Authorization: authHeader || '' } }
-        });
-        
-        const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
-        if (userError || !user) {
-          return new Response(JSON.stringify({ 
-            success: false, 
-            message: 'Authentication required' 
-          }), {
-            status: 401,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-          });
+        // The LinkedIn access token is the authorization for this operation.
+        // Resolve account roles directly from LinkedIn so reconnecting there is
+        // sufficient and a separate app session is not required.
+        const accountRoles = new Map<string, string>();
+        try {
+          const rolesResponse = await fetch(
+            'https://api.linkedin.com/rest/adAccountUsers?q=authenticatedUser',
+            {
+              headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'LinkedIn-Version': '202511',
+                'X-Restli-Protocol-Version': '2.0.0',
+              },
+            }
+          );
+          if (rolesResponse.ok) {
+            const rolesData = await rolesResponse.json();
+            for (const entry of (rolesData?.elements || [])) {
+              const roleAccountId = String(entry?.account || '').split(':').pop();
+              if (roleAccountId) accountRoles.set(roleAccountId, entry?.role || 'DIRECT_ACCESS');
+            }
+          }
+        } catch (roleError) {
+          console.warn('[update_campaign_targeting] Could not resolve account roles:', roleError);
         }
         
         type FacetStat = { facet: string; existing: number; requested: number; willAdd: number; total: number; room: number; overLimit: boolean; dropped: number };
@@ -9073,115 +9078,23 @@ serve(async (req) => {
               continue;
             }
             
-            // Step 3: Check cached permissions from linkedin_ad_accounts table
-            let { data: accRow, error: accErr } = await supabaseClient
-              .from('linkedin_ad_accounts')
-              .select('can_write, user_role, account_urn')
-              .eq('user_id', user.id)
-              .eq('account_id', derivedAccountId)
-              .maybeSingle();
-            
-            // If not in cache, attempt to sync accounts and retry once
-            if (!accRow) {
-              console.log(`[update_campaign_targeting] Account ${derivedAccountId} not in cache, triggering discovery...`);
-              
-              // Inline minimal discovery for this specific account
-              try {
-                const accResponse = await fetch(
-                  `https://api.linkedin.com/v2/adAccountsV2/${derivedAccountId}`,
-                  { headers: { 'Authorization': `Bearer ${accessToken}` } }
-                );
-                
-                if (accResponse.ok) {
-                  const accData = await accResponse.json();
-                  
-                  // Get user's role on this account
-                  let userRole = 'UNKNOWN';
-                  try {
-                    const usersResponse = await fetch(
-                      'https://api.linkedin.com/rest/adAccountUsers?q=authenticatedUser',
-                      {
-                        headers: {
-                          'Authorization': `Bearer ${accessToken}`,
-                          'LinkedIn-Version': '202511',
-                          'X-Restli-Protocol-Version': '2.0.0',
-                        },
-                      }
-                    );
-                    if (usersResponse.ok) {
-                      const usersData = await usersResponse.json();
-                      for (const el of (usersData?.elements || [])) {
-                        const accountId = (el.account || '').split(':').pop();
-                        if (accountId === derivedAccountId) {
-                          userRole = el.role || 'UNKNOWN';
-                          break;
-                        }
-                      }
-                    }
-                  } catch (e) {
-                    console.log('[update_campaign_targeting] Could not fetch user role:', e);
-                  }
-                  
-                  const writeCapableRoles = ['ACCOUNT_MANAGER', 'CAMPAIGN_MANAGER', 'CREATIVE_MANAGER'];
-                  const canWrite = writeCapableRoles.includes(userRole);
-                  
-                  // Upsert to cache
-                  await supabaseClient
-                    .from('linkedin_ad_accounts')
-                    .upsert({
-                      user_id: user.id,
-                      account_id: derivedAccountId,
-                      account_urn: `urn:li:sponsoredAccount:${derivedAccountId}`,
-                      name: accData.name || `Account ${derivedAccountId}`,
-                      status: accData.status || 'ACTIVE',
-                      type: accData.type || 'UNKNOWN',
-                      currency: accData.currency || 'USD',
-                      user_role: userRole,
-                      can_write: canWrite,
-                      last_synced_at: new Date().toISOString(),
-                    }, { onConflict: 'user_id,account_id' });
-                  
-                  // Re-query
-                  const { data: accRow2 } = await supabaseClient
-                    .from('linkedin_ad_accounts')
-                    .select('can_write, user_role, account_urn')
-                    .eq('user_id', user.id)
-                    .eq('account_id', derivedAccountId)
-                    .maybeSingle();
-                  
-                  accRow = accRow2;
-                }
-              } catch (discoverErr) {
-                console.error('[update_campaign_targeting] Discovery failed:', discoverErr);
-              }
-              
-              // If still not found after discovery
-              if (!accRow) {
-                results.push({
-                  campaignId: currentCampaignId,
-                  success: false,
-                  message: 'This campaign belongs to an ad account you cannot access in this app.',
-                  errorCode: 'ACCOUNT_NOT_ACCESSIBLE',
-                  accountId: derivedAccountId
-                });
-                continue;
-              }
-            }
-            
-            // Step 4: Gate on can_write - but allow DIRECT_ACCESS (role unknown — let LinkedIn decide)
-            if (!accRow.can_write && accRow.user_role !== 'DIRECT_ACCESS') {
-              console.log(`[update_campaign_targeting] User lacks write permission on account ${derivedAccountId} (role: ${accRow.user_role})`);
+            // Step 3: Gate on the role reported by LinkedIn. If role discovery is
+            // unavailable, let LinkedIn's campaign PATCH make the final decision.
+            const userRole = accountRoles.get(derivedAccountId) || 'DIRECT_ACCESS';
+            const writeCapableRoles = ['ACCOUNT_MANAGER', 'CAMPAIGN_MANAGER', 'CREATIVE_MANAGER'];
+            if (userRole !== 'DIRECT_ACCESS' && !writeCapableRoles.includes(userRole)) {
+              console.log(`[update_campaign_targeting] User lacks write permission on account ${derivedAccountId} (role: ${userRole})`);
               results.push({
                 campaignId: currentCampaignId,
                 success: false,
-                message: `You don't have a write-capable role on this ad account (role: ${accRow.user_role || 'UNKNOWN'}). Needs Account/Campaign Manager.`,
+                message: `You don't have a write-capable role on this ad account (role: ${userRole}). Needs Account/Campaign Manager.`,
                 errorCode: 'ROLE_INSUFFICIENT',
                 accountId: derivedAccountId
               });
               continue;
             }
             
-            // Step 5: Build targeting criteria
+            // Step 4: Build targeting criteria
             let targetingCriteria: any;
 
             const FACET_TITLES = 'urn:li:adTargetingFacet:titles';
