@@ -21,6 +21,10 @@ export default function Auth() {
 
   const isEmailMode = searchParams.get('mode') === 'email';
   const [isSignUpMode, setIsSignUpMode] = useState(searchParams.get('view') === 'signup');
+  const requestedReturnTo = searchParams.get('returnTo');
+  const returnTo = requestedReturnTo?.startsWith('/') && !requestedReturnTo.startsWith('//')
+    ? requestedReturnTo
+    : '/dashboard';
 
   useEffect(() => {
     setIsSignUpMode(searchParams.get('view') === 'signup');
@@ -30,19 +34,19 @@ export default function Auth() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       setSession(session);
       if (session) {
-        navigate('/dashboard');
+        navigate(returnTo);
       }
     });
 
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       if (session) {
-        navigate('/dashboard');
+        navigate(returnTo);
       }
     });
 
     return () => subscription.unsubscribe();
-  }, [navigate]);
+  }, [navigate, returnTo]);
 
   const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault();
