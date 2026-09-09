@@ -47,6 +47,26 @@ interface Campaign {
   status: string;
 }
 
+// supabase-js hides the response body behind a generic "non-2xx status code".
+// FunctionsHttpError carries the Response on `.context` — read the real reason.
+async function readInvokeError(error: unknown): Promise<string> {
+  const fallback = error instanceof Error ? error.message : 'The request failed.';
+  const ctx = (error as { context?: unknown })?.context;
+  if (ctx && typeof (ctx as Response).json === 'function') {
+    try {
+      const body = await (ctx as Response).clone().json();
+      if (body?.message) return body.message;
+      if (body?.error) return body.errorCode ? `${body.error} (${body.errorCode})` : body.error;
+    } catch {
+      try {
+        const text = await (ctx as Response).clone().text();
+        if (text) return text.slice(0, 300);
+      } catch { /* ignore */ }
+    }
+  }
+  return fallback;
+}
+
 // Per-facet capacity info returned by the backend (LinkedIn caps each facet at 100 values).
 interface FacetStat {
   facet: string;
@@ -124,6 +144,8 @@ export function CampaignTargetingEditor({
   // Bulk import
   const [showBulkImport, setShowBulkImport] = useState(false);
   const [showBulkSkillsImport, setShowBulkSkillsImport] = useState(false);
+  const [showBulkCompanyImport, setShowBulkCompanyImport] = useState(false);
+  const [showBulkIndustryImport, setShowBulkIndustryImport] = useState(false);
 
   // Skill suggestions
   const [skillSuggestions, setSkillSuggestions] = useState<TargetingEntity[]>([]);
@@ -297,6 +319,58 @@ export function CampaignTargetingEditor({
       return { results: [], notFound: skills };
     }
   };
+
+  // Companies / industries have no bulk endpoint, and LinkedIn rejects a typeahead
+  // query longer than 100 chars — so resolve one name at a time, a few in parallel.
+  const resolveEntityList = async (
+    names: string[],
+    kind: 'companies' | 'industries',
+  ): Promise<{ results: TargetingEntity[]; notFound: string[] }> => {
+    if (!accessToken) return { results: [], notFound: names };
+    const action = kind === 'companies' ? 'search_companies' : 'search_industries';
+    const key = kind;
+    const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ');
+    const found: TargetingEntity[] = [];
+    const missing: string[] = [];
+    const seen = new Set<string>();
+
+    const lookup = async (name: string) => {
+      const { data, error } = await supabase.functions.invoke('linkedin-api', {
+        body: { action, accessToken, params: { query: name.slice(0, 90) } },
+      });
+      if (error) throw error;
+      const list = (data?.[key] || data?.results || []) as TargetingEntity[];
+      if (!list.length) return null;
+      return (
+        list.find(r => norm(r.name || '') === norm(name)) ||
+        list.find(r => norm(r.name || '').startsWith(norm(name))) ||
+        list[0]
+      );
+    };
+
+    const CHUNK = 4;
+    for (let i = 0; i < names.length; i += CHUNK) {
+      const settled = await Promise.all(
+        names.slice(i, i + CHUNK).map(async (n) => {
+          try {
+            return { n, hit: await lookup(n) };
+          } catch {
+            return { n, hit: null };
+          }
+        }),
+      );
+      for (const { n, hit } of settled) {
+        if (hit && !seen.has(hit.urn)) {
+          seen.add(hit.urn);
+          found.push({ ...hit, type: kind === 'companies' ? 'company' : 'industry' });
+        } else if (!hit) {
+          missing.push(n);
+        }
+      }
+    }
+    return { results: found, notFound: missing };
+  };
+
 
   // Fetch skill suggestions: uses selected skills if any, otherwise derives from selected titles
   const fetchSkillSuggestions = useCallback(async (selectedSkills: TargetingEntity[], selectedTitles: TargetingEntity[]) => {
@@ -533,6 +607,18 @@ export function CampaignTargetingEditor({
       return;
     }
     
+    // Writes require a signed-in app session (the edge function verifies the JWT).
+    // Without this check the failure surfaces as a generic "non-2xx status code".
+    const { data: sessionData } = await supabase.auth.getSession();
+    if (!sessionData.session) {
+      toast({
+        title: 'Sign in required',
+        description: 'Your app session expired. Sign in again, then re-apply the targeting.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     setIsUpdating(true);
     setApplyResults(null);
 
@@ -551,8 +637,9 @@ export function CampaignTargetingEditor({
         }
       });
       
-      if (error) throw error;
-      
+      if (error) throw new Error(await readInvokeError(error));
+      if (data?.message && data?.success === false) throw new Error(data.message);
+
       const results = (data?.results || []) as TargetingUpdateResult[];
       const successCount = results.filter(r => r.success).length;
       const totalCount = selectedCampaignIds.length;
@@ -886,14 +973,18 @@ export function CampaignTargetingEditor({
                     <Button
                       variant="outline"
                       size="icon"
-                      disabled={searchType === 'companies' || searchType === 'industries'}
-                      onClick={() => searchType === 'titles' ? setShowBulkImport(true) : setShowBulkSkillsImport(true)}
+                      onClick={() => {
+                        if (searchType === 'titles') setShowBulkImport(true);
+                        else if (searchType === 'skills') setShowBulkSkillsImport(true);
+                        else if (searchType === 'companies') setShowBulkCompanyImport(true);
+                        else setShowBulkIndustryImport(true);
+                      }}
                     >
                       <Upload className="h-4 w-4" />
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent>
-                    {searchType === 'companies' || searchType === 'industries' ? 'Bulk import not available for this type' : `Bulk import ${searchType === 'titles' ? 'job titles' : 'skills'}`}
+                    {`Bulk import ${searchType === 'titles' ? 'job titles' : searchType === 'skills' ? 'skills' : searchType === 'companies' ? 'companies' : 'industries'}`}
                   </TooltipContent>
                 </Tooltip>
               </div>
@@ -1163,6 +1254,8 @@ export function CampaignTargetingEditor({
         <SaveAudienceDialog open={showSaveDialog} onOpenChange={setShowSaveDialog} onSave={handleSaveAudience} isLoading={isSaving} />
         <BulkImportDialog open={showBulkImport} onOpenChange={setShowBulkImport} onResolve={handleBulkResolve} onAddToSelection={addMultipleToSelection} type="titles" />
         <BulkImportDialog open={showBulkSkillsImport} onOpenChange={setShowBulkSkillsImport} onResolve={handleBulkSkillsResolve} onAddToSelection={addMultipleToSelection} type="skills" />
+        <BulkImportDialog open={showBulkCompanyImport} onOpenChange={setShowBulkCompanyImport} onResolve={(n) => resolveEntityList(n, 'companies')} onAddToSelection={addMultipleToSelection} type="companies" />
+        <BulkImportDialog open={showBulkIndustryImport} onOpenChange={setShowBulkIndustryImport} onResolve={(n) => resolveEntityList(n, 'industries')} onAddToSelection={addMultipleToSelection} type="industries" />
       </div>
     </TooltipProvider>
   );
