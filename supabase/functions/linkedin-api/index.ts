@@ -9095,7 +9095,6 @@ serve(async (req) => {
             }
             
             // Step 4: Build targeting criteria
-            let targetingCriteria: any;
 
             const FACET_TITLES = 'urn:li:adTargetingFacet:titles';
             const FACET_SKILLS = 'urn:li:adTargetingFacet:skills';
