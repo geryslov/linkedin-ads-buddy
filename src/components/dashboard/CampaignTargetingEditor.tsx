@@ -47,6 +47,26 @@ interface Campaign {
   status: string;
 }
 
+// supabase-js hides the response body behind a generic "non-2xx status code".
+// FunctionsHttpError carries the Response on `.context` — read the real reason.
+async function readInvokeError(error: unknown): Promise<string> {
+  const fallback = error instanceof Error ? error.message : 'The request failed.';
+  const ctx = (error as { context?: unknown })?.context;
+  if (ctx && typeof (ctx as Response).json === 'function') {
+    try {
+      const body = await (ctx as Response).clone().json();
+      if (body?.message) return body.message;
+      if (body?.error) return body.errorCode ? `${body.error} (${body.errorCode})` : body.error;
+    } catch {
+      try {
+        const text = await (ctx as Response).clone().text();
+        if (text) return text.slice(0, 300);
+      } catch { /* ignore */ }
+    }
+  }
+  return fallback;
+}
+
 // Per-facet capacity info returned by the backend (LinkedIn caps each facet at 100 values).
 interface FacetStat {
   facet: string;
