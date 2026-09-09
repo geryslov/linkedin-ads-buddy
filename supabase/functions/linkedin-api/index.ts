@@ -9209,55 +9209,60 @@ serve(async (req) => {
             // Build the criteria from an arbitrary subset of the requested facets, so a
             // LinkedIn rejection can be narrowed down to the exact offending facet.
             const buildCriteria = (payload: Array<[string, string[]]>): any => {
-            if (mode === 'exclude') {
-              // EXCLUDE MODE — leave include untouched, merge into exclusion facets (single OR map).
-              const existingExcludeOr: Record<string, string[]> = existingTargeting?.exclude?.or || {};
-              const mergedOr: Record<string, string[]> = { ...existingExcludeOr };
+              if (mode === 'exclude') {
+                // EXCLUDE MODE — leave include untouched, merge into exclusion facets (single OR map).
+                const existingExcludeOr: Record<string, string[]> = existingTargeting?.exclude?.or || {};
+                const mergedOr: Record<string, string[]> = { ...existingExcludeOr };
 
-              for (const [facet, urns] of facetPayload) {
-                const current = Array.isArray(mergedOr[facet]) ? mergedOr[facet] : [];
-                mergedOr[facet] = Array.from(new Set([...current, ...urns]));
+                for (const [facet, urns] of payload) {
+                  const current = Array.isArray(mergedOr[facet]) ? mergedOr[facet] : [];
+                  mergedOr[facet] = Array.from(new Set([...current, ...urns]));
+                }
+
+                return {
+                  include: existingTargeting?.include || { and: [] },
+                  exclude: { or: mergedOr }
+                };
               }
 
-              targetingCriteria = {
-                include: existingTargeting?.include || { and: [] },
-                exclude: { or: mergedOr }
-              };
-            } else if (mode === 'replace_exclude') {
-              // AUDIENCE TEMPLATE EXCLUSION REPLACE — preserve exclusion facets not supplied
-              // by this template, but make every supplied facet exactly match the template.
-              const existingExcludeOr: Record<string, string[]> = existingTargeting?.exclude?.or || {};
-              const replacedOr: Record<string, string[]> = { ...existingExcludeOr };
+              if (mode === 'replace_exclude') {
+                // AUDIENCE TEMPLATE EXCLUSION REPLACE — preserve exclusion facets not supplied
+                // by this template, but make every supplied facet exactly match the template.
+                const existingExcludeOr: Record<string, string[]> = existingTargeting?.exclude?.or || {};
+                const replacedOr: Record<string, string[]> = { ...existingExcludeOr };
 
-              for (const [facet, urns] of facetPayload) {
-                replacedOr[facet] = urns;
+                for (const [facet, urns] of payload) {
+                  replacedOr[facet] = urns;
+                }
+
+                return {
+                  include: existingTargeting?.include || { and: [] },
+                  exclude: { or: replacedOr }
+                };
               }
 
-              targetingCriteria = {
-                include: existingTargeting?.include || { and: [] },
-                exclude: { or: replacedOr }
-              };
-            } else if (mode === 'replace') {
-              // Preserve ALL existing facets except the ones we're explicitly replacing.
-              const existingAndClauses: any[] = existingTargeting?.include?.and || [];
-              const replacedFacets = facetPayload.map(([facet]) => facet);
+              if (mode === 'replace') {
+                // Preserve ALL existing facets except the ones we're explicitly replacing.
+                const existingAndClauses: any[] = existingTargeting?.include?.and || [];
+                const replacedFacets = payload.map(([facet]) => facet);
 
-              const preservedClauses = existingAndClauses.filter((clause: any) => {
-                if (!clause.or) return true;
-                const facetKeys = Object.keys(clause.or);
-                return !facetKeys.some(key => replacedFacets.includes(key));
-              });
+                const preservedClauses = existingAndClauses.filter((clause: any) => {
+                  if (!clause.or) return true;
+                  const facetKeys = Object.keys(clause.or);
+                  return !facetKeys.some(key => replacedFacets.includes(key));
+                });
 
-              const newAndClauses = [...preservedClauses];
-              for (const [facet, urns] of facetPayload) {
-                newAndClauses.push({ or: { [facet]: urns } });
+                const newAndClauses = [...preservedClauses];
+                for (const [facet, urns] of payload) {
+                  newAndClauses.push({ or: { [facet]: urns } });
+                }
+
+                return {
+                  include: { and: newAndClauses },
+                  exclude: existingTargeting?.exclude || {}
+                };
               }
 
-              targetingCriteria = {
-                include: { and: newAndClauses },
-                exclude: existingTargeting?.exclude || {}
-              };
-            } else {
               // APPEND MODE — widen an existing facet (OR within the same facet) instead of
               // pushing a brand new AND clause, which would intersect and collapse the audience.
               const existingAndClauses: any[] = existingTargeting?.include?.and || [];
@@ -9277,7 +9282,7 @@ serve(async (req) => {
                 );
               };
 
-              for (const [facet, urns] of facetPayload) {
+              for (const [facet, urns] of payload) {
                 const exactTarget = newAndClauses.find((clause: any) => clause?.or && Array.isArray(clause.or[facet]));
                 const target = exactTarget || (
                   organizationFacets.has(facet)
@@ -9292,43 +9297,70 @@ serve(async (req) => {
                 }
               }
 
-              targetingCriteria = {
+              return {
                 include: { and: newAndClauses },
                 exclude: existingTargeting?.exclude || {}
               };
-            }
-            
+            };
+
             // Step 6: Perform PATCH update
             const updateUrl = `https://api.linkedin.com/v2/adCampaignsV2/${currentCampaignId}`;
-            const updatePayload = {
-              patch: {
-                $set: {
-                  targetingCriteria
-                }
-              }
+            const applyCriteria = async (payload: Array<[string, string[]]>) => {
+              const res = await fetch(updateUrl, {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${accessToken}`,
+                  'Content-Type': 'application/json',
+                  'X-Restli-Method': 'partial_update',
+                  'X-Restli-Protocol-Version': '2.0.0',
+                  'LinkedIn-Version': '202511',
+                },
+                body: JSON.stringify({ patch: { $set: { targetingCriteria: buildCriteria(payload) } } })
+              });
+              if (res.ok) return { ok: true, status: res.status, text: '' };
+              return { ok: false, status: res.status, text: await res.text() };
             };
-            
-            const updateResponse = await fetch(updateUrl, {
-              method: 'POST',
-              headers: {
-                'Authorization': `Bearer ${accessToken}`,
-                'Content-Type': 'application/json',
-                'X-Restli-Method': 'partial_update',
-                'X-Restli-Protocol-Version': '2.0.0',
-                'LinkedIn-Version': '202511',
-              },
-              body: JSON.stringify(updatePayload)
-            });
+
+            let attempt = await applyCriteria(facetPayload);
+            const rejectedFacets: string[] = [];
+
+            // LinkedIn answers one unacceptable value with a 400 on the WHOLE criteria, so a
+            // single bad company/industry silently kills the entire update. Narrow it down
+            // facet by facet: apply everything LinkedIn accepts and name what it refused.
+            if (!attempt.ok && attempt.status === 400 && facetPayload.length > 1 && facetPayload.length <= 8) {
+              console.warn(`[update_campaign_targeting] 400 on campaign ${currentCampaignId} — isolating the rejected facet`);
+              const accepted: Array<[string, string[]]> = [];
+              let lastAttempt = attempt;
+              for (const entry of facetPayload) {
+                const probe = await applyCriteria([...accepted, entry]);
+                if (probe.ok) {
+                  accepted.push(entry);
+                  lastAttempt = probe;
+                } else {
+                  rejectedFacets.push(entry[0]);
+                }
+                await new Promise((r) => setTimeout(r, 150));
+              }
+              if (accepted.length && rejectedFacets.length) {
+                lastAttempt = await applyCriteria(accepted);
+              }
+              if (accepted.length) attempt = lastAttempt;
+            }
+
+            const updateResponse = { ok: attempt.ok, status: attempt.status };
+            const rejectedNote = rejectedFacets.length
+              ? ` LinkedIn refused: ${rejectedFacets.map((f) => f.split(':').pop()).join(', ')}.`
+              : '';
             
             if (updateResponse.ok) {
               results.push({ 
                 campaignId: currentCampaignId, 
                 success: true, 
-                message: 'Updated',
+                message: rejectedFacets.length ? `Partially updated.${rejectedNote}` : 'Updated',
                 accountId: derivedAccountId 
               });
             } else {
-              const errorText = await updateResponse.text();
+              const errorText = attempt.text;
               console.error(`[update_campaign_targeting] LinkedIn error for campaign ${currentCampaignId}: ${updateResponse.status}`, errorText);
               
               let errorMessage = `Failed: ${updateResponse.status}`;
