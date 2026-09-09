@@ -13,7 +13,6 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useToast } from '@/hooks/use-toast';
-import { ToastAction } from '@/components/ui/toast';
 import { supabase } from '@/integrations/supabase/client';
 import { useSavedAudiences, TargetingEntity } from '@/hooks/useSavedAudiences';
 import { SaveAudienceDialog } from './SaveAudienceDialog';
@@ -608,37 +607,6 @@ export function CampaignTargetingEditor({
       return;
     }
     
-    // Writes require a verified app session in addition to the LinkedIn connection.
-    // Refresh first so a renewable session is not incorrectly treated as signed out.
-    let { data: userData } = await supabase.auth.getUser();
-    if (!userData.user) {
-      const { data: refreshed } = await supabase.auth.refreshSession();
-      if (refreshed.session) {
-        const verified = await supabase.auth.getUser();
-        userData = verified.data;
-      }
-    }
-
-    if (!userData.user) {
-      const returnTo = `${window.location.pathname}${window.location.search}`;
-      toast({
-        title: 'App sign-in required',
-        description: 'LinkedIn is connected. Sign in to your app account to make campaign changes.',
-        variant: 'destructive',
-        action: (
-          <ToastAction
-            altText="Sign in to the app"
-            onClick={() => {
-              window.location.assign(`/auth?mode=email&returnTo=${encodeURIComponent(returnTo)}`);
-            }}
-          >
-            Sign in
-          </ToastAction>
-        ),
-      });
-      return;
-    }
-
     setIsUpdating(true);
     setApplyResults(null);
 
