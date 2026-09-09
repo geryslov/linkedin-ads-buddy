@@ -144,6 +144,8 @@ export function CampaignTargetingEditor({
   // Bulk import
   const [showBulkImport, setShowBulkImport] = useState(false);
   const [showBulkSkillsImport, setShowBulkSkillsImport] = useState(false);
+  const [showBulkCompanyImport, setShowBulkCompanyImport] = useState(false);
+  const [showBulkIndustryImport, setShowBulkIndustryImport] = useState(false);
 
   // Skill suggestions
   const [skillSuggestions, setSkillSuggestions] = useState<TargetingEntity[]>([]);
@@ -971,14 +973,18 @@ export function CampaignTargetingEditor({
                     <Button
                       variant="outline"
                       size="icon"
-                      disabled={searchType === 'companies' || searchType === 'industries'}
-                      onClick={() => searchType === 'titles' ? setShowBulkImport(true) : setShowBulkSkillsImport(true)}
+                      onClick={() => {
+                        if (searchType === 'titles') setShowBulkImport(true);
+                        else if (searchType === 'skills') setShowBulkSkillsImport(true);
+                        else if (searchType === 'companies') setShowBulkCompanyImport(true);
+                        else setShowBulkIndustryImport(true);
+                      }}
                     >
                       <Upload className="h-4 w-4" />
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent>
-                    {searchType === 'companies' || searchType === 'industries' ? 'Bulk import not available for this type' : `Bulk import ${searchType === 'titles' ? 'job titles' : 'skills'}`}
+                    {`Bulk import ${searchType === 'titles' ? 'job titles' : searchType === 'skills' ? 'skills' : searchType === 'companies' ? 'companies' : 'industries'}`}
                   </TooltipContent>
                 </Tooltip>
               </div>
