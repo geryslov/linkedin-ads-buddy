@@ -12451,6 +12451,8 @@ serve(async (req) => {
             currency,
             googleBudget,
             googleSpent,
+            googleLinked,
+            googleAccountName: googleNameByAccount[acctId] || null,
             additionalBudget,
             additionalSpent,
             totalBudget,
