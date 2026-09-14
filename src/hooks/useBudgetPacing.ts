@@ -110,16 +110,17 @@ export function useBudgetPacing(accessToken: string | null) {
     }
   }, [accessToken]);
 
-  const saveBudget = useCallback(async (accountId: string, amount: number, currency: string = 'USD') => {
+  const saveBudget = useCallback(async (accountId: string, input: BudgetInput | number, currency: string = 'USD') => {
     const now = new Date();
     const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+    const payload: BudgetInput = typeof input === 'number' ? { amount: input, currency } : { currency, ...input };
 
     try {
       const { data: result, error: fnError } = await supabase.functions.invoke('linkedin-api', {
         body: {
           action: 'save_account_budget',
           accessToken,
-          params: { accountId, amount, currency, month },
+          params: { accountId, month, ...payload },
         },
       });
 
