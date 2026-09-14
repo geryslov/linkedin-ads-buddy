@@ -14,7 +14,101 @@ const LINKEDIN_CLIENT_SECRET = Deno.env.get('LINKEDIN_CLIENT_SECRET');
 // Initialize Supabase client for company cache operations
 const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
 const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-const supabaseClient = createClient(supabaseUrl, supabaseServiceKey);
+
+// ============ GOOGLE ADS (via Lovable connector gateway) ============
+const GOOGLE_ADS_API_VERSION = 'v22';
+const GOOGLE_ADS_GATEWAY = 'https://connector-gateway.lovable.dev/google_ads';
+
+function googleAdsHeaders(loginCustomerId?: string | null): Record<string, string> {
+  const lovableKey = Deno.env.get('LOVABLE_API_KEY');
+  const connKey = Deno.env.get('GOOGLE_ADS_API_KEY');
+  if (!lovableKey || !connKey) throw new Error('Google Ads is not connected');
+  const h: Record<string, string> = {
+    'Authorization': `Bearer ${lovableKey}`,
+    'X-Connection-Api-Key': connKey,
+    'Content-Type': 'application/json',
+  };
+  if (loginCustomerId) h['login-customer-id'] = String(loginCustomerId).replace(/-/g, '');
+  return h;
+}
+
+async function googleAdsSearch(customerId: string, query: string, loginCustomerId?: string | null): Promise<any[]> {
+  const cid = String(customerId).replace(/-/g, '');
+  const res = await fetch(`${GOOGLE_ADS_GATEWAY}/${GOOGLE_ADS_API_VERSION}/customers/${cid}/googleAds:searchStream`, {
+    method: 'POST',
+    headers: googleAdsHeaders(loginCustomerId || cid),
+    body: JSON.stringify({ query }),
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Google Ads request failed [${res.status}]: ${body.slice(0, 500)}`);
+  }
+  const payload = await res.json();
+  const chunks = Array.isArray(payload) ? payload : [payload];
+  const rows: any[] = [];
+  for (const chunk of chunks) {
+    for (const r of (chunk?.results || [])) rows.push(r);
+  }
+  return rows;
+}
+
+// Month-to-date Google Ads spend for a set of linked customers.
+async function fetchGoogleSpend(
+  links: Array<{ customerId: string; loginCustomerId?: string | null }>,
+  startDate: string,
+  endDate: string,
+): Promise<Record<string, number>> {
+  const out: Record<string, number> = {};
+  if (!links.length) return out;
+  const query =
+    `SELECT metrics.cost_micros FROM customer ` +
+    `WHERE segments.date BETWEEN '${startDate}' AND '${endDate}'`;
+
+  await Promise.all(links.map(async (link) => {
+    try {
+      const rows = await googleAdsSearch(link.customerId, query, link.loginCustomerId);
+      let micros = 0;
+      for (const row of rows) micros += Number(row?.metrics?.costMicros || 0);
+      out[String(link.customerId).replace(/-/g, '')] = Math.round((micros / 1_000_000) * 100) / 100;
+    } catch (e) {
+      console.warn(`[google_spend] ${link.customerId} failed:`, (e as Error).message);
+    }
+  }));
+
+  return out;
+}
+
+// Resolve which app user is making the request (may be null when only LinkedIn-authenticated).
+async function resolveOwnerId(req: Request): Promise<string | null> {
+  try {
+    const authHeader = req.headers.get('Authorization') || '';
+    const jwt = authHeader.replace('Bearer ', '');
+    if (!jwt) return null;
+    const { data } = await supabaseClient.auth.getUser(jwt);
+    return data?.user?.id || null;
+  } catch (_e) {
+    return null;
+  }
+}
+
+// Google Ads links for the given LinkedIn ad accounts.
+async function getGoogleLinks(accountIds: string[], ownerId: string | null) {
+  if (!accountIds.length) return [] as Array<{
+    account_id: string; google_customer_id: string; google_customer_name: string | null; login_customer_id: string | null;
+  }>;
+  let q = supabaseClient
+    .from('account_google_links')
+    .select('account_id, google_customer_id, google_customer_name, login_customer_id')
+    .in('account_id', accountIds);
+  if (ownerId) q = q.eq('user_id', ownerId);
+  const { data, error } = await q;
+  if (error) {
+    console.warn('[google_links] read failed:', error.message);
+    return [];
+  }
+  return data || [];
+}
+
 
 // Helper: Extract image URNs from creative content object (deep scan)
 function extractImageUrns(content: any): string[] {
