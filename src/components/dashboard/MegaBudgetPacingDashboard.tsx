@@ -10,6 +10,8 @@ import {
 } from "@/components/ui/table";
 import { AlertTriangle, ArrowUpDown, Save, X, Pencil } from "lucide-react";
 import { toast } from "sonner";
+import { useGoogleAdsLinks } from "@/hooks/useGoogleAdsLinks";
+import { GoogleAccountLinkPicker } from "./GoogleAccountLinkPicker";
 
 interface Props {
   accessToken: string | null;
@@ -225,7 +227,31 @@ export function MegaBudgetPacingDashboard({ accessToken, adAccounts }: Props) {
                     <p className="mt-1 text-[11px] text-muted-foreground">{s.daysRemaining} days left</p>
                   </TableCell>
                   <TableCell className="align-top">{channelCell(s, "LinkedIn", s.spent, s.budget, "amount")}</TableCell>
-                  <TableCell className="align-top">{channelCell(s, "Google", s.googleSpent || 0, s.googleBudget || 0, "googleAmount", "googleSpend")}</TableCell>
+                  <TableCell className="align-top">
+                    {channelCell(
+                      s,
+                      "Google",
+                      s.googleSpent || 0,
+                      s.googleBudget || 0,
+                      "googleAmount",
+                      googleLinks[s.accountId] ? undefined : "googleSpend",
+                      <GoogleAccountLinkPicker
+                        compact
+                        accountId={s.accountId}
+                        link={googleLinks[s.accountId]}
+                        accounts={googleAccounts}
+                        isLoading={isLoadingGoogleAccounts}
+                        error={googleAccountsError}
+                        onOpen={() => loadGoogleAccounts()}
+                        onSelect={async (acct) => {
+                          const res = await saveGoogleLink(s.accountId, acct);
+                          if (!res.ok) { toast.error(res.message); return; }
+                          toast.success(acct ? "Google account linked" : "Google account unlinked");
+                          fetchAll(adAccounts.map(a => a.id));
+                        }}
+                      />,
+                    )}
+                  </TableCell>
                   <TableCell className="align-top">{channelCell(s, "Additional", s.additionalSpent || 0, s.additionalBudget || 0, "additionalAmount", "additionalSpend")}</TableCell>
                 </TableRow>
               ))}
