@@ -9853,12 +9853,8 @@ serve(async (req) => {
             status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
           });
         }
-        const ownerForSave = await resolveOwnerId(req);
-        if (!ownerForSave) {
-          return new Response(JSON.stringify({ error: 'Sign in to the app to link Google Ads accounts' }), {
-            status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-          });
-        }
+        // Works without an app session (LinkedIn-only users) — fall back to the shared owner.
+        const ownerForSave = (await resolveOwnerId(req)) || '00000000-0000-0000-0000-000000000000';
 
         if (!googleCustomerId) {
           const { error: delErr } = await supabaseClient
