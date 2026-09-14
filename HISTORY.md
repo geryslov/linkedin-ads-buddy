@@ -215,6 +215,8 @@ sequencing decision, not a defect — but it is now recorded as urgent rather th
 
 ## Sep 2026 — Ad copy on the MCP surface, and the wall behind it
 
+**Sep 14 — Budget pacing split by channel.** The all-accounts budget view dropped its overall-total presentation and wide metric table. Each account now has compact LinkedIn, Google, and Additional lanes showing spend, editable budget, percent used, month-relative pacing status, and manual spend editing for Google and Additional.
+
 `get_creatives` had always returned IDs, status and a name that was often just the first 80
 characters of the post text — enough to identify an ad, useless for reading or rewriting one. Added
 edge action `get_ad_copy` plus a matching MCP tool to pull intro text, headline, description,

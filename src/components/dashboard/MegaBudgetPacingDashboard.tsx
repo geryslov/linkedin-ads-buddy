@@ -1,6 +1,5 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useMegaBudgetPacing, AccountPacingSummary } from "@/hooks/useMegaBudgetPacing";
-import { MetricCard } from "./MetricCard";
 import { WidgetCard, EmptyState, StatusPill } from "./widgets";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,25 +8,22 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow
 } from "@/components/ui/table";
-import {
-  DollarSign, Wallet, TrendingUp, AlertTriangle, CheckCircle2, ArrowUpDown, Save, X, Pencil
-} from "lucide-react";
+import { AlertTriangle, ArrowUpDown, Save, X, Pencil } from "lucide-react";
 import { toast } from "sonner";
-import { LineChart, Line, ResponsiveContainer, Tooltip } from "recharts";
 
 interface Props {
   accessToken: string | null;
   adAccounts: Array<{ id: string; name?: string | null }>;
 }
 
-type SortKey = "name" | "pacingStatus" | "pacingPercent" | "spent" | "budget" | "totalBudget" | "totalSpent";
+type SortKey = "name" | "linkedin" | "google" | "additional";
 type BudgetField = "amount" | "googleAmount" | "additionalAmount" | "googleSpend" | "additionalSpend";
 
-const statusOrder: Record<string, number> = { overspend: 0, underspend: 1, on_track: 2 };
+type ChannelStatus = "overspend" | "underspend" | "on_track" | "no_budget";
 
 export function MegaBudgetPacingDashboard({ accessToken, adAccounts }: Props) {
-  const { data, isLoading, error, fetchAll, saveBudget, aggregates } = useMegaBudgetPacing(accessToken);
-  const [sortKey, setSortKey] = useState<SortKey>("pacingStatus");
+  const { data, isLoading, error, fetchAll, saveBudget } = useMegaBudgetPacing(accessToken);
+  const [sortKey, setSortKey] = useState<SortKey>("name");
   const [sortAsc, setSortAsc] = useState(true);
   const [editingCell, setEditingCell] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
@@ -53,14 +49,12 @@ export function MegaBudgetPacingDashboard({ accessToken, adAccounts }: Props) {
 
   const sorted = [...data].sort((a, b) => {
     const dir = sortAsc ? 1 : -1;
+    const channelUsage = (spent: number, budget: number) => budget > 0 ? spent / budget : -1;
     switch (sortKey) {
       case "name": return dir * (nameMap.get(a.accountId) || "").localeCompare(nameMap.get(b.accountId) || "");
-      case "pacingStatus": return dir * ((statusOrder[a.pacingStatus] ?? 3) - (statusOrder[b.pacingStatus] ?? 3));
-      case "pacingPercent": return dir * (a.pacingPercent - b.pacingPercent);
-      case "spent": return dir * (a.spent - b.spent);
-      case "budget": return dir * (a.budget - b.budget);
-      case "totalBudget": return dir * ((a.totalBudget || 0) - (b.totalBudget || 0));
-      case "totalSpent": return dir * ((a.totalSpent || 0) - (b.totalSpent || 0));
+      case "linkedin": return dir * (channelUsage(a.spent, a.budget) - channelUsage(b.spent, b.budget));
+      case "google": return dir * (channelUsage(a.googleSpent || 0, a.googleBudget || 0) - channelUsage(b.googleSpent || 0, b.googleBudget || 0));
+      case "additional": return dir * (channelUsage(a.additionalSpent || 0, a.additionalBudget || 0) - channelUsage(b.additionalSpent || 0, b.additionalBudget || 0));
       default: return 0;
     }
   });
@@ -78,17 +72,25 @@ export function MegaBudgetPacingDashboard({ accessToken, adAccounts }: Props) {
     }
   }, [editValue, saveBudget, fetchAll, adAccounts]);
 
-  const pacingColor = (s: AccountPacingSummary) => {
-    if (s.budget === 0) return "text-muted-foreground";
-    if (s.pacingStatus === "overspend") return "text-destructive";
-    if (s.pacingStatus === "underspend") return "text-warning";
-    return "text-success";
+  const channelPacing = (s: AccountPacingSummary, spent: number, budget: number) => {
+    const usedPercent = budget > 0 ? (spent / budget) * 100 : 0;
+    const daysElapsed = Math.max(1, s.daysInMonth - s.daysRemaining);
+    const expectedPercent = (daysElapsed / s.daysInMonth) * 100;
+    const pacingPercent = expectedPercent > 0 ? (usedPercent / expectedPercent) * 100 : 0;
+    const status: ChannelStatus = budget === 0
+      ? "no_budget"
+      : pacingPercent > 110
+        ? "overspend"
+        : pacingPercent < 90
+          ? "underspend"
+          : "on_track";
+    return { usedPercent, pacingPercent, status };
   };
 
-  const statusBadge = (s: AccountPacingSummary) => {
-    if (s.budget === 0) return <StatusPill tone="neutral" label="No budget" />;
-    if (s.pacingStatus === "overspend") return <StatusPill tone="danger" label="Over" />;
-    if (s.pacingStatus === "underspend") return <StatusPill tone="warning" label="Under" />;
+  const statusBadge = (status: ChannelStatus) => {
+    if (status === "no_budget") return <StatusPill tone="neutral" label="No budget" />;
+    if (status === "overspend") return <StatusPill tone="danger" label="Over" />;
+    if (status === "underspend") return <StatusPill tone="warning" label="Under" />;
     return <StatusPill tone="success" label="On track" />;
   };
 
@@ -125,6 +127,48 @@ export function MegaBudgetPacingDashboard({ accessToken, adAccounts }: Props) {
     );
   };
 
+  const channelCell = (
+    s: AccountPacingSummary,
+    label: string,
+    spent: number,
+    budget: number,
+    budgetField: BudgetField,
+    spendField?: BudgetField,
+  ) => {
+    const pacing = channelPacing(s, spent, budget);
+    return (
+      <div className="min-w-[210px] space-y-2 py-1">
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">{label}</span>
+          {statusBadge(pacing.status)}
+        </div>
+        <div className="flex items-center justify-between gap-3 text-xs">
+          <div className="min-w-0">
+            <span className="text-muted-foreground">Spent </span>
+            {spendField ? editableCell(s, spendField, spent) : (
+              <span className="font-semibold tabular-nums">${spent.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+            )}
+          </div>
+          <div className="flex items-center gap-1 whitespace-nowrap">
+            <span className="text-muted-foreground">Budget</span>
+            {editableCell(s, budgetField, budget)}
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <Progress value={Math.min(pacing.usedPercent, 100)} className="h-1.5 flex-1" />
+          <span className="w-9 text-right text-xs font-semibold tabular-nums text-foreground">
+            {budget > 0 ? `${pacing.usedPercent.toFixed(0)}%` : "—"}
+          </span>
+        </div>
+        {budget > 0 && (
+          <p className="text-[11px] text-muted-foreground tabular-nums">
+            Pacing {pacing.pacingPercent.toFixed(0)}% of month target
+          </p>
+        )}
+      </div>
+    );
+  };
+
   if (error) {
     return (
       <WidgetCard noPadding>
@@ -143,82 +187,8 @@ export function MegaBudgetPacingDashboard({ accessToken, adAccounts }: Props) {
   }
 
   return (
-    <div className="space-y-6">
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {isLoading ? (
-          [...Array(4)].map((_, i) => <Skeleton key={i} className="h-32 rounded-xl bg-secondary" />)
-        ) : (
-          <>
-            <MetricCard
-              title="Total Budget (all channels)"
-              value={`$${aggregates.allBudget.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
-              change={`LinkedIn $${aggregates.totalBudget.toLocaleString(undefined, { maximumFractionDigits: 0 })} · Google $${aggregates.googleBudget.toLocaleString(undefined, { maximumFractionDigits: 0 })} · Additional $${aggregates.additionalBudget.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
-              changeType="neutral"
-              icon={Wallet}
-              delay={0}
-            />
-            <MetricCard
-              title="Total Spent (all channels)"
-              value={`$${aggregates.allSpent.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
-              change={`LinkedIn $${aggregates.totalSpent.toLocaleString(undefined, { maximumFractionDigits: 0 })} · Google $${aggregates.googleSpent.toLocaleString(undefined, { maximumFractionDigits: 0 })} · Additional $${aggregates.additionalSpent.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
-              changeType="neutral"
-              icon={DollarSign}
-              delay={50}
-            />
-            <MetricCard
-              title="Overall Pacing"
-              value={`${aggregates.allPacing.toFixed(1)}%`}
-              change={`LinkedIn ${aggregates.overallPacing.toFixed(0)}%`}
-              changeType="neutral"
-              icon={TrendingUp}
-              delay={100}
-            />
-            <MetricCard
-              title="Account Status"
-              value={`${aggregates.onTrack} on track`}
-              change={aggregates.over > 0 ? `${aggregates.over} over · ${aggregates.under} under` : `${aggregates.under} under`}
-              changeType={aggregates.over > 0 ? "negative" : "neutral"}
-              icon={CheckCircle2}
-              delay={150}
-            />
-          </>
-        )}
-      </div>
-
-      {/* Channel Breakdown */}
-      {!isLoading && (
-        <WidgetCard noPadding title="Budget by channel" subtitle="Spend against budget for each channel across all clients this month">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 divide-x divide-y lg:divide-y-0 divide-border/60">
-            {[
-              { label: "LinkedIn", spent: aggregates.totalSpent, budget: aggregates.totalBudget, pacing: aggregates.overallPacing },
-              { label: "Google", spent: aggregates.googleSpent, budget: aggregates.googleBudget, pacing: null },
-              { label: "Additional", spent: aggregates.additionalSpent, budget: aggregates.additionalBudget, pacing: null },
-              { label: "Total", spent: aggregates.allSpent, budget: aggregates.allBudget, pacing: aggregates.allPacing },
-            ].map(({ label, spent, budget, pacing }) => {
-              const pct = budget > 0 ? (spent / budget) * 100 : 0;
-              return (
-                <div key={label} className="px-5 py-4 space-y-2">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">{label}</p>
-                  <p className="text-xl font-bold tabular-nums">${spent.toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>
-                  <p className="text-xs text-muted-foreground tabular-nums">
-                    of ${budget.toLocaleString(undefined, { maximumFractionDigits: 0 })}{budget > 0 ? ` · ${pct.toFixed(0)}%` : " · no budget"}
-                  </p>
-                  <Progress value={Math.min(pct, 100)} className="h-1.5" />
-                  {pacing !== null && budget > 0 && (
-                    <p className={`text-xs tabular-nums ${pacing > 110 ? "text-destructive" : pacing < 90 ? "text-warning" : "text-success"}`}>
-                      Pacing {pacing.toFixed(0)}%
-                    </p>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </WidgetCard>
-      )}
-
-      {/* Account Table */}
-      <WidgetCard noPadding title="Account pacing" subtitle="Spend vs. budget across every ad account" className="animate-slide-up">
+    <div>
+      <WidgetCard noPadding title="Account pacing by channel" subtitle="LinkedIn, Google and Additional spend against budget for every account">
         {isLoading ? (
           <div className="p-5"><Skeleton className="h-64 bg-secondary rounded-lg" /></div>
         ) : (
@@ -228,83 +198,33 @@ export function MegaBudgetPacingDashboard({ accessToken, adAccounts }: Props) {
                 <TableHead className="cursor-pointer" onClick={() => handleSort("name")}>
                   <span className="flex items-center gap-1">Account <ArrowUpDown className="h-3 w-3" /></span>
                 </TableHead>
-                <TableHead className="cursor-pointer" onClick={() => handleSort("budget")}>
-                  <span className="flex items-center gap-1">LinkedIn budget <ArrowUpDown className="h-3 w-3" /></span>
+                <TableHead className="cursor-pointer w-[27%]" onClick={() => handleSort("linkedin")}>
+                  <span className="flex items-center gap-1">LinkedIn <ArrowUpDown className="h-3 w-3" /></span>
                 </TableHead>
-                <TableHead className="cursor-pointer" onClick={() => handleSort("spent")}>
-                  <span className="flex items-center gap-1">LinkedIn spent <ArrowUpDown className="h-3 w-3" /></span>
+                <TableHead className="cursor-pointer w-[27%]" onClick={() => handleSort("google")}>
+                  <span className="flex items-center gap-1">Google <ArrowUpDown className="h-3 w-3" /></span>
                 </TableHead>
-                <TableHead>Google budget</TableHead>
-                <TableHead>Google spent</TableHead>
-                <TableHead>Additional budget</TableHead>
-                <TableHead>Additional spent</TableHead>
-                <TableHead className="cursor-pointer" onClick={() => handleSort("totalBudget")}>
-                  <span className="flex items-center gap-1">Total budget <ArrowUpDown className="h-3 w-3" /></span>
+                <TableHead className="cursor-pointer w-[27%]" onClick={() => handleSort("additional")}>
+                  <span className="flex items-center gap-1">Additional <ArrowUpDown className="h-3 w-3" /></span>
                 </TableHead>
-                <TableHead className="cursor-pointer" onClick={() => handleSort("totalSpent")}>
-                  <span className="flex items-center gap-1">Total spent <ArrowUpDown className="h-3 w-3" /></span>
-                </TableHead>
-                <TableHead className="cursor-pointer" onClick={() => handleSort("pacingStatus")}>
-                  <span className="flex items-center gap-1">Status <ArrowUpDown className="h-3 w-3" /></span>
-                </TableHead>
-                <TableHead className="cursor-pointer" onClick={() => handleSort("pacingPercent")}>
-                  <span className="flex items-center gap-1">Pacing <ArrowUpDown className="h-3 w-3" /></span>
-                </TableHead>
-                <TableHead>Avg Daily (3d)</TableHead>
-                <TableHead>Projected (3d)</TableHead>
-                <TableHead>3-Day Trend</TableHead>
-                <TableHead>Projected</TableHead>
-                <TableHead>Days Left</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {sorted.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={16} className="text-center text-muted-foreground py-12">
+                  <TableCell colSpan={4} className="text-center text-muted-foreground py-12">
                     No accounts found
                   </TableCell>
                 </TableRow>
               ) : sorted.map((s) => (
                 <TableRow key={s.accountId}>
-                  <TableCell className="font-medium">{nameMap.get(s.accountId) || s.accountId}</TableCell>
-                  <TableCell>{editableCell(s, "amount", s.budget)}</TableCell>
-                  <TableCell className="tabular-nums">${s.spent.toLocaleString(undefined, { maximumFractionDigits: 0 })}</TableCell>
-                  <TableCell>{editableCell(s, "googleAmount", s.googleBudget || 0)}</TableCell>
-                  <TableCell>{editableCell(s, "googleSpend", s.googleSpent || 0)}</TableCell>
-                  <TableCell>{editableCell(s, "additionalAmount", s.additionalBudget || 0)}</TableCell>
-                  <TableCell>{editableCell(s, "additionalSpend", s.additionalSpent || 0)}</TableCell>
-                  <TableCell className="tabular-nums font-medium">${(s.totalBudget || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}</TableCell>
-                  <TableCell className="tabular-nums font-medium">${(s.totalSpent || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}</TableCell>
-                  <TableCell>{statusBadge(s)}</TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-2 min-w-[120px]">
-                      <Progress value={Math.min(s.pacingPercent, 150) / 1.5} className="h-2 w-16" />
-                      <span className={`text-sm font-medium ${pacingColor(s)}`}>
-                        {s.budget > 0 ? `${s.pacingPercent}%` : "—"}
-                      </span>
-                    </div>
+                  <TableCell className="align-top">
+                    <p className="font-semibold text-foreground">{nameMap.get(s.accountId) || s.accountId}</p>
+                    <p className="mt-1 text-[11px] text-muted-foreground">{s.daysRemaining} days left</p>
                   </TableCell>
-                  <TableCell>
-                    <span className="text-sm font-medium">${(s.avgDaily3d ?? s.avgDaily ?? 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
-                  </TableCell>
-                  <TableCell>
-                    <span className={`text-sm font-medium ${s.budget > 0 && (s.projected3d ?? 0) > s.budget ? 'text-destructive' : ''}`}>
-                      ${(s.projected3d ?? s.projected ?? 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                    </span>
-                  </TableCell>
-                  <TableCell>
-                    {(s.last3Days?.length ?? 0) > 0 ? (
-                      <div className="w-20 h-8" title={s.last3Days?.map(d => `${d.date.slice(5)}: $${d.spend.toLocaleString(undefined, { maximumFractionDigits: 0 })}`).join(' | ')}>
-                        <ResponsiveContainer width="100%" height="100%">
-                          <LineChart data={s.last3Days}>
-                            <Line type="monotone" dataKey="spend" stroke="hsl(var(--primary))" strokeWidth={1.5} dot={false} isAnimationActive={false} />
-                          </LineChart>
-                        </ResponsiveContainer>
-                      </div>
-                    ) : <span className="text-muted-foreground text-xs">—</span>}
-                  </TableCell>
-                  <TableCell className="tabular-nums">${s.projected.toLocaleString(undefined, { maximumFractionDigits: 0 })}</TableCell>
-                  <TableCell className="tabular-nums">{s.daysRemaining}d</TableCell>
+                  <TableCell className="align-top">{channelCell(s, "LinkedIn", s.spent, s.budget, "amount")}</TableCell>
+                  <TableCell className="align-top">{channelCell(s, "Google", s.googleSpent || 0, s.googleBudget || 0, "googleAmount", "googleSpend")}</TableCell>
+                  <TableCell className="align-top">{channelCell(s, "Additional", s.additionalSpent || 0, s.additionalBudget || 0, "additionalAmount", "additionalSpend")}</TableCell>
                 </TableRow>
               ))}
             </TableBody>

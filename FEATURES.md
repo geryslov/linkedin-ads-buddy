@@ -32,7 +32,7 @@ Groups and items:
 | Item | Component | Hook |
 |---|---|---|
 | Campaigns | [CampaignTable](src/components/dashboard/CampaignTable.tsx) | [useLinkedInAds](src/hooks/useLinkedInAds.ts) |
-| Budget Pacing | [BudgetPacingDashboard](src/components/dashboard/BudgetPacingDashboard.tsx), [MegaBudgetPacingDashboard](src/components/dashboard/MegaBudgetPacingDashboard.tsx) | [useBudgetPacing](src/hooks/useBudgetPacing.ts), [useMegaBudgetPacing](src/hooks/useMegaBudgetPacing.ts) |
+| Budget Pacing | [BudgetPacingDashboard](src/components/dashboard/BudgetPacingDashboard.tsx), [MegaBudgetPacingDashboard](src/components/dashboard/MegaBudgetPacingDashboard.tsx) — per-account LinkedIn, Google, and Additional pacing lanes with inline budget/spend editing | [useBudgetPacing](src/hooks/useBudgetPacing.ts), [useMegaBudgetPacing](src/hooks/useMegaBudgetPacing.ts) |
 | Creatives | [CreativeGallery](src/components/dashboard/CreativeGallery.tsx) | [useCreativeReporting](src/hooks/useCreativeReporting.ts) |
 
 ### Bulk Editing
