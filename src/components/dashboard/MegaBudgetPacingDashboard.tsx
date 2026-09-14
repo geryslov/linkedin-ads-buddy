@@ -213,7 +213,7 @@ export function MegaBudgetPacingDashboard({ accessToken, adAccounts }: Props) {
             <TableBody>
               {sorted.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={10} className="text-center text-muted-foreground py-12">
+                  <TableCell colSpan={16} className="text-center text-muted-foreground py-12">
                     No accounts found
                   </TableCell>
                 </TableRow>
