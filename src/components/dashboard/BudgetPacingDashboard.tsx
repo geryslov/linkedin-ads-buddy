@@ -30,6 +30,10 @@ export function BudgetPacingDashboard({ accessToken, selectedAccount }: BudgetPa
   const { data, isLoading, error, fetchBudgetPacing, saveBudget } = useBudgetPacing(accessToken);
   const { toast } = useToast();
   const [budgetInput, setBudgetInput] = useState('');
+  const [googleBudgetInput, setGoogleBudgetInput] = useState('');
+  const [googleSpendInput, setGoogleSpendInput] = useState('');
+  const [additionalBudgetInput, setAdditionalBudgetInput] = useState('');
+  const [additionalSpendInput, setAdditionalSpendInput] = useState('');
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
@@ -38,34 +42,47 @@ export function BudgetPacingDashboard({ accessToken, selectedAccount }: BudgetPa
     }
   }, [selectedAccount, fetchBudgetPacing]);
 
+  const ch = data?.channels;
+
   useEffect(() => {
-    if (data?.budget?.amount) {
-      setBudgetInput(data.budget.amount.toString());
-    }
-  }, [data?.budget?.amount]);
+    setBudgetInput(data?.budget?.amount ? String(data.budget.amount) : '');
+    setGoogleBudgetInput(ch?.google?.budget ? String(ch.google.budget) : '');
+    setGoogleSpendInput(ch?.google?.spent ? String(ch.google.spent) : '');
+    setAdditionalBudgetInput(ch?.additional?.budget ? String(ch.additional.budget) : '');
+    setAdditionalSpendInput(ch?.additional?.spent ? String(ch.additional.spent) : '');
+  }, [data?.budget?.amount, ch?.google?.budget, ch?.google?.spent, ch?.additional?.budget, ch?.additional?.spent]);
 
   const handleSaveBudget = async () => {
-    if (!selectedAccount || !budgetInput) return;
+    if (!selectedAccount) return;
 
-    setIsSaving(true);
-    const amount = parseFloat(budgetInput);
+    const parse = (v: string) => (v.trim() === '' ? 0 : parseFloat(v));
+    const values = {
+      amount: parse(budgetInput),
+      googleAmount: parse(googleBudgetInput),
+      additionalAmount: parse(additionalBudgetInput),
+      googleSpend: parse(googleSpendInput),
+      additionalSpend: parse(additionalSpendInput),
+    };
 
-    if (isNaN(amount) || amount < 0) {
+    if (Object.values(values).some((v) => isNaN(v) || v < 0)) {
       toast({
-        title: 'Invalid budget',
-        description: 'Please enter a valid positive number',
+        title: 'Invalid amount',
+        description: 'Please enter valid positive numbers',
         variant: 'destructive',
       });
-      setIsSaving(false);
       return;
     }
 
-    const success = await saveBudget(selectedAccount, amount);
+    setIsSaving(true);
+    const success = await saveBudget(selectedAccount, values);
     if (success) {
-      toast({ title: 'Budget saved', description: `Monthly budget set to ${formatCurrency(amount)}` });
+      toast({
+        title: 'Budgets saved',
+        description: `Total monthly budget ${formatCurrency(values.amount + values.googleAmount + values.additionalAmount)}`,
+      });
       fetchBudgetPacing(selectedAccount);
     } else {
-      toast({ title: 'Error', description: 'Failed to save budget', variant: 'destructive' });
+      toast({ title: 'Error', description: 'Failed to save budgets', variant: 'destructive' });
     }
     setIsSaving(false);
   };
