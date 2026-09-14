@@ -12086,7 +12086,7 @@ serve(async (req) => {
             }),
             supabaseClient
               .from('account_budgets')
-              .select('budget_amount, currency')
+              .select('budget_amount, currency, google_budget_amount, google_spend, additional_budget_amount, additional_spend')
               .eq('account_id', acctId)
               .eq('month', monthStr)
               .maybeSingle()
