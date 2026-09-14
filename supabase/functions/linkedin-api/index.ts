@@ -9825,6 +9825,18 @@ serve(async (req) => {
             amount: budgetAmount,
             currency: budgetCurrency,
             isSet: budgetAmount > 0,
+            google: googleBudgetAmount,
+            additional: additionalBudgetAmount,
+            total: budgetAmount + googleBudgetAmount + additionalBudgetAmount,
+          },
+          channels: {
+            linkedin: { budget: budgetAmount, spent: totalSpent },
+            google: { budget: googleBudgetAmount, spent: googleSpendAmount },
+            additional: { budget: additionalBudgetAmount, spent: additionalSpendAmount },
+            total: {
+              budget: budgetAmount + googleBudgetAmount + additionalBudgetAmount,
+              spent: totalSpent + googleSpendAmount + additionalSpendAmount,
+            },
           },
           spending: {
             total: totalSpent,
