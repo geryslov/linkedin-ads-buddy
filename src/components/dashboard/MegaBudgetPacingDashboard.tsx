@@ -20,7 +20,8 @@ interface Props {
   adAccounts: Array<{ id: string; name?: string | null }>;
 }
 
-type SortKey = "name" | "pacingStatus" | "pacingPercent" | "spent" | "budget";
+type SortKey = "name" | "pacingStatus" | "pacingPercent" | "spent" | "budget" | "totalBudget" | "totalSpent";
+type BudgetField = "amount" | "googleAmount" | "additionalAmount" | "googleSpend" | "additionalSpend";
 
 const statusOrder: Record<string, number> = { overspend: 0, underspend: 1, on_track: 2 };
 
