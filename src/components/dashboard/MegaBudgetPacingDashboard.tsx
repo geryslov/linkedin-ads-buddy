@@ -134,6 +134,7 @@ export function MegaBudgetPacingDashboard({ accessToken, adAccounts }: Props) {
     budget: number,
     budgetField: BudgetField,
     spendField?: BudgetField,
+    footer?: React.ReactNode,
   ) => {
     const pacing = channelPacing(s, spent, budget);
     return (
@@ -165,6 +166,7 @@ export function MegaBudgetPacingDashboard({ accessToken, adAccounts }: Props) {
             Pacing {pacing.pacingPercent.toFixed(0)}% of month target
           </p>
         )}
+        {footer}
       </div>
     );
   };
