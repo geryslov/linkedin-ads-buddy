@@ -12115,8 +12115,12 @@ serve(async (req) => {
           // Sort by date ascending
           last3Days.sort((a, b) => a.date.localeCompare(b.date));
 
-          const budgetAmount = budgetRes.data?.budget_amount || 0;
+          const budgetAmount = Number(budgetRes.data?.budget_amount) || 0;
           const currency = budgetRes.data?.currency || 'USD';
+          const googleBudget = Number(budgetRes.data?.google_budget_amount) || 0;
+          const googleSpent = Number(budgetRes.data?.google_spend) || 0;
+          const additionalBudget = Number(budgetRes.data?.additional_budget_amount) || 0;
+          const additionalSpent = Number(budgetRes.data?.additional_spend) || 0;
 
           const avgDaily = currentDay > 0 ? spent / currentDay : 0;
           const projected = avgDaily * daysInMonth;
@@ -12134,11 +12138,30 @@ serve(async (req) => {
             else if (pacingPercent > 115) pacingStatus = 'overspend';
           }
 
+          const totalBudget = budgetAmount + googleBudget + additionalBudget;
+          const totalSpentAll = spent + googleSpent + additionalSpent;
+          let totalPacingPercent = 0;
+          let totalPacingStatus: 'on_track' | 'underspend' | 'overspend' = 'on_track';
+          if (totalBudget > 0) {
+            const idealTotal = (totalBudget / daysInMonth) * currentDay;
+            totalPacingPercent = idealTotal > 0 ? (totalSpentAll / idealTotal) * 100 : 0;
+            if (totalPacingPercent < 85) totalPacingStatus = 'underspend';
+            else if (totalPacingPercent > 115) totalPacingStatus = 'overspend';
+          }
+
           return {
             accountId: acctId,
             budget: budgetAmount,
             spent,
             currency,
+            googleBudget,
+            googleSpent,
+            additionalBudget,
+            additionalSpent,
+            totalBudget,
+            totalSpent: totalSpentAll,
+            totalPacingPercent: Math.round(totalPacingPercent * 10) / 10,
+            totalPacingStatus,
             pacingPercent: Math.round(pacingPercent * 10) / 10,
             pacingStatus,
             daysRemaining,
