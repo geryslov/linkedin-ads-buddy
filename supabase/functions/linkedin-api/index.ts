@@ -9731,6 +9731,10 @@ serve(async (req) => {
         // Step 2: Fetch budget from Supabase (if exists)
         let budgetAmount = 0;
         let budgetCurrency = 'USD';
+        let googleBudgetAmount = 0;
+        let googleSpendAmount = 0;
+        let additionalBudgetAmount = 0;
+        let additionalSpendAmount = 0;
 
         try {
           const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
@@ -9741,16 +9745,20 @@ serve(async (req) => {
           // Query with YYYY-MM-01 format for the date column
           const { data: budgetData, error: budgetError } = await supabase
             .from('account_budgets')
-            .select('budget_amount, currency')
+            .select('budget_amount, currency, google_budget_amount, google_spend, additional_budget_amount, additional_spend')
             .eq('account_id', accountId)
             .eq('month', currentMonthDate)
-            .single();
+            .maybeSingle();
 
           console.log(`[get_budget_pacing] Budget query for ${accountId}, month ${currentMonthDate}:`, budgetData, budgetError);
 
           if (budgetData) {
-            budgetAmount = budgetData.budget_amount || 0;
+            budgetAmount = Number(budgetData.budget_amount) || 0;
             budgetCurrency = budgetData.currency || 'USD';
+            googleBudgetAmount = Number(budgetData.google_budget_amount) || 0;
+            googleSpendAmount = Number(budgetData.google_spend) || 0;
+            additionalBudgetAmount = Number(budgetData.additional_budget_amount) || 0;
+            additionalSpendAmount = Number(budgetData.additional_spend) || 0;
           }
         } catch (err) {
           console.log('[get_budget_pacing] Budget fetch error (may not exist):', err);
