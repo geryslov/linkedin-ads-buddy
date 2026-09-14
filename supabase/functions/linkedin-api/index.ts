@@ -9575,10 +9575,28 @@ serve(async (req) => {
       }
 
       case 'save_account_budget': {
-        // Persist a monthly budget without requiring a Supabase app session.
-        const { accountId, amount, currency, month } = params || {};
-        if (!accountId || amount === undefined || amount === null || isNaN(Number(amount))) {
-          return new Response(JSON.stringify({ error: 'accountId and a numeric amount are required' }), {
+        // Persist monthly budgets (LinkedIn / Google / Additional) without requiring a Supabase app session.
+        const { accountId, amount, currency, month, googleAmount, additionalAmount, googleSpend, additionalSpend } = params || {};
+        if (!accountId) {
+          return new Response(JSON.stringify({ error: 'accountId is required' }), {
+            status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+
+        const numOrUndef = (v: unknown) =>
+          v === undefined || v === null || v === '' || isNaN(Number(v)) ? undefined : Number(v);
+
+        const linkedinAmt = numOrUndef(amount);
+        const googleAmt = numOrUndef(googleAmount);
+        const additionalAmt = numOrUndef(additionalAmount);
+        const googleSp = numOrUndef(googleSpend);
+        const additionalSp = numOrUndef(additionalSpend);
+
+        if (
+          linkedinAmt === undefined && googleAmt === undefined && additionalAmt === undefined &&
+          googleSp === undefined && additionalSp === undefined
+        ) {
+          return new Response(JSON.stringify({ error: 'At least one numeric budget or spend value is required' }), {
             status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
           });
         }
@@ -9603,6 +9621,13 @@ serve(async (req) => {
           }
         } catch (_e) { /* no app session — fall through */ }
 
+        const patch: Record<string, unknown> = { currency: currency || 'USD' };
+        if (linkedinAmt !== undefined) patch.budget_amount = linkedinAmt;
+        if (googleAmt !== undefined) patch.google_budget_amount = googleAmt;
+        if (additionalAmt !== undefined) patch.additional_budget_amount = additionalAmt;
+        if (googleSp !== undefined) patch.google_spend = googleSp;
+        if (additionalSp !== undefined) patch.additional_spend = additionalSp;
+
         const { data: existing } = await admin
           .from('account_budgets')
           .select('id, user_id')
@@ -9613,7 +9638,7 @@ serve(async (req) => {
         if (existing) {
           const { error: updErr } = await admin
             .from('account_budgets')
-            .update({ budget_amount: Number(amount), currency: currency || 'USD' })
+            .update(patch)
             .eq('id', existing.id);
           if (updErr) {
             return new Response(JSON.stringify({ error: updErr.message }), {
@@ -9626,8 +9651,8 @@ serve(async (req) => {
             .insert({
               account_id: accountId,
               month: monthStrB,
-              budget_amount: Number(amount),
-              currency: currency || 'USD',
+              budget_amount: linkedinAmt ?? 0,
+              ...patch,
               user_id: ownerId || '00000000-0000-0000-0000-000000000000',
             });
           if (insErr) {
@@ -9637,7 +9662,7 @@ serve(async (req) => {
           }
         }
 
-        return new Response(JSON.stringify({ success: true, accountId, month: monthStrB, amount: Number(amount) }), {
+        return new Response(JSON.stringify({ success: true, accountId, month: monthStrB, ...patch }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
       }
