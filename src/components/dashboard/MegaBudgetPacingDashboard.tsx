@@ -150,11 +150,27 @@ export function MegaBudgetPacingDashboard({ accessToken, adAccounts }: Props) {
           [...Array(4)].map((_, i) => <Skeleton key={i} className="h-32 rounded-xl bg-secondary" />)
         ) : (
           <>
-            <MetricCard title="Total Budget" value={`$${aggregates.totalBudget.toLocaleString()}`} icon={Wallet} delay={0} />
-            <MetricCard title="Total Spent" value={`$${aggregates.totalSpent.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} icon={DollarSign} delay={50} />
+            <MetricCard
+              title="Total Budget (all channels)"
+              value={`$${aggregates.allBudget.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
+              change={`LinkedIn $${aggregates.totalBudget.toLocaleString(undefined, { maximumFractionDigits: 0 })} · Google $${aggregates.googleBudget.toLocaleString(undefined, { maximumFractionDigits: 0 })} · Additional $${aggregates.additionalBudget.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
+              changeType="neutral"
+              icon={Wallet}
+              delay={0}
+            />
+            <MetricCard
+              title="Total Spent (all channels)"
+              value={`$${aggregates.allSpent.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
+              change={`LinkedIn $${aggregates.totalSpent.toLocaleString(undefined, { maximumFractionDigits: 0 })} · Google $${aggregates.googleSpent.toLocaleString(undefined, { maximumFractionDigits: 0 })} · Additional $${aggregates.additionalSpent.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
+              changeType="neutral"
+              icon={DollarSign}
+              delay={50}
+            />
             <MetricCard
               title="Overall Pacing"
-              value={`${aggregates.overallPacing.toFixed(1)}%`}
+              value={`${aggregates.allPacing.toFixed(1)}%`}
+              change={`LinkedIn ${aggregates.overallPacing.toFixed(0)}%`}
+              changeType="neutral"
               icon={TrendingUp}
               delay={100}
             />
