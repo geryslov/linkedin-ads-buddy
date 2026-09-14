@@ -62,16 +62,16 @@ export function MegaBudgetPacingDashboard({ accessToken, adAccounts }: Props) {
     }
   });
 
-  const handleSaveBudget = useCallback(async (accountId: string) => {
-    const amount = parseFloat(editValue);
-    if (isNaN(amount) || amount < 0) { toast.error("Enter a valid budget"); return; }
-    const ok = await saveBudget(accountId, amount);
+  const handleSaveField = useCallback(async (accountId: string, field: BudgetField) => {
+    const value = parseFloat(editValue);
+    if (isNaN(value) || value < 0) { toast.error("Enter a valid amount"); return; }
+    const ok = await saveBudget(accountId, { [field]: value });
     if (ok) {
-      toast.success("Budget saved");
-      setEditingId(null);
+      toast.success("Saved");
+      setEditingCell(null);
       fetchAll(adAccounts.map(a => a.id));
     } else {
-      toast.error("Failed to save budget");
+      toast.error("Failed to save");
     }
   }, [editValue, saveBudget, fetchAll, adAccounts]);
 
