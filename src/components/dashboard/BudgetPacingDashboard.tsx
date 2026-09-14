@@ -7,6 +7,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { WidgetCard, EmptyState, StatusPill, ChartLegend } from './widgets';
 import { DollarSign, TrendingUp, TrendingDown, AlertTriangle, CheckCircle, RefreshCw, Save, Lightbulb } from 'lucide-react';
 import { useBudgetPacing } from '@/hooks/useBudgetPacing';
+import { useGoogleAdsLinks } from '@/hooks/useGoogleAdsLinks';
+import { GoogleAccountLinkPicker } from './GoogleAccountLinkPicker';
 import { useToast } from '@/hooks/use-toast';
 import { formatNumber, formatCurrency, cn } from '@/lib/utils';
 import {
@@ -43,6 +45,17 @@ export function BudgetPacingDashboard({ accessToken, selectedAccount }: BudgetPa
   }, [selectedAccount, fetchBudgetPacing]);
 
   const ch = data?.channels;
+
+  const {
+    accounts: googleAccounts,
+    links: googleLinks,
+    isLoadingAccounts: isLoadingGoogleAccounts,
+    accountsError: googleAccountsError,
+    loadAccounts: loadGoogleAccounts,
+    saveLink: saveGoogleLink,
+  } = useGoogleAdsLinks(accessToken, selectedAccount ? [selectedAccount] : []);
+
+  const googleSpendLinked = !!(selectedAccount && googleLinks[selectedAccount]);
 
   useEffect(() => {
     setBudgetInput(data?.budget?.amount ? String(data.budget.amount) : '');
