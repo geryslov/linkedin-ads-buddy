@@ -186,6 +186,37 @@ export function MegaBudgetPacingDashboard({ accessToken, adAccounts }: Props) {
         )}
       </div>
 
+      {/* Channel Breakdown */}
+      {!isLoading && (
+        <WidgetCard noPadding title="Budget by channel" subtitle="Spend against budget for each channel across all clients this month">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 divide-x divide-y lg:divide-y-0 divide-border/60">
+            {[
+              { label: "LinkedIn", spent: aggregates.totalSpent, budget: aggregates.totalBudget, pacing: aggregates.overallPacing },
+              { label: "Google", spent: aggregates.googleSpent, budget: aggregates.googleBudget, pacing: null },
+              { label: "Additional", spent: aggregates.additionalSpent, budget: aggregates.additionalBudget, pacing: null },
+              { label: "Total", spent: aggregates.allSpent, budget: aggregates.allBudget, pacing: aggregates.allPacing },
+            ].map(({ label, spent, budget, pacing }) => {
+              const pct = budget > 0 ? (spent / budget) * 100 : 0;
+              return (
+                <div key={label} className="px-5 py-4 space-y-2">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">{label}</p>
+                  <p className="text-xl font-bold tabular-nums">${spent.toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>
+                  <p className="text-xs text-muted-foreground tabular-nums">
+                    of ${budget.toLocaleString(undefined, { maximumFractionDigits: 0 })}{budget > 0 ? ` · ${pct.toFixed(0)}%` : " · no budget"}
+                  </p>
+                  <Progress value={Math.min(pct, 100)} className="h-1.5" />
+                  {pacing !== null && budget > 0 && (
+                    <p className={`text-xs tabular-nums ${pacing > 110 ? "text-destructive" : pacing < 90 ? "text-warning" : "text-success"}`}>
+                      Pacing {pacing.toFixed(0)}%
+                    </p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </WidgetCard>
+      )}
+
       {/* Account Table */}
       <WidgetCard noPadding title="Account pacing" subtitle="Spend vs. budget across every ad account" className="animate-slide-up">
         {isLoading ? (
