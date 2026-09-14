@@ -33,6 +33,15 @@ export function MegaBudgetPacingDashboard({ accessToken, adAccounts }: Props) {
   const accountIds = useMemo(() => adAccounts.map(a => a.id), [adAccounts]);
   const accountIdsKey = accountIds.join(",");
 
+  const {
+    accounts: googleAccounts,
+    links: googleLinks,
+    isLoadingAccounts: isLoadingGoogleAccounts,
+    accountsError: googleAccountsError,
+    loadAccounts: loadGoogleAccounts,
+    saveLink: saveGoogleLink,
+  } = useGoogleAdsLinks(accessToken, accountIds);
+
   const fetchAllRef = useRef(fetchAll);
   fetchAllRef.current = fetchAll;
 
