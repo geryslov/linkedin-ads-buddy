@@ -28,7 +28,7 @@ export function MegaBudgetPacingDashboard({ accessToken, adAccounts }: Props) {
   const { data, isLoading, error, fetchAll, saveBudget, aggregates } = useMegaBudgetPacing(accessToken);
   const [sortKey, setSortKey] = useState<SortKey>("pacingStatus");
   const [sortAsc, setSortAsc] = useState(true);
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingCell, setEditingCell] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
 
   const accountIds = useMemo(() => adAccounts.map(a => a.id), [adAccounts]);
