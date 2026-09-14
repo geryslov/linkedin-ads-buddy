@@ -90,6 +90,39 @@ export function MegaBudgetPacingDashboard({ accessToken, adAccounts }: Props) {
     return <StatusPill tone="success" label="On track" />;
   };
 
+  const editableCell = (s: AccountPacingSummary, field: BudgetField, value: number) => {
+    const cellId = `${s.accountId}|${field}`;
+    if (editingCell === cellId) {
+      return (
+        <div className="flex items-center gap-1">
+          <Input
+            type="number"
+            value={editValue}
+            onChange={e => setEditValue(e.target.value)}
+            className="w-24 h-8 text-sm"
+            onKeyDown={e => e.key === "Enter" && handleSaveField(s.accountId, field)}
+            autoFocus
+          />
+          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleSaveField(s.accountId, field)}>
+            <Save className="h-3.5 w-3.5" />
+          </Button>
+          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setEditingCell(null)}>
+            <X className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      );
+    }
+    return (
+      <button
+        className="flex items-center gap-1 hover:text-primary transition-colors tabular-nums"
+        onClick={() => { setEditingCell(cellId); setEditValue(String(value || "")); }}
+      >
+        {value > 0 ? `$${value.toLocaleString(undefined, { maximumFractionDigits: 0 })}` : "Set"}
+        <Pencil className="h-3 w-3 opacity-50" />
+      </button>
+    );
+  };
+
   if (error) {
     return (
       <WidgetCard noPadding>
