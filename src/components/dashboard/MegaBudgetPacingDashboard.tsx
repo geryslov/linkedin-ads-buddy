@@ -59,6 +59,8 @@ export function MegaBudgetPacingDashboard({ accessToken, adAccounts }: Props) {
       case "pacingPercent": return dir * (a.pacingPercent - b.pacingPercent);
       case "spent": return dir * (a.spent - b.spent);
       case "budget": return dir * (a.budget - b.budget);
+      case "totalBudget": return dir * ((a.totalBudget || 0) - (b.totalBudget || 0));
+      case "totalSpent": return dir * ((a.totalSpent || 0) - (b.totalSpent || 0));
       default: return 0;
     }
   });
