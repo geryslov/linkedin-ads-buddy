@@ -9574,6 +9574,75 @@ serve(async (req) => {
         });
       }
 
+      case 'save_account_budget': {
+        // Persist a monthly budget without requiring a Supabase app session.
+        const { accountId, amount, currency, month } = params || {};
+        if (!accountId || amount === undefined || amount === null || isNaN(Number(amount))) {
+          return new Response(JSON.stringify({ error: 'accountId and a numeric amount are required' }), {
+            status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+
+        const nowB = new Date();
+        const monthStrB = month || `${nowB.getFullYear()}-${String(nowB.getMonth() + 1).padStart(2, '0')}-01`;
+
+        const { createClient: createClientB } = await import('https://esm.sh/@supabase/supabase-js@2');
+        const admin = createClientB(
+          Deno.env.get('SUPABASE_URL')!,
+          Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+        );
+
+        // Prefer the signed-in app user when available, else reuse the row's owner.
+        let ownerId: string | null = null;
+        try {
+          const authHeader = req.headers.get('Authorization') || '';
+          const jwt = authHeader.replace('Bearer ', '');
+          if (jwt) {
+            const { data: userData } = await admin.auth.getUser(jwt);
+            ownerId = userData?.user?.id || null;
+          }
+        } catch (_e) { /* no app session — fall through */ }
+
+        const { data: existing } = await admin
+          .from('account_budgets')
+          .select('id, user_id')
+          .eq('account_id', accountId)
+          .eq('month', monthStrB)
+          .maybeSingle();
+
+        if (existing) {
+          const { error: updErr } = await admin
+            .from('account_budgets')
+            .update({ budget_amount: Number(amount), currency: currency || 'USD' })
+            .eq('id', existing.id);
+          if (updErr) {
+            return new Response(JSON.stringify({ error: updErr.message }), {
+              status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+            });
+          }
+        } else {
+          const { error: insErr } = await admin
+            .from('account_budgets')
+            .insert({
+              account_id: accountId,
+              month: monthStrB,
+              budget_amount: Number(amount),
+              currency: currency || 'USD',
+              user_id: ownerId || '00000000-0000-0000-0000-000000000000',
+            });
+          if (insErr) {
+            return new Response(JSON.stringify({ error: insErr.message }), {
+              status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+            });
+          }
+        }
+
+        return new Response(JSON.stringify({ success: true, accountId, month: monthStrB, amount: Number(amount) }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+
       case 'get_budget_pacing': {
         // Budget Pacing Dashboard - compares actual spend vs planned budget
         const { accountId, dateRange } = params || {};

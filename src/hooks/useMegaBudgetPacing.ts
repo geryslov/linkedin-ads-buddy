@@ -60,21 +60,16 @@ export function useMegaBudgetPacing(accessToken: string | null) {
     const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return false;
+      const { data: result, error: fnError } = await supabase.functions.invoke('linkedin-api', {
+        body: {
+          action: 'save_account_budget',
+          accessToken,
+          params: { accountId, amount, currency, month },
+        },
+      });
 
-      const { error: upsertError } = await supabase
-        .from('account_budgets')
-        .upsert({
-          account_id: accountId,
-          budget_amount: amount,
-          currency,
-          month,
-          user_id: user.id,
-        }, { onConflict: 'user_id,account_id,month' });
-
-      if (upsertError) {
-        console.error('Budget save error:', upsertError);
+      if (fnError || result?.error) {
+        console.error('Budget save error:', fnError || result?.error);
         return false;
       }
       return true;
@@ -82,7 +77,7 @@ export function useMegaBudgetPacing(accessToken: string | null) {
       console.error('Budget save error:', err);
       return false;
     }
-  }, []);
+  }, [accessToken]);
 
   const aggregates = useMemo(() => {
     const withBudget = data.filter(d => d.budget > 0);
