@@ -17,9 +17,13 @@ export type Database = {
       account_budgets: {
         Row: {
           account_id: string
+          additional_budget_amount: number
+          additional_spend: number
           budget_amount: number
           created_at: string | null
           currency: string | null
+          google_budget_amount: number
+          google_spend: number
           id: string
           month: string
           updated_at: string | null
@@ -27,9 +31,13 @@ export type Database = {
         }
         Insert: {
           account_id: string
+          additional_budget_amount?: number
+          additional_spend?: number
           budget_amount: number
           created_at?: string | null
           currency?: string | null
+          google_budget_amount?: number
+          google_spend?: number
           id?: string
           month: string
           updated_at?: string | null
@@ -37,9 +45,13 @@ export type Database = {
         }
         Update: {
           account_id?: string
+          additional_budget_amount?: number
+          additional_spend?: number
           budget_amount?: number
           created_at?: string | null
           currency?: string | null
+          google_budget_amount?: number
+          google_spend?: number
           id?: string
           month?: string
           updated_at?: string | null
