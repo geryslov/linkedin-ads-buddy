@@ -12310,7 +12310,31 @@ serve(async (req) => {
 
         console.log(`[get_budget_pacing_summary] Fetching ${accountIds.length} accounts, month ${monthStr}`);
 
+        // Live Google Ads spend for accounts linked to a Google Ads customer.
+        const summaryOwnerId = await resolveOwnerId(req);
+        const summaryLinks = await getGoogleLinks(accountIds, summaryOwnerId);
+        const googleSpendByAccount: Record<string, number> = {};
+        const googleNameByAccount: Record<string, string | null> = {};
+        if (summaryLinks.length > 0) {
+          const gStart = `${year}-${String(month).padStart(2, '0')}-01`;
+          const gEnd = `${year}-${String(month).padStart(2, '0')}-${String(currentDay).padStart(2, '0')}`;
+          try {
+            const byCustomer = await fetchGoogleSpend(
+              summaryLinks.map(l => ({ customerId: l.google_customer_id, loginCustomerId: l.login_customer_id })),
+              gStart, gEnd,
+            );
+            for (const l of summaryLinks) {
+              googleNameByAccount[l.account_id] = l.google_customer_name;
+              const v = byCustomer[String(l.google_customer_id).replace(/-/g, '')];
+              if (v !== undefined) googleSpendByAccount[l.account_id] = v;
+            }
+          } catch (e) {
+            console.warn('[get_budget_pacing_summary] Google spend failed:', (e as Error).message);
+          }
+        }
+
         const results = await Promise.allSettled(accountIds.map(async (acctId: string) => {
+
           // Monthly spend params
           const spendParams = new URLSearchParams();
           spendParams.set('q', 'analytics');
