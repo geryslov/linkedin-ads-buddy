@@ -9,6 +9,8 @@ export interface AccountPacingSummary {
   currency: string;
   googleBudget: number;
   googleSpent: number;
+  googleLinked?: boolean;
+  googleAccountName?: string | null;
   additionalBudget: number;
   additionalSpent: number;
   totalBudget: number;
