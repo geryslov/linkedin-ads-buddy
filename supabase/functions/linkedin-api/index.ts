@@ -9762,6 +9762,178 @@ serve(async (req) => {
         });
       }
 
+      case 'list_google_ads_accounts': {
+        // Every non-manager Google Ads account reachable from the connected Google account,
+        // including all clients under any MCC it manages.
+        try {
+          const listRes = await fetch(
+            `${GOOGLE_ADS_GATEWAY}/${GOOGLE_ADS_API_VERSION}/customers:listAccessibleCustomers`,
+            { headers: googleAdsHeaders() }
+          );
+          if (!listRes.ok) {
+            const body = await listRes.text();
+            return new Response(JSON.stringify({ error: `Google Ads request failed [${listRes.status}]`, details: body.slice(0, 500) }), {
+              status: listRes.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+            });
+          }
+          const listData = await listRes.json();
+          const rootIds: string[] = (listData?.resourceNames || []).map((rn: string) => rn.split('/')[1]);
+
+          const byId = new Map<string, { id: string; name: string; currency: string; loginCustomerId: string; manager: boolean }>();
+          const clientQuery =
+            `SELECT customer_client.id, customer_client.descriptive_name, customer_client.manager, ` +
+            `customer_client.currency_code, customer_client.level FROM customer_client ` +
+            `WHERE customer_client.status = 'ENABLED'`;
+
+          await Promise.all(rootIds.map(async (rootId) => {
+            try {
+              const rows = await googleAdsSearch(rootId, clientQuery, rootId);
+              for (const row of rows) {
+                const c = row?.customerClient;
+                if (!c?.id) continue;
+                const id = String(c.id);
+                if (c.manager) continue;
+                if (!byId.has(id)) {
+                  byId.set(id, {
+                    id,
+                    name: c.descriptiveName || `Account ${id}`,
+                    currency: c.currencyCode || '',
+                    loginCustomerId: rootId,
+                    manager: false,
+                  });
+                }
+              }
+            } catch (e) {
+              console.warn(`[list_google_ads_accounts] ${rootId} failed:`, (e as Error).message);
+            }
+          }));
+
+          const accounts = Array.from(byId.values()).sort((a, b) => a.name.localeCompare(b.name));
+          return new Response(JSON.stringify({ accounts }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        } catch (e) {
+          return new Response(JSON.stringify({ error: (e as Error).message }), {
+            status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+      }
+
+      case 'get_google_ads_links': {
+        const { accountIds: linkAccountIds } = params || {};
+        const ownerForLinks = await resolveOwnerId(req);
+        let linkQuery = supabaseClient
+          .from('account_google_links')
+          .select('account_id, google_customer_id, google_customer_name, login_customer_id, currency_code');
+        if (Array.isArray(linkAccountIds) && linkAccountIds.length > 0) {
+          linkQuery = linkQuery.in('account_id', linkAccountIds);
+        }
+        if (ownerForLinks) linkQuery = linkQuery.eq('user_id', ownerForLinks);
+        const { data: linkRows, error: linkErr } = await linkQuery;
+        if (linkErr) {
+          return new Response(JSON.stringify({ error: linkErr.message }), {
+            status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+        return new Response(JSON.stringify({
+          links: (linkRows || []).map(r => ({
+            accountId: r.account_id,
+            googleCustomerId: r.google_customer_id,
+            googleCustomerName: r.google_customer_name,
+            loginCustomerId: r.login_customer_id,
+            currencyCode: r.currency_code,
+          }))
+        }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      case 'save_google_ads_link': {
+        const { accountId: linkAcct, googleCustomerId, googleCustomerName, loginCustomerId, currencyCode } = params || {};
+        if (!linkAcct) {
+          return new Response(JSON.stringify({ error: 'accountId is required' }), {
+            status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+        const ownerForSave = await resolveOwnerId(req);
+        if (!ownerForSave) {
+          return new Response(JSON.stringify({ error: 'Sign in to the app to link Google Ads accounts' }), {
+            status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+
+        if (!googleCustomerId) {
+          const { error: delErr } = await supabaseClient
+            .from('account_google_links')
+            .delete()
+            .eq('user_id', ownerForSave)
+            .eq('account_id', linkAcct);
+          if (delErr) {
+            return new Response(JSON.stringify({ error: delErr.message }), {
+              status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+            });
+          }
+          return new Response(JSON.stringify({ success: true, accountId: linkAcct, googleCustomerId: null }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+
+        const { error: upErr } = await supabaseClient
+          .from('account_google_links')
+          .upsert({
+            user_id: ownerForSave,
+            account_id: linkAcct,
+            google_customer_id: String(googleCustomerId).replace(/-/g, ''),
+            google_customer_name: googleCustomerName || null,
+            login_customer_id: loginCustomerId ? String(loginCustomerId).replace(/-/g, '') : null,
+            currency_code: currencyCode || null,
+          }, { onConflict: 'user_id,account_id' });
+
+        if (upErr) {
+          return new Response(JSON.stringify({ error: upErr.message }), {
+            status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+        return new Response(JSON.stringify({ success: true, accountId: linkAcct, googleCustomerId }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+      case 'get_google_spend': {
+        const { accountIds: spendAccountIds, month: spendMonth } = params || {};
+        if (!Array.isArray(spendAccountIds) || spendAccountIds.length === 0) {
+          return new Response(JSON.stringify({ error: 'accountIds array required' }), {
+            status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+        const gNow = new Date();
+        const gYear = spendMonth ? Number(spendMonth.slice(0, 4)) : gNow.getFullYear();
+        const gMonth = spendMonth ? Number(spendMonth.slice(5, 7)) : gNow.getMonth() + 1;
+        const gStart = `${gYear}-${String(gMonth).padStart(2, '0')}-01`;
+        const isCurrent = gYear === gNow.getFullYear() && gMonth === gNow.getMonth() + 1;
+        const gEnd = isCurrent
+          ? `${gYear}-${String(gMonth).padStart(2, '0')}-${String(gNow.getDate()).padStart(2, '0')}`
+          : `${gYear}-${String(gMonth).padStart(2, '0')}-${String(new Date(gYear, gMonth, 0).getDate()).padStart(2, '0')}`;
+
+        const ownerForSpend = await resolveOwnerId(req);
+        const spendLinks = await getGoogleLinks(spendAccountIds, ownerForSpend);
+        const spendByCustomer = await fetchGoogleSpend(
+          spendLinks.map(l => ({ customerId: l.google_customer_id, loginCustomerId: l.login_customer_id })),
+          gStart,
+          gEnd,
+        );
+
+        const byAccount: Record<string, number> = {};
+        for (const l of spendLinks) {
+          const v = spendByCustomer[String(l.google_customer_id).replace(/-/g, '')];
+          if (v !== undefined) byAccount[l.account_id] = v;
+        }
+
+        return new Response(JSON.stringify({ month: gStart, spend: byAccount }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+
+
 
       case 'get_budget_pacing': {
         // Budget Pacing Dashboard - compares actual spend vs planned budget
