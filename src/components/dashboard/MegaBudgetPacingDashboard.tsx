@@ -20,7 +20,8 @@ interface Props {
   adAccounts: Array<{ id: string; name?: string | null }>;
 }
 
-type SortKey = "name" | "pacingStatus" | "pacingPercent" | "spent" | "budget";
+type SortKey = "name" | "pacingStatus" | "pacingPercent" | "spent" | "budget" | "totalBudget" | "totalSpent";
+type BudgetField = "amount" | "googleAmount" | "additionalAmount" | "googleSpend" | "additionalSpend";
 
 const statusOrder: Record<string, number> = { overspend: 0, underspend: 1, on_track: 2 };
 
@@ -28,7 +29,7 @@ export function MegaBudgetPacingDashboard({ accessToken, adAccounts }: Props) {
   const { data, isLoading, error, fetchAll, saveBudget, aggregates } = useMegaBudgetPacing(accessToken);
   const [sortKey, setSortKey] = useState<SortKey>("pacingStatus");
   const [sortAsc, setSortAsc] = useState(true);
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingCell, setEditingCell] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
 
   const accountIds = useMemo(() => adAccounts.map(a => a.id), [adAccounts]);
@@ -58,20 +59,22 @@ export function MegaBudgetPacingDashboard({ accessToken, adAccounts }: Props) {
       case "pacingPercent": return dir * (a.pacingPercent - b.pacingPercent);
       case "spent": return dir * (a.spent - b.spent);
       case "budget": return dir * (a.budget - b.budget);
+      case "totalBudget": return dir * ((a.totalBudget || 0) - (b.totalBudget || 0));
+      case "totalSpent": return dir * ((a.totalSpent || 0) - (b.totalSpent || 0));
       default: return 0;
     }
   });
 
-  const handleSaveBudget = useCallback(async (accountId: string) => {
-    const amount = parseFloat(editValue);
-    if (isNaN(amount) || amount < 0) { toast.error("Enter a valid budget"); return; }
-    const ok = await saveBudget(accountId, amount);
+  const handleSaveField = useCallback(async (accountId: string, field: BudgetField) => {
+    const value = parseFloat(editValue);
+    if (isNaN(value) || value < 0) { toast.error("Enter a valid amount"); return; }
+    const ok = await saveBudget(accountId, { [field]: value });
     if (ok) {
-      toast.success("Budget saved");
-      setEditingId(null);
+      toast.success("Saved");
+      setEditingCell(null);
       fetchAll(adAccounts.map(a => a.id));
     } else {
-      toast.error("Failed to save budget");
+      toast.error("Failed to save");
     }
   }, [editValue, saveBudget, fetchAll, adAccounts]);
 
@@ -87,6 +90,39 @@ export function MegaBudgetPacingDashboard({ accessToken, adAccounts }: Props) {
     if (s.pacingStatus === "overspend") return <StatusPill tone="danger" label="Over" />;
     if (s.pacingStatus === "underspend") return <StatusPill tone="warning" label="Under" />;
     return <StatusPill tone="success" label="On track" />;
+  };
+
+  const editableCell = (s: AccountPacingSummary, field: BudgetField, value: number) => {
+    const cellId = `${s.accountId}|${field}`;
+    if (editingCell === cellId) {
+      return (
+        <div className="flex items-center gap-1">
+          <Input
+            type="number"
+            value={editValue}
+            onChange={e => setEditValue(e.target.value)}
+            className="w-24 h-8 text-sm"
+            onKeyDown={e => e.key === "Enter" && handleSaveField(s.accountId, field)}
+            autoFocus
+          />
+          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleSaveField(s.accountId, field)}>
+            <Save className="h-3.5 w-3.5" />
+          </Button>
+          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setEditingCell(null)}>
+            <X className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      );
+    }
+    return (
+      <button
+        className="flex items-center gap-1 hover:text-primary transition-colors tabular-nums"
+        onClick={() => { setEditingCell(cellId); setEditValue(String(value || "")); }}
+      >
+        {value > 0 ? `$${value.toLocaleString(undefined, { maximumFractionDigits: 0 })}` : "Set"}
+        <Pencil className="h-3 w-3 opacity-50" />
+      </button>
+    );
   };
 
   if (error) {
@@ -114,11 +150,27 @@ export function MegaBudgetPacingDashboard({ accessToken, adAccounts }: Props) {
           [...Array(4)].map((_, i) => <Skeleton key={i} className="h-32 rounded-xl bg-secondary" />)
         ) : (
           <>
-            <MetricCard title="Total Budget" value={`$${aggregates.totalBudget.toLocaleString()}`} icon={Wallet} delay={0} />
-            <MetricCard title="Total Spent" value={`$${aggregates.totalSpent.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} icon={DollarSign} delay={50} />
+            <MetricCard
+              title="Total Budget (all channels)"
+              value={`$${aggregates.allBudget.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
+              change={`LinkedIn $${aggregates.totalBudget.toLocaleString(undefined, { maximumFractionDigits: 0 })} · Google $${aggregates.googleBudget.toLocaleString(undefined, { maximumFractionDigits: 0 })} · Additional $${aggregates.additionalBudget.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
+              changeType="neutral"
+              icon={Wallet}
+              delay={0}
+            />
+            <MetricCard
+              title="Total Spent (all channels)"
+              value={`$${aggregates.allSpent.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
+              change={`LinkedIn $${aggregates.totalSpent.toLocaleString(undefined, { maximumFractionDigits: 0 })} · Google $${aggregates.googleSpent.toLocaleString(undefined, { maximumFractionDigits: 0 })} · Additional $${aggregates.additionalSpent.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
+              changeType="neutral"
+              icon={DollarSign}
+              delay={50}
+            />
             <MetricCard
               title="Overall Pacing"
-              value={`${aggregates.overallPacing.toFixed(1)}%`}
+              value={`${aggregates.allPacing.toFixed(1)}%`}
+              change={`LinkedIn ${aggregates.overallPacing.toFixed(0)}%`}
+              changeType="neutral"
               icon={TrendingUp}
               delay={100}
             />
@@ -146,10 +198,20 @@ export function MegaBudgetPacingDashboard({ accessToken, adAccounts }: Props) {
                   <span className="flex items-center gap-1">Account <ArrowUpDown className="h-3 w-3" /></span>
                 </TableHead>
                 <TableHead className="cursor-pointer" onClick={() => handleSort("budget")}>
-                  <span className="flex items-center gap-1">Budget <ArrowUpDown className="h-3 w-3" /></span>
+                  <span className="flex items-center gap-1">LinkedIn budget <ArrowUpDown className="h-3 w-3" /></span>
                 </TableHead>
                 <TableHead className="cursor-pointer" onClick={() => handleSort("spent")}>
-                  <span className="flex items-center gap-1">Spent <ArrowUpDown className="h-3 w-3" /></span>
+                  <span className="flex items-center gap-1">LinkedIn spent <ArrowUpDown className="h-3 w-3" /></span>
+                </TableHead>
+                <TableHead>Google budget</TableHead>
+                <TableHead>Google spent</TableHead>
+                <TableHead>Additional budget</TableHead>
+                <TableHead>Additional spent</TableHead>
+                <TableHead className="cursor-pointer" onClick={() => handleSort("totalBudget")}>
+                  <span className="flex items-center gap-1">Total budget <ArrowUpDown className="h-3 w-3" /></span>
+                </TableHead>
+                <TableHead className="cursor-pointer" onClick={() => handleSort("totalSpent")}>
+                  <span className="flex items-center gap-1">Total spent <ArrowUpDown className="h-3 w-3" /></span>
                 </TableHead>
                 <TableHead className="cursor-pointer" onClick={() => handleSort("pacingStatus")}>
                   <span className="flex items-center gap-1">Status <ArrowUpDown className="h-3 w-3" /></span>
@@ -167,42 +229,21 @@ export function MegaBudgetPacingDashboard({ accessToken, adAccounts }: Props) {
             <TableBody>
               {sorted.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={10} className="text-center text-muted-foreground py-12">
+                  <TableCell colSpan={16} className="text-center text-muted-foreground py-12">
                     No accounts found
                   </TableCell>
                 </TableRow>
               ) : sorted.map((s) => (
                 <TableRow key={s.accountId}>
                   <TableCell className="font-medium">{nameMap.get(s.accountId) || s.accountId}</TableCell>
-                  <TableCell>
-                    {editingId === s.accountId ? (
-                      <div className="flex items-center gap-1">
-                        <Input
-                          type="number"
-                          value={editValue}
-                          onChange={e => setEditValue(e.target.value)}
-                          className="w-24 h-8 text-sm"
-                          onKeyDown={e => e.key === "Enter" && handleSaveBudget(s.accountId)}
-                          autoFocus
-                        />
-                        <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleSaveBudget(s.accountId)}>
-                          <Save className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setEditingId(null)}>
-                          <X className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    ) : (
-                      <button
-                        className="flex items-center gap-1 hover:text-primary transition-colors"
-                        onClick={() => { setEditingId(s.accountId); setEditValue(String(s.budget || "")); }}
-                      >
-                        {s.budget > 0 ? `$${s.budget.toLocaleString()}` : "Set budget"}
-                        <Pencil className="h-3 w-3 opacity-50" />
-                      </button>
-                    )}
-                  </TableCell>
-                  <TableCell>${s.spent.toLocaleString(undefined, { maximumFractionDigits: 0 })}</TableCell>
+                  <TableCell>{editableCell(s, "amount", s.budget)}</TableCell>
+                  <TableCell className="tabular-nums">${s.spent.toLocaleString(undefined, { maximumFractionDigits: 0 })}</TableCell>
+                  <TableCell>{editableCell(s, "googleAmount", s.googleBudget || 0)}</TableCell>
+                  <TableCell>{editableCell(s, "googleSpend", s.googleSpent || 0)}</TableCell>
+                  <TableCell>{editableCell(s, "additionalAmount", s.additionalBudget || 0)}</TableCell>
+                  <TableCell>{editableCell(s, "additionalSpend", s.additionalSpent || 0)}</TableCell>
+                  <TableCell className="tabular-nums font-medium">${(s.totalBudget || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}</TableCell>
+                  <TableCell className="tabular-nums font-medium">${(s.totalSpent || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}</TableCell>
                   <TableCell>{statusBadge(s)}</TableCell>
                   <TableCell>
                     <div className="flex items-center gap-2 min-w-[120px]">

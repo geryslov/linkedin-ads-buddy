@@ -9575,10 +9575,28 @@ serve(async (req) => {
       }
 
       case 'save_account_budget': {
-        // Persist a monthly budget without requiring a Supabase app session.
-        const { accountId, amount, currency, month } = params || {};
-        if (!accountId || amount === undefined || amount === null || isNaN(Number(amount))) {
-          return new Response(JSON.stringify({ error: 'accountId and a numeric amount are required' }), {
+        // Persist monthly budgets (LinkedIn / Google / Additional) without requiring a Supabase app session.
+        const { accountId, amount, currency, month, googleAmount, additionalAmount, googleSpend, additionalSpend } = params || {};
+        if (!accountId) {
+          return new Response(JSON.stringify({ error: 'accountId is required' }), {
+            status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+
+        const numOrUndef = (v: unknown) =>
+          v === undefined || v === null || v === '' || isNaN(Number(v)) ? undefined : Number(v);
+
+        const linkedinAmt = numOrUndef(amount);
+        const googleAmt = numOrUndef(googleAmount);
+        const additionalAmt = numOrUndef(additionalAmount);
+        const googleSp = numOrUndef(googleSpend);
+        const additionalSp = numOrUndef(additionalSpend);
+
+        if (
+          linkedinAmt === undefined && googleAmt === undefined && additionalAmt === undefined &&
+          googleSp === undefined && additionalSp === undefined
+        ) {
+          return new Response(JSON.stringify({ error: 'At least one numeric budget or spend value is required' }), {
             status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
           });
         }
@@ -9603,6 +9621,13 @@ serve(async (req) => {
           }
         } catch (_e) { /* no app session — fall through */ }
 
+        const patch: Record<string, unknown> = { currency: currency || 'USD' };
+        if (linkedinAmt !== undefined) patch.budget_amount = linkedinAmt;
+        if (googleAmt !== undefined) patch.google_budget_amount = googleAmt;
+        if (additionalAmt !== undefined) patch.additional_budget_amount = additionalAmt;
+        if (googleSp !== undefined) patch.google_spend = googleSp;
+        if (additionalSp !== undefined) patch.additional_spend = additionalSp;
+
         const { data: existing } = await admin
           .from('account_budgets')
           .select('id, user_id')
@@ -9613,7 +9638,7 @@ serve(async (req) => {
         if (existing) {
           const { error: updErr } = await admin
             .from('account_budgets')
-            .update({ budget_amount: Number(amount), currency: currency || 'USD' })
+            .update(patch)
             .eq('id', existing.id);
           if (updErr) {
             return new Response(JSON.stringify({ error: updErr.message }), {
@@ -9626,8 +9651,8 @@ serve(async (req) => {
             .insert({
               account_id: accountId,
               month: monthStrB,
-              budget_amount: Number(amount),
-              currency: currency || 'USD',
+              budget_amount: linkedinAmt ?? 0,
+              ...patch,
               user_id: ownerId || '00000000-0000-0000-0000-000000000000',
             });
           if (insErr) {
@@ -9637,7 +9662,7 @@ serve(async (req) => {
           }
         }
 
-        return new Response(JSON.stringify({ success: true, accountId, month: monthStrB, amount: Number(amount) }), {
+        return new Response(JSON.stringify({ success: true, accountId, month: monthStrB, ...patch }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
       }
@@ -9706,6 +9731,10 @@ serve(async (req) => {
         // Step 2: Fetch budget from Supabase (if exists)
         let budgetAmount = 0;
         let budgetCurrency = 'USD';
+        let googleBudgetAmount = 0;
+        let googleSpendAmount = 0;
+        let additionalBudgetAmount = 0;
+        let additionalSpendAmount = 0;
 
         try {
           const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
@@ -9716,16 +9745,20 @@ serve(async (req) => {
           // Query with YYYY-MM-01 format for the date column
           const { data: budgetData, error: budgetError } = await supabase
             .from('account_budgets')
-            .select('budget_amount, currency')
+            .select('budget_amount, currency, google_budget_amount, google_spend, additional_budget_amount, additional_spend')
             .eq('account_id', accountId)
             .eq('month', currentMonthDate)
-            .single();
+            .maybeSingle();
 
           console.log(`[get_budget_pacing] Budget query for ${accountId}, month ${currentMonthDate}:`, budgetData, budgetError);
 
           if (budgetData) {
-            budgetAmount = budgetData.budget_amount || 0;
+            budgetAmount = Number(budgetData.budget_amount) || 0;
             budgetCurrency = budgetData.currency || 'USD';
+            googleBudgetAmount = Number(budgetData.google_budget_amount) || 0;
+            googleSpendAmount = Number(budgetData.google_spend) || 0;
+            additionalBudgetAmount = Number(budgetData.additional_budget_amount) || 0;
+            additionalSpendAmount = Number(budgetData.additional_spend) || 0;
           }
         } catch (err) {
           console.log('[get_budget_pacing] Budget fetch error (may not exist):', err);
@@ -9792,6 +9825,18 @@ serve(async (req) => {
             amount: budgetAmount,
             currency: budgetCurrency,
             isSet: budgetAmount > 0,
+            google: googleBudgetAmount,
+            additional: additionalBudgetAmount,
+            total: budgetAmount + googleBudgetAmount + additionalBudgetAmount,
+          },
+          channels: {
+            linkedin: { budget: budgetAmount, spent: totalSpent },
+            google: { budget: googleBudgetAmount, spent: googleSpendAmount },
+            additional: { budget: additionalBudgetAmount, spent: additionalSpendAmount },
+            total: {
+              budget: budgetAmount + googleBudgetAmount + additionalBudgetAmount,
+              spent: totalSpent + googleSpendAmount + additionalSpendAmount,
+            },
           },
           spending: {
             total: totalSpent,
@@ -12041,7 +12086,7 @@ serve(async (req) => {
             }),
             supabaseClient
               .from('account_budgets')
-              .select('budget_amount, currency')
+              .select('budget_amount, currency, google_budget_amount, google_spend, additional_budget_amount, additional_spend')
               .eq('account_id', acctId)
               .eq('month', monthStr)
               .maybeSingle()
@@ -12070,8 +12115,12 @@ serve(async (req) => {
           // Sort by date ascending
           last3Days.sort((a, b) => a.date.localeCompare(b.date));
 
-          const budgetAmount = budgetRes.data?.budget_amount || 0;
+          const budgetAmount = Number(budgetRes.data?.budget_amount) || 0;
           const currency = budgetRes.data?.currency || 'USD';
+          const googleBudget = Number(budgetRes.data?.google_budget_amount) || 0;
+          const googleSpent = Number(budgetRes.data?.google_spend) || 0;
+          const additionalBudget = Number(budgetRes.data?.additional_budget_amount) || 0;
+          const additionalSpent = Number(budgetRes.data?.additional_spend) || 0;
 
           const avgDaily = currentDay > 0 ? spent / currentDay : 0;
           const projected = avgDaily * daysInMonth;
@@ -12089,11 +12138,30 @@ serve(async (req) => {
             else if (pacingPercent > 115) pacingStatus = 'overspend';
           }
 
+          const totalBudget = budgetAmount + googleBudget + additionalBudget;
+          const totalSpentAll = spent + googleSpent + additionalSpent;
+          let totalPacingPercent = 0;
+          let totalPacingStatus: 'on_track' | 'underspend' | 'overspend' = 'on_track';
+          if (totalBudget > 0) {
+            const idealTotal = (totalBudget / daysInMonth) * currentDay;
+            totalPacingPercent = idealTotal > 0 ? (totalSpentAll / idealTotal) * 100 : 0;
+            if (totalPacingPercent < 85) totalPacingStatus = 'underspend';
+            else if (totalPacingPercent > 115) totalPacingStatus = 'overspend';
+          }
+
           return {
             accountId: acctId,
             budget: budgetAmount,
             spent,
             currency,
+            googleBudget,
+            googleSpent,
+            additionalBudget,
+            additionalSpent,
+            totalBudget,
+            totalSpent: totalSpentAll,
+            totalPacingPercent: Math.round(totalPacingPercent * 10) / 10,
+            totalPacingStatus,
             pacingPercent: Math.round(pacingPercent * 10) / 10,
             pacingStatus,
             daysRemaining,

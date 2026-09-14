@@ -1,11 +1,20 @@
 import { useState, useCallback, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import type { BudgetInput } from './useBudgetPacing';
 
 export interface AccountPacingSummary {
   accountId: string;
   budget: number;
   spent: number;
   currency: string;
+  googleBudget: number;
+  googleSpent: number;
+  additionalBudget: number;
+  additionalSpent: number;
+  totalBudget: number;
+  totalSpent: number;
+  totalPacingPercent: number;
+  totalPacingStatus: 'on_track' | 'underspend' | 'overspend';
   pacingPercent: number;
   pacingStatus: 'on_track' | 'underspend' | 'overspend';
   daysRemaining: number;
@@ -55,16 +64,17 @@ export function useMegaBudgetPacing(accessToken: string | null) {
     }
   }, [accessToken]);
 
-  const saveBudget = useCallback(async (accountId: string, amount: number, currency: string = 'USD') => {
+  const saveBudget = useCallback(async (accountId: string, input: BudgetInput | number, currency: string = 'USD') => {
     const now = new Date();
     const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+    const payload: BudgetInput = typeof input === 'number' ? { amount: input, currency } : { currency, ...input };
 
     try {
       const { data: result, error: fnError } = await supabase.functions.invoke('linkedin-api', {
         body: {
           action: 'save_account_budget',
           accessToken,
-          params: { accountId, amount, currency, month },
+          params: { accountId, month, ...payload },
         },
       });
 
@@ -83,20 +93,34 @@ export function useMegaBudgetPacing(accessToken: string | null) {
     const withBudget = data.filter(d => d.budget > 0);
     const totalBudget = data.reduce((s, d) => s + d.budget, 0);
     const totalSpent = data.reduce((s, d) => s + d.spent, 0);
+    const googleBudget = data.reduce((s, d) => s + (d.googleBudget || 0), 0);
+    const googleSpent = data.reduce((s, d) => s + (d.googleSpent || 0), 0);
+    const additionalBudget = data.reduce((s, d) => s + (d.additionalBudget || 0), 0);
+    const additionalSpent = data.reduce((s, d) => s + (d.additionalSpent || 0), 0);
+    const allBudget = totalBudget + googleBudget + additionalBudget;
+    const allSpent = totalSpent + googleSpent + additionalSpent;
     const onTrack = withBudget.filter(d => d.pacingStatus === 'on_track').length;
     const over = withBudget.filter(d => d.pacingStatus === 'overspend').length;
     const under = withBudget.filter(d => d.pacingStatus === 'underspend').length;
     const noBudget = data.filter(d => d.budget === 0).length;
 
-    let overallPacing = 0;
-    if (totalBudget > 0) {
-      const daysInMonth = data[0]?.daysInMonth || 30;
-      const currentDay = daysInMonth - (data[0]?.daysRemaining || 0);
-      const idealSpent = (totalBudget / daysInMonth) * currentDay;
-      overallPacing = idealSpent > 0 ? (totalSpent / idealSpent) * 100 : 0;
-    }
+    const daysInMonth = data[0]?.daysInMonth || 30;
+    const currentDay = daysInMonth - (data[0]?.daysRemaining || 0);
+    const pacingFor = (budget: number, spent: number) => {
+      if (budget <= 0) return 0;
+      const idealSpent = (budget / daysInMonth) * currentDay;
+      return idealSpent > 0 ? (spent / idealSpent) * 100 : 0;
+    };
 
-    return { totalBudget, totalSpent, overallPacing, onTrack, over, under, noBudget };
+    return {
+      totalBudget, totalSpent,
+      googleBudget, googleSpent,
+      additionalBudget, additionalSpent,
+      allBudget, allSpent,
+      overallPacing: pacingFor(totalBudget, totalSpent),
+      allPacing: pacingFor(allBudget, allSpent),
+      onTrack, over, under, noBudget,
+    };
   }, [data]);
 
   return { data, isLoading, error, fetchAll, saveBudget, aggregates };

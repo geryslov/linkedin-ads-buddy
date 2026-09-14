@@ -30,6 +30,10 @@ export function BudgetPacingDashboard({ accessToken, selectedAccount }: BudgetPa
   const { data, isLoading, error, fetchBudgetPacing, saveBudget } = useBudgetPacing(accessToken);
   const { toast } = useToast();
   const [budgetInput, setBudgetInput] = useState('');
+  const [googleBudgetInput, setGoogleBudgetInput] = useState('');
+  const [googleSpendInput, setGoogleSpendInput] = useState('');
+  const [additionalBudgetInput, setAdditionalBudgetInput] = useState('');
+  const [additionalSpendInput, setAdditionalSpendInput] = useState('');
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
@@ -38,34 +42,47 @@ export function BudgetPacingDashboard({ accessToken, selectedAccount }: BudgetPa
     }
   }, [selectedAccount, fetchBudgetPacing]);
 
+  const ch = data?.channels;
+
   useEffect(() => {
-    if (data?.budget?.amount) {
-      setBudgetInput(data.budget.amount.toString());
-    }
-  }, [data?.budget?.amount]);
+    setBudgetInput(data?.budget?.amount ? String(data.budget.amount) : '');
+    setGoogleBudgetInput(ch?.google?.budget ? String(ch.google.budget) : '');
+    setGoogleSpendInput(ch?.google?.spent ? String(ch.google.spent) : '');
+    setAdditionalBudgetInput(ch?.additional?.budget ? String(ch.additional.budget) : '');
+    setAdditionalSpendInput(ch?.additional?.spent ? String(ch.additional.spent) : '');
+  }, [data?.budget?.amount, ch?.google?.budget, ch?.google?.spent, ch?.additional?.budget, ch?.additional?.spent]);
 
   const handleSaveBudget = async () => {
-    if (!selectedAccount || !budgetInput) return;
+    if (!selectedAccount) return;
 
-    setIsSaving(true);
-    const amount = parseFloat(budgetInput);
+    const parse = (v: string) => (v.trim() === '' ? 0 : parseFloat(v));
+    const values = {
+      amount: parse(budgetInput),
+      googleAmount: parse(googleBudgetInput),
+      additionalAmount: parse(additionalBudgetInput),
+      googleSpend: parse(googleSpendInput),
+      additionalSpend: parse(additionalSpendInput),
+    };
 
-    if (isNaN(amount) || amount < 0) {
+    if (Object.values(values).some((v) => isNaN(v) || v < 0)) {
       toast({
-        title: 'Invalid budget',
-        description: 'Please enter a valid positive number',
+        title: 'Invalid amount',
+        description: 'Please enter valid positive numbers',
         variant: 'destructive',
       });
-      setIsSaving(false);
       return;
     }
 
-    const success = await saveBudget(selectedAccount, amount);
+    setIsSaving(true);
+    const success = await saveBudget(selectedAccount, values);
     if (success) {
-      toast({ title: 'Budget saved', description: `Monthly budget set to ${formatCurrency(amount)}` });
+      toast({
+        title: 'Budgets saved',
+        description: `Total monthly budget ${formatCurrency(values.amount + values.googleAmount + values.additionalAmount)}`,
+      });
       fetchBudgetPacing(selectedAccount);
     } else {
-      toast({ title: 'Error', description: 'Failed to save budget', variant: 'destructive' });
+      toast({ title: 'Error', description: 'Failed to save budgets', variant: 'destructive' });
     }
     setIsSaving(false);
   };
@@ -131,30 +148,85 @@ export function BudgetPacingDashboard({ accessToken, selectedAccount }: BudgetPa
     <div className="space-y-6">
       {/* Budget Input & Pacing Status */}
       <div className="grid gap-6 md:grid-cols-2">
-        <WidgetCard title={<span className="inline-flex items-center gap-2"><DollarSign className="h-4 w-4 text-primary" /> Monthly budget</span>}>
-          <div className="flex gap-2">
-            <div className="flex-1">
-              <Label htmlFor="budget" className="sr-only">Budget</Label>
+        <WidgetCard
+          title={<span className="inline-flex items-center gap-2"><DollarSign className="h-4 w-4 text-primary" /> Monthly budgets</span>}
+          subtitle="LinkedIn spend is tracked automatically. Enter Google and Additional spend manually."
+          toolbar={
+            <div className="flex gap-2">
+              <Button onClick={handleSaveBudget} disabled={isSaving} size="sm" className="h-8">
+                <Save className="h-4 w-4" />
+                Save
+              </Button>
+              <Button variant="outline" size="icon" className="h-8 w-8" onClick={handleRefresh}>
+                <RefreshCw className="h-4 w-4" />
+              </Button>
+            </div>
+          }
+        >
+          <div className="space-y-3">
+            <div className="grid grid-cols-[1fr_auto] gap-3 items-center">
+              <Label htmlFor="budget" className="text-sm">LinkedIn budget</Label>
               <Input
                 id="budget"
                 type="number"
-                placeholder="Enter monthly budget"
+                placeholder="0"
                 value={budgetInput}
                 onChange={(e) => setBudgetInput(e.target.value)}
-                className="h-9"
+                className="h-9 w-36 tabular-nums"
               />
             </div>
-            <Button onClick={handleSaveBudget} disabled={isSaving} className="h-9">
-              <Save className="h-4 w-4" />
-              Save
-            </Button>
-            <Button variant="outline" size="icon" className="h-9 w-9" onClick={handleRefresh}>
-              <RefreshCw className="h-4 w-4" />
-            </Button>
+            <div className="grid grid-cols-[1fr_auto] gap-3 items-center">
+              <Label htmlFor="google-budget" className="text-sm">Google budget</Label>
+              <Input
+                id="google-budget"
+                type="number"
+                placeholder="0"
+                value={googleBudgetInput}
+                onChange={(e) => setGoogleBudgetInput(e.target.value)}
+                className="h-9 w-36 tabular-nums"
+              />
+            </div>
+            <div className="grid grid-cols-[1fr_auto] gap-3 items-center">
+              <Label htmlFor="google-spend" className="text-sm text-muted-foreground">Google spend this month</Label>
+              <Input
+                id="google-spend"
+                type="number"
+                placeholder="0"
+                value={googleSpendInput}
+                onChange={(e) => setGoogleSpendInput(e.target.value)}
+                className="h-9 w-36 tabular-nums"
+              />
+            </div>
+            <div className="grid grid-cols-[1fr_auto] gap-3 items-center">
+              <Label htmlFor="additional-budget" className="text-sm">Additional budget</Label>
+              <Input
+                id="additional-budget"
+                type="number"
+                placeholder="0"
+                value={additionalBudgetInput}
+                onChange={(e) => setAdditionalBudgetInput(e.target.value)}
+                className="h-9 w-36 tabular-nums"
+              />
+            </div>
+            <div className="grid grid-cols-[1fr_auto] gap-3 items-center">
+              <Label htmlFor="additional-spend" className="text-sm text-muted-foreground">Additional spend this month</Label>
+              <Input
+                id="additional-spend"
+                type="number"
+                placeholder="0"
+                value={additionalSpendInput}
+                onChange={(e) => setAdditionalSpendInput(e.target.value)}
+                className="h-9 w-36 tabular-nums"
+              />
+            </div>
           </div>
-          {data?.budget?.isSet && (
-            <p className="text-sm text-muted-foreground mt-3">
-              Budget for {data.period.month}: <span className="font-medium text-foreground tabular-nums">{formatCurrency(data.budget.amount)}</span> {data.budget.currency}
+          {data?.period?.month && (
+            <p className="text-sm text-muted-foreground mt-4 pt-3 border-t border-border/60">
+              {data.period.month} total:{' '}
+              <span className="font-medium text-foreground tabular-nums">
+                {formatCurrency(ch?.total?.budget ?? data?.budget?.amount ?? 0)}
+              </span>{' '}
+              {data.budget.currency}
             </p>
           )}
         </WidgetCard>
@@ -186,6 +258,33 @@ export function BudgetPacingDashboard({ accessToken, selectedAccount }: BudgetPa
           )}
         </WidgetCard>
       </div>
+
+      {/* Channel breakdown */}
+      {ch && (
+        <WidgetCard noPadding title="Budget by channel" subtitle="Spend against budget for each channel this month">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 divide-x divide-y lg:divide-y-0 divide-border/60">
+            {[
+              { label: 'LinkedIn', c: ch.linkedin },
+              { label: 'Google', c: ch.google },
+              { label: 'Additional', c: ch.additional },
+              { label: 'Total', c: ch.total },
+            ].map(({ label, c }) => {
+              const pct = c.budget > 0 ? (c.spent / c.budget) * 100 : 0;
+              return (
+                <div key={label} className="px-5 py-4 space-y-2">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">{label}</p>
+                  <p className="text-xl font-bold tabular-nums">{formatCurrency(c.spent)}</p>
+                  <p className="text-xs text-muted-foreground tabular-nums">
+                    of {formatCurrency(c.budget)} {c.budget > 0 ? `· ${pct.toFixed(0)}%` : ''}
+                  </p>
+                  <Progress value={Math.min(pct, 100)} className="h-1.5" />
+                </div>
+              );
+            })}
+          </div>
+        </WidgetCard>
+      )}
+
 
       {/* Key Metrics — clean stat strip */}
       <WidgetCard noPadding>

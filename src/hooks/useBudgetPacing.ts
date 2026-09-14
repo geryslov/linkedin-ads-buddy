@@ -9,6 +9,11 @@ export interface DailySpend {
   leads: number;
 }
 
+export interface ChannelBudget {
+  budget: number;
+  spent: number;
+}
+
 export interface BudgetPacingData {
   period: {
     start: string;
@@ -19,6 +24,15 @@ export interface BudgetPacingData {
     amount: number;
     currency: string;
     isSet: boolean;
+    google?: number;
+    additional?: number;
+    total?: number;
+  };
+  channels?: {
+    linkedin: ChannelBudget;
+    google: ChannelBudget;
+    additional: ChannelBudget;
+    total: ChannelBudget;
   };
   spending: {
     total: number;
@@ -47,6 +61,15 @@ export interface BudgetPacingData {
     spendTrendPercent: number;
   };
   recommendations: string[];
+}
+
+export interface BudgetInput {
+  amount?: number;
+  googleAmount?: number;
+  additionalAmount?: number;
+  googleSpend?: number;
+  additionalSpend?: number;
+  currency?: string;
 }
 
 export function useBudgetPacing(accessToken: string | null) {
@@ -87,16 +110,17 @@ export function useBudgetPacing(accessToken: string | null) {
     }
   }, [accessToken]);
 
-  const saveBudget = useCallback(async (accountId: string, amount: number, currency: string = 'USD') => {
+  const saveBudget = useCallback(async (accountId: string, input: BudgetInput | number, currency: string = 'USD') => {
     const now = new Date();
     const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+    const payload: BudgetInput = typeof input === 'number' ? { amount: input, currency } : { currency, ...input };
 
     try {
       const { data: result, error: fnError } = await supabase.functions.invoke('linkedin-api', {
         body: {
           action: 'save_account_budget',
           accessToken,
-          params: { accountId, amount, currency, month },
+          params: { accountId, month, ...payload },
         },
       });
 
