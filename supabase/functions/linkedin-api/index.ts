@@ -14,6 +14,7 @@ const LINKEDIN_CLIENT_SECRET = Deno.env.get('LINKEDIN_CLIENT_SECRET');
 // Initialize Supabase client for company cache operations
 const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
 const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+const supabaseClient = createClient(supabaseUrl, supabaseServiceKey);
 
 // ============ GOOGLE ADS (via Lovable connector gateway) ============
 const GOOGLE_ADS_API_VERSION = 'v22';
