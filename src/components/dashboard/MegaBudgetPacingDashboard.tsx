@@ -175,34 +175,7 @@ export function MegaBudgetPacingDashboard({ accessToken, adAccounts }: Props) {
               ) : sorted.map((s) => (
                 <TableRow key={s.accountId}>
                   <TableCell className="font-medium">{nameMap.get(s.accountId) || s.accountId}</TableCell>
-                  <TableCell>
-                    {editingId === s.accountId ? (
-                      <div className="flex items-center gap-1">
-                        <Input
-                          type="number"
-                          value={editValue}
-                          onChange={e => setEditValue(e.target.value)}
-                          className="w-24 h-8 text-sm"
-                          onKeyDown={e => e.key === "Enter" && handleSaveBudget(s.accountId)}
-                          autoFocus
-                        />
-                        <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleSaveBudget(s.accountId)}>
-                          <Save className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setEditingId(null)}>
-                          <X className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    ) : (
-                      <button
-                        className="flex items-center gap-1 hover:text-primary transition-colors"
-                        onClick={() => { setEditingId(s.accountId); setEditValue(String(s.budget || "")); }}
-                      >
-                        {s.budget > 0 ? `$${s.budget.toLocaleString()}` : "Set budget"}
-                        <Pencil className="h-3 w-3 opacity-50" />
-                      </button>
-                    )}
-                  </TableCell>
+                  <TableCell>{editableCell(s, "amount", s.budget)}</TableCell>
                   <TableCell className="tabular-nums">${s.spent.toLocaleString(undefined, { maximumFractionDigits: 0 })}</TableCell>
                   <TableCell>{editableCell(s, "googleAmount", s.googleBudget || 0)}</TableCell>
                   <TableCell>{editableCell(s, "googleSpend", s.googleSpent || 0)}</TableCell>
