@@ -12409,7 +12409,11 @@ serve(async (req) => {
           const budgetAmount = Number(budgetRes.data?.budget_amount) || 0;
           const currency = budgetRes.data?.currency || 'USD';
           const googleBudget = Number(budgetRes.data?.google_budget_amount) || 0;
-          const googleSpent = Number(budgetRes.data?.google_spend) || 0;
+          const liveGoogleSpend = googleSpendByAccount[acctId];
+          const googleLinked = Object.prototype.hasOwnProperty.call(googleNameByAccount, acctId);
+          const googleSpent = liveGoogleSpend !== undefined
+            ? liveGoogleSpend
+            : (Number(budgetRes.data?.google_spend) || 0);
           const additionalBudget = Number(budgetRes.data?.additional_budget_amount) || 0;
           const additionalSpent = Number(budgetRes.data?.additional_spend) || 0;
 
