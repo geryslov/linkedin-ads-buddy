@@ -203,7 +203,13 @@ export function MegaBudgetPacingDashboard({ accessToken, adAccounts }: Props) {
                       </button>
                     )}
                   </TableCell>
-                  <TableCell>${s.spent.toLocaleString(undefined, { maximumFractionDigits: 0 })}</TableCell>
+                  <TableCell className="tabular-nums">${s.spent.toLocaleString(undefined, { maximumFractionDigits: 0 })}</TableCell>
+                  <TableCell>{editableCell(s, "googleAmount", s.googleBudget || 0)}</TableCell>
+                  <TableCell>{editableCell(s, "googleSpend", s.googleSpent || 0)}</TableCell>
+                  <TableCell>{editableCell(s, "additionalAmount", s.additionalBudget || 0)}</TableCell>
+                  <TableCell>{editableCell(s, "additionalSpend", s.additionalSpent || 0)}</TableCell>
+                  <TableCell className="tabular-nums font-medium">${(s.totalBudget || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}</TableCell>
+                  <TableCell className="tabular-nums font-medium">${(s.totalSpent || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}</TableCell>
                   <TableCell>{statusBadge(s)}</TableCell>
                   <TableCell>
                     <div className="flex items-center gap-2 min-w-[120px]">
