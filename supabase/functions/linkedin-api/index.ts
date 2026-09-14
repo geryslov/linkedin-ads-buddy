@@ -10123,7 +10123,13 @@ serve(async (req) => {
           },
           channels: {
             linkedin: { budget: budgetAmount, spent: totalSpent },
-            google: { budget: googleBudgetAmount, spent: googleSpendAmount },
+            google: {
+              budget: googleBudgetAmount,
+              spent: googleSpendAmount,
+              linked: googleSpendIsLive || !!googleLinkedAccountName,
+              accountName: googleLinkedAccountName,
+              live: googleSpendIsLive,
+            },
             additional: { budget: additionalBudgetAmount, spent: additionalSpendAmount },
             total: {
               budget: budgetAmount + googleBudgetAmount + additionalBudgetAmount,
