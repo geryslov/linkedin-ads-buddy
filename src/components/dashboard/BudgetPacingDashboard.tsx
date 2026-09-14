@@ -259,6 +259,33 @@ export function BudgetPacingDashboard({ accessToken, selectedAccount }: BudgetPa
         </WidgetCard>
       </div>
 
+      {/* Channel breakdown */}
+      {ch && (
+        <WidgetCard noPadding title="Budget by channel" subtitle="Spend against budget for each channel this month">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 divide-x divide-y lg:divide-y-0 divide-border/60">
+            {[
+              { label: 'LinkedIn', c: ch.linkedin },
+              { label: 'Google', c: ch.google },
+              { label: 'Additional', c: ch.additional },
+              { label: 'Total', c: ch.total },
+            ].map(({ label, c }) => {
+              const pct = c.budget > 0 ? (c.spent / c.budget) * 100 : 0;
+              return (
+                <div key={label} className="px-5 py-4 space-y-2">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">{label}</p>
+                  <p className="text-xl font-bold tabular-nums">{formatCurrency(c.spent)}</p>
+                  <p className="text-xs text-muted-foreground tabular-nums">
+                    of {formatCurrency(c.budget)} {c.budget > 0 ? `· ${pct.toFixed(0)}%` : ''}
+                  </p>
+                  <Progress value={Math.min(pct, 100)} className="h-1.5" />
+                </div>
+              );
+            })}
+          </div>
+        </WidgetCard>
+      )}
+
+
       {/* Key Metrics — clean stat strip */}
       <WidgetCard noPadding>
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 divide-x divide-y lg:divide-y-0 divide-border/60">
