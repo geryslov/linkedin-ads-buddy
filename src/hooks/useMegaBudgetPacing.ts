@@ -1,11 +1,20 @@
 import { useState, useCallback, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import type { BudgetInput } from './useBudgetPacing';
 
 export interface AccountPacingSummary {
   accountId: string;
   budget: number;
   spent: number;
   currency: string;
+  googleBudget: number;
+  googleSpent: number;
+  additionalBudget: number;
+  additionalSpent: number;
+  totalBudget: number;
+  totalSpent: number;
+  totalPacingPercent: number;
+  totalPacingStatus: 'on_track' | 'underspend' | 'overspend';
   pacingPercent: number;
   pacingStatus: 'on_track' | 'underspend' | 'overspend';
   daysRemaining: number;
