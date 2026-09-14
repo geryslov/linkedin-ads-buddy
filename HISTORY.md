@@ -256,6 +256,21 @@ doc).
 
 ---
 
+## Sep 2026 — Google Ads spend in the budget tracker
+
+Connected the workspace `google_ads` connector to the budget tracker. New table `account_google_links`
+(owner-scoped RLS, unique on user_id+account_id) maps each LinkedIn ad account to a Google Ads
+customer. Four edge actions — `list_google_ads_accounts` (accessible customers → enabled client
+accounts, managers skipped), `get_google_ads_links`, `save_google_ads_link` (empty customer id =
+unlink), `get_google_spend` (GAQL `metrics.cost_micros` over the month) — all through the connector
+gateway at `/google_ads/v22/...` (v21 and v18 404).
+
+`get_budget_pacing` and `get_budget_pacing_summary` now use live Google spend whenever a link exists
+and fall back to the stored `google_spend` column otherwise, so unlinked clients keep the manual
+field. In the UI the Google lane carries a link picker; once linked, the spend cell goes read-only.
+
+---
+
 ## Recurring themes
 
 - **URN resolution is the project's tax.** Creative names, job titles, super titles, company names — each needed multiple rounds of encoding fixes, batch fetchers, and caches.
