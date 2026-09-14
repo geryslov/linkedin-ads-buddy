@@ -147,10 +147,20 @@ export function MegaBudgetPacingDashboard({ accessToken, adAccounts }: Props) {
                   <span className="flex items-center gap-1">Account <ArrowUpDown className="h-3 w-3" /></span>
                 </TableHead>
                 <TableHead className="cursor-pointer" onClick={() => handleSort("budget")}>
-                  <span className="flex items-center gap-1">Budget <ArrowUpDown className="h-3 w-3" /></span>
+                  <span className="flex items-center gap-1">LinkedIn budget <ArrowUpDown className="h-3 w-3" /></span>
                 </TableHead>
                 <TableHead className="cursor-pointer" onClick={() => handleSort("spent")}>
-                  <span className="flex items-center gap-1">Spent <ArrowUpDown className="h-3 w-3" /></span>
+                  <span className="flex items-center gap-1">LinkedIn spent <ArrowUpDown className="h-3 w-3" /></span>
+                </TableHead>
+                <TableHead>Google budget</TableHead>
+                <TableHead>Google spent</TableHead>
+                <TableHead>Additional budget</TableHead>
+                <TableHead>Additional spent</TableHead>
+                <TableHead className="cursor-pointer" onClick={() => handleSort("totalBudget")}>
+                  <span className="flex items-center gap-1">Total budget <ArrowUpDown className="h-3 w-3" /></span>
+                </TableHead>
+                <TableHead className="cursor-pointer" onClick={() => handleSort("totalSpent")}>
+                  <span className="flex items-center gap-1">Total spent <ArrowUpDown className="h-3 w-3" /></span>
                 </TableHead>
                 <TableHead className="cursor-pointer" onClick={() => handleSort("pacingStatus")}>
                   <span className="flex items-center gap-1">Status <ArrowUpDown className="h-3 w-3" /></span>
