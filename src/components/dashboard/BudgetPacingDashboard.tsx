@@ -73,7 +73,7 @@ export function BudgetPacingDashboard({ accessToken, selectedAccount }: BudgetPa
       amount: parse(budgetInput),
       googleAmount: parse(googleBudgetInput),
       additionalAmount: parse(additionalBudgetInput),
-      googleSpend: parse(googleSpendInput),
+      ...(googleSpendLinked ? {} : { googleSpend: parse(googleSpendInput) }),
       additionalSpend: parse(additionalSpendInput),
     };
 
