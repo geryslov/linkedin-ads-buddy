@@ -10031,6 +10031,31 @@ serve(async (req) => {
           console.log('[get_budget_pacing] Budget fetch error (may not exist):', err);
         }
 
+        // Live Google Ads spend when this account is linked to a Google Ads customer.
+        let googleLinkedAccountName: string | null = null;
+        let googleSpendIsLive = false;
+        try {
+          const pacingOwnerId = await resolveOwnerId(req);
+          const pacingLinks = await getGoogleLinks([accountId], pacingOwnerId);
+          const pacingLink = pacingLinks[0];
+          if (pacingLink) {
+            googleLinkedAccountName = pacingLink.google_customer_name;
+            const byCustomer = await fetchGoogleSpend(
+              [{ customerId: pacingLink.google_customer_id, loginCustomerId: pacingLink.login_customer_id }],
+              `${currentMonth}-01`,
+              endDate,
+            );
+            const live = byCustomer[String(pacingLink.google_customer_id).replace(/-/g, '')];
+            if (live !== undefined) {
+              googleSpendAmount = live;
+              googleSpendIsLive = true;
+            }
+          }
+        } catch (err) {
+          console.warn('[get_budget_pacing] Google spend fetch failed:', (err as Error).message);
+        }
+
+
         // Step 3: Calculate pacing metrics
         const totalSpent = dailyData.reduce((sum, d) => sum + d.spend, 0);
         const totalImpressions = dailyData.reduce((sum, d) => sum + d.impressions, 0);
