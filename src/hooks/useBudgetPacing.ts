@@ -89,40 +89,27 @@ export function useBudgetPacing(accessToken: string | null) {
 
   const saveBudget = useCallback(async (accountId: string, amount: number, currency: string = 'USD') => {
     const now = new Date();
-    // Format as YYYY-MM-01 for date column compatibility
     const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
 
     try {
-      // Get current user
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        console.error('No authenticated user');
+      const { data: result, error: fnError } = await supabase.functions.invoke('linkedin-api', {
+        body: {
+          action: 'save_account_budget',
+          accessToken,
+          params: { accountId, amount, currency, month },
+        },
+      });
+
+      if (fnError || result?.error) {
+        console.error('Budget save error:', fnError || result?.error);
         return false;
       }
-
-      const { error: upsertError } = await supabase
-        .from('account_budgets')
-        .upsert({
-          account_id: accountId,
-          budget_amount: amount,
-          currency,
-          month,
-          user_id: user.id,
-        }, {
-          onConflict: 'user_id,account_id,month'
-        });
-
-      if (upsertError) {
-        console.error('Budget save error:', upsertError);
-        return false;
-      }
-
       return true;
     } catch (err) {
       console.error('Budget save error:', err);
       return false;
     }
-  }, []);
+  }, [accessToken]);
 
   return {
     data,
