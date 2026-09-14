@@ -9397,10 +9397,16 @@ serve(async (req) => {
               };
             };
 
-            // Step 6: Perform PATCH update
-            const updateUrl = `https://api.linkedin.com/v2/adCampaignsV2/${currentCampaignId}`;
-            const applyCriteria = async (payload: Array<[string, string[]]>) => {
-              const res = await fetch(updateUrl, {
+            // Step 6: Perform PATCH update.
+            // Use the versioned REST campaign endpoint — the legacy /v2/adCampaignsV2 route
+            // rejects company (employers) exclusions with INVALID_VALUE_FOR_FIELD. Fall back
+            // to v2 only if the REST route is unavailable for this campaign.
+            const restUpdateUrl = derivedAccountId
+              ? `https://api.linkedin.com/rest/adAccounts/${derivedAccountId}/adCampaigns/${currentCampaignId}`
+              : '';
+            const legacyUpdateUrl = `https://api.linkedin.com/v2/adCampaignsV2/${currentCampaignId}`;
+            const sendPatch = async (url: string, criteria: any) => {
+              const res = await fetch(url, {
                 method: 'POST',
                 headers: {
                   'Authorization': `Bearer ${accessToken}`,
@@ -9409,10 +9415,18 @@ serve(async (req) => {
                   'X-Restli-Protocol-Version': '2.0.0',
                   'LinkedIn-Version': '202511',
                 },
-                body: JSON.stringify({ patch: { $set: { targetingCriteria: buildCriteria(payload) } } })
+                body: JSON.stringify({ patch: { $set: { targetingCriteria: criteria } } })
               });
               if (res.ok) return { ok: true, status: res.status, text: '' };
               return { ok: false, status: res.status, text: await res.text() };
+            };
+            const applyCriteria = async (payload: Array<[string, string[]]>) => {
+              const criteria = buildCriteria(payload);
+              if (restUpdateUrl) {
+                const res = await sendPatch(restUpdateUrl, criteria);
+                if (res.ok || (res.status !== 404 && res.status !== 405)) return res;
+              }
+              return await sendPatch(legacyUpdateUrl, criteria);
             };
 
             let attempt = await applyCriteria(facetPayload);

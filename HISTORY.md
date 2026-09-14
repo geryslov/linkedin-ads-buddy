@@ -277,3 +277,6 @@ field. In the UI the Google lane carries a link picker; once linked, the spend c
 - **LinkedIn API versioning churn** forced repeated endpoint and version-header rewrites, especially Dec 2025.
 - **Deploy drift.** The edge function deploys manually; several bugs traced back to code that was committed but never deployed.
 - **Redesign cycles.** Targeting Editor, Influence Matcher, Lead Records, and Segmentation were each visually reworked 2–3 times toward a data-dense dashboard style.
+
+### Sep 14, 2026 — company exclusions fixed
+Excluding companies (employers facet) always returned 400 INVALID_VALUE_FOR_FIELD from the legacy `/v2/adCampaignsV2` PATCH route, while industries/titles exclusions went through. Verified by hand: the same payload is accepted (204) by `/rest/adAccounts/{acct}/adCampaigns/{id}`. `update_campaign_targeting` now patches via the versioned REST endpoint, falling back to v2 only on 404/405.
