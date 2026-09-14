@@ -9,6 +9,11 @@ export interface DailySpend {
   leads: number;
 }
 
+export interface ChannelBudget {
+  budget: number;
+  spent: number;
+}
+
 export interface BudgetPacingData {
   period: {
     start: string;
@@ -19,6 +24,15 @@ export interface BudgetPacingData {
     amount: number;
     currency: string;
     isSet: boolean;
+    google?: number;
+    additional?: number;
+    total?: number;
+  };
+  channels?: {
+    linkedin: ChannelBudget;
+    google: ChannelBudget;
+    additional: ChannelBudget;
+    total: ChannelBudget;
   };
   spending: {
     total: number;
@@ -47,6 +61,15 @@ export interface BudgetPacingData {
     spendTrendPercent: number;
   };
   recommendations: string[];
+}
+
+export interface BudgetInput {
+  amount?: number;
+  googleAmount?: number;
+  additionalAmount?: number;
+  googleSpend?: number;
+  additionalSpend?: number;
+  currency?: string;
 }
 
 export function useBudgetPacing(accessToken: string | null) {
