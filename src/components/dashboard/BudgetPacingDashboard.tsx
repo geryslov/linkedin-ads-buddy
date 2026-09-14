@@ -187,13 +187,39 @@ export function BudgetPacingDashboard({ accessToken, selectedAccount }: BudgetPa
               />
             </div>
             <div className="grid grid-cols-[1fr_auto] gap-3 items-center">
-              <Label htmlFor="google-spend" className="text-sm text-muted-foreground">Google spend this month</Label>
+              <div className="min-w-0">
+                <Label htmlFor="google-spend" className="text-sm text-muted-foreground">
+                  Google spend this month
+                </Label>
+                <div className="mt-0.5">
+                  <GoogleAccountLinkPicker
+                    compact
+                    accountId={selectedAccount || ''}
+                    link={selectedAccount ? googleLinks[selectedAccount] : undefined}
+                    accounts={googleAccounts}
+                    isLoading={isLoadingGoogleAccounts}
+                    error={googleAccountsError}
+                    onOpen={() => loadGoogleAccounts()}
+                    onSelect={async (acct) => {
+                      if (!selectedAccount) return;
+                      const res = await saveGoogleLink(selectedAccount, acct);
+                      if (!res.ok) {
+                        toast({ title: 'Error', description: res.message, variant: 'destructive' });
+                        return;
+                      }
+                      toast({ title: acct ? 'Google account linked' : 'Google account unlinked' });
+                      fetchBudgetPacing(selectedAccount);
+                    }}
+                  />
+                </div>
+              </div>
               <Input
                 id="google-spend"
                 type="number"
                 placeholder="0"
                 value={googleSpendInput}
                 onChange={(e) => setGoogleSpendInput(e.target.value)}
+                disabled={googleSpendLinked}
                 className="h-9 w-36 tabular-nums"
               />
             </div>
