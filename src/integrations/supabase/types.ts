@@ -59,6 +59,42 @@ export type Database = {
         }
         Relationships: []
       }
+      account_google_links: {
+        Row: {
+          account_id: string
+          created_at: string
+          currency_code: string | null
+          google_customer_id: string
+          google_customer_name: string | null
+          id: string
+          login_customer_id: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          account_id: string
+          created_at?: string
+          currency_code?: string | null
+          google_customer_id: string
+          google_customer_name?: string | null
+          id?: string
+          login_customer_id?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          account_id?: string
+          created_at?: string
+          currency_code?: string | null
+          google_customer_id?: string
+          google_customer_name?: string | null
+          id?: string
+          login_customer_id?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       activities: {
         Row: {
           account_id: string
