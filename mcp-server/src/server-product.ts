@@ -334,6 +334,13 @@ app.post("/mcp", async (req, res) => {
     return;
   }
 
+  // Unknown session (e.g. server restarted on redeploy): 404 tells the client to re-initialize.
+  // Without this the request falls through to a fresh transport and fails "Server not initialized".
+  if (sessionId) {
+    res.status(404).json({ jsonrpc: "2.0", error: { code: -32001, message: "Session not found" }, id: null });
+    return;
+  }
+
   if (!presentedKey) { denyRequest(res, FAILED_CLOSED); return; }
 
   const auth = new SessionAuth(presentedKey);

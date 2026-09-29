@@ -126,7 +126,9 @@ surface, and duplicating auth into it is how the two systems start to drift.
 | Railway service | existing | new |
 
 **The legacy server must not change.** It is the user's own working integration. `src/server.ts` is
-byte-identical to its original and should stay that way; `src/index.ts` (stdio) likewise. Everything
+unchanged from its original except one transport fix (Sep 29, 2026: unknown `mcp-session-id` → 404
+so clients re-initialize after a Railway redeploy, instead of a 400 "Server not initialized" they never
+recover from) and should otherwise stay that way; `src/index.ts` (stdio) likewise. Everything
 new in `tools.ts` is behind `mode: "product"` and **defaults to `"legacy"`** — do not flip that
 default. If you need new behaviour, add an option that defaults to off.
 

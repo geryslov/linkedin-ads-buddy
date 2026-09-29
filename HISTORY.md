@@ -283,3 +283,7 @@ Excluding companies (employers facet) always returned 400 INVALID_VALUE_FOR_FIEL
 
 ### Sep 29, 2026 — engagement and video metrics on `get_ad_analytics`
 The MCP's per-creative analytics only carried delivery, spend and lead metrics. `get_ad_analytics` now also requests `landingPageClicks`, `totalEngagements`, `likes`, `comments`, `shares`, `follows`, `videoViews`, `videoStarts` and returns them per creative. Note LinkedIn's field is `videoStarts` (plural) — an unknown name in `fields=` 400s the whole call. Edge function change, so it needs a manual deploy until the CI token is fixed.
+
+### Sep 29, 2026 — MCP sessions survive a redeploy
+Right after the `get_ad_analytics` merge, every MCP call failed with `400 Bad Request: Server not initialized (-32000)`. Cause: any push to `main` redeploys the Railway server, which holds sessions only in memory. Claude kept sending its old `mcp-session-id`; the server didn't find it, built a fresh transport, and the SDK rejected the non-`initialize` request with a 400 — which the client does not recover from. The MCP spec says an unknown session is a **404**, which makes the client re-initialize. Both `server.ts` and `server-product.ts` now return 404 `Session not found` for an unknown session id. Reproduced locally before/after (400 → 404; fresh `initialize` still 200). This is the one deliberate change to the otherwise-frozen legacy `server.ts`.
+
