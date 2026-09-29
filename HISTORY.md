@@ -280,3 +280,6 @@ field. In the UI the Google lane carries a link picker; once linked, the spend c
 
 ### Sep 14, 2026 — company exclusions fixed
 Excluding companies (employers facet) always returned 400 INVALID_VALUE_FOR_FIELD from the legacy `/v2/adCampaignsV2` PATCH route, while industries/titles exclusions went through. Verified by hand: the same payload is accepted (204) by `/rest/adAccounts/{acct}/adCampaigns/{id}`. `update_campaign_targeting` now patches via the versioned REST endpoint, falling back to v2 only on 404/405.
+
+### Sep 29, 2026 — engagement and video metrics on `get_ad_analytics`
+The MCP's per-creative analytics only carried delivery, spend and lead metrics. `get_ad_analytics` now also requests `landingPageClicks`, `totalEngagements`, `likes`, `comments`, `shares`, `follows`, `videoViews`, `videoStarts` and returns them per creative. Note LinkedIn's field is `videoStarts` (plural) — an unknown name in `fields=` 400s the whole call. Edge function change, so it needs a manual deploy until the CI token is fixed.
