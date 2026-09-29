@@ -2441,6 +2441,11 @@ serve(async (req) => {
           });
         }
 
+        // Engagement + video counts, passed through per creative under the same names LinkedIn uses
+        const AD_ENGAGEMENT_FIELDS = ['landingPageClicks', 'totalEngagements', 'likes', 'comments', 'shares', 'follows', 'videoViews', 'videoStarts'] as const;
+        type EngagementCounts = Record<typeof AD_ENGAGEMENT_FIELDS[number], number>;
+        const zeroEngagement = (): EngagementCounts => Object.fromEntries(AD_ENGAGEMENT_FIELDS.map(f => [f, 0])) as EngagementCounts;
+
         // Build analytics URL with pagination support - must include accounts parameter
         const analyticsUrl = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&` +
           `dateRange.start.day=${new Date(startDate).getDate()}&` +
@@ -2452,7 +2457,7 @@ serve(async (req) => {
           `timeGranularity=${granularity === 'ALL' ? 'ALL' : granularity}&` +
           `pivot=CREATIVE&` +
           `accounts[0]=urn:li:sponsoredAccount:${accountId}&` +
-          `fields=impressions,clicks,costInLocalCurrency,costInUsd,externalWebsiteConversions,oneClickLeads,oneClickLeadFormOpens,pivotValue&` +
+          `fields=impressions,clicks,costInLocalCurrency,costInUsd,externalWebsiteConversions,oneClickLeads,oneClickLeadFormOpens,${AD_ENGAGEMENT_FIELDS.join(',')},pivotValue&` +
           `count=500&` +
           campaignIds.slice(0, 20).map((id: string, i: number) => `campaigns[${i}]=urn:li:sponsoredCampaign:${id}`).join('&');
 
@@ -2471,13 +2476,15 @@ serve(async (req) => {
         console.log(`[Step 1] Received ${analyticsData.elements?.length || 0} analytics records`);
 
         // Aggregate analytics by creative URN
-        const analyticsMap = new Map<string, { impressions: number; clicks: number; spent: number; spentUsd: number; leads: number; conversions: number; formOpens: number }>();
+        const analyticsMap = new Map<string, { impressions: number; clicks: number; spent: number; spentUsd: number; leads: number; conversions: number; formOpens: number; engagement: EngagementCounts }>();
         (analyticsData.elements || []).forEach((el: any) => {
           const creativeUrn = el.pivotValue || '';
           const creativeId = creativeUrn.split(':').pop() || '';
           if (!creativeId) return;
 
-          const existing = analyticsMap.get(creativeId) || { impressions: 0, clicks: 0, spent: 0, spentUsd: 0, leads: 0, conversions: 0, formOpens: 0 };
+          const existing = analyticsMap.get(creativeId) || { impressions: 0, clicks: 0, spent: 0, spentUsd: 0, leads: 0, conversions: 0, formOpens: 0, engagement: zeroEngagement() };
+          const engagement = zeroEngagement();
+          AD_ENGAGEMENT_FIELDS.forEach(f => { engagement[f] = existing.engagement[f] + (el[f] || 0); });
           analyticsMap.set(creativeId, {
             impressions: existing.impressions + (el.impressions || 0),
             clicks: existing.clicks + (el.clicks || 0),
@@ -2486,6 +2493,7 @@ serve(async (req) => {
             leads: existing.leads + (el.oneClickLeads || 0),
             conversions: existing.conversions + (el.externalWebsiteConversions || 0),
             formOpens: existing.formOpens + (el.oneClickLeadFormOpens || 0),
+            engagement,
           });
         });
         console.log(`[Step 1] Aggregated analytics for ${analyticsMap.size} unique creatives`);
@@ -2741,6 +2749,7 @@ serve(async (req) => {
             leads: metrics.leads,
             conversions: metrics.conversions,
             formOpens: metrics.formOpens,
+            ...metrics.engagement,
             ctr: ctr.toFixed(2),
             cpc: cpc.toFixed(2),
             cpm: cpm.toFixed(2),
@@ -2764,6 +2773,7 @@ serve(async (req) => {
               leads: 0,
               conversions: 0,
               formOpens: 0,
+              ...zeroEngagement(),
               ctr: '0.00',
               cpc: '0.00',
               cpm: '0.00',
