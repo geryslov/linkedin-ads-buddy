@@ -271,6 +271,43 @@ field. In the UI the Google lane carries a link picker; once linked, the spend c
 
 ---
 
+## Oct 2026 — Google Ads reaches the MCP surface, and a sunset two days out
+
+Added nine read-only Google Ads tools to the MCP server, plus eight read actions in `linkedin-api`
+behind them. Google Ads had been in the product since September — the budget tracker pulls live spend
+per client — but only the dashboard could see it; Claude could not.
+
+**The first attempt was a duplicate, and the cause was a stale checkout.** Local `main` was 75
+commits behind, so a whole parallel integration got built: its own Google Cloud OAuth client, a
+`google_ads_connections` table with a `mcp_server`-only resolver, a `google-ads-api` edge function, a
+`/google-callback` route, a connect panel. Upstream already reached Google through the **Lovable
+connector gateway** (`LOVABLE_API_KEY` + `GOOGLE_ADS_API_KEY`), which owns the developer token and
+OAuth entirely — so none of that credential layer was needed. It survives on
+`claude/google-ads-mcp-wip` as the migration path if the gateway is ever dropped. The lesson is
+cheap and worth keeping: `git fetch` before designing, not before pushing.
+
+**v22 sunset, caught by accident.** `GOOGLE_ADS_API_VERSION` was hardcoded to `v22`, which Google
+retired on 2026-10-07 — found on Oct 6, with a day to spare. A sunset version does not degrade; every
+call errors, so Google spend in the budget tracker would have gone to zero with no obvious cause.
+Fixed on its own branch so it could merge ahead of the feature, and made env-overridable: the next
+sunset is a secret change rather than a code change plus an edge deploy, which matters because edge
+CI has been broken since June.
+
+**Two tenancy decisions.** The gateway connection is account-wide, not per-user, so the Google tools
+are blocked in `mode: "product"` even with the opt-in flag set, and the Google actions are absent
+from `PASSTHROUGH_READ` so the passthrough cannot reach them either. And `get_google_ads_links` /
+`get_google_spend` were left out of the MCP surface entirely: both apply their `user_id` filter only
+`if (ownerId)`, on a service-role client that bypasses RLS, so with no JWT — which is every MCP call,
+and every anonymous call, on a `verify_jwt = false` function whose anon key is public — they return
+every user's rows. Claude takes customer IDs from `list_google_ads_accounts` instead, which is scoped
+by the connected Google account rather than by table row. The underlying leak is documented and
+unfixed: failing closed would regress the LinkedIn-only-session path the code deliberately permits,
+and that tradeoff is the owner's call, not a cleanup.
+
+The tools themselves are opt-in via `GOOGLE_ADS_MCP_TOOLS=1`, held to the same standard as every
+other addition to the legacy server: additive, inert by default, verified rather than assumed — 17
+tools without the flag, 26 with it, none removed, and 17 in product mode even with the flag on.
+
 ## Recurring themes
 
 - **URN resolution is the project's tax.** Creative names, job titles, super titles, company names — each needed multiple rounds of encoding fixes, batch fetchers, and caches.

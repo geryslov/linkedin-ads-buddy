@@ -79,6 +79,103 @@ async function fetchGoogleSpend(
   return out;
 }
 
+// ── Google Ads read helpers (MCP surface) ────────────────────────────────────
+// These back the read-only Google actions further down, which exist so Claude
+// can read Google Ads over MCP the way it already reads LinkedIn. They reuse
+// googleAdsSearch, and therefore the connector gateway — there is deliberately
+// no second Google credential path.
+
+function gJson(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  });
+}
+
+function gDates(params: any): { start: string; end: string } {
+  const r = params?.dateRange || {};
+  const end = r.end || params?.endDate || new Date().toISOString().slice(0, 10);
+  const start = r.start || params?.startDate ||
+    new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+  return { start, end };
+}
+
+/** Google returns int64 as a JSON string, and money in micros. */
+function gNum(v: unknown): number {
+  const n = typeof v === 'number' ? v : Number(v ?? 0);
+  return Number.isFinite(n) ? n : 0;
+}
+function gMicros(v: unknown): number {
+  return Math.round((gNum(v) / 1_000_000) * 100) / 100;
+}
+
+function gMetrics(m: any) {
+  const impressions = gNum(m?.impressions);
+  const clicks = gNum(m?.clicks);
+  const spend = gMicros(m?.costMicros);
+  const conversions = gNum(m?.conversions);
+  return {
+    impressions, clicks, spend, conversions,
+    conversionValue: gNum(m?.conversionsValue),
+    ctr: impressions ? Math.round((clicks / impressions) * 10000) / 100 : 0,
+    cpc: clicks ? Math.round((spend / clicks) * 100) / 100 : 0,
+    cpm: impressions ? Math.round((spend / impressions) * 1000 * 100) / 100 : 0,
+    costPerConversion: conversions ? Math.round((spend / conversions) * 100) / 100 : 0,
+  };
+}
+
+// Caller-supplied values are interpolated into GAQL, so they are stripped to a
+// safe alphabet first rather than trusted.
+function gIds(arr: unknown): string[] {
+  if (!Array.isArray(arr)) return [];
+  return arr.map((v) => String(v ?? '').replace(/\D/g, '')).filter(Boolean);
+}
+function gEnum(v: unknown): string {
+  return String(v ?? '').toUpperCase().replace(/[^A-Z_]/g, '');
+}
+function gLimit(v: unknown, dflt: number, max: number): number {
+  const n = gNum(v) || dflt;
+  return Math.min(Math.max(Math.trunc(n), 1), max);
+}
+
+/** This function stays read-only: reject anything that is not a bare SELECT. */
+function gAssertSelect(query: string): void {
+  const q = query.trim();
+  if (!/^select\s/i.test(q)) {
+    throw new Error('Only SELECT queries are allowed — this action is read-only.');
+  }
+  if (/;/.test(q.replace(/;\s*$/, ''))) {
+    throw new Error('Multiple statements are not allowed.');
+  }
+}
+
+/** Pull text out of whichever responsive ad format the row carries. */
+function gAdCopy(ad: any) {
+  const texts = (arr: any): string[] =>
+    Array.isArray(arr) ? arr.map((a: any) => a?.text).filter(Boolean) : [];
+  const rsa = ad?.responsiveSearchAd;
+  if (rsa) {
+    return {
+      headlines: texts(rsa.headlines),
+      descriptions: texts(rsa.descriptions),
+      paths: [rsa.path1, rsa.path2].filter(Boolean),
+      longHeadline: null as string | null,
+    };
+  }
+  const rda = ad?.responsiveDisplayAd;
+  if (rda) {
+    return {
+      headlines: texts(rda.headlines),
+      descriptions: texts(rda.descriptions),
+      paths: [] as string[],
+      longHeadline: (rda.longHeadline?.text ?? null) as string | null,
+    };
+  }
+  // Other formats (demand gen, app, video) keep their assets on fields these
+  // queries do not select, so they come back empty rather than wrong. Add the
+  // field to the SELECT if one is needed.
+  return { headlines: [] as string[], descriptions: [] as string[], paths: [] as string[], longHeadline: null as string | null };
+}
+
 // Resolve which app user is making the request (may be null when only LinkedIn-authenticated).
 async function resolveOwnerId(req: Request): Promise<string | null> {
   try {
@@ -9954,6 +10051,246 @@ serve(async (req) => {
 
 
 
+
+      // ── Google Ads reads for the MCP surface ──────────────────────────────
+      // Read-only, gateway-backed, every one scoped to an explicit customerId.
+      //
+      // Deliberately NOT exposed to MCP: get_google_ads_links and
+      // get_google_spend. Both apply their user_id filter only `if (ownerId)`,
+      // on a service-role client that bypasses RLS — and an MCP caller never
+      // sends a user JWT, so through MCP they would return every user's rows.
+      // Claude gets the customer IDs from list_google_ads_accounts instead,
+      // which is scoped by the connected Google account rather than by table.
+
+      case 'get_google_campaigns': {
+        const gqRows = await googleAdsSearch(params?.customerId, `
+          SELECT campaign.id, campaign.name, campaign.status,
+                 campaign.advertising_channel_type, campaign.bidding_strategy_type,
+                 campaign.start_date, campaign.end_date,
+                 campaign_budget.amount_micros, campaign_budget.delivery_method
+          FROM campaign
+          ${params?.status ? `WHERE campaign.status = '${gEnum(params.status)}'` : ''}
+          ORDER BY campaign.name
+        `, params?.loginCustomerId);
+        return gJson({
+          customerId: String(params?.customerId ?? '').replace(/-/g, ''),
+          campaigns: gqRows.map((r: any) => ({
+            id: String(r.campaign?.id ?? ''),
+            name: r.campaign?.name ?? null,
+            status: r.campaign?.status ?? null,
+            channel: r.campaign?.advertisingChannelType ?? null,
+            biddingStrategy: r.campaign?.biddingStrategyType ?? null,
+            startDate: r.campaign?.startDate ?? null,
+            endDate: r.campaign?.endDate ?? null,
+            dailyBudget: gMicros(r.campaignBudget?.amountMicros),
+            budgetDelivery: r.campaignBudget?.deliveryMethod ?? null,
+          })),
+        });
+      }
+
+      case 'get_google_campaign_report': {
+        const { start: gcrStart, end: gcrEnd } = gDates(params);
+        const gcrRows = await googleAdsSearch(params?.customerId, `
+          SELECT campaign.id, campaign.name, campaign.status,
+                 campaign.advertising_channel_type, campaign_budget.amount_micros,
+                 metrics.impressions, metrics.clicks, metrics.cost_micros,
+                 metrics.conversions, metrics.conversions_value
+          FROM campaign
+          WHERE segments.date BETWEEN '${gcrStart}' AND '${gcrEnd}'
+          ORDER BY metrics.cost_micros DESC
+        `, params?.loginCustomerId);
+        return gJson({
+          customerId: String(params?.customerId ?? '').replace(/-/g, ''),
+          dateRange: { start: gcrStart, end: gcrEnd },
+          campaigns: gcrRows.map((r: any) => ({
+            id: String(r.campaign?.id ?? ''),
+            name: r.campaign?.name ?? null,
+            status: r.campaign?.status ?? null,
+            channel: r.campaign?.advertisingChannelType ?? null,
+            dailyBudget: gMicros(r.campaignBudget?.amountMicros),
+            ...gMetrics(r.metrics),
+          })),
+        });
+      }
+
+      case 'get_google_ad_group_report': {
+        const { start: gagStart, end: gagEnd } = gDates(params);
+        const gagCampaigns = gIds(params?.campaignIds);
+        const gagRows = await googleAdsSearch(params?.customerId, `
+          SELECT ad_group.id, ad_group.name, ad_group.status, ad_group.type,
+                 campaign.id, campaign.name,
+                 metrics.impressions, metrics.clicks, metrics.cost_micros,
+                 metrics.conversions, metrics.conversions_value
+          FROM ad_group
+          WHERE segments.date BETWEEN '${gagStart}' AND '${gagEnd}'
+          ${gagCampaigns.length ? `AND campaign.id IN (${gagCampaigns.join(',')})` : ''}
+          ORDER BY metrics.cost_micros DESC
+        `, params?.loginCustomerId);
+        return gJson({
+          customerId: String(params?.customerId ?? '').replace(/-/g, ''),
+          dateRange: { start: gagStart, end: gagEnd },
+          adGroups: gagRows.map((r: any) => ({
+            id: String(r.adGroup?.id ?? ''),
+            name: r.adGroup?.name ?? null,
+            status: r.adGroup?.status ?? null,
+            type: r.adGroup?.type ?? null,
+            campaignId: String(r.campaign?.id ?? ''),
+            campaignName: r.campaign?.name ?? null,
+            ...gMetrics(r.metrics),
+          })),
+        });
+      }
+
+      case 'get_google_ad_report': {
+        const { start: garStart, end: garEnd } = gDates(params);
+        const garRows = await googleAdsSearch(params?.customerId, `
+          SELECT ad_group_ad.ad.id, ad_group_ad.ad.name, ad_group_ad.ad.type,
+                 ad_group_ad.status, ad_group.id, ad_group.name,
+                 campaign.id, campaign.name,
+                 metrics.impressions, metrics.clicks, metrics.cost_micros,
+                 metrics.conversions, metrics.conversions_value
+          FROM ad_group_ad
+          WHERE segments.date BETWEEN '${garStart}' AND '${garEnd}'
+          ORDER BY metrics.cost_micros DESC
+        `, params?.loginCustomerId);
+        return gJson({
+          customerId: String(params?.customerId ?? '').replace(/-/g, ''),
+          dateRange: { start: garStart, end: garEnd },
+          ads: garRows.map((r: any) => ({
+            id: String(r.adGroupAd?.ad?.id ?? ''),
+            name: r.adGroupAd?.ad?.name ?? null,
+            type: r.adGroupAd?.ad?.type ?? null,
+            status: r.adGroupAd?.status ?? null,
+            adGroupId: String(r.adGroup?.id ?? ''),
+            adGroupName: r.adGroup?.name ?? null,
+            campaignId: String(r.campaign?.id ?? ''),
+            campaignName: r.campaign?.name ?? null,
+            ...gMetrics(r.metrics),
+          })),
+        });
+      }
+
+      case 'get_google_ad_copy': {
+        // No date filter and no metrics: this answers "what does the ad say".
+        // Segmenting by date would multiply rows per ad for no gain — ad-level
+        // performance is get_google_ad_report.
+        const gacFilters: string[] = ["ad_group_ad.status != 'REMOVED'"];
+        if (params?.status) gacFilters.push(`ad_group_ad.status = '${gEnum(params.status)}'`);
+        const gacCampaigns = gIds(params?.campaignIds);
+        if (gacCampaigns.length) gacFilters.push(`campaign.id IN (${gacCampaigns.join(',')})`);
+        const gacAdGroups = gIds(params?.adGroupIds);
+        if (gacAdGroups.length) gacFilters.push(`ad_group.id IN (${gacAdGroups.join(',')})`);
+        const gacLimit = gLimit(params?.limit, 200, 2000);
+
+        const gacRows = await googleAdsSearch(params?.customerId, `
+          SELECT ad_group_ad.ad.id, ad_group_ad.ad.name, ad_group_ad.ad.type,
+                 ad_group_ad.ad.final_urls,
+                 ad_group_ad.ad.responsive_search_ad.headlines,
+                 ad_group_ad.ad.responsive_search_ad.descriptions,
+                 ad_group_ad.ad.responsive_search_ad.path1,
+                 ad_group_ad.ad.responsive_search_ad.path2,
+                 ad_group_ad.ad.responsive_display_ad.headlines,
+                 ad_group_ad.ad.responsive_display_ad.descriptions,
+                 ad_group_ad.ad.responsive_display_ad.long_headline,
+                 ad_group_ad.status, ad_group_ad.ad_strength,
+                 ad_group.id, ad_group.name, campaign.id, campaign.name
+          FROM ad_group_ad
+          WHERE ${gacFilters.join(' AND ')}
+          LIMIT ${gacLimit}
+        `, params?.loginCustomerId);
+
+        return gJson({
+          customerId: String(params?.customerId ?? '').replace(/-/g, ''),
+          ads: gacRows.map((r: any) => {
+            const gacAd = r.adGroupAd?.ad;
+            return {
+              id: String(gacAd?.id ?? ''),
+              name: gacAd?.name ?? null,
+              type: gacAd?.type ?? null,
+              status: r.adGroupAd?.status ?? null,
+              adStrength: r.adGroupAd?.adStrength ?? null,
+              campaignId: String(r.campaign?.id ?? ''),
+              campaignName: r.campaign?.name ?? null,
+              adGroupId: String(r.adGroup?.id ?? ''),
+              adGroupName: r.adGroup?.name ?? null,
+              finalUrls: gacAd?.finalUrls ?? [],
+              ...gAdCopy(gacAd),
+            };
+          }),
+        });
+      }
+
+      case 'get_google_keywords': {
+        const { start: gkStart, end: gkEnd } = gDates(params);
+        const gkRows = await googleAdsSearch(params?.customerId, `
+          SELECT ad_group_criterion.criterion_id, ad_group_criterion.keyword.text,
+                 ad_group_criterion.keyword.match_type, ad_group_criterion.status,
+                 ad_group.id, ad_group.name, campaign.id, campaign.name,
+                 metrics.impressions, metrics.clicks, metrics.cost_micros,
+                 metrics.conversions, metrics.conversions_value,
+                 metrics.search_impression_share
+          FROM keyword_view
+          WHERE segments.date BETWEEN '${gkStart}' AND '${gkEnd}'
+          ORDER BY metrics.cost_micros DESC
+        `, params?.loginCustomerId);
+        return gJson({
+          customerId: String(params?.customerId ?? '').replace(/-/g, ''),
+          dateRange: { start: gkStart, end: gkEnd },
+          keywords: gkRows.map((r: any) => ({
+            id: String(r.adGroupCriterion?.criterionId ?? ''),
+            text: r.adGroupCriterion?.keyword?.text ?? null,
+            matchType: r.adGroupCriterion?.keyword?.matchType ?? null,
+            status: r.adGroupCriterion?.status ?? null,
+            adGroupName: r.adGroup?.name ?? null,
+            campaignName: r.campaign?.name ?? null,
+            impressionShare: r.metrics?.searchImpressionShare ?? null,
+            ...gMetrics(r.metrics),
+          })),
+        });
+      }
+
+      case 'get_google_search_terms': {
+        const { start: gstStart, end: gstEnd } = gDates(params);
+        const gstLimit = gLimit(params?.limit, 500, 5000);
+        const gstRows = await googleAdsSearch(params?.customerId, `
+          SELECT search_term_view.search_term, search_term_view.status,
+                 campaign.name, ad_group.name,
+                 metrics.impressions, metrics.clicks, metrics.cost_micros,
+                 metrics.conversions, metrics.conversions_value
+          FROM search_term_view
+          WHERE segments.date BETWEEN '${gstStart}' AND '${gstEnd}'
+          ORDER BY metrics.cost_micros DESC
+          LIMIT ${gstLimit}
+        `, params?.loginCustomerId);
+        return gJson({
+          customerId: String(params?.customerId ?? '').replace(/-/g, ''),
+          dateRange: { start: gstStart, end: gstEnd },
+          searchTerms: gstRows.map((r: any) => ({
+            term: r.searchTermView?.searchTerm ?? null,
+            status: r.searchTermView?.status ?? null,
+            campaignName: r.campaign?.name ?? null,
+            adGroupName: r.adGroup?.name ?? null,
+            ...gMetrics(r.metrics),
+          })),
+        });
+      }
+
+      case 'google_ads_search': {
+        // Raw GAQL escape hatch, SELECT-only. Rows are returned exactly as
+        // Google sends them so a caller can reach any resource without waiting
+        // for a named action here.
+        const gasQuery = String(params?.query ?? '');
+        if (!gasQuery) return gJson({ error: 'A GAQL `query` is required.' }, 400);
+        gAssertSelect(gasQuery);
+        const gasRows = await googleAdsSearch(params?.customerId, gasQuery, params?.loginCustomerId);
+        const gasLimit = gLimit(params?.limit, 2000, 10000);
+        return gJson({
+          customerId: String(params?.customerId ?? '').replace(/-/g, ''),
+          rowCount: Math.min(gasRows.length, gasLimit),
+          truncated: gasRows.length > gasLimit,
+          rows: gasRows.slice(0, gasLimit),
+        });
+      }
 
       case 'get_budget_pacing': {
         // Budget Pacing Dashboard - compares actual spend vs planned budget

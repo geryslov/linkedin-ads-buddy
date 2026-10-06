@@ -148,6 +148,85 @@ Env vars for the product server: `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_
 `{"role":"mcp_server"}` JWT — **required**, no useful default), `SETUP_URL`, `OAUTH_CLIENT_ID`,
 `PUBLIC_URL`, `PORT`. The legacy server reads only `PORT`, as before.
 
+## Google Ads
+
+Two layers, one credential path.
+
+**Dashboard (existing).** Budget Pacing pulls live Google spend per client. Each LinkedIn ad account
+is linked to a Google customer in `account_google_links` via
+[GoogleAccountLinkPicker](src/components/dashboard/GoogleAccountLinkPicker.tsx); `account_budgets`
+carries `google_budget_amount` / `google_spend`. Actions: `list_google_ads_accounts`,
+`get_google_ads_links`, `save_google_ads_link`, `get_google_spend`.
+
+**MCP (new).** Nine read-only tools so Claude can read Google Ads the way it reads LinkedIn —
+campaigns, ad groups, ads, **ad copy**, keywords, search terms, plus a raw GAQL escape hatch. Tool
+definitions in [google-tools.ts](mcp-server/src/google-tools.ts); they wrap read actions in
+`linkedin-api` and reuse `tools.ts`'s own `callEdge`, so there is one transport path, not two.
+
+### No second Google credential
+
+Everything goes through the **Lovable connector gateway**:
+
+```
+GOOGLE_ADS_GATEWAY = https://connector-gateway.lovable.dev/google_ads
+auth: Authorization: Bearer ${LOVABLE_API_KEY} + X-Connection-Api-Key: ${GOOGLE_ADS_API_KEY}
+```
+
+So there is **no developer token, no Google Cloud OAuth client, and no refresh token** in this
+codebase — Lovable's connector owns all of that. Don't add a parallel OAuth path without deciding to
+migrate off the gateway first; `googleAdsSearch()` is the single entry point and every action reuses
+it.
+
+⚠️ **`GOOGLE_ADS_API_KEY` is the Lovable *connection* key, not a Google Ads developer token.** The
+name invites that mistake. Putting a developer token there breaks gateway auth and presents as an
+unrelated outage.
+
+### The MCP tools are opt-in and legacy-only
+
+`ServerOptions.enableGoogleAds` **defaults to false**; `server.ts` sets it from
+`GOOGLE_ADS_MCP_TOOLS=1` on the Railway service. Unset, the server advertises the same 17 tools it
+always has (verified: 17 → 26 with the flag, none removed). `GET /health` reports
+`googleAdsTools: "on" | "off"`.
+
+🔴 **They are blocked in `mode: "product"` even with the flag set**, and that is not a style choice:
+the gateway connection is **account-wide, not per-user**, so in the multi-tenant server every tenant
+would be reading one shared Google account. `tools.ts` enforces `enableGoogleAds && !productMode`;
+the Google actions are also absent from `PASSTHROUGH_READ`, so `call_linkedin_action` cannot reach
+them in product mode either. Keep both.
+
+### 🔴 `get_google_ads_links` / `get_google_spend` leak across users
+
+Both scope to the caller only `if (ownerId)` — and `supabaseClient` is the **service role**, which
+bypasses RLS:
+
+```js
+const ownerForLinks = await resolveOwnerId(req);
+if (ownerForLinks) linkQuery = linkQuery.eq('user_id', ownerForLinks);  // ← skipped when null
+```
+
+`resolveOwnerId` returns null whenever no user JWT is present. `linkedin-api` is `verify_jwt = false`
+and the anon key is committed to this **public** repo, so an unauthenticated caller can read **every
+user's** Google customer IDs and names. `getGoogleLinks()` has the same shape, so `get_google_spend`
+and budget pacing share it.
+
+Not yet fixed, because failing closed would regress the LinkedIn-only-session path the code
+deliberately allows (`resolveOwnerId`'s own comment says owner "may be null"). Deciding that is a
+product call. In the meantime neither action is exposed as an MCP tool or allowlisted — Claude gets
+customer IDs from `list_google_ads_accounts`, which is scoped by the connected Google account rather
+than by table row.
+
+### API version — pinned versions are a time bomb
+
+```js
+const GOOGLE_ADS_API_VERSION = Deno.env.get('GOOGLE_ADS_API_VERSION') || 'v25';
+```
+
+Google retires each major version ~12 months after release and keeps ~four alive. This was hardcoded
+to `v22`, which sunset **2026-10-07** — a sunset version doesn't degrade, every call errors, which
+would have taken Google spend to zero silently. Now env-overridable: the next sunset is a secret
+change, not a code change plus an edge deploy. If the gateway lags a version, set
+`GOOGLE_ADS_API_VERSION=v24`.
+
 ## LinkedIn OAuth scopes
 
 Two **mutually exclusive** scope sets, one per product — served by two different functions:

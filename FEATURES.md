@@ -137,6 +137,36 @@ Agency → client publishing flow.
 
 `create-test-user` was **deleted 2026-08-05** — a public `verify_jwt = false` endpoint that minted email-confirmed accounts with the service role for anyone who knew the URL. ⚠️ Deleting the folder does not undeploy it; remove it in the Supabase dashboard (or `npx supabase functions delete create-test-user`) or it stays live.
 
+### Google Ads (gateway-backed)
+
+All Google access runs through the Lovable connector gateway — no developer token, no Google OAuth
+client, no refresh token in this repo. See **Google Ads** in [CLAUDE.md](CLAUDE.md).
+
+**Dashboard actions**: `list_google_ads_accounts`, `get_google_ads_links`, `save_google_ads_link`,
+`get_google_spend`. Linked per client in `account_google_links`; spend feeds Budget Pacing.
+
+**MCP read actions** (new): `get_google_campaigns`, `get_google_campaign_report`,
+`get_google_ad_group_report`, `get_google_ad_report`, `get_google_ad_copy`, `get_google_keywords`,
+`get_google_search_terms`, `google_ads_search`.
+
+**9 MCP tools** ([google-tools.ts](mcp-server/src/google-tools.ts)): `list_google_ad_accounts`,
+`get_google_campaigns`, `get_google_campaign_report`, `get_google_ad_group_report`,
+`get_google_ad_report`, `get_google_ad_copy`, `get_google_keywords`, `get_google_search_terms`,
+`google_ads_query`.
+
+`get_google_ad_copy` returns every headline and description asset, long headline, display-URL paths,
+final URLs and ad strength — the thing LinkedIn walls off behind two gates is a plain read here.
+`google_ads_query` is a raw GAQL escape hatch, SELECT-only.
+
+**Opt-in, legacy-only.** `enableGoogleAds` defaults to false and `server.ts` sets it from
+`GOOGLE_ADS_MCP_TOOLS=1`; unset, the server advertises its usual 17 tools (verified 17 → 26, none
+removed). Blocked in `mode: "product"` even with the flag, because the gateway connection is
+account-wide and would be shared across tenants. `GET /health` shows `googleAdsTools`.
+
+🔴 `get_google_ads_links` and `get_google_spend` are **not** exposed to MCP or allowlisted: both skip
+their `user_id` filter when no JWT resolves, on a service-role client, so they return every user's
+rows. Details and the open decision in CLAUDE.md.
+
 ### `linkedin-api` actions (74)
 
 **Auth & accounts** — `get_auth_url`, `exchange_token`, `get_profile`, `get_ad_accounts`, `sync_ad_accounts`, `sync_mcp_token`
