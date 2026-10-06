@@ -17,7 +17,15 @@ const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const supabaseClient = createClient(supabaseUrl, supabaseServiceKey);
 
 // ============ GOOGLE ADS (via Lovable connector gateway) ============
-const GOOGLE_ADS_API_VERSION = 'v22';
+// Google retires each major version ~12 months after release and keeps about
+// four alive. v22 sunset 2026-10-07 — a sunset version does not degrade, it
+// errors on every call, which took Google spend in the budget tracker to zero.
+// v25 is current as of Oct 2026.
+//
+// Env-overridable on purpose: the next sunset should be a secret change, not a
+// code change plus an edge deploy. If the connector gateway has not caught up to
+// a version, set GOOGLE_ADS_API_VERSION to v24 or v23 to fall back immediately.
+const GOOGLE_ADS_API_VERSION = Deno.env.get('GOOGLE_ADS_API_VERSION') || 'v25';
 const GOOGLE_ADS_GATEWAY = 'https://connector-gateway.lovable.dev/google_ads';
 
 function googleAdsHeaders(loginCustomerId?: string | null): Record<string, string> {
