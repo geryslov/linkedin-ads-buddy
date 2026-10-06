@@ -271,6 +271,29 @@ field. In the UI the Google lane carries a link picker; once linked, the spend c
 
 ---
 
+## Oct 2026 — Two version time bombs, found by looking for the second one
+
+Fixing the hardcoded Google Ads `v22` (one day from sunset) raised the obvious question: where else
+is a dated upstream version frozen into this codebase? Answer: `LinkedIn-Version`, at **63 call
+sites**.
+
+62 were on `202511`, which sunsets ~2026-11-15 — six weeks out, and a 63-site find-and-replace is a
+bad thing to attempt under deadline with edge CI broken. The 63rd was on `202501`, sunset
+~2026-01-15, so **nine months dead**: `/rest/leadForms?q=owner`, the call behind the lead-gen form
+picker in Bulk Editing. That is the interesting one. A single straggler among 62 correct values is
+invisible to review and to grep-by-eye, and it fails as "the form picker is empty" rather than as a
+version error — the same shape as the ugcPosts fallbacks that failed silently from December to
+September.
+
+Both platforms are now one env-overridable constant each (`LINKEDIN_VERSION` /
+`GOOGLE_ADS_API_VERSION`), so the next bump is a secret change. The `202501` site moved to the shared
+constant, which is the only behavioural change in the batch — defensible because a nine-month-sunset
+version cannot have been working, so any live version is an improvement.
+
+LinkedIn supports each monthly version for exactly 12 months; Google keeps about four majors alive and
+retires each roughly a year after release. Neither degrades at sunset. Worth a calendar reminder
+rather than a rediscovery.
+
 ## Recurring themes
 
 - **URN resolution is the project's tax.** Creative names, job titles, super titles, company names — each needed multiple rounds of encoding fixes, batch fetchers, and caches.

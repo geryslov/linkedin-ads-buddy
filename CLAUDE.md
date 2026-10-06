@@ -214,6 +214,29 @@ Sidebar group with two tools. Both are **platform-only writes** (JWT + can_write
 
 Design tokens (palette, the DM Sans / Space Grotesk / Bricolage Grotesque type system, shadows, radius) live in [src/index.css](src/index.css) + [tailwind.config.ts](tailwind.config.ts); shared widgets in [widgets.tsx](src/components/dashboard/widgets.tsx). See FEATURES.md → **Design system**. Nav items carry an optional `hidden?: boolean` (frozen tabs) that the sidebar and ⌘K command palette both filter out while the route still works. A dashboard-wide [ErrorBoundary](src/components/ErrorBoundary.tsx) wraps the tab content so a render crash shows a recoverable error card (with the message) instead of unmounting the whole tree to a blank page.
 
+## Upstream API versions are time bombs
+
+Both platforms date their API versions and retire them on a clock, so a hardcoded version is a
+scheduled outage. Neither fails gracefully — a sunset version errors on every call, which reads as
+"the integration broke" rather than "the version expired".
+
+| Constant | Env override | Policy |
+|---|---|---|
+| `LINKEDIN_VERSION` | `LINKEDIN_API_VERSION` | Monthly `YYYYMM`, supported exactly **12 months** |
+| `GOOGLE_ADS_API_VERSION` | same name | ~4 alive at a time, each retired ~**12 months** after release |
+
+Both are single env-overridable constants, so a bump is a secret change rather than a code change
+plus an edge deploy — which matters while edge CI is broken.
+
+Check before bumping: [LinkedIn versioning](https://learn.microsoft.com/en-us/linkedin/marketing/versioning)
+· [Google sunset dates](https://developers.google.com/google-ads/api/docs/sunset-dates)
+
+**History worth not repeating.** `LinkedIn-Version` was hardcoded at **63 call sites**: 62 on
+`202511` (sunsets ~2026-11-15) and one on `202501`, which sunset ~2026-01-15 and had been **nine
+months dead** — on `/rest/leadForms?q=owner`, behind the lead-gen form picker in Bulk Editing. A
+straggler like that is invisible precisely because the other 62 look fine. Google's was hardcoded to
+`v22`, found one day before its 2026-10-07 sunset.
+
 ## Common pitfalls
 
 - Editing edge function without deploying → changes never take effect. Watch for stale behavior.

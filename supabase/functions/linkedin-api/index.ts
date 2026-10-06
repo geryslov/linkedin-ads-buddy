@@ -16,6 +16,20 @@ const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
 const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const supabaseClient = createClient(supabaseUrl, supabaseServiceKey);
 
+// ============ LINKEDIN API VERSION ============
+// LinkedIn versions are monthly (YYYYMM) and each is supported for exactly 12
+// months, then sunset. This was hardcoded at 62 call sites on '202511' (sunsets
+// ~2026-11-15) plus one straggler on '202501' (sunset ~2026-01-15 — already
+// nine months dead, which is why /rest/leadForms?q=owner was the odd one out).
+//
+// One env-overridable constant instead, for the same reason as
+// GOOGLE_ADS_API_VERSION: a version bump should be a secret change, not a
+// 63-site find-and-replace plus an edge deploy — especially with edge CI broken.
+//
+// Bump by setting LINKEDIN_API_VERSION. Check what is current first:
+// https://learn.microsoft.com/en-us/linkedin/marketing/versioning
+const LINKEDIN_VERSION = Deno.env.get('LINKEDIN_API_VERSION') || '202511';
+
 // ============ GOOGLE ADS (via Lovable connector gateway) ============
 const GOOGLE_ADS_API_VERSION = 'v22';
 const GOOGLE_ADS_GATEWAY = 'https://connector-gateway.lovable.dev/google_ads';
@@ -156,7 +170,7 @@ async function resolveImageUrnsBatch(imageUrns: string[], token: string): Promis
       const resp = await fetch(url, {
         headers: {
           'Authorization': `Bearer ${token}`,
-          'LinkedIn-Version': '202511',
+          'LinkedIn-Version': LINKEDIN_VERSION,
           'X-Restli-Protocol-Version': '2.0.0',
         },
       });
@@ -908,7 +922,7 @@ serve(async (req) => {
               {
                 headers: {
                   'Authorization': `Bearer ${accessToken}`,
-                  'LinkedIn-Version': '202511',
+                  'LinkedIn-Version': LINKEDIN_VERSION,
                   'X-Restli-Protocol-Version': '2.0.0',
                 },
               }
@@ -1166,7 +1180,7 @@ serve(async (req) => {
           const nameById: Record<string, string> = {};
           const restHeaders = {
             'Authorization': `Bearer ${accessToken}`,
-            'LinkedIn-Version': '202511',
+            'LinkedIn-Version': LINKEDIN_VERSION,
             'X-Restli-Protocol-Version': '2.0.0',
           };
           for (let i = 0; i < ids.length; i += 50) {
@@ -1376,7 +1390,7 @@ serve(async (req) => {
         try {
           const restHeaders = {
             'Authorization': `Bearer ${accessToken}`,
-            'LinkedIn-Version': '202511',
+            'LinkedIn-Version': LINKEDIN_VERSION,
             'X-Restli-Protocol-Version': '2.0.0',
           };
           const copyIds = copySelected.map((c: any) => idOf(c?.id)).filter(Boolean);
@@ -1555,7 +1569,7 @@ serve(async (req) => {
         const probeCid = probeIdOf(probeTarget?.id);
         const restHdr = {
           'Authorization': `Bearer ${accessToken}`,
-          'LinkedIn-Version': '202511',
+          'LinkedIn-Version': LINKEDIN_VERSION,
           'X-Restli-Protocol-Version': '2.0.0',
         };
         const v2Hdr = { 'Authorization': `Bearer ${accessToken}` };
@@ -1911,7 +1925,7 @@ serve(async (req) => {
                   const creativeResp = await fetch(creativeUrl, {
                     headers: {
                       'Authorization': `Bearer ${token}`,
-                      'LinkedIn-Version': '202511',
+                      'LinkedIn-Version': LINKEDIN_VERSION,
                       'X-Restli-Protocol-Version': '2.0.0'
                     }
                   });
@@ -2043,7 +2057,7 @@ serve(async (req) => {
                 const postsResp = await fetch(`https://api.linkedin.com/rest/posts/${encodeURIComponent(urn)}`, {
                   headers: {
                     'Authorization': `Bearer ${token}`,
-                    'LinkedIn-Version': '202511',
+                    'LinkedIn-Version': LINKEDIN_VERSION,
                     'X-Restli-Protocol-Version': '2.0.0',
                   }
                 });
@@ -3158,7 +3172,7 @@ serve(async (req) => {
         const response = await fetch(url, {
           headers: { 
             'Authorization': `Bearer ${accessToken}`,
-            'LinkedIn-Version': '202511',
+            'LinkedIn-Version': LINKEDIN_VERSION,
             'X-Restli-Protocol-Version': '2.0.0',
           },
         });
@@ -3458,7 +3472,7 @@ serve(async (req) => {
                 try {
                   const vanityResponse = await fetch(
                     `https://api.linkedin.com/rest/organizations?q=vanityName&vanityName=${encodeURIComponent(vanityGuess)}`,
-                    { headers: { 'Authorization': `Bearer ${accessToken}`, 'LinkedIn-Version': '202511', 'X-Restli-Protocol-Version': '2.0.0' } }
+                    { headers: { 'Authorization': `Bearer ${accessToken}`, 'LinkedIn-Version': LINKEDIN_VERSION, 'X-Restli-Protocol-Version': '2.0.0' } }
                   );
                   if (vanityResponse.ok) {
                     const vanityData = await vanityResponse.json();
@@ -3709,7 +3723,7 @@ serve(async (req) => {
                   const cResp = await fetch(cUrl, {
                     headers: {
                       'Authorization': `Bearer ${accessToken}`,
-                      'LinkedIn-Version': '202511',
+                      'LinkedIn-Version': LINKEDIN_VERSION,
                       'X-Restli-Protocol-Version': '2.0.0',
                     },
                   });
@@ -4176,7 +4190,7 @@ serve(async (req) => {
         const campaignsResponse = await fetch(campaignsUrl, {
           headers: {
             'Authorization': `Bearer ${accessToken}`,
-            'LinkedIn-Version': '202511',
+            'LinkedIn-Version': LINKEDIN_VERSION,
             'X-Restli-Protocol-Version': '2.0.0',
           },
         });
@@ -4336,7 +4350,7 @@ serve(async (req) => {
               const creativeResp = await fetch(creativeUrl, {
                 headers: {
                   'Authorization': `Bearer ${accessToken}`,
-                  'LinkedIn-Version': '202511',
+                  'LinkedIn-Version': LINKEDIN_VERSION,
                   'X-Restli-Protocol-Version': '2.0.0'
                 }
               });
@@ -4526,7 +4540,7 @@ serve(async (req) => {
           do {
             const cpCampaignsUrl = `https://api.linkedin.com/rest/adAccounts/${accountId}/adCampaigns?q=search&sortOrder=DESCENDING&count=100&start=${cpCampStart}`;
             const cpCampaignsResp = await fetch(cpCampaignsUrl, {
-              headers: { 'Authorization': `Bearer ${accessToken}`, 'LinkedIn-Version': '202511', 'X-Restli-Protocol-Version': '2.0.0' },
+              headers: { 'Authorization': `Bearer ${accessToken}`, 'LinkedIn-Version': LINKEDIN_VERSION, 'X-Restli-Protocol-Version': '2.0.0' },
             });
             if (cpCampaignsResp.ok) {
               const cpCampaignsData = await cpCampaignsResp.json();
@@ -4606,7 +4620,7 @@ serve(async (req) => {
             try {
               const urn = encodeURIComponent(`urn:li:sponsoredCreative:${creativeId}`);
               const url = `https://api.linkedin.com/rest/adAccounts/${accountId}/creatives/${urn}`;
-              const resp = await fetch(url, { headers: { 'Authorization': `Bearer ${accessToken}`, 'LinkedIn-Version': '202511', 'X-Restli-Protocol-Version': '2.0.0' } });
+              const resp = await fetch(url, { headers: { 'Authorization': `Bearer ${accessToken}`, 'LinkedIn-Version': LINKEDIN_VERSION, 'X-Restli-Protocol-Version': '2.0.0' } });
               if (resp.ok) {
                 const d = await resp.json();
                 const campId = (d.campaign || '').split(':').pop() || '';
@@ -4832,7 +4846,7 @@ serve(async (req) => {
           let cpStart = 0; let cpTotal = 0;
           do {
             const url = `https://api.linkedin.com/rest/adAccounts/${campPerfAccountId}/adCampaigns?q=search&sortOrder=DESCENDING&count=100&start=${cpStart}`;
-            const r = await fetch(url, { headers: { 'Authorization': `Bearer ${accessToken}`, 'LinkedIn-Version': '202511', 'X-Restli-Protocol-Version': '2.0.0' } });
+            const r = await fetch(url, { headers: { 'Authorization': `Bearer ${accessToken}`, 'LinkedIn-Version': LINKEDIN_VERSION, 'X-Restli-Protocol-Version': '2.0.0' } });
             if (r.ok) {
               const d = await r.json();
               const els = d.elements || [];
@@ -4929,7 +4943,7 @@ serve(async (req) => {
             try {
               const urn = encodeURIComponent(`urn:li:sponsoredCreative:${creativeId}`);
               const r = await fetch(`https://api.linkedin.com/rest/adAccounts/${campPerfAccountId}/creatives/${urn}`, {
-                headers: { 'Authorization': `Bearer ${accessToken}`, 'LinkedIn-Version': '202511', 'X-Restli-Protocol-Version': '2.0.0' },
+                headers: { 'Authorization': `Bearer ${accessToken}`, 'LinkedIn-Version': LINKEDIN_VERSION, 'X-Restli-Protocol-Version': '2.0.0' },
               });
               if (r.ok) {
                 const d = await r.json();
@@ -5043,7 +5057,7 @@ serve(async (req) => {
         const campaignGroupsResponse = await fetch(campaignGroupsUrl, {
           headers: {
             'Authorization': `Bearer ${accessToken}`,
-            'LinkedIn-Version': '202511',
+            'LinkedIn-Version': LINKEDIN_VERSION,
             'X-Restli-Protocol-Version': '2.0.0',
           },
         });
@@ -5073,7 +5087,7 @@ serve(async (req) => {
         const campaignsResponse = await fetch(campaignsUrl, {
           headers: {
             'Authorization': `Bearer ${accessToken}`,
-            'LinkedIn-Version': '202511',
+            'LinkedIn-Version': LINKEDIN_VERSION,
             'X-Restli-Protocol-Version': '2.0.0',
           },
         });
@@ -5105,7 +5119,7 @@ serve(async (req) => {
         const creativesListResponse = await fetch(creativesListUrl, {
           headers: {
             'Authorization': `Bearer ${accessToken}`,
-            'LinkedIn-Version': '202511',
+            'LinkedIn-Version': LINKEDIN_VERSION,
             'X-Restli-Protocol-Version': '2.0.0',
           },
         });
@@ -5134,7 +5148,7 @@ serve(async (req) => {
             const creativeDetailResponse = await fetch(creativeDetailUrl, {
               headers: {
                 'Authorization': `Bearer ${accessToken}`,
-                'LinkedIn-Version': '202511',
+                'LinkedIn-Version': LINKEDIN_VERSION,
                 'X-Restli-Protocol-Version': '2.0.0',
               },
             });
@@ -6358,7 +6372,7 @@ serve(async (req) => {
             try {
               const resp = await fetch(
                 `https://api.linkedin.com/rest/adAccounts/${accountId}/creatives/${encodeURIComponent(creativeUrn)}`,
-                { headers: { 'Authorization': `Bearer ${accessToken}`, 'X-Restli-Protocol-Version': '2.0.0', 'LinkedIn-Version': '202511' } }
+                { headers: { 'Authorization': `Bearer ${accessToken}`, 'X-Restli-Protocol-Version': '2.0.0', 'LinkedIn-Version': LINKEDIN_VERSION } }
               );
               if (resp.ok) {
                 const cd = await resp.json();
@@ -6451,7 +6465,7 @@ serve(async (req) => {
             headers: {
               'Authorization': `Bearer ${accessToken}`,
               'X-Restli-Protocol-Version': '2.0.0',
-              'LinkedIn-Version': '202511',
+              'LinkedIn-Version': LINKEDIN_VERSION,
             },
           });
 
@@ -6504,7 +6518,7 @@ serve(async (req) => {
                   headers: {
                     'Authorization': `Bearer ${accessToken}`,
                     'X-Restli-Protocol-Version': '2.0.0',
-                    'LinkedIn-Version': '202511',
+                    'LinkedIn-Version': LINKEDIN_VERSION,
                   },
                 });
                 if (resp.ok) {
@@ -7044,7 +7058,7 @@ serve(async (req) => {
               const response = await fetch(url, {
                 headers: {
                   'Authorization': `Bearer ${accessToken}`,
-                  'LinkedIn-Version': '202511',
+                  'LinkedIn-Version': LINKEDIN_VERSION,
                   'X-Restli-Protocol-Version': '2.0.0'
                 }
               });
@@ -7237,7 +7251,7 @@ serve(async (req) => {
           headers: {
             'Authorization': `Bearer ${accessToken}`,
             'X-Restli-Protocol-Version': '2.0.0',
-            'LinkedIn-Version': '202511'
+            'LinkedIn-Version': LINKEDIN_VERSION
           }
         });
         
@@ -7312,7 +7326,7 @@ serve(async (req) => {
           headers: { 
             'Authorization': `Bearer ${accessToken}`,
             'X-Restli-Protocol-Version': '2.0.0',
-            'LinkedIn-Version': '202511',
+            'LinkedIn-Version': LINKEDIN_VERSION,
           },
         });
         
@@ -7780,7 +7794,7 @@ serve(async (req) => {
           headers: {
             'Authorization': `Bearer ${accessToken}`,
             'X-Restli-Protocol-Version': '2.0.0',
-            'LinkedIn-Version': '202511',
+            'LinkedIn-Version': LINKEDIN_VERSION,
           },
         });
 
@@ -7945,7 +7959,7 @@ serve(async (req) => {
           headers: { 
             'Authorization': `Bearer ${accessToken}`,
             'X-Restli-Protocol-Version': '2.0.0',
-            'LinkedIn-Version': '202511',
+            'LinkedIn-Version': LINKEDIN_VERSION,
           },
         });
         
@@ -8017,7 +8031,7 @@ serve(async (req) => {
           headers: {
             'Authorization': `Bearer ${accessToken}`,
             'X-Restli-Protocol-Version': '2.0.0',
-            'LinkedIn-Version': '202511',
+            'LinkedIn-Version': LINKEDIN_VERSION,
           },
         });
 
@@ -8081,7 +8095,7 @@ serve(async (req) => {
           headers: {
             'Authorization': `Bearer ${accessToken}`,
             'X-Restli-Protocol-Version': '2.0.0',
-            'LinkedIn-Version': '202511',
+            'LinkedIn-Version': LINKEDIN_VERSION,
           },
         });
 
@@ -8172,7 +8186,7 @@ serve(async (req) => {
             {
               headers: {
                 'Authorization': `Bearer ${accessToken}`,
-                'LinkedIn-Version': '202511',
+                'LinkedIn-Version': LINKEDIN_VERSION,
                 'X-Restli-Protocol-Version': '2.0.0',
               },
             }
@@ -8355,7 +8369,7 @@ serve(async (req) => {
               headers: { 
                 'Authorization': `Bearer ${accessToken}`,
                 'X-Restli-Protocol-Version': '2.0.0',
-                'LinkedIn-Version': '202511',
+                'LinkedIn-Version': LINKEDIN_VERSION,
               },
             });
             
@@ -8465,7 +8479,7 @@ serve(async (req) => {
                 headers: {
                   'Authorization': `Bearer ${accessToken}`,
                   'X-Restli-Protocol-Version': '2.0.0',
-                  'LinkedIn-Version': '202511',
+                  'LinkedIn-Version': LINKEDIN_VERSION,
                 },
               }
             );
@@ -8549,7 +8563,7 @@ serve(async (req) => {
               headers: {
                 'Authorization': `Bearer ${accessToken}`,
                 'X-Restli-Protocol-Version': '2.0.0',
-                'LinkedIn-Version': '202511',
+                'LinkedIn-Version': LINKEDIN_VERSION,
               },
             });
 
@@ -8652,7 +8666,7 @@ serve(async (req) => {
                 headers: {
                   'Authorization': `Bearer ${accessToken}`,
                   'X-Restli-Protocol-Version': '2.0.0',
-                  'LinkedIn-Version': '202511',
+                  'LinkedIn-Version': LINKEDIN_VERSION,
                 },
               }
             );
@@ -8744,7 +8758,7 @@ serve(async (req) => {
               headers: {
                 'Authorization': `Bearer ${accessToken}`,
                 'X-Restli-Protocol-Version': '2.0.0',
-                'LinkedIn-Version': '202511',
+                'LinkedIn-Version': LINKEDIN_VERSION,
               },
             });
             if (resp.ok) {
@@ -8819,7 +8833,7 @@ serve(async (req) => {
           headers: {
             'Authorization': `Bearer ${accessToken}`,
             'X-Restli-Protocol-Version': '2.0.0',
-            'LinkedIn-Version': '202511',
+            'LinkedIn-Version': LINKEDIN_VERSION,
           }
         });
 
@@ -8857,7 +8871,7 @@ serve(async (req) => {
         const liHeaders = {
           'Authorization': `Bearer ${accessToken}`,
           'X-Restli-Protocol-Version': '2.0.0',
-          'LinkedIn-Version': '202511',
+          'LinkedIn-Version': LINKEDIN_VERSION,
         };
 
         const campResp = await fetch(
@@ -9002,7 +9016,7 @@ serve(async (req) => {
         const liHeaders = {
           'Authorization': `Bearer ${accessToken}`,
           'X-Restli-Protocol-Version': '2.0.0',
-          'LinkedIn-Version': '202511',
+          'LinkedIn-Version': LINKEDIN_VERSION,
         };
 
         const TYPEAHEAD = new Set([
@@ -9116,7 +9130,7 @@ serve(async (req) => {
             {
               headers: {
                 'Authorization': `Bearer ${accessToken}`,
-                'LinkedIn-Version': '202511',
+                'LinkedIn-Version': LINKEDIN_VERSION,
                 'X-Restli-Protocol-Version': '2.0.0',
               },
             }
@@ -9146,7 +9160,7 @@ serve(async (req) => {
               headers: {
                 'Authorization': `Bearer ${accessToken}`,
                 'X-Restli-Protocol-Version': '2.0.0',
-                'LinkedIn-Version': '202511',
+                'LinkedIn-Version': LINKEDIN_VERSION,
               }
             });
             
@@ -9423,7 +9437,7 @@ serve(async (req) => {
                   'Content-Type': 'application/json',
                   'X-Restli-Method': 'partial_update',
                   'X-Restli-Protocol-Version': '2.0.0',
-                  'LinkedIn-Version': '202511',
+                  'LinkedIn-Version': LINKEDIN_VERSION,
                 },
                 body: JSON.stringify({ patch: { $set: { targetingCriteria: criteria } } })
               });
@@ -9612,7 +9626,7 @@ serve(async (req) => {
               headers: {
                 'Authorization': `Bearer ${accessToken}`,
                 'X-Restli-Protocol-Version': '2.0.0',
-                'LinkedIn-Version': '202511',
+                'LinkedIn-Version': LINKEDIN_VERSION,
               },
             });
             
@@ -9660,7 +9674,7 @@ serve(async (req) => {
                 'Content-Type': 'application/json',
                 'X-Restli-Method': 'partial_update',
                 'X-Restli-Protocol-Version': '2.0.0',
-                'LinkedIn-Version': '202511',
+                'LinkedIn-Version': LINKEDIN_VERSION,
               },
               body: JSON.stringify(updatePayload),
             });
@@ -10269,7 +10283,7 @@ serve(async (req) => {
           const batchResp = await fetch(batchUrl, {
             headers: {
               'Authorization': `Bearer ${accessToken}`,
-              'LinkedIn-Version': '202511',
+              'LinkedIn-Version': LINKEDIN_VERSION,
               'X-Restli-Protocol-Version': '2.0.0'
             }
           });
@@ -10313,7 +10327,7 @@ serve(async (req) => {
               const creativeResp = await fetch(creativeUrl, {
                 headers: {
                   'Authorization': `Bearer ${accessToken}`,
-                  'LinkedIn-Version': '202511',
+                  'LinkedIn-Version': LINKEDIN_VERSION,
                   'X-Restli-Protocol-Version': '2.0.0'
                 }
               });
@@ -10366,7 +10380,7 @@ serve(async (req) => {
               const resp = await fetch(endpoint, {
                 headers: {
                   'Authorization': `Bearer ${accessToken}`,
-                  'LinkedIn-Version': '202511',
+                  'LinkedIn-Version': LINKEDIN_VERSION,
                   'X-Restli-Protocol-Version': '2.0.0'
                 }
               });
@@ -12782,7 +12796,7 @@ serve(async (req) => {
         const convDefsResponse = await fetch(convDefsUrl, {
           headers: {
             'Authorization': `Bearer ${accessToken}`,
-            'LinkedIn-Version': '202511',
+            'LinkedIn-Version': LINKEDIN_VERSION,
             'X-Restli-Protocol-Version': '2.0.0',
           },
         });
@@ -12983,7 +12997,7 @@ serve(async (req) => {
             const kwResp = await fetch(kwUrl, {
               headers: {
                 'Authorization': `Bearer ${accessToken}`,
-                'LinkedIn-Version': '202511',
+                'LinkedIn-Version': LINKEDIN_VERSION,
                 'X-Restli-Protocol-Version': '2.0.0',
               },
             });
@@ -13189,7 +13203,7 @@ serve(async (req) => {
         const leadsResp = await fetch(leadsUrl, {
           headers: {
             'Authorization': `Bearer ${accessToken}`,
-            'LinkedIn-Version': '202511',
+            'LinkedIn-Version': LINKEDIN_VERSION,
             'X-Restli-Protocol-Version': '2.0.0',
           },
         });
@@ -13240,7 +13254,7 @@ serve(async (req) => {
                 const creativeResp = await fetch(`https://api.linkedin.com/rest/adAccounts/${accountId}/creatives/${encodeURIComponent(creativeUrn)}`, {
                   headers: {
                     'Authorization': `Bearer ${accessToken}`,
-                    'LinkedIn-Version': '202511',
+                    'LinkedIn-Version': LINKEDIN_VERSION,
                     'X-Restli-Protocol-Version': '2.0.0',
                   },
                 });
@@ -13297,7 +13311,7 @@ serve(async (req) => {
                       const r = await fetch(url, {
                         headers: {
                           'Authorization': `Bearer ${accessToken}`,
-                          'LinkedIn-Version': '202511',
+                          'LinkedIn-Version': LINKEDIN_VERSION,
                           'X-Restli-Protocol-Version': '2.0.0',
                         },
                       });
@@ -13352,7 +13366,7 @@ serve(async (req) => {
               const r = await fetch(`https://api.linkedin.com/rest/leadForms/${formId}`, {
                 headers: {
                   'Authorization': `Bearer ${accessToken}`,
-                  'LinkedIn-Version': '202511',
+                  'LinkedIn-Version': LINKEDIN_VERSION,
                   'X-Restli-Protocol-Version': '2.0.0',
                 },
               });
@@ -13588,7 +13602,7 @@ serve(async (req) => {
               const urn = encodeURIComponent(`urn:li:sponsoredCreative:${creativeId}`);
               const resp = await fetch(
                 `https://api.linkedin.com/rest/adAccounts/${accountId}/creatives/${urn}`,
-                { headers: { ...authHdr, 'LinkedIn-Version': '202511', 'X-Restli-Protocol-Version': '2.0.0' } }
+                { headers: { ...authHdr, 'LinkedIn-Version': LINKEDIN_VERSION, 'X-Restli-Protocol-Version': '2.0.0' } }
               );
               if (!resp.ok) { await resp.text(); return; }
               const d = await resp.json();
@@ -13698,7 +13712,7 @@ serve(async (req) => {
           const ownerParam = encodeURIComponent(`urn:li:sponsoredAccount:${accountId}`);
           const resp = await fetch(
             `https://api.linkedin.com/rest/leadForms?q=owner&owner=${ownerParam}&count=500`,
-            { headers: { ...authHdr, 'LinkedIn-Version': '202501', 'X-Restli-Protocol-Version': '2.0.0' } }
+            { headers: { ...authHdr, 'LinkedIn-Version': LINKEDIN_VERSION, 'X-Restli-Protocol-Version': '2.0.0' } }
           );
           if (resp.ok) {
             const data = await resp.json();
@@ -14110,7 +14124,7 @@ serve(async (req) => {
         };
 
         const lgH = { 'Authorization': `Bearer ${accessToken}` };
-        const lgRH = { ...lgH, 'X-Restli-Protocol-Version': '2.0.0', 'LinkedIn-Version': '202511' };
+        const lgRH = { ...lgH, 'X-Restli-Protocol-Version': '2.0.0', 'LinkedIn-Version': LINKEDIN_VERSION };
 
         // Static label maps for audience insights
         const JOB_FUNCTIONS: Record<string, string> = {
@@ -14631,7 +14645,7 @@ serve(async (req) => {
                   'https://api.linkedin.com/rest/adAccountUsers?q=authenticatedUser',
                   { headers: {
                       'Authorization': `Bearer ${accessToken}`,
-                      'LinkedIn-Version': '202511',
+                      'LinkedIn-Version': LINKEDIN_VERSION,
                       'X-Restli-Protocol-Version': '2.0.0',
                   } }
                 );
@@ -14698,7 +14712,7 @@ serve(async (req) => {
         const probeSrcResp = await fetch(probeSrcUrl, {
           headers: {
             'Authorization': `Bearer ${accessToken}`,
-            'LinkedIn-Version': '202511',
+            'LinkedIn-Version': LINKEDIN_VERSION,
             'X-Restli-Protocol-Version': '2.0.0',
           },
         });
@@ -14760,7 +14774,7 @@ serve(async (req) => {
           headers: {
             'Authorization': `Bearer ${accessToken}`,
             'Content-Type': 'application/json',
-            'LinkedIn-Version': '202511',
+            'LinkedIn-Version': LINKEDIN_VERSION,
             'X-Restli-Protocol-Version': '2.0.0',
           },
           body: JSON.stringify(probeBody),
@@ -14828,7 +14842,7 @@ serve(async (req) => {
                 'Authorization': `Bearer ${accessToken}`,
                 'Content-Type': 'application/json',
                 'X-Restli-Method': 'partial_update',
-                'LinkedIn-Version': '202511',
+                'LinkedIn-Version': LINKEDIN_VERSION,
                 'X-Restli-Protocol-Version': '2.0.0',
               },
               body: JSON.stringify({ patch: { $set: { intendedStatus: 'ARCHIVED' } } }),
@@ -14892,7 +14906,7 @@ serve(async (req) => {
             headers: {
               'Authorization': `Bearer ${accessToken}`,
               'X-Restli-Protocol-Version': '2.0.0',
-              'LinkedIn-Version': '202511',
+              'LinkedIn-Version': LINKEDIN_VERSION,
             },
           });
           if (resp.ok) {
@@ -14984,7 +14998,7 @@ serve(async (req) => {
                   'https://api.linkedin.com/rest/adAccountUsers?q=authenticatedUser',
                   { headers: {
                       'Authorization': `Bearer ${accessToken}`,
-                      'LinkedIn-Version': '202511',
+                      'LinkedIn-Version': LINKEDIN_VERSION,
                       'X-Restli-Protocol-Version': '2.0.0',
                   } }
                 );
@@ -15042,7 +15056,7 @@ serve(async (req) => {
 
         const bulkVersionHeaders = {
           'Authorization': `Bearer ${accessToken}`,
-          'LinkedIn-Version': '202511',
+          'LinkedIn-Version': LINKEDIN_VERSION,
           'X-Restli-Protocol-Version': '2.0.0',
         };
         const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
