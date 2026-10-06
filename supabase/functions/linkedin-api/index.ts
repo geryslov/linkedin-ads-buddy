@@ -34,7 +34,13 @@ function googleAdsHeaders(loginCustomerId?: string | null): Record<string, strin
 }
 
 async function googleAdsSearch(customerId: string, query: string, loginCustomerId?: string | null): Promise<any[]> {
-  const cid = String(customerId).replace(/-/g, '');
+  const cid = String(customerId ?? '').replace(/\D/g, '');
+  // Without this, a missing or malformed id silently becomes
+  // `customers//googleAds:searchStream` and comes back as an opaque gateway
+  // error. Every caller treats a missing customer as a bug, so say so.
+  if (!cid) {
+    throw new Error('A Google Ads customerId is required (10 digits). Call list_google_ads_accounts to find one.');
+  }
   const res = await fetch(`${GOOGLE_ADS_GATEWAY}/${GOOGLE_ADS_API_VERSION}/customers/${cid}/googleAds:searchStream`, {
     method: 'POST',
     headers: googleAdsHeaders(loginCustomerId || cid),
@@ -10222,20 +10228,38 @@ serve(async (req) => {
 
       case 'get_google_keywords': {
         const { start: gkStart, end: gkEnd } = gDates(params);
-        const gkRows = await googleAdsSearch(params?.customerId, `
+        // metrics.search_impression_share could not be verified as selectable
+        // on keyword_view (Google's field reference renders client-side, so it
+        // is not checkable without a live call). If Google rejects it, drop the
+        // column and return the rest — one unverified metric should not fail the
+        // whole report. The response says which happened.
+        const gkQuery = (withShare: boolean) => `
           SELECT ad_group_criterion.criterion_id, ad_group_criterion.keyword.text,
                  ad_group_criterion.keyword.match_type, ad_group_criterion.status,
                  ad_group.id, ad_group.name, campaign.id, campaign.name,
                  metrics.impressions, metrics.clicks, metrics.cost_micros,
-                 metrics.conversions, metrics.conversions_value,
-                 metrics.search_impression_share
+                 metrics.conversions, metrics.conversions_value${withShare ? ',\n                 metrics.search_impression_share' : ''}
           FROM keyword_view
           WHERE segments.date BETWEEN '${gkStart}' AND '${gkEnd}'
           ORDER BY metrics.cost_micros DESC
-        `, params?.loginCustomerId);
+        `;
+        let gkRows: any[];
+        let gkShareAvailable = true;
+        try {
+          gkRows = await googleAdsSearch(params?.customerId, gkQuery(true), params?.loginCustomerId);
+        } catch (gkErr) {
+          const gkMsg = (gkErr as Error).message || '';
+          // Only a field-selection complaint earns the retry. A bad customer id,
+          // an auth failure or a sunset version must surface as itself.
+          if (!/field|selectable|unrecognized|unknown|not found in|INVALID/i.test(gkMsg)) throw gkErr;
+          console.warn('[get_google_keywords] retrying without search_impression_share:', gkMsg.slice(0, 200));
+          gkShareAvailable = false;
+          gkRows = await googleAdsSearch(params?.customerId, gkQuery(false), params?.loginCustomerId);
+        }
         return gJson({
           customerId: String(params?.customerId ?? '').replace(/-/g, ''),
           dateRange: { start: gkStart, end: gkEnd },
+          impressionShareAvailable: gkShareAvailable,
           keywords: gkRows.map((r: any) => ({
             id: String(r.adGroupCriterion?.criterionId ?? ''),
             text: r.adGroupCriterion?.keyword?.text ?? null,
@@ -10280,7 +10304,7 @@ serve(async (req) => {
         // Google sends them so a caller can reach any resource without waiting
         // for a named action here.
         const gasQuery = String(params?.query ?? '');
-        if (!gasQuery) return gJson({ error: 'A GAQL `query` is required.' }, 400);
+        if (!gasQuery) throw new Error('A GAQL `query` is required.');
         gAssertSelect(gasQuery);
         const gasRows = await googleAdsSearch(params?.customerId, gasQuery, params?.loginCustomerId);
         const gasLimit = gLimit(params?.limit, 2000, 10000);

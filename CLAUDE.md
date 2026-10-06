@@ -215,6 +215,24 @@ product call. In the meantime neither action is exposed as an MCP tool or allowl
 customer IDs from `list_google_ads_accounts`, which is scoped by the connected Google account rather
 than by table row.
 
+### Two guards worth knowing
+
+**`googleAdsSearch()` rejects a missing customer id.** It used to interpolate whatever it was given,
+so a missing or malformed value became `customers//googleAds:searchStream` and returned an opaque
+gateway error. Now it strips to digits and throws if nothing remains. This covers the dashboard
+callers too, not just the MCP ones.
+
+**`get_google_keywords` degrades rather than fails.** `metrics.search_impression_share` could not be
+verified as selectable on `keyword_view` — Google's field reference renders client-side, so it is not
+checkable without a live call. If Google rejects the field, the action retries without it and the
+response carries `impressionShareAvailable: false`. The retry fires only on a field-selection
+complaint; a bad customer id, an auth failure or a sunset version surfaces as itself. Once you have
+seen a live response, check that flag and simplify this if the field is fine.
+
+Everything else in the new queries was structurally linted (all 8 pass, including both branches of
+the conditional field), but **no query has run against the gateway yet** — treat the first real call
+as the test.
+
 ### API version — pinned versions are a time bomb
 
 ```js
