@@ -101,20 +101,6 @@ async function readInvokeError(error: unknown): Promise<string> {
   return fallback;
 }
 
-/** `auth.storage` is allowed to be async, and on a Lovable preview surface it is:
- *  the session is brokered to the editor over postMessage with a 2s timeout (see
- *  previewAuthStorage.ts). A single `getSession()` can therefore resolve null
- *  while that round-trip is still in flight, and nothing fires afterwards to
- *  correct it — which reports a signed-in user as signed out. One retry past the
- *  broker's own timeout is enough; on plain localStorage the first read hits. */
-async function readSession() {
-  const first = await supabase.auth.getSession();
-  if (first.data.session) return first.data.session;
-  await new Promise(resolve => setTimeout(resolve, 2500));
-  const second = await supabase.auth.getSession();
-  return second.data.session;
-}
-
 export function useProspectFinder(accessToken: string | null) {
   const [companies, setCompanies] = useState<AudienceRow[]>([]);
   const [titles, setTitles] = useState<AudienceRow[]>([]);
@@ -128,38 +114,34 @@ export function useProspectFinder(accessToken: string | null) {
   const [findError, setFindError] = useState<string | null>(null);
 
   const [status, setStatus] = useState<MoltSetsStatus | null>(null);
-  /** null = not determined yet. `/dashboard` has NO route guard (see App.tsx) and
-   *  the rest of the dashboard runs on the LinkedIn token in localStorage, so a
-   *  Supabase session is genuinely optional here — but both Prospect Finder
-   *  actions require one. Without this the UI cannot tell "not signed in" from
-   *  "MoltSets is broken", and it reported the second for the first. */
-  const [hasSession, setHasSession] = useState<boolean | null>(null);
+  /** null = not determined yet. Tracks the LinkedIn connection, not a Supabase
+   *  session — `prospectGate` in the edge function accepts either, and the
+   *  dashboard has only the former (`/dashboard` has NO route guard, see
+   *  App.tsx). Kept so the UI can tell "not connected" from "MoltSets is
+   *  broken"; it reported the second for the first twice before this existed. */
+  const [hasLinkedIn, setHasLinkedIn] = useState<boolean | null>(null);
   const { toast } = useToast();
 
   /** Is the MOLTSETS_API_KEY secret present and working? */
   const checkStatus = useCallback(async () => {
-    // `moltsets_status` is platform-only: with no session, supabase-js sends the
-    // anon key and the JWT gate 401s. That is the gate working, not a verdict on
-    // MoltSets — so stay silent rather than reporting a failure the user cannot act
-    // on. The effect below re-probes once the session lands.
-    const session = await readSession();
-    setHasSession(!!session);
-    if (!session) {
+    // Works on the LinkedIn connection alone; an app session is optional.
+    if (!accessToken) {
+      setHasLinkedIn(false);
       setStatus(null);
       return;
     }
+    setHasLinkedIn(true);
     try {
       const { data, error } = await supabase.functions.invoke('linkedin-api', {
-        body: { action: 'moltsets_status' },
+        body: { action: 'moltsets_status', accessToken },
       });
       if (error) throw error;
       setStatus({ connected: !!data?.connected, reason: data?.reason, budget: data?.budget ?? null });
     } catch (e) {
       const reason = await readInvokeError(e);
-      // Nothing thrown here says anything about the key: a function without the
-      // action answers 400 "Unknown action" (stale deploy), an unauthenticated call
-      // answers 401 AUTH_REQUIRED. Only a 200 carrying `connected: false` is the
-      // action's own report, so flag these as callFailed and let the UI say so.
+      // Nothing thrown here says anything about the key (stale deploy, expired
+      // LinkedIn token…). Only a 200 carrying `connected: false` is the action's
+      // own report, so flag these as callFailed and let the UI say so.
       setStatus({
         connected: false,
         reason,
@@ -167,18 +149,10 @@ export function useProspectFinder(accessToken: string | null) {
         notDeployed: /unknown action/i.test(reason),
       });
     }
-  }, []);
+  }, [accessToken]);
 
-  /** Probe on mount, and again when a session arrives. On first paint the session
-   *  may still be hydrating from storage, and a status set from that miss would
-   *  never correct itself — the old mount-only effect left the banner permanently
-   *  wrong for anyone who loaded the tab directly. */
   useEffect(() => {
     checkStatus();
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session) checkStatus();
-    });
-    return () => sub.subscription.unsubscribe();
   }, [checkStatus]);
 
   /** Load both demographic pivots for the chosen campaigns in one pass.
@@ -251,18 +225,10 @@ export function useProspectFinder(accessToken: string | null) {
       country?: string;
       perCompanyLimit?: number;
     }) => {
-      // Both actions are JWT-gated, and this dashboard does not require a sign-in,
-      // so answer the real question here instead of letting the edge function
-      // return AUTH_REQUIRED — which reads as "the tool is broken" when it means
-      // "you are not signed in".
-      const findSession = await readSession();
-      setHasSession(!!findSession);
-      if (!findSession) {
-        setFindError(
-          'Prospect Finder needs a signed-in Ads Buddy account — the rest of the dashboard runs on '
-          + 'your LinkedIn connection alone, but this tool spends MoltSets credits, so it is tied to '
-          + 'a user. Sign in and try again.',
-        );
+      // The edge gate accepts the dashboard's LinkedIn session (browser origin +
+      // live token) or an app session; MCP is blocked server-side.
+      if (!accessToken) {
+        setFindError('Connect LinkedIn first.');
         return;
       }
 
@@ -326,6 +292,6 @@ export function useProspectFinder(accessToken: string | null) {
     findProspects,
     status,
     checkStatus,
-    hasSession,
+    hasLinkedIn,
   };
 }

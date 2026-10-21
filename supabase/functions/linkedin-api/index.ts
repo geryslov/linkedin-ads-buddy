@@ -30,6 +30,34 @@ const MOLTSETS_CONCURRENCY = 3;
 
 type MoltSetsError = Error & { code?: string; retryAfter?: number | null; status?: number };
 
+/** Prospect Finder gate. Allows (a) a signed-in app user, or (b) a dashboard
+ *  browser call carrying a live LinkedIn token. (b) requires an app Origin
+ *  header: browsers always send one on these cross-origin POSTs, while the MCP
+ *  server (server-side fetch) sends none — so Claude cannot spend MoltSets
+ *  credits through the unrestricted legacy passthrough. Decided 2026-10-21:
+ *  LinkedIn-only sessions must work, Claude must stay blocked. */
+const PROSPECT_ALLOWED_ORIGIN = /^https:\/\/([a-z0-9-]+\.)*(lovable\.app|lovableproject\.com|lovable\.dev)$|^http:\/\/localhost(:\d+)?$/i;
+async function prospectGate(req: Request, accessToken: unknown): Promise<boolean> {
+  const authHeader = req.headers.get('Authorization') || '';
+  try {
+    const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+    const c = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!, {
+      global: { headers: { Authorization: authHeader } },
+    });
+    const { data: { user } } = await c.auth.getUser();
+    if (user) return true;
+  } catch (_e) { /* fall through to LinkedIn check */ }
+
+  const origin = req.headers.get('Origin') || '';
+  if (!origin || !PROSPECT_ALLOWED_ORIGIN.test(origin)) return false;
+  if (typeof accessToken !== 'string' || accessToken.length < 20) return false;
+  const me = await fetch('https://api.linkedin.com/v2/me', {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  await me.body?.cancel();
+  return me.ok;
+}
+
 async function moltsetsCall(tool: string, body: Record<string, unknown>): Promise<any> {
   const key = Deno.env.get('MOLTSETS_API_KEY');
   if (!key) throw new Error('MoltSets is not connected: set the MOLTSETS_API_KEY edge secret.');
@@ -15752,15 +15780,7 @@ serve(async (req) => {
       // record, so the spend stays behind the dashboard where it is visible.
 
       case 'moltsets_status': {
-        const msAuthHeader = req.headers.get('Authorization');
-        const { createClient: createMsClient } = await import('https://esm.sh/@supabase/supabase-js@2');
-        const msSupabase = createMsClient(
-          Deno.env.get('SUPABASE_URL')!,
-          Deno.env.get('SUPABASE_ANON_KEY')!,
-          { global: { headers: { Authorization: msAuthHeader || '' } } },
-        );
-        const { data: { user: msUser }, error: msUserError } = await msSupabase.auth.getUser();
-        if (msUserError || !msUser) {
+        if (!(await prospectGate(req, accessToken))) {
           return new Response(JSON.stringify({
             error: 'Authentication required. This action is platform-only and not reachable from MCP.',
             errorCode: 'AUTH_REQUIRED',
@@ -15805,16 +15825,8 @@ serve(async (req) => {
           perCompanyLimit,                // 1..25, default 10
         } = params || {};
 
-        // ---- JWT gate (platform-only) ----
-        const prospectAuthHeader = req.headers.get('Authorization');
-        const { createClient: createProspectClient } = await import('https://esm.sh/@supabase/supabase-js@2');
-        const prospectSupabase = createProspectClient(
-          Deno.env.get('SUPABASE_URL')!,
-          Deno.env.get('SUPABASE_ANON_KEY')!,
-          { global: { headers: { Authorization: prospectAuthHeader || '' } } },
-        );
-        const { data: { user: prospectUser }, error: prospectUserError } = await prospectSupabase.auth.getUser();
-        if (prospectUserError || !prospectUser) {
+        // ---- Gate: app session OR dashboard LinkedIn session; never MCP ----
+        if (!(await prospectGate(req, accessToken))) {
           return new Response(JSON.stringify({
             error: 'Authentication required. This action is platform-only and not reachable from MCP.',
             errorCode: 'AUTH_REQUIRED',
