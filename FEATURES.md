@@ -321,7 +321,9 @@ An info banner states this above the controls; don't quietly reword it into "peo
 - **Shipped ahead of its backend (as of 2026-10-21).** Both actions are on `main`, but `main` was
   reached before `linkedin-api` was deployed, and the live function still answers `moltsets_status`
   with `400 Unknown action`. The tab renders and its demographic steps work; the MoltSets search
-  does not until the manual deploy under **Known gaps** is run.
+  does not until the manual deploy under **Known gaps** is run. The setup banner tells those two
+  apart — `notDeployed` (the action is missing, so deploy) vs a missing key (so add the secret) —
+  because the first wording told users to add a secret that was never the problem.
 
 ## Known gaps
 

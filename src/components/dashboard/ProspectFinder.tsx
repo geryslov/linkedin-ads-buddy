@@ -338,12 +338,28 @@ export function ProspectFinder({ accessToken, selectedAccount, campaigns }: Pros
         <div className="flex items-start gap-3 rounded-xl border border-warning/30 bg-warning/[0.06] px-4 py-3">
           <AlertTriangle className="h-4 w-4 text-warning mt-0.5 shrink-0" />
           <div className="text-xs text-foreground/90 space-y-1">
-            <p className="font-semibold">MoltSets is not connected</p>
-            <p className="text-muted-foreground">
-              {status.reason || 'The MOLTSETS_API_KEY secret is missing.'} Add it as a Supabase edge
-              secret for <code className="font-mono">linkedin-api</code>, then redeploy the function.
-              Loading the audience below still works — only the people search needs the key.
-            </p>
+            {status.notDeployed ? (
+              <>
+                <p className="font-semibold">Prospect Finder's backend isn't deployed yet</p>
+                <p className="text-muted-foreground">
+                  The live <code className="font-mono">linkedin-api</code> function has no{' '}
+                  <code className="font-mono">moltsets_status</code> action — it answered{' '}
+                  <span className="font-mono">"{status.reason}"</span>. Deploy the edge function;
+                  adding the API key changes nothing until then. Loading the audience below still
+                  works.
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="font-semibold">MoltSets is not connected</p>
+                <p className="text-muted-foreground">
+                  {status.reason || 'The MOLTSETS_API_KEY secret is missing.'} Add it as a Supabase
+                  edge secret for <code className="font-mono">linkedin-api</code>, then redeploy the
+                  function. Loading the audience below still works — only the people search needs
+                  the key.
+                </p>
+              </>
+            )}
           </div>
         </div>
       )}
