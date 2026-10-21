@@ -377,6 +377,16 @@ rows remaining and warns before a run exceeds it.
 
 Needs `MOLTSETS_API_KEY` as an edge secret, and a manual deploy — the CI token is still broken.
 
+**And the merge beat the deploy.** PR #56 took the whole branch into `main` on 2026-10-21 at 12:14,
+before `linkedin-api` had been deployed. The frontend auto-deploys from `main` via Lovable; edge
+functions do not. So `main` began serving a Prospecting tab whose first call — `moltsets_status`, on
+mount — came back `400 {"error":"Unknown action"}` from the live function. Verified by probing the
+deployed endpoint, not inferred from the workflow being broken. CLAUDE.md already lists this as the
+first common pitfall ("editing edge function without deploying → changes never take effect"), but
+the ordering it implies is worth stating outright: for a feature split across a repo where the
+frontend ships itself and the backend does not, **deploy the function before the frontend reaches
+`main`** — otherwise the half that deploys on its own is the half that cannot work alone.
+
 ## Recurring themes
 
 - **URN resolution is the project's tax.** Creative names, job titles, super titles, company names — each needed multiple rounds of encoding fixes, batch fetchers, and caches.

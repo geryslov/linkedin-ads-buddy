@@ -318,6 +318,10 @@ An info banner states this above the controls; don't quietly reword it into "peo
   `fair_use`; paid keys return `fair_use`. `moltsetsBudget()` normalizes both — the UI shows rows
   remaining and warns when a run would exceed it, because the free trial is only 100 rows and one
   25-company run can spend more than that.
+- **Shipped ahead of its backend (as of 2026-10-21).** Both actions are on `main`, but `main` was
+  reached before `linkedin-api` was deployed, and the live function still answers `moltsets_status`
+  with `400 Unknown action`. The tab renders and its demographic steps work; the MoltSets search
+  does not until the manual deploy under **Known gaps** is run.
 
 ## Known gaps
 
