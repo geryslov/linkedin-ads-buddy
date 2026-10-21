@@ -15825,16 +15825,8 @@ serve(async (req) => {
           perCompanyLimit,                // 1..25, default 10
         } = params || {};
 
-        // ---- JWT gate (platform-only) ----
-        const prospectAuthHeader = req.headers.get('Authorization');
-        const { createClient: createProspectClient } = await import('https://esm.sh/@supabase/supabase-js@2');
-        const prospectSupabase = createProspectClient(
-          Deno.env.get('SUPABASE_URL')!,
-          Deno.env.get('SUPABASE_ANON_KEY')!,
-          { global: { headers: { Authorization: prospectAuthHeader || '' } } },
-        );
-        const { data: { user: prospectUser }, error: prospectUserError } = await prospectSupabase.auth.getUser();
-        if (prospectUserError || !prospectUser) {
+        // ---- Gate: app session OR dashboard LinkedIn session; never MCP ----
+        if (!(await prospectGate(req, accessToken))) {
           return new Response(JSON.stringify({
             error: 'Authentication required. This action is platform-only and not reachable from MCP.',
             errorCode: 'AUTH_REQUIRED',
