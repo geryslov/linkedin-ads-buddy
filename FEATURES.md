@@ -351,3 +351,5 @@ An info banner states this above the controls; don't quietly reword it into "peo
 - **`sync_mcp_token` has no caller auth.** Service-role upsert, `verify_jwt = false`, so anyone can overwrite any key's LinkedIn token. Same reasoning: the old dashboard depends on it. Blocked from the product passthrough.
 - **No LinkedIn token refresh.** Access tokens die at ~60 days; refresh tokens are Marketing Developer Platform partner-gated. `connect_linkedin` reports `hasRefreshToken` so the answer is observable on the next real connect.
 - **`get_profile` still calls `/v2/me`**, which requires the deprecated `r_liteprofile`. That is why `get_auth_url` keeps two mutually-exclusive scope sets (`legacy` and `oidc`) instead of one — OIDC callers should read identity from `/v2/userinfo`.
+
+> **Prospect Finder gate (Oct 21, 2026):** `moltsets_status` / `find_prospects` use `prospectGate()` — an app session, OR a browser call from an app Origin with a live LinkedIn token (checked via `/v2/me`). No Origin = MCP = blocked, so Claude cannot spend MoltSets credits. No separate sign-in is needed in the dashboard.

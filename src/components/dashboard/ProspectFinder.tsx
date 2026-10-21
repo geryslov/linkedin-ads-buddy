@@ -336,20 +336,9 @@ export function ProspectFinder({ accessToken, selectedAccount, campaigns }: Pros
         <div className="flex items-start gap-3 rounded-xl border border-warning/30 bg-warning/[0.06] px-4 py-3">
           <AlertTriangle className="h-4 w-4 text-warning mt-0.5 shrink-0" />
           <div className="text-xs text-foreground/90 space-y-1">
-            <p className="font-semibold">Sign in to use Prospect Finder</p>
+            <p className="font-semibold">Connect LinkedIn to use Prospect Finder</p>
             <p className="text-muted-foreground">
-              The rest of the dashboard runs on your LinkedIn connection alone, but this tool spends
-              MoltSets credits, so it is tied to an Ads Buddy account (email + password — connecting
-              LinkedIn again does not sign you in).{' '}
-              {/* Must be the email form: plain /auth only offers "Continue with LinkedIn", which
-                  refreshes the LinkedIn token but never creates an app session — a loop. */}
-              <a
-                href={`/auth?mode=email&returnTo=${encodeURIComponent('/dashboard?tab=prospect_finder')}`}
-                className="text-primary underline underline-offset-2"
-              >
-                Sign in with email
-              </a>
-              ; you'll come straight back here. Loading the audience below still works without it.
+              Prospect Finder runs on your LinkedIn connection, like the rest of the dashboard.
             </p>
           </div>
         </div>

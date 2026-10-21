@@ -413,3 +413,6 @@ Excluding companies (employers facet) always returned 400 INVALID_VALUE_FOR_FIEL
 
 ### Sep 29, 2026 — engagement and video metrics on `get_ad_analytics`
 The MCP's per-creative analytics only carried delivery, spend and lead metrics. `get_ad_analytics` now also requests `landingPageClicks`, `totalEngagements`, `likes`, `comments`, `shares`, `follows`, `videoViews`, `videoStarts` and returns them per creative. Note LinkedIn's field is `videoStarts` (plural) — an unknown name in `fields=` 400s the whole call. Edge function change, so it needs a manual deploy until the CI token is fixed.
+
+### Oct 21, 2026 — Prospect Finder works on LinkedIn SSO alone
+The JWT-only gate made the tool unreachable for LinkedIn-only users (the "Sign in" link looped back to LinkedIn connect). User decision: LinkedIn session is enough, Claude/MCP must stay blocked. Gate now accepts a live LinkedIn token only when the request carries an app browser Origin; the MCP server sends none. Verified: browser-origin call → connected, no-origin call → 401.
