@@ -310,6 +310,13 @@ missing session and says to sign in, rather than reporting it as a MoltSets fail
 gate is **not** the fix: legacy `call_linkedin_action` is unrestricted, so an MCP key could then
 spend MoltSets credits through the public anon key.
 
+⚠️ **`auth.storage` can be async, so one `getSession()` is not an answer.** On a Lovable preview
+surface [previewAuthStorage.ts](src/integrations/supabase/previewAuthStorage.ts) brokers the session
+to the editor over postMessage with a 2s timeout, so a single read can resolve null while the
+round-trip is in flight and nothing fires afterwards to correct it — a signed-in user is reported as
+signed out. `readSession()` in the hook retries once past that window; on plain localStorage the
+first read hits and costs nothing.
+
 ⚠️ **A platform-only action cannot be probed from a mount effect.** `moltsets_status` ran in
 `useEffect` on mount, which beats the Supabase session's hydration from storage — supabase-js then
 sends the anon key, the gate 401s correctly, and the status sticks because nothing re-probes.

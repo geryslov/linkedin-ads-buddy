@@ -101,6 +101,20 @@ async function readInvokeError(error: unknown): Promise<string> {
   return fallback;
 }
 
+/** `auth.storage` is allowed to be async, and on a Lovable preview surface it is:
+ *  the session is brokered to the editor over postMessage with a 2s timeout (see
+ *  previewAuthStorage.ts). A single `getSession()` can therefore resolve null
+ *  while that round-trip is still in flight, and nothing fires afterwards to
+ *  correct it — which reports a signed-in user as signed out. One retry past the
+ *  broker's own timeout is enough; on plain localStorage the first read hits. */
+async function readSession() {
+  const first = await supabase.auth.getSession();
+  if (first.data.session) return first.data.session;
+  await new Promise(resolve => setTimeout(resolve, 2500));
+  const second = await supabase.auth.getSession();
+  return second.data.session;
+}
+
 export function useProspectFinder(accessToken: string | null) {
   const [companies, setCompanies] = useState<AudienceRow[]>([]);
   const [titles, setTitles] = useState<AudienceRow[]>([]);
@@ -128,7 +142,7 @@ export function useProspectFinder(accessToken: string | null) {
     // anon key and the JWT gate 401s. That is the gate working, not a verdict on
     // MoltSets — so stay silent rather than reporting a failure the user cannot act
     // on. The effect below re-probes once the session lands.
-    const { data: { session } } = await supabase.auth.getSession();
+    const session = await readSession();
     setHasSession(!!session);
     if (!session) {
       setStatus(null);
@@ -241,7 +255,7 @@ export function useProspectFinder(accessToken: string | null) {
       // so answer the real question here instead of letting the edge function
       // return AUTH_REQUIRED — which reads as "the tool is broken" when it means
       // "you are not signed in".
-      const { data: { session: findSession } } = await supabase.auth.getSession();
+      const findSession = await readSession();
       setHasSession(!!findSession);
       if (!findSession) {
         setFindError(
