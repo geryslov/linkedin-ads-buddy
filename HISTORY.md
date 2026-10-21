@@ -293,11 +293,15 @@ Fixed on its own branch so it could merge ahead of the feature, and made env-ove
 sunset is a secret change rather than a code change plus an edge deploy, which matters because edge
 CI has been broken since June.
 
-**That branch never merged.** `claude/google-ads-v22-sunset` (`9b1db03`) was pushed and CLAUDE.md was
-updated to describe the env-overridable version — but the branch sat unmerged, so the code kept
-reading `'v22'` while the docs said otherwise. Spotted on 2026-10-21, two weeks past the sunset,
-while adding Prospect Finder; the doc describing code that does not exist is the part worth
-remembering, because it reads as reassurance during exactly the check that should have caught it.
+**A false alarm two weeks later, from a stale checkout.** On 2026-10-21, while adding Prospect
+Finder, `linkedin-api/index.ts` still read `'v22'` while CLAUDE.md described the env-overridable
+version — which looks exactly like a fix that was documented but never landed, and was reported as
+one. It had landed: PR #55 merged `9b1db03` into `main` on Oct 6, a day before the sunset, as this
+entry already said. The `main` being compared against was a local ref from Sep 29, and
+`claude/google-ads-mcp-gateway` was cut from it, so the branch really did carry `'v22'` while `main`
+was already fixed. Same root cause as the duplicate integration above, which is what makes it worth
+recording twice: `git fetch` before concluding anything about what is or is not in `main` — a stale
+ref answers `--is-ancestor` with a confident, wrong "no".
 
 **Two tenancy decisions.** The gateway connection is account-wide, not per-user, so the Google tools
 are blocked in `mode: "product"` even with the opt-in flag set, and the Google actions are absent
