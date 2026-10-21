@@ -114,23 +114,23 @@ export function useProspectFinder(accessToken: string | null) {
   const [findError, setFindError] = useState<string | null>(null);
 
   const [status, setStatus] = useState<MoltSetsStatus | null>(null);
-  /** null = not determined yet. `/dashboard` has NO route guard (see App.tsx) and
-   *  the rest of the dashboard runs on the LinkedIn token in localStorage, so a
-   *  Supabase session is genuinely optional here — but both Prospect Finder
-   *  actions require one. Without this the UI cannot tell "not signed in" from
-   *  "MoltSets is broken", and it reported the second for the first. */
-  const [hasSession, setHasSession] = useState<boolean | null>(null);
+  /** null = not determined yet. Tracks the LinkedIn connection, not a Supabase
+   *  session — `prospectGate` in the edge function accepts either, and the
+   *  dashboard has only the former (`/dashboard` has NO route guard, see
+   *  App.tsx). Kept so the UI can tell "not connected" from "MoltSets is
+   *  broken"; it reported the second for the first twice before this existed. */
+  const [hasLinkedIn, setHasLinkedIn] = useState<boolean | null>(null);
   const { toast } = useToast();
 
   /** Is the MOLTSETS_API_KEY secret present and working? */
   const checkStatus = useCallback(async () => {
     // Works on the LinkedIn connection alone; an app session is optional.
     if (!accessToken) {
-      setHasSession(false);
+      setHasLinkedIn(false);
       setStatus(null);
       return;
     }
-    setHasSession(true);
+    setHasLinkedIn(true);
     try {
       const { data, error } = await supabase.functions.invoke('linkedin-api', {
         body: { action: 'moltsets_status', accessToken },
@@ -292,6 +292,6 @@ export function useProspectFinder(accessToken: string | null) {
     findProspects,
     status,
     checkStatus,
-    hasSession,
+    hasLinkedIn,
   };
 }

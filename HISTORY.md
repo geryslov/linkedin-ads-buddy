@@ -416,3 +416,10 @@ The MCP's per-creative analytics only carried delivery, spend and lead metrics. 
 
 ### Oct 21, 2026 — Prospect Finder works on LinkedIn SSO alone
 The JWT-only gate made the tool unreachable for LinkedIn-only users (the "Sign in" link looped back to LinkedIn connect). User decision: LinkedIn session is enough, Claude/MCP must stay blocked. Gate now accepts a live LinkedIn token only when the request carries an app browser Origin; the MCP server sends none. Verified: browser-origin call → connected, no-origin call → 401.
+
+The gate also cost two wrong fixes first. The banner that replaced the 401 linked to `/auth`, which
+only shows the email form with `?mode=email`; plain `/auth` offers "Continue with LinkedIn", which
+refreshes the LinkedIn token and creates no Supabase session — so signing in returned the user to an
+unchanged banner. Before that was found the symptom was chased into async `auth.storage` on Lovable
+preview surfaces: a real property of the storage contract, and not the cause. Reading where the link
+sent the user would have been faster than reading the storage layer.

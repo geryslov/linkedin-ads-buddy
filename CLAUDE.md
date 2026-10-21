@@ -298,26 +298,43 @@ payload and `find_prospects` drops it. Emails (`linkedin_to_best_email`) and car
 (`linkedin_to_mobile_phone`, ~$0.15/token) are separate billed endpoints and a privacy decision —
 adding them is a product call, not a wider SELECT.
 
-Both actions are **platform-only**: they require a user JWT, so MCP's anon key 401s them by
-construction (same gate as `bulk_copy_creatives`). That keeps per-record spend behind the dashboard.
+Both actions are gated by **`prospectGate()`**, not by a bare JWT check. It accepts either a
+signed-in app user *or* a request carrying an app `Origin` header plus a LinkedIn token that
+`/v2/me` confirms is live. Browsers always send `Origin` on these cross-origin POSTs; the MCP
+server's server-side `fetch` sends none, so Claude still cannot spend MoltSets credits through the
+unrestricted legacy passthrough. Verified 2026-10-21: no `Origin`, no token → 401 `AUTH_REQUIRED`.
 
-🔴 **Platform-only means signed-in, and this dashboard does not require that.** `/dashboard` has no
-route guard; its real credential is the LinkedIn token in `localStorage`. So for a LinkedIn-only
-session both Prospect Finder actions 401 — the gate is working, the feature is simply unreachable.
-Modelling the gate on `bulk_copy_creatives` without checking what the dashboard guarantees is the
-mistake; "MCP cannot reach it" was verified and "the dashboard can" was not. The UI now detects a
-missing session and says to sign in, rather than reporting it as a MoltSets failure. Removing the
-gate is **not** the fix: legacy `call_linkedin_action` is unrestricted, so an MCP key could then
-spend MoltSets credits through the public anon key.
+🔴 **Platform-only must not mean "needs a JWT" here.** `/dashboard` has no route guard; its real
+credential is the LinkedIn token in `localStorage`. A JWT-only gate (copied from
+`bulk_copy_creatives` without checking what this dashboard actually guarantees) made the feature
+unreachable for every LinkedIn-only session. Dropping the gate is still **not** the fix — legacy
+`call_linkedin_action` is unrestricted, so an MCP key would then reach MoltSets through the public
+anon key — which is why the gate widened to a second credential instead of disappearing.
 
-⚠️ **A platform-only action cannot be probed from a mount effect.** `moltsets_status` ran in
-`useEffect` on mount, which beats the Supabase session's hydration from storage — supabase-js then
-sends the anon key, the gate 401s correctly, and the status sticks because nothing re-probes.
-`bulk_copy_creatives` never showed this because a click is always late enough. `checkStatus` now
-waits for `getSession()` and re-probes on `onAuthStateChange`. Any *thrown* error from that probe is
-flagged `callFailed`, because only a 200 carrying `connected: false` is the action's own report
-about the key — a 401 or a stale-deploy 400 says nothing about it, and advising a key change on
-those sends people to fix something that is already right.
+⚠️ **The "Sign in" dead end, and why it cost two wrong fixes.** The banner that replaced the 401
+linked to `/auth`, which shows the email form only with `?mode=email`; plain `/auth` offers
+"Continue with LinkedIn", and that refreshes the LinkedIn token **without creating a Supabase
+session** (`linkedin_oidc` is deliberately not enabled — see Token flow). Signing in therefore
+returned the user to an unchanged banner, a clean loop. Before finding that, the symptom was chased
+into `auth.storage` being async on Lovable preview surfaces
+([previewAuthStorage.ts](src/integrations/supabase/previewAuthStorage.ts) brokers over postMessage
+with a 2s timeout) — true of the storage contract, irrelevant here, and a round of work spent
+reading the storage layer rather than the sign-in page the banner pointed at. **Read where a link
+actually sends the user before theorising about what happens after they arrive.**
+
+⚠️ **Any *thrown* error from the `moltsets_status` probe is flagged `callFailed`.** Only a 200
+carrying `connected: false` is the action's own report about the key — a 401 or a stale-deploy 400
+says nothing about it, and advising a key change on those sends people to fix something already
+right. The probe runs from a mount effect again, which is fine now that it depends on
+`accessToken` rather than on a session hydrating from storage.
+
+⚠️ **`prospectGate` has two coupling risks worth knowing.** `Origin` is a browser convention, not an
+auth boundary: any server-side caller can set it, so with the anon key public the real credential
+for MoltSets spend is now "possession of some live LinkedIn ads token". The ceiling is the MoltSets
+plan's own row budget, and the MCP path stays shut, so this was accepted knowingly — don't mistake
+it for a guarantee. Second, the gate calls `/v2/me`, which needs the deprecated `r_liteprofile`
+this app still requests. If these scopes ever move to OIDC (`get_profile` → `/v2/userinfo`),
+`prospectGate` fails closed for everyone and the symptom is an unexplained 401.
 
 ## LinkedIn OAuth scopes
 

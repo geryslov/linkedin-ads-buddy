@@ -225,7 +225,7 @@ export function ProspectFinder({ accessToken, selectedAccount, campaigns }: Pros
   const {
     companies, titles, isLoadingAudience, audienceError, loadAudience,
     prospects, companyResults, runMeta, isFinding, findError, findProspects,
-    status, checkStatus, hasSession,
+    status, checkStatus, hasLinkedIn,
   } = useProspectFinder(accessToken);
 
   const [selectedCampaignIds, setSelectedCampaignIds] = useState<string[]>([]);
@@ -332,7 +332,7 @@ export function ProspectFinder({ accessToken, selectedAccount, campaigns }: Pros
 
   return (
     <div className="space-y-4 animate-fade-in">
-      {hasSession === false && (
+      {hasLinkedIn === false && (
         <div className="flex items-start gap-3 rounded-xl border border-warning/30 bg-warning/[0.06] px-4 py-3">
           <AlertTriangle className="h-4 w-4 text-warning mt-0.5 shrink-0" />
           <div className="text-xs text-foreground/90 space-y-1">
@@ -344,7 +344,7 @@ export function ProspectFinder({ accessToken, selectedAccount, campaigns }: Pros
         </div>
       )}
 
-      {hasSession !== false && status && !status.connected && (
+      {hasLinkedIn !== false && status && !status.connected && (
         <div className="flex items-start gap-3 rounded-xl border border-warning/30 bg-warning/[0.06] px-4 py-3">
           <AlertTriangle className="h-4 w-4 text-warning mt-0.5 shrink-0" />
           <div className="text-xs text-foreground/90 space-y-1">
