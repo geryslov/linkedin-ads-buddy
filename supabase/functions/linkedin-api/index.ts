@@ -30,6 +30,34 @@ const MOLTSETS_CONCURRENCY = 3;
 
 type MoltSetsError = Error & { code?: string; retryAfter?: number | null; status?: number };
 
+/** Prospect Finder gate. Allows (a) a signed-in app user, or (b) a dashboard
+ *  browser call carrying a live LinkedIn token. (b) requires an app Origin
+ *  header: browsers always send one on these cross-origin POSTs, while the MCP
+ *  server (server-side fetch) sends none — so Claude cannot spend MoltSets
+ *  credits through the unrestricted legacy passthrough. Decided 2026-10-21:
+ *  LinkedIn-only sessions must work, Claude must stay blocked. */
+const PROSPECT_ALLOWED_ORIGIN = /^https:\/\/([a-z0-9-]+\.)*(lovable\.app|lovableproject\.com|lovable\.dev)$|^http:\/\/localhost(:\d+)?$/i;
+async function prospectGate(req: Request, accessToken: unknown): Promise<boolean> {
+  const authHeader = req.headers.get('Authorization') || '';
+  try {
+    const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+    const c = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!, {
+      global: { headers: { Authorization: authHeader } },
+    });
+    const { data: { user } } = await c.auth.getUser();
+    if (user) return true;
+  } catch (_e) { /* fall through to LinkedIn check */ }
+
+  const origin = req.headers.get('Origin') || '';
+  if (!origin || !PROSPECT_ALLOWED_ORIGIN.test(origin)) return false;
+  if (typeof accessToken !== 'string' || accessToken.length < 20) return false;
+  const me = await fetch('https://api.linkedin.com/v2/me', {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  await me.body?.cancel();
+  return me.ok;
+}
+
 async function moltsetsCall(tool: string, body: Record<string, unknown>): Promise<any> {
   const key = Deno.env.get('MOLTSETS_API_KEY');
   if (!key) throw new Error('MoltSets is not connected: set the MOLTSETS_API_KEY edge secret.');
