@@ -293,6 +293,12 @@ Fixed on its own branch so it could merge ahead of the feature, and made env-ove
 sunset is a secret change rather than a code change plus an edge deploy, which matters because edge
 CI has been broken since June.
 
+**That branch never merged.** `claude/google-ads-v22-sunset` (`9b1db03`) was pushed and CLAUDE.md was
+updated to describe the env-overridable version — but the branch sat unmerged, so the code kept
+reading `'v22'` while the docs said otherwise. Spotted on 2026-10-21, two weeks past the sunset,
+while adding Prospect Finder; the doc describing code that does not exist is the part worth
+remembering, because it reads as reassurance during exactly the check that should have caught it.
+
 **Two tenancy decisions.** The gateway connection is account-wide, not per-user, so the Google tools
 are blocked in `mode: "product"` even with the opt-in flag set, and the Google actions are absent
 from `PASSTHROUGH_READ` so the passthrough cannot reach them either. And `get_google_ads_links` /
@@ -307,6 +313,65 @@ and that tradeoff is the owner's call, not a cleanup.
 The tools themselves are opt-in via `GOOGLE_ADS_MCP_TOOLS=1`, held to the same standard as every
 other addition to the legacy server: additive, inert by default, verified rather than assumed — 17
 tools without the flag, 26 with it, none removed, and 17 in product mode even with the flag on.
+
+## Oct 2026 — Prospect Finder: demographics back to people
+
+The dashboard could already say *which companies* and *which job titles* engaged with a campaign. It
+could never say *who* — because LinkedIn does not know, or will not say. Demographic analytics
+aggregates each pivot independently: a list of companies, a separate list of titles, no cross-tab and
+no member-level rows at any volume. Prospect Finder closes that gap from the outside, by taking the
+company and title rows an operator ticks and asking a B2B people-search API who matches.
+
+[MoltSets](https://developer.moltsets.com) does the matching. One credential, one entry point
+(`moltsetsCall`), the same discipline as the Lovable Google Ads gateway — the point being that there
+is no second path to add a second credential to later.
+
+**The honest framing was the design decision.** It would be easy to render this as "the people who
+clicked your ad", and it would be wrong: a company × title search returns people who *fit the profile
+of* the engaged audience. The feature says so in an info banner above its own controls, and the
+per-row "name match" label flags the weaker matches rather than hiding them. If a future change makes
+that banner read like identification, the change is the bug.
+
+What the API documentation made clear, and what the code now encodes:
+
+- **A miss is HTTP 200 with `status: "not_found"`.** Reading the status code instead of the field
+  turns every empty result into a success and every quota error into "no prospects found". The
+  per-company outcome pills exist for the same reason: "no match" and "the key is wrong" render
+  identically in an empty table.
+- **A missing `User-Agent` is a 403**, indistinguishable from a bad key at a glance. `moltsetsCall`
+  always sends one.
+- **Search concurrency is plan-dependent** — 3 on Free/$27, up to 8 above — and exceeding it returns
+  `429 search_concurrency_exceeded` rather than queueing. Capped at 3, the only value safe on every
+  plan, with 25 companies per run so the fan-out still fits the edge function's window.
+- **`company_domain` beats `company`.** Name matching finds the wrong "Acme" often enough to matter,
+  so each company URN is resolved to `localizedWebsite` via `organizationsLookup` first — a route
+  already proven on this token by `get_company_demographic`, not a new permission bet.
+- **Domains that aren't domains.** `new URL()` happily parses `https://n/a` and hands back the host
+  `n`. A hostname with no dot is rejected rather than spent on a guaranteed `not_found`.
+- **Duplicate targets bill twice.** Two LinkedIn company pages can resolve to one domain; the second
+  search returns the same rows for the same money. Collapsed, and counted in `duplicatesSkipped`.
+
+Scope was held deliberately narrow: **LinkedIn profiles only**. `search_people` returns
+`business_email` in the same payload for no extra call, and `find_prospects` drops it anyway. Emails
+and carrier-verified mobiles are separate billed endpoints — mobiles metered at ~$0.15 a token — and
+contact data is a privacy decision rather than a wider SELECT. Both actions are platform-only (user
+JWT required, so MCP's anon key 401s them by construction, like `bulk_copy_creatives`), which keeps
+per-record spend behind a UI where it is visible before it happens.
+
+Then the first real call was made, and it earned its keep. Both request shapes answered exactly as
+written — but `get_account` showed the free plan reports `search_trial.max_per_call: 5`, and
+`limit: 6` came back as **five rows, HTTP 200, no error**. A silent clamp, which meant the
+per-company dropdown offering 10 and 25 was promising rows the plan would never return. It now reads
+the cap from the account and offers nothing above it.
+
+The same response contradicted the docs a second way: a trial key carries `tokens_remaining` and a
+`search_trial` block and **no `fair_use` at all**, so the code reading `metadata.fair_use` would have
+quietly shown no budget to anyone on a free key. `moltsetsBudget()` now normalizes whichever shape
+arrives. That mattered more than a cosmetic field, because the trial is **100 rows total** and a
+25-company run at 5 rows each spends 125 — more than the whole allowance in one click. The UI shows
+rows remaining and warns before a run exceeds it.
+
+Needs `MOLTSETS_API_KEY` as an edge secret, and a manual deploy — the CI token is still broken.
 
 ## Recurring themes
 

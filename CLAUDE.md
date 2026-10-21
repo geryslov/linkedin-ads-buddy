@@ -245,6 +245,55 @@ would have taken Google spend to zero silently. Now env-overridable: the next su
 change, not a code change plus an edge deploy. If the gateway lags a version, set
 `GOOGLE_ADS_API_VERSION=v24`.
 
+## Prospect Finder (MoltSets)
+
+Turns campaign demographics into named people. Sidebar group **Prospecting** →
+[ProspectFinder.tsx](src/components/dashboard/ProspectFinder.tsx) +
+[useProspectFinder.ts](src/hooks/useProspectFinder.ts); edge actions `find_prospects` and
+`moltsets_status`. All MoltSets traffic goes through `moltsetsCall()` — one credential, one entry
+point, like `googleAdsSearch()`.
+
+Needs `MOLTSETS_API_KEY` as a Supabase edge secret on `linkedin-api`. Without it the audience panels
+still load (that is plain LinkedIn data) and the people search shows a setup banner.
+
+⚠️ **LinkedIn aggregates each demographic pivot independently.** There is no company × title
+cross-tab and no member-level data, so results are people who *match* the engaged audience's
+profile — not who saw or clicked the ad. The UI states this; keep it that way.
+
+Verified against the live API 2026-10-21 — `get_account` and `search_people` both answer the exact
+request shapes `find_prospects` sends. Non-obvious behaviours, all encoded in the code:
+- **A miss is HTTP 200 with `status: "not_found"`** — read the field, not the status code, or quota
+  errors silently become "no results".
+- **A missing `User-Agent` header is a 403**, which reads exactly like a bad key.
+- **Search concurrency is plan-dependent** (3 on Free/$27, 8 on top plans) and over-limit returns
+  `429 search_concurrency_exceeded`, not a queue. `MOLTSETS_CONCURRENCY = 3` is the only safe value;
+  25 companies per run.
+- 🔴 **`limit` is silently CLAMPED, not rejected.** A trial/free key reports
+  `search_trial.max_per_call: 5` and returns 5 rows for `limit: 6` with HTTP 200 and no error. The
+  UI reads that cap from `moltsets_status` and only offers values at or under it — a dropdown
+  offering 25 on a 5-row plan is a lie, not a bug in the API.
+- 🔴 **`metadata.fair_use` is not what every plan returns.** A free/trial key carries
+  `tokens_remaining` plus a `search_trial` block and *no* `fair_use` at all; paid keys carry
+  `fair_use`. `moltsetsBudget()` normalizes whichever is present, so never read `fair_use` directly —
+  on a trial key it is `undefined` and the remaining-rows figure silently disappears.
+
+**Two separate budgets, and the row one is small.** `token_balance` is consumed per call;
+`search_trial.results_remaining` is consumed per *returned row* and starts at 100 on the free plan.
+25 companies × 5 rows is 125 rows — more than a whole trial in one click. The UI shows rows
+remaining and warns before a run exceeds it.
+
+Company matching prefers `company_domain`, resolved from `localizedWebsite` via
+`organizationsLookup`, because a bare company name matches the wrong "Acme" too often. Name-matched
+rows are labelled as such in the results.
+
+**LinkedIn profiles only, on purpose.** `search_people` returns `business_email` for free in the same
+payload and `find_prospects` drops it. Emails (`linkedin_to_best_email`) and carrier-verified mobiles
+(`linkedin_to_mobile_phone`, ~$0.15/token) are separate billed endpoints and a privacy decision —
+adding them is a product call, not a wider SELECT.
+
+Both actions are **platform-only**: they require a user JWT, so MCP's anon key 401s them by
+construction (same gate as `bulk_copy_creatives`). That keeps per-record spend behind the dashboard.
+
 ## LinkedIn OAuth scopes
 
 Two **mutually exclusive** scope sets, one per product — served by two different functions:
