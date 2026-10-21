@@ -301,6 +301,15 @@ adding them is a product call, not a wider SELECT.
 Both actions are **platform-only**: they require a user JWT, so MCP's anon key 401s them by
 construction (same gate as `bulk_copy_creatives`). That keeps per-record spend behind the dashboard.
 
+⚠️ **A platform-only action cannot be probed from a mount effect.** `moltsets_status` ran in
+`useEffect` on mount, which beats the Supabase session's hydration from storage — supabase-js then
+sends the anon key, the gate 401s correctly, and the status sticks because nothing re-probes.
+`bulk_copy_creatives` never showed this because a click is always late enough. `checkStatus` now
+waits for `getSession()` and re-probes on `onAuthStateChange`. Any *thrown* error from that probe is
+flagged `callFailed`, because only a 200 carrying `connected: false` is the action's own report
+about the key — a 401 or a stale-deploy 400 says nothing about it, and advising a key change on
+those sends people to fix something that is already right.
+
 ## LinkedIn OAuth scopes
 
 Two **mutually exclusive** scope sets, one per product — served by two different functions:

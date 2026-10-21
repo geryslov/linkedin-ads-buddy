@@ -236,8 +236,6 @@ export function ProspectFinder({ accessToken, selectedAccount, campaigns }: Pros
   const [country, setCountry] = useState('');
   const [perCompanyLimit, setPerCompanyLimit] = useState('10');
 
-  useEffect(() => { checkStatus(); }, [checkStatus]);
-
   // A different account or campaign set makes the old selection meaningless.
   useEffect(() => {
     setSelectedCompanies(new Set());
@@ -348,6 +346,19 @@ export function ProspectFinder({ accessToken, selectedAccount, campaigns }: Pros
                   adding the API key changes nothing until then. Loading the audience below still
                   works.
                 </p>
+              </>
+            ) : status.callFailed ? (
+              <>
+                <p className="font-semibold">Couldn't check MoltSets</p>
+                <p className="text-muted-foreground">
+                  The connection check itself failed — <span className="font-mono">"{status.reason}"</span>.
+                  This says nothing about your API key, so don't change it yet: an authentication
+                  error here usually means the check outran your session. Loading the audience below
+                  still works.
+                </p>
+                <Button variant="outline" size="sm" className="mt-1 h-7 text-xs" onClick={() => checkStatus()}>
+                  Try again
+                </Button>
               </>
             ) : (
               <>
