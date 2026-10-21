@@ -17,7 +17,7 @@ What exists in LinkedIn Ads Buddy today. See [CLAUDE.md](CLAUDE.md) for architec
 
 ## Dashboard navigation
 
-Defined in [Sidebar.tsx](src/components/dashboard/Sidebar.tsx). Seven groups.
+Defined in [Sidebar.tsx](src/components/dashboard/Sidebar.tsx). Eight groups.
 
 **Frozen items** — nav items marked `hidden: true` on their `NavItem` are filtered out of both the sidebar and the ⌘K command palette, but their routes/tabs still exist and render if reached by direct URL (`?tab=<id>`). Currently frozen: Campaigns (`campaigns`), Creatives (`creatives`), Conv. Breakdown (`conv_breakdown`), Activity Report (`activity_report`), Account Health (`account_health`), Audiences (`audiences`), Titles (`standardized_titles`). Remove the flag to bring one back. A group whose visible items all become hidden renders nothing (no orphan header).
 
@@ -74,6 +74,11 @@ Groups and items:
 | Audiences | [AudienceInsightsHub](src/components/dashboard/AudienceInsightsHub.tsx), [AudienceExpansionSuggester](src/components/dashboard/AudienceExpansionSuggester.tsx) | Live size estimates via Audience Counts API |
 | Company Timeline | [CompanyEngagementTimeline](src/components/dashboard/CompanyEngagementTimeline.tsx) | |
 | Influence Matcher | [CompanyInfluenceMatcher](src/components/dashboard/CompanyInfluenceMatcher.tsx) | CRM CSV → LinkedIn attribution, 4-level drill-down |
+
+### Prospecting
+| Item | Component | Notes |
+|---|---|---|
+| Prospect Finder | [ProspectFinder](src/components/dashboard/ProspectFinder.tsx), [useProspectFinder](src/hooks/useProspectFinder.ts) | Campaign demographics → named people via MoltSets |
 
 ### Tools
 | Item | Component |
@@ -137,7 +142,37 @@ Agency → client publishing flow.
 
 `create-test-user` was **deleted 2026-08-05** — a public `verify_jwt = false` endpoint that minted email-confirmed accounts with the service role for anyone who knew the URL. ⚠️ Deleting the folder does not undeploy it; remove it in the Supabase dashboard (or `npx supabase functions delete create-test-user`) or it stays live.
 
-### `linkedin-api` actions (74)
+### Google Ads (gateway-backed)
+
+All Google access runs through the Lovable connector gateway — no developer token, no Google OAuth
+client, no refresh token in this repo. See **Google Ads** in [CLAUDE.md](CLAUDE.md).
+
+**Dashboard actions**: `list_google_ads_accounts`, `get_google_ads_links`, `save_google_ads_link`,
+`get_google_spend`. Linked per client in `account_google_links`; spend feeds Budget Pacing.
+
+**MCP read actions** (new): `get_google_campaigns`, `get_google_campaign_report`,
+`get_google_ad_group_report`, `get_google_ad_report`, `get_google_ad_copy`, `get_google_keywords`,
+`get_google_search_terms`, `google_ads_search`.
+
+**9 MCP tools** ([google-tools.ts](mcp-server/src/google-tools.ts)): `list_google_ad_accounts`,
+`get_google_campaigns`, `get_google_campaign_report`, `get_google_ad_group_report`,
+`get_google_ad_report`, `get_google_ad_copy`, `get_google_keywords`, `get_google_search_terms`,
+`google_ads_query`.
+
+`get_google_ad_copy` returns every headline and description asset, long headline, display-URL paths,
+final URLs and ad strength — the thing LinkedIn walls off behind two gates is a plain read here.
+`google_ads_query` is a raw GAQL escape hatch, SELECT-only.
+
+**Opt-in, legacy-only.** `enableGoogleAds` defaults to false and `server.ts` sets it from
+`GOOGLE_ADS_MCP_TOOLS=1`; unset, the server advertises its usual 17 tools (verified 17 → 26, none
+removed). Blocked in `mode: "product"` even with the flag, because the gateway connection is
+account-wide and would be shared across tenants. `GET /health` shows `googleAdsTools`.
+
+🔴 `get_google_ads_links` and `get_google_spend` are **not** exposed to MCP or allowlisted: both skip
+their `user_id` filter when no JWT resolves, on a service-role client, so they return every user's
+rows. Details and the open decision in CLAUDE.md.
+
+### `linkedin-api` actions (76)
 
 **Auth & accounts** — `get_auth_url`, `exchange_token`, `get_profile`, `get_ad_accounts`, `sync_ad_accounts`, `sync_mcp_token`
 
@@ -158,6 +193,8 @@ Agency → client publishing flow.
 **Custom fields** — `get_custom_fields`, `set_custom_field`, `bulk_set_custom_fields`, `delete_custom_field`
 
 **Reports** — `get_weekly_report`, `publish_weekly_report`, `list_published_reports`, `revoke_published_report`
+
+**Prospecting (MoltSets)** — `find_prospects`, `moltsets_status`
 
 **Diagnostic (temporary)** — `probe_creative_create`
 
@@ -244,6 +281,43 @@ Lives in a **separate repo**: `geryslov/ads-manager-hub-2bd81d31` (Lovable — T
 All four are blocked on one thing: a Supabase access token with project access. Run
 `python3 scripts/setup.py` **from `geryslov/ads-manager-hub-2bd81d31`** — it applies the product
 migrations and deploys `mcp-auth`. Nothing in this repo needs to be deployed for the product.
+
+## Prospect Finder (MoltSets)
+
+Campaign demographics tell you *which companies* and *which job titles* engaged. They never tell you
+*who*. Prospect Finder takes the company rows and job-title rows you tick and asks MoltSets for
+people who match, so an impression at Company X with Job Title Y becomes a list of named profiles
+to reach out to on LinkedIn.
+
+**The inference is the feature, and the UI says so.** LinkedIn aggregates each demographic pivot
+independently — there is no company × title cross-tab to request, and no member-level data at all.
+The results are candidates fitting the engaged audience's profile, not a record of who saw the ad.
+An info banner states this above the controls; don't quietly reword it into "people who clicked".
+
+- **Flow** — pick campaigns + window → `get_demographic_analytics` runs twice (`MEMBER_COMPANY`,
+  `MEMBER_JOB_TITLE`) in parallel → tick companies and titles → `find_prospects`.
+- **Output is LinkedIn profiles only.** `search_people` also returns `business_email`, and
+  `find_prospects` deliberately drops it. Emails and carrier-verified mobiles are separate billed
+  endpoints (`linkedin_to_best_email`, `linkedin_to_mobile_phone` at ~$0.15/phone token) and a
+  privacy decision, not a wider SELECT — adding them is a product call, not a patch.
+- **Domain beats name.** A company name matches the wrong "Acme" often enough to matter, so
+  `find_prospects` resolves each company URN to `localizedWebsite` via `organizationsLookup` and
+  searches `company_domain`. Name-matched rows are labelled "name match" in the results table.
+- **One search per company**, capped at `MOLTSETS_CONCURRENCY = 3` — the only value safe on every
+  MoltSets plan (3 on Free/$27, 5 on $97, 8 above); exceeding it returns
+  `429 search_concurrency_exceeded` rather than queueing. 25 companies max per run.
+- **Duplicate targets are collapsed.** Two LinkedIn company pages can share one domain (subsidiary,
+  duplicate page); searching both bills the same query twice. `metadata.duplicatesSkipped` reports it.
+- **A miss is HTTP 200 with `status: "not_found"`.** Read the field, not the status code. Per-company
+  outcome pills distinguish found / none / failed, because "no match" and "the key is wrong" look
+  identical in an empty table.
+- **`limit` is clamped, not rejected.** A free/trial key caps results at `search_trial.max_per_call`
+  (5) and returns 5 for `limit: 6` with no error. The per-company dropdown only offers values at or
+  under the cap the account reports.
+- **Budget shape varies by plan.** A trial key returns `tokens_remaining` + `search_trial` and no
+  `fair_use`; paid keys return `fair_use`. `moltsetsBudget()` normalizes both — the UI shows rows
+  remaining and warns when a run would exceed it, because the free trial is only 100 rows and one
+  25-company run can spend more than that.
 
 ## Known gaps
 

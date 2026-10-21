@@ -36,6 +36,7 @@ import { AgenticChatDrawer } from "@/components/dashboard/AgenticChatDrawer";
 import { AccountHealthCheck } from "@/components/dashboard/AccountHealthCheck";
 import { PerformanceSegmentation } from "@/components/dashboard/PerformanceSegmentation";
 import { ConnectClaude } from "@/components/dashboard/ConnectClaude";
+import { ProspectFinder } from "@/components/dashboard/ProspectFinder";
 import { CommandPalette } from "@/components/dashboard/CommandPalette";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -68,6 +69,7 @@ const tabMeta: Record<string, { group: string; title: string; subtitle: string }
   audiences:           { group: "Audience",   title: "Audience Insights",           subtitle: "Understand and manage your target audiences" },
   company_timeline:    { group: "Audience",   title: "Company Timeline",            subtitle: "Track company engagement over time" },
   influence_matcher:   { group: "Audience",   title: "Influence Matcher",           subtitle: "Match companies to influential contacts" },
+  prospect_finder:     { group: "Prospecting", title: "Prospect Finder",           subtitle: "Turn campaign demographics into named people at the companies you reached" },
   title_checker:       { group: "Tools",      title: "Title Checker",               subtitle: "Validate and explore job titles" },
   standardized_titles: { group: "Tools",      title: "Standardized Titles",         subtitle: "Normalize job title variations" },
   name_report:         { group: "Tools",      title: "Name Report",                 subtitle: "Analyze campaign naming conventions" },
@@ -491,6 +493,14 @@ export default function Dashboard() {
           <CompanyInfluenceMatcher
             accessToken={accessToken}
             selectedAccount={selectedAccount}
+          />
+        )}
+
+        {activeTab === "prospect_finder" && (
+          <ProspectFinder
+            accessToken={accessToken}
+            selectedAccount={selectedAccount}
+            campaigns={campaigns.map((c) => ({ id: c.id, name: c.name, status: c.status }))}
           />
         )}
 

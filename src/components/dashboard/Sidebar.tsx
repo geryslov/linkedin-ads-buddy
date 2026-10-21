@@ -32,6 +32,7 @@ import {
   Bot,
   CopyPlus,
   Pencil,
+  Radar,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -109,6 +110,13 @@ export const navGroups: NavGroup[] = [
       { id: "audiences", label: "Audiences", icon: Users, hidden: true },
       { id: "company_timeline", label: "Company Timeline", icon: Building2 },
       { id: "influence_matcher", label: "Influence Matcher", icon: Crosshair },
+    ],
+  },
+  {
+    id: "prospecting",
+    label: "Prospecting",
+    items: [
+      { id: "prospect_finder", label: "Prospect Finder", icon: Radar },
     ],
   },
   {

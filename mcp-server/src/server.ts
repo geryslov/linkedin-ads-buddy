@@ -28,6 +28,12 @@ registeredClients.set(CLAUDE_CLIENT_ID, { redirectUris: ["*"], clientSecret: "no
 // MCP sessions
 const mcpSessions = new Map<string, { transport: StreamableHTTPServerTransport }>();
 
+// Read-only Google Ads tools, off unless the Railway service opts in. Google is
+// reached through the Lovable connector gateway in the edge function, so there
+// is no extra credential here — this flag only decides whether the tools are
+// advertised. Unset, this server behaves exactly as it always has.
+const GOOGLE_ADS_MCP_TOOLS = process.env.GOOGLE_ADS_MCP_TOOLS === "1";
+
 function getBaseUrl(req: express.Request): string {
   return `https://${req.hostname}`;
 }
@@ -247,7 +253,7 @@ app.post("/mcp", async (req, res) => {
     sessionIdGenerator: () => randomUUID(),
   });
 
-  const server = createLinkedInAdsServer(() => token);
+  const server = createLinkedInAdsServer(() => token, { enableGoogleAds: GOOGLE_ADS_MCP_TOOLS });
   await server.connect(transport);
 
   transport.onclose = () => {
@@ -280,7 +286,12 @@ app.delete("/mcp", (req, res) => {
 // ── Health + client ID ────────────────────────────────────────────────────────
 
 app.get("/health", (_req, res) => {
-  res.json({ status: "ok", sessions: mcpSessions.size, clientId: CLAUDE_CLIENT_ID });
+  res.json({
+    status: "ok",
+    sessions: mcpSessions.size,
+    clientId: CLAUDE_CLIENT_ID,
+    googleAdsTools: GOOGLE_ADS_MCP_TOOLS ? "on" : "off",
+  });
 });
 
 app.get("/client-id", (_req, res) => {

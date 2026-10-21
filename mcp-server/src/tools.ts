@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { registerGoogleAdsTools } from "./google-tools.js";
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "https://bxoxefmenvlxiubynuay.supabase.co";
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJ4b3hlZm1lbnZseGl1YnludWF5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU0NTUzMzQsImV4cCI6MjA4MTAzMTMzNH0.ox7oP80ZqfgC5wuEJbtiMTiB-XxmCzrN2ZlZ9tpo8QI";
@@ -20,6 +21,14 @@ const LINKEDIN_API = "https://api.linkedin.com";
 //   get_auth_url          } OAuth plumbing; does not belong on the MCP surface.
 //   exchange_token        }
 //   *_published_report    — JWT-scoped platform actions; 401 from here anyway.
+//   get_google_ads_links  } Apply their user_id filter only `if (ownerId)`, on a
+//   get_google_spend      } service-role client that bypasses RLS. An MCP caller
+//                           never sends a user JWT, so both would return EVERY
+//                           user's rows. Not allowlisted, and not wrapped by a
+//                           tool either — see google-tools.ts.
+//   get_google_*          — the gateway Google reads. The Lovable connector is
+//   google_ads_search     } account-wide, so one shared Google account would be
+//                           readable by every tenant. Legacy opt-in only.
 const PASSTHROUGH_READ = new Set([
   "bulk_search_skills", "bulk_search_titles", "get_account_structure", "get_ad_accounts",
   "get_ad_analytics", "get_analytics", "get_audience_count", "get_audience_expansion",
@@ -71,6 +80,19 @@ export type ServerOptions = {
   allowWrites?: () => boolean;
   /** Product mode only: where to send a user whose connection has expired. */
   setupUrl?: string;
+  /**
+   * Register the read-only Google Ads tools (see google-tools.ts).
+   *
+   * Defaults to FALSE. Leave it off and the server advertises exactly the tool
+   * list it always has — the same "additive, inert by default" standard the
+   * Google connection resolver is held to.
+   *
+   * Must stay off in `mode: "product"`. These tools reach Google through the
+   * Lovable connector gateway, whose connection is account-wide rather than
+   * per-user, so in a multi-tenant server every tenant would be reading one
+   * shared Google account. server-product.ts deliberately never sets it.
+   */
+  enableGoogleAds?: boolean;
 };
 
 export function createLinkedInAdsServer(
@@ -333,6 +355,12 @@ get_lead_gen_forms, get_ad_analytics, sync_ad_accounts, and more.`,
       return ok(await callEdge(action, (params as Record<string, unknown>) || {}));
     }
   );
+
+  // Google Ads: opt-in, read-only, and never in product mode. Reuses callEdge
+  // above so there is one transport path to the edge function, not two.
+  if (opts.enableGoogleAds && !productMode) {
+    registerGoogleAdsTools(server, { callEdge });
+  }
 
   return server;
 }

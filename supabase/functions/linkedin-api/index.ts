@@ -16,6 +16,115 @@ const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
 const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const supabaseClient = createClient(supabaseUrl, supabaseServiceKey);
 
+// ============ MOLTSETS (B2B people search) ============
+// Powers Prospect Finder. LinkedIn demographics are aggregated per pivot — you
+// get company rows and job-title rows, never the people behind either. MoltSets
+// search_people turns a company × title pair back into named profiles, which is
+// a candidate list, not a record of who actually saw the ad.
+// One credential, one entry point: every call goes through moltsetsCall.
+const MOLTSETS_API = 'https://api.moltsets.com/api/v1/tools';
+// Plan-dependent: 3 concurrent searches on Free/$27, 5 on $97, 8 above. Three is
+// the only value safe on every plan, and exceeding it returns
+// 429 search_concurrency_exceeded rather than queueing.
+const MOLTSETS_CONCURRENCY = 3;
+
+type MoltSetsError = Error & { code?: string; retryAfter?: number | null; status?: number };
+
+async function moltsetsCall(tool: string, body: Record<string, unknown>): Promise<any> {
+  const key = Deno.env.get('MOLTSETS_API_KEY');
+  if (!key) throw new Error('MoltSets is not connected: set the MOLTSETS_API_KEY edge secret.');
+
+  const res = await fetch(`${MOLTSETS_API}/${tool}`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${key}`,
+      // A missing or empty User-Agent is a 403, which reads exactly like a bad
+      // key. Always send one.
+      'User-Agent': 'linkedin-ads-buddy/1.0',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+
+  const text = await res.text();
+  let payload: any = null;
+  try { payload = text ? JSON.parse(text) : null; } catch { /* non-JSON error body */ }
+
+  if (!res.ok) {
+    const code = payload?.error?.code || `http_${res.status}`;
+    const message = payload?.error?.message || text.slice(0, 300) || res.statusText;
+    const err = new Error(`MoltSets ${tool} failed [${code}]: ${message}`) as MoltSetsError;
+    err.code = code;
+    err.status = res.status;
+    err.retryAfter = Number(res.headers.get('Retry-After')) || payload?.metadata?.retry_after || null;
+    throw err;
+  }
+
+  // A miss is HTTP 200 with status "not_found", so callers must read the
+  // `status` field rather than the HTTP code.
+  return payload || {};
+}
+
+// The documented `metadata.fair_use` shape is not what every plan returns. A
+// free/trial key carries `tokens_remaining` plus a `search_trial` block and no
+// fair_use at all (verified live, 2026-10-21), while paid keys carry fair_use.
+// Read whichever is present: the remaining-row count is the one number that
+// decides whether a run is affordable, so it must never silently read undefined.
+function moltsetsBudget(src: any) {
+  const s = src || {};
+  const trial = s.search_trial || {};
+  const fair = s.fair_use || {};
+  const num = (v: unknown) => (typeof v === 'number' ? v : null);
+  return {
+    plan: typeof s.plan === 'string' ? s.plan : null,
+    // get_account calls it token_balance; a tool response calls it tokens_remaining.
+    tokensRemaining: num(s.token_balance) ?? num(s.tokens_remaining),
+    searchResultsRemaining: num(trial.results_remaining),
+    searchResultsTotal: num(trial.results_total),
+    // A trial plan silently CLAMPS limit to this instead of erroring, so a UI
+    // that offers more than this is lying about what it will return.
+    maxPerCall: num(trial.max_per_call),
+    searchRequestsRemaining: num(fair?.search?.requests?.['5h']?.remaining),
+    recordsRemaining5h: num(fair?.records_remaining_5h),
+  };
+}
+
+// MoltSets matches company_domain far more precisely than a company name, so
+// prefer the domain whenever LinkedIn gave us a website.
+function domainFromWebsite(website: string | null | undefined): string | null {
+  if (!website) return null;
+  try {
+    const raw = String(website).trim();
+    const url = new URL(raw.startsWith('http') ? raw : `https://${raw}`);
+    const host = url.hostname.replace(/^www\./, '').toLowerCase();
+    // "n/a" and friends parse as a URL and yield a dotless host. A domain
+    // without a dot is never a real one, and MoltSets would just return
+    // not_found for it.
+    return host.includes('.') ? host : null;
+  } catch {
+    return null;
+  }
+}
+
+// Run tasks with a hard concurrency cap, preserving input order.
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, async () => {
+    for (;;) {
+      const i = next++;
+      if (i >= items.length) return;
+      out[i] = await fn(items[i], i);
+    }
+  });
+  await Promise.all(workers);
+  return out;
+}
+
 // ============ GOOGLE ADS (via Lovable connector gateway) ============
 // Google retires each major version ~12 months after release and keeps about
 // four alive. v22 sunset 2026-10-07 — a sunset version does not degrade, it
@@ -42,7 +151,13 @@ function googleAdsHeaders(loginCustomerId?: string | null): Record<string, strin
 }
 
 async function googleAdsSearch(customerId: string, query: string, loginCustomerId?: string | null): Promise<any[]> {
-  const cid = String(customerId).replace(/-/g, '');
+  const cid = String(customerId ?? '').replace(/\D/g, '');
+  // Without this, a missing or malformed id silently becomes
+  // `customers//googleAds:searchStream` and comes back as an opaque gateway
+  // error. Every caller treats a missing customer as a bug, so say so.
+  if (!cid) {
+    throw new Error('A Google Ads customerId is required (10 digits). Call list_google_ads_accounts to find one.');
+  }
   const res = await fetch(`${GOOGLE_ADS_GATEWAY}/${GOOGLE_ADS_API_VERSION}/customers/${cid}/googleAds:searchStream`, {
     method: 'POST',
     headers: googleAdsHeaders(loginCustomerId || cid),
@@ -85,6 +200,103 @@ async function fetchGoogleSpend(
   }));
 
   return out;
+}
+
+// ── Google Ads read helpers (MCP surface) ────────────────────────────────────
+// These back the read-only Google actions further down, which exist so Claude
+// can read Google Ads over MCP the way it already reads LinkedIn. They reuse
+// googleAdsSearch, and therefore the connector gateway — there is deliberately
+// no second Google credential path.
+
+function gJson(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  });
+}
+
+function gDates(params: any): { start: string; end: string } {
+  const r = params?.dateRange || {};
+  const end = r.end || params?.endDate || new Date().toISOString().slice(0, 10);
+  const start = r.start || params?.startDate ||
+    new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+  return { start, end };
+}
+
+/** Google returns int64 as a JSON string, and money in micros. */
+function gNum(v: unknown): number {
+  const n = typeof v === 'number' ? v : Number(v ?? 0);
+  return Number.isFinite(n) ? n : 0;
+}
+function gMicros(v: unknown): number {
+  return Math.round((gNum(v) / 1_000_000) * 100) / 100;
+}
+
+function gMetrics(m: any) {
+  const impressions = gNum(m?.impressions);
+  const clicks = gNum(m?.clicks);
+  const spend = gMicros(m?.costMicros);
+  const conversions = gNum(m?.conversions);
+  return {
+    impressions, clicks, spend, conversions,
+    conversionValue: gNum(m?.conversionsValue),
+    ctr: impressions ? Math.round((clicks / impressions) * 10000) / 100 : 0,
+    cpc: clicks ? Math.round((spend / clicks) * 100) / 100 : 0,
+    cpm: impressions ? Math.round((spend / impressions) * 1000 * 100) / 100 : 0,
+    costPerConversion: conversions ? Math.round((spend / conversions) * 100) / 100 : 0,
+  };
+}
+
+// Caller-supplied values are interpolated into GAQL, so they are stripped to a
+// safe alphabet first rather than trusted.
+function gIds(arr: unknown): string[] {
+  if (!Array.isArray(arr)) return [];
+  return arr.map((v) => String(v ?? '').replace(/\D/g, '')).filter(Boolean);
+}
+function gEnum(v: unknown): string {
+  return String(v ?? '').toUpperCase().replace(/[^A-Z_]/g, '');
+}
+function gLimit(v: unknown, dflt: number, max: number): number {
+  const n = gNum(v) || dflt;
+  return Math.min(Math.max(Math.trunc(n), 1), max);
+}
+
+/** This function stays read-only: reject anything that is not a bare SELECT. */
+function gAssertSelect(query: string): void {
+  const q = query.trim();
+  if (!/^select\s/i.test(q)) {
+    throw new Error('Only SELECT queries are allowed — this action is read-only.');
+  }
+  if (/;/.test(q.replace(/;\s*$/, ''))) {
+    throw new Error('Multiple statements are not allowed.');
+  }
+}
+
+/** Pull text out of whichever responsive ad format the row carries. */
+function gAdCopy(ad: any) {
+  const texts = (arr: any): string[] =>
+    Array.isArray(arr) ? arr.map((a: any) => a?.text).filter(Boolean) : [];
+  const rsa = ad?.responsiveSearchAd;
+  if (rsa) {
+    return {
+      headlines: texts(rsa.headlines),
+      descriptions: texts(rsa.descriptions),
+      paths: [rsa.path1, rsa.path2].filter(Boolean),
+      longHeadline: null as string | null,
+    };
+  }
+  const rda = ad?.responsiveDisplayAd;
+  if (rda) {
+    return {
+      headlines: texts(rda.headlines),
+      descriptions: texts(rda.descriptions),
+      paths: [] as string[],
+      longHeadline: (rda.longHeadline?.text ?? null) as string | null,
+    };
+  }
+  // Other formats (demand gen, app, video) keep their assets on fields these
+  // queries do not select, so they come back empty rather than wrong. Add the
+  // field to the SELECT if one is needed.
+  return { headlines: [] as string[], descriptions: [] as string[], paths: [] as string[], longHeadline: null as string | null };
 }
 
 // Resolve which app user is making the request (may be null when only LinkedIn-authenticated).
@@ -9963,6 +10175,264 @@ serve(async (req) => {
 
 
 
+      // ── Google Ads reads for the MCP surface ──────────────────────────────
+      // Read-only, gateway-backed, every one scoped to an explicit customerId.
+      //
+      // Deliberately NOT exposed to MCP: get_google_ads_links and
+      // get_google_spend. Both apply their user_id filter only `if (ownerId)`,
+      // on a service-role client that bypasses RLS — and an MCP caller never
+      // sends a user JWT, so through MCP they would return every user's rows.
+      // Claude gets the customer IDs from list_google_ads_accounts instead,
+      // which is scoped by the connected Google account rather than by table.
+
+      case 'get_google_campaigns': {
+        const gqRows = await googleAdsSearch(params?.customerId, `
+          SELECT campaign.id, campaign.name, campaign.status,
+                 campaign.advertising_channel_type, campaign.bidding_strategy_type,
+                 campaign.start_date, campaign.end_date,
+                 campaign_budget.amount_micros, campaign_budget.delivery_method
+          FROM campaign
+          ${params?.status ? `WHERE campaign.status = '${gEnum(params.status)}'` : ''}
+          ORDER BY campaign.name
+        `, params?.loginCustomerId);
+        return gJson({
+          customerId: String(params?.customerId ?? '').replace(/-/g, ''),
+          campaigns: gqRows.map((r: any) => ({
+            id: String(r.campaign?.id ?? ''),
+            name: r.campaign?.name ?? null,
+            status: r.campaign?.status ?? null,
+            channel: r.campaign?.advertisingChannelType ?? null,
+            biddingStrategy: r.campaign?.biddingStrategyType ?? null,
+            startDate: r.campaign?.startDate ?? null,
+            endDate: r.campaign?.endDate ?? null,
+            dailyBudget: gMicros(r.campaignBudget?.amountMicros),
+            budgetDelivery: r.campaignBudget?.deliveryMethod ?? null,
+          })),
+        });
+      }
+
+      case 'get_google_campaign_report': {
+        const { start: gcrStart, end: gcrEnd } = gDates(params);
+        const gcrRows = await googleAdsSearch(params?.customerId, `
+          SELECT campaign.id, campaign.name, campaign.status,
+                 campaign.advertising_channel_type, campaign_budget.amount_micros,
+                 metrics.impressions, metrics.clicks, metrics.cost_micros,
+                 metrics.conversions, metrics.conversions_value
+          FROM campaign
+          WHERE segments.date BETWEEN '${gcrStart}' AND '${gcrEnd}'
+          ORDER BY metrics.cost_micros DESC
+        `, params?.loginCustomerId);
+        return gJson({
+          customerId: String(params?.customerId ?? '').replace(/-/g, ''),
+          dateRange: { start: gcrStart, end: gcrEnd },
+          campaigns: gcrRows.map((r: any) => ({
+            id: String(r.campaign?.id ?? ''),
+            name: r.campaign?.name ?? null,
+            status: r.campaign?.status ?? null,
+            channel: r.campaign?.advertisingChannelType ?? null,
+            dailyBudget: gMicros(r.campaignBudget?.amountMicros),
+            ...gMetrics(r.metrics),
+          })),
+        });
+      }
+
+      case 'get_google_ad_group_report': {
+        const { start: gagStart, end: gagEnd } = gDates(params);
+        const gagCampaigns = gIds(params?.campaignIds);
+        const gagRows = await googleAdsSearch(params?.customerId, `
+          SELECT ad_group.id, ad_group.name, ad_group.status, ad_group.type,
+                 campaign.id, campaign.name,
+                 metrics.impressions, metrics.clicks, metrics.cost_micros,
+                 metrics.conversions, metrics.conversions_value
+          FROM ad_group
+          WHERE segments.date BETWEEN '${gagStart}' AND '${gagEnd}'
+          ${gagCampaigns.length ? `AND campaign.id IN (${gagCampaigns.join(',')})` : ''}
+          ORDER BY metrics.cost_micros DESC
+        `, params?.loginCustomerId);
+        return gJson({
+          customerId: String(params?.customerId ?? '').replace(/-/g, ''),
+          dateRange: { start: gagStart, end: gagEnd },
+          adGroups: gagRows.map((r: any) => ({
+            id: String(r.adGroup?.id ?? ''),
+            name: r.adGroup?.name ?? null,
+            status: r.adGroup?.status ?? null,
+            type: r.adGroup?.type ?? null,
+            campaignId: String(r.campaign?.id ?? ''),
+            campaignName: r.campaign?.name ?? null,
+            ...gMetrics(r.metrics),
+          })),
+        });
+      }
+
+      case 'get_google_ad_report': {
+        const { start: garStart, end: garEnd } = gDates(params);
+        const garRows = await googleAdsSearch(params?.customerId, `
+          SELECT ad_group_ad.ad.id, ad_group_ad.ad.name, ad_group_ad.ad.type,
+                 ad_group_ad.status, ad_group.id, ad_group.name,
+                 campaign.id, campaign.name,
+                 metrics.impressions, metrics.clicks, metrics.cost_micros,
+                 metrics.conversions, metrics.conversions_value
+          FROM ad_group_ad
+          WHERE segments.date BETWEEN '${garStart}' AND '${garEnd}'
+          ORDER BY metrics.cost_micros DESC
+        `, params?.loginCustomerId);
+        return gJson({
+          customerId: String(params?.customerId ?? '').replace(/-/g, ''),
+          dateRange: { start: garStart, end: garEnd },
+          ads: garRows.map((r: any) => ({
+            id: String(r.adGroupAd?.ad?.id ?? ''),
+            name: r.adGroupAd?.ad?.name ?? null,
+            type: r.adGroupAd?.ad?.type ?? null,
+            status: r.adGroupAd?.status ?? null,
+            adGroupId: String(r.adGroup?.id ?? ''),
+            adGroupName: r.adGroup?.name ?? null,
+            campaignId: String(r.campaign?.id ?? ''),
+            campaignName: r.campaign?.name ?? null,
+            ...gMetrics(r.metrics),
+          })),
+        });
+      }
+
+      case 'get_google_ad_copy': {
+        // No date filter and no metrics: this answers "what does the ad say".
+        // Segmenting by date would multiply rows per ad for no gain — ad-level
+        // performance is get_google_ad_report.
+        const gacFilters: string[] = ["ad_group_ad.status != 'REMOVED'"];
+        if (params?.status) gacFilters.push(`ad_group_ad.status = '${gEnum(params.status)}'`);
+        const gacCampaigns = gIds(params?.campaignIds);
+        if (gacCampaigns.length) gacFilters.push(`campaign.id IN (${gacCampaigns.join(',')})`);
+        const gacAdGroups = gIds(params?.adGroupIds);
+        if (gacAdGroups.length) gacFilters.push(`ad_group.id IN (${gacAdGroups.join(',')})`);
+        const gacLimit = gLimit(params?.limit, 200, 2000);
+
+        const gacRows = await googleAdsSearch(params?.customerId, `
+          SELECT ad_group_ad.ad.id, ad_group_ad.ad.name, ad_group_ad.ad.type,
+                 ad_group_ad.ad.final_urls,
+                 ad_group_ad.ad.responsive_search_ad.headlines,
+                 ad_group_ad.ad.responsive_search_ad.descriptions,
+                 ad_group_ad.ad.responsive_search_ad.path1,
+                 ad_group_ad.ad.responsive_search_ad.path2,
+                 ad_group_ad.ad.responsive_display_ad.headlines,
+                 ad_group_ad.ad.responsive_display_ad.descriptions,
+                 ad_group_ad.ad.responsive_display_ad.long_headline,
+                 ad_group_ad.status, ad_group_ad.ad_strength,
+                 ad_group.id, ad_group.name, campaign.id, campaign.name
+          FROM ad_group_ad
+          WHERE ${gacFilters.join(' AND ')}
+          LIMIT ${gacLimit}
+        `, params?.loginCustomerId);
+
+        return gJson({
+          customerId: String(params?.customerId ?? '').replace(/-/g, ''),
+          ads: gacRows.map((r: any) => {
+            const gacAd = r.adGroupAd?.ad;
+            return {
+              id: String(gacAd?.id ?? ''),
+              name: gacAd?.name ?? null,
+              type: gacAd?.type ?? null,
+              status: r.adGroupAd?.status ?? null,
+              adStrength: r.adGroupAd?.adStrength ?? null,
+              campaignId: String(r.campaign?.id ?? ''),
+              campaignName: r.campaign?.name ?? null,
+              adGroupId: String(r.adGroup?.id ?? ''),
+              adGroupName: r.adGroup?.name ?? null,
+              finalUrls: gacAd?.finalUrls ?? [],
+              ...gAdCopy(gacAd),
+            };
+          }),
+        });
+      }
+
+      case 'get_google_keywords': {
+        const { start: gkStart, end: gkEnd } = gDates(params);
+        // metrics.search_impression_share could not be verified as selectable
+        // on keyword_view (Google's field reference renders client-side, so it
+        // is not checkable without a live call). If Google rejects it, drop the
+        // column and return the rest — one unverified metric should not fail the
+        // whole report. The response says which happened.
+        const gkQuery = (withShare: boolean) => `
+          SELECT ad_group_criterion.criterion_id, ad_group_criterion.keyword.text,
+                 ad_group_criterion.keyword.match_type, ad_group_criterion.status,
+                 ad_group.id, ad_group.name, campaign.id, campaign.name,
+                 metrics.impressions, metrics.clicks, metrics.cost_micros,
+                 metrics.conversions, metrics.conversions_value${withShare ? ',\n                 metrics.search_impression_share' : ''}
+          FROM keyword_view
+          WHERE segments.date BETWEEN '${gkStart}' AND '${gkEnd}'
+          ORDER BY metrics.cost_micros DESC
+        `;
+        let gkRows: any[];
+        let gkShareAvailable = true;
+        try {
+          gkRows = await googleAdsSearch(params?.customerId, gkQuery(true), params?.loginCustomerId);
+        } catch (gkErr) {
+          const gkMsg = (gkErr as Error).message || '';
+          // Only a field-selection complaint earns the retry. A bad customer id,
+          // an auth failure or a sunset version must surface as itself.
+          if (!/field|selectable|unrecognized|unknown|not found in|INVALID/i.test(gkMsg)) throw gkErr;
+          console.warn('[get_google_keywords] retrying without search_impression_share:', gkMsg.slice(0, 200));
+          gkShareAvailable = false;
+          gkRows = await googleAdsSearch(params?.customerId, gkQuery(false), params?.loginCustomerId);
+        }
+        return gJson({
+          customerId: String(params?.customerId ?? '').replace(/-/g, ''),
+          dateRange: { start: gkStart, end: gkEnd },
+          impressionShareAvailable: gkShareAvailable,
+          keywords: gkRows.map((r: any) => ({
+            id: String(r.adGroupCriterion?.criterionId ?? ''),
+            text: r.adGroupCriterion?.keyword?.text ?? null,
+            matchType: r.adGroupCriterion?.keyword?.matchType ?? null,
+            status: r.adGroupCriterion?.status ?? null,
+            adGroupName: r.adGroup?.name ?? null,
+            campaignName: r.campaign?.name ?? null,
+            impressionShare: r.metrics?.searchImpressionShare ?? null,
+            ...gMetrics(r.metrics),
+          })),
+        });
+      }
+
+      case 'get_google_search_terms': {
+        const { start: gstStart, end: gstEnd } = gDates(params);
+        const gstLimit = gLimit(params?.limit, 500, 5000);
+        const gstRows = await googleAdsSearch(params?.customerId, `
+          SELECT search_term_view.search_term, search_term_view.status,
+                 campaign.name, ad_group.name,
+                 metrics.impressions, metrics.clicks, metrics.cost_micros,
+                 metrics.conversions, metrics.conversions_value
+          FROM search_term_view
+          WHERE segments.date BETWEEN '${gstStart}' AND '${gstEnd}'
+          ORDER BY metrics.cost_micros DESC
+          LIMIT ${gstLimit}
+        `, params?.loginCustomerId);
+        return gJson({
+          customerId: String(params?.customerId ?? '').replace(/-/g, ''),
+          dateRange: { start: gstStart, end: gstEnd },
+          searchTerms: gstRows.map((r: any) => ({
+            term: r.searchTermView?.searchTerm ?? null,
+            status: r.searchTermView?.status ?? null,
+            campaignName: r.campaign?.name ?? null,
+            adGroupName: r.adGroup?.name ?? null,
+            ...gMetrics(r.metrics),
+          })),
+        });
+      }
+
+      case 'google_ads_search': {
+        // Raw GAQL escape hatch, SELECT-only. Rows are returned exactly as
+        // Google sends them so a caller can reach any resource without waiting
+        // for a named action here.
+        const gasQuery = String(params?.query ?? '');
+        if (!gasQuery) throw new Error('A GAQL `query` is required.');
+        gAssertSelect(gasQuery);
+        const gasRows = await googleAdsSearch(params?.customerId, gasQuery, params?.loginCustomerId);
+        const gasLimit = gLimit(params?.limit, 2000, 10000);
+        return gJson({
+          customerId: String(params?.customerId ?? '').replace(/-/g, ''),
+          rowCount: Math.min(gasRows.length, gasLimit),
+          truncated: gasRows.length > gasLimit,
+          rows: gasRows.slice(0, gasLimit),
+        });
+      }
+
       case 'get_budget_pacing': {
         // Budget Pacing Dashboard - compares actual spend vs planned budget
         const { accountId, dateRange } = params || {};
@@ -15272,6 +15742,291 @@ serve(async (req) => {
             formsApplied: formsAppliedCount,
           },
           results: bulkResults,
+        }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      // ---- Prospect Finder (MoltSets) ----------------------------------------
+      // Both actions are platform-only: they require a real user JWT, and MCP
+      // sends the anon key, so they 401 from there by construction — the same
+      // gate as probe_creative_create / bulk_copy_creatives. MoltSets bills per
+      // record, so the spend stays behind the dashboard where it is visible.
+
+      case 'moltsets_status': {
+        const msAuthHeader = req.headers.get('Authorization');
+        const { createClient: createMsClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+        const msSupabase = createMsClient(
+          Deno.env.get('SUPABASE_URL')!,
+          Deno.env.get('SUPABASE_ANON_KEY')!,
+          { global: { headers: { Authorization: msAuthHeader || '' } } },
+        );
+        const { data: { user: msUser }, error: msUserError } = await msSupabase.auth.getUser();
+        if (msUserError || !msUser) {
+          return new Response(JSON.stringify({
+            error: 'Authentication required. This action is platform-only and not reachable from MCP.',
+            errorCode: 'AUTH_REQUIRED',
+          }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        if (!Deno.env.get('MOLTSETS_API_KEY')) {
+          return new Response(JSON.stringify({
+            connected: false,
+            reason: 'MOLTSETS_API_KEY is not set on this function.',
+          }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        // The key is set, so the only thing that makes this "not connected" is
+        // the key being rejected. A probe that fails for any other reason
+        // (quota, a 422 on an empty body, a blip) says nothing about whether a
+        // real search would work — don't report it as a missing credential.
+        try {
+          const msAccount = await moltsetsCall('get_account', {});
+          return new Response(JSON.stringify({
+            connected: true,
+            account: msAccount?.results ?? null,
+            budget: moltsetsBudget(msAccount?.results),
+          }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        } catch (e) {
+          const msErr = e as MoltSetsError;
+          const rejected = msErr.status === 401 || msErr.status === 403;
+          return new Response(JSON.stringify({
+            connected: !rejected,
+            reason: msErr.message,
+            errorCode: msErr.code ?? null,
+          }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+      }
+
+      case 'find_prospects': {
+        const {
+          companies: prospectCompanies,   // [{ urn?, name, domain? }] — ticked company demographic rows
+          titles: prospectTitles,         // string[] — ticked job-title demographic rows, OR'd together
+          seniority: prospectSeniority,   // optional string | string[]
+          country: prospectCountry,       // optional string | string[]
+          perCompanyLimit,                // 1..25, default 10
+        } = params || {};
+
+        // ---- JWT gate (platform-only) ----
+        const prospectAuthHeader = req.headers.get('Authorization');
+        const { createClient: createProspectClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+        const prospectSupabase = createProspectClient(
+          Deno.env.get('SUPABASE_URL')!,
+          Deno.env.get('SUPABASE_ANON_KEY')!,
+          { global: { headers: { Authorization: prospectAuthHeader || '' } } },
+        );
+        const { data: { user: prospectUser }, error: prospectUserError } = await prospectSupabase.auth.getUser();
+        if (prospectUserError || !prospectUser) {
+          return new Response(JSON.stringify({
+            error: 'Authentication required. This action is platform-only and not reachable from MCP.',
+            errorCode: 'AUTH_REQUIRED',
+          }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        if (!Array.isArray(prospectCompanies) || prospectCompanies.length === 0) {
+          return new Response(JSON.stringify({
+            error: 'companies must be a non-empty array of { urn?, name, domain? }',
+          }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        // Each company is one search, and MoltSets caps concurrency at 3 on the
+        // lowest plans. 25 companies is ~9 waves — enough to stay inside the
+        // edge function's execution window.
+        const MAX_PROSPECT_COMPANIES = 25;
+        const prospectTargets = prospectCompanies
+          .slice(0, MAX_PROSPECT_COMPANIES)
+          .map((c: any) => ({
+            urn: c?.urn ? String(c.urn) : null,
+            name: c?.name ? String(c.name) : null,
+            domain: domainFromWebsite(c?.domain) || (c?.domain ? String(c.domain).toLowerCase() : null),
+          }))
+          .filter((c: any) => c.name || c.domain || c.urn);
+
+        if (prospectTargets.length === 0) {
+          return new Response(JSON.stringify({
+            error: 'Every company entry needs at least a name, a domain, or an organization urn',
+          }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        const prospectTitleList = (Array.isArray(prospectTitles) ? prospectTitles : [prospectTitles])
+          .filter((t: unknown) => typeof t === 'string' && t.trim().length > 0)
+          .map((t: string) => t.trim())
+          .slice(0, 25);
+
+        const prospectLimit = Math.min(25, Math.max(1, Number(perCompanyLimit) || 10));
+
+        console.log(`[find_prospects] ${prospectTargets.length} companies × ${prospectTitleList.length} titles, limit ${prospectLimit}/company`);
+
+        // ---- Step 1: fill in missing domains from LinkedIn ----
+        // A company name alone matches the wrong "Acme" often enough to matter;
+        // localizedWebsite is already proven on this token (get_company_demographic).
+        const prospectNeedsDomain = prospectTargets.filter((c: any) => !c.domain && c.urn);
+        if (prospectNeedsDomain.length > 0 && accessToken) {
+          const prospectOrgIdToTarget = new Map<string, any>();
+          for (const c of prospectNeedsDomain) {
+            const m = String(c.urn).match(/^urn:li:organization:(\d+)$/);
+            if (m) prospectOrgIdToTarget.set(m[1], c);
+          }
+          const prospectOrgIds = Array.from(prospectOrgIdToTarget.keys());
+          for (let i = 0; i < prospectOrgIds.length; i += 50) {
+            const batch = prospectOrgIds.slice(i, i + 50);
+            const idsParam = batch.map((id, idx) => `ids[${idx}]=${id}`).join('&');
+            try {
+              const orgResponse = await fetch(
+                `https://api.linkedin.com/v2/organizationsLookup?${idsParam}&projection=(results*(id,localizedName,localizedWebsite))`,
+                { headers: { 'Authorization': `Bearer ${accessToken}` } },
+              );
+              if (orgResponse.ok) {
+                const orgData = await orgResponse.json();
+                Object.entries(orgData.results || {}).forEach(([id, org]: [string, any]) => {
+                  const target = prospectOrgIdToTarget.get(id);
+                  if (!target) return;
+                  if (!target.name && org?.localizedName) target.name = org.localizedName;
+                  const domain = domainFromWebsite(org?.localizedWebsite);
+                  if (domain) target.domain = domain;
+                });
+              } else {
+                console.log(`[find_prospects] organizationsLookup ${orgResponse.status} — falling back to company names`);
+              }
+            } catch (e) {
+              console.log('[find_prospects] organizationsLookup failed:', (e as Error).message);
+            }
+          }
+        }
+
+        // Two LinkedIn company pages can resolve to one domain (a subsidiary, a
+        // duplicate page). Searching both runs the same billed query twice for
+        // the same rows, so collapse them and keep the first for attribution.
+        const prospectSeenKeys = new Set<string>();
+        const prospectSearchTargets = prospectTargets.filter((c: any) => {
+          const key = (c.domain || c.name || c.urn || '').toLowerCase();
+          if (!key || prospectSeenKeys.has(key)) return false;
+          prospectSeenKeys.add(key);
+          return true;
+        });
+        const prospectDuplicatesSkipped = prospectTargets.length - prospectSearchTargets.length;
+        if (prospectDuplicatesSkipped > 0) {
+          console.log(`[find_prospects] Collapsed ${prospectDuplicatesSkipped} duplicate target(s)`);
+        }
+
+        // ---- Step 2: one people search per company ----
+        type ProspectCompanyResult = {
+          urn: string | null;
+          name: string | null;
+          domain: string | null;
+          matchedBy: 'domain' | 'name';
+          status: 'ok' | 'not_found' | 'error';
+          total: number;
+          returned: number;
+          error: string | null;
+          retryAfter: number | null;
+        };
+
+        const prospectRows: any[] = [];
+        let prospectBudget: ReturnType<typeof moltsetsBudget> | null = null;
+
+        const prospectCompanyResults = await mapWithConcurrency<any, ProspectCompanyResult>(
+          prospectSearchTargets,
+          MOLTSETS_CONCURRENCY,
+          async (target) => {
+            const matchedBy: 'domain' | 'name' = target.domain ? 'domain' : 'name';
+            const body: Record<string, unknown> = { limit: prospectLimit, offset: 0 };
+            if (target.domain) body.company_domain = target.domain;
+            else body.company = target.name;
+            if (prospectTitleList.length > 0) body.title = prospectTitleList;
+            if (prospectSeniority) body.seniority = prospectSeniority;
+            if (prospectCountry) body.country = prospectCountry;
+
+            try {
+              const payload = await moltsetsCall('search_people', body);
+              if (payload?.metadata) prospectBudget = moltsetsBudget(payload.metadata);
+
+              const people = payload?.results?.results || [];
+              for (const p of people) {
+                // Deliberately no business_email / phone here — this feature
+                // surfaces LinkedIn profiles only. Adding contact fields means
+                // extra billed calls and a privacy decision, not a wider SELECT.
+                prospectRows.push({
+                  fullName: p?.full_name || [p?.first_name, p?.last_name].filter(Boolean).join(' ') || 'Unknown',
+                  title: p?.title || null,
+                  headline: p?.headline || null,
+                  seniority: p?.seniority || null,
+                  city: p?.city || null,
+                  state: p?.state || null,
+                  country: p?.country || null,
+                  linkedInUrl: p?.linkedin_url
+                    ? (String(p.linkedin_url).startsWith('http') ? p.linkedin_url : `https://${p.linkedin_url}`)
+                    : null,
+                  companyName: p?.company?.name || null,
+                  companyDomain: p?.company?.domain || null,
+                  companySize: p?.company?.size || null,
+                  companyIndustry: p?.company?.industry || null,
+                  companyLinkedInUrl: p?.company?.linkedin_url
+                    ? (String(p.company.linkedin_url).startsWith('http') ? p.company.linkedin_url : `https://${p.company.linkedin_url}`)
+                    : null,
+                  lastUpdatedAt: p?.last_updated_at || null,
+                  score: typeof p?._score === 'number' ? p._score : null,
+                  // Which demographic row this person was found for, so the UI
+                  // can tie a profile back to the company that got impressions.
+                  sourceCompanyUrn: target.urn,
+                  sourceCompanyName: target.name,
+                  matchedBy,
+                });
+              }
+
+              return {
+                urn: target.urn, name: target.name, domain: target.domain, matchedBy,
+                status: payload?.status === 'ok' && people.length > 0 ? 'ok' : 'not_found',
+                total: Number(payload?.results?.total || 0),
+                returned: people.length,
+                error: null,
+                retryAfter: payload?.metadata?.retry_after ?? null,
+              };
+            } catch (e) {
+              const msErr = e as MoltSetsError;
+              console.error(`[find_prospects] ${target.domain || target.name}: ${msErr.message}`);
+              return {
+                urn: target.urn, name: target.name, domain: target.domain, matchedBy,
+                status: 'error',
+                total: 0,
+                returned: 0,
+                error: msErr.message,
+                retryAfter: msErr.retryAfter ?? null,
+              };
+            }
+          },
+        );
+
+        prospectRows.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+
+        const prospectErrored = prospectCompanyResults.filter(r => r.status === 'error');
+        // Every company failing the same way is a credential or quota problem,
+        // not a data miss — say so instead of rendering an empty table.
+        if (prospectRows.length === 0 && prospectErrored.length === prospectCompanyResults.length) {
+          return new Response(JSON.stringify({
+            error: prospectErrored[0]?.error || 'Every MoltSets search failed.',
+            errorCode: 'MOLTSETS_UNAVAILABLE',
+            companies: prospectCompanyResults,
+          }), { status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        console.log(`[find_prospects] Complete. ${prospectRows.length} people from ${prospectCompanyResults.length} companies (${prospectErrored.length} errored)`);
+
+        return new Response(JSON.stringify({
+          prospects: prospectRows,
+          companies: prospectCompanyResults,
+          metadata: {
+            titles: prospectTitleList,
+            perCompanyLimit: prospectLimit,
+            companiesRequested: prospectCompanies.length,
+            companiesSearched: prospectCompanyResults.length,
+            companiesTruncated: Math.max(0, prospectCompanies.length - prospectTargets.length),
+            companiesErrored: prospectErrored.length,
+            duplicatesSkipped: prospectDuplicatesSkipped,
+            domainsResolved: prospectSearchTargets.filter((c: any) => !!c.domain).length,
+            budget: prospectBudget,
+            // What the plan actually returned, which on a trial key is capped
+            // below whatever perCompanyLimit was asked for.
+            peopleReturned: prospectRows.length,
+          },
         }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
