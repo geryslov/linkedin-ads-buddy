@@ -15780,15 +15780,7 @@ serve(async (req) => {
       // record, so the spend stays behind the dashboard where it is visible.
 
       case 'moltsets_status': {
-        const msAuthHeader = req.headers.get('Authorization');
-        const { createClient: createMsClient } = await import('https://esm.sh/@supabase/supabase-js@2');
-        const msSupabase = createMsClient(
-          Deno.env.get('SUPABASE_URL')!,
-          Deno.env.get('SUPABASE_ANON_KEY')!,
-          { global: { headers: { Authorization: msAuthHeader || '' } } },
-        );
-        const { data: { user: msUser }, error: msUserError } = await msSupabase.auth.getUser();
-        if (msUserError || !msUser) {
+        if (!(await prospectGate(req, accessToken))) {
           return new Response(JSON.stringify({
             error: 'Authentication required. This action is platform-only and not reachable from MCP.',
             errorCode: 'AUTH_REQUIRED',
