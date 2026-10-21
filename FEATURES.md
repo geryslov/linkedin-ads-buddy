@@ -318,12 +318,14 @@ An info banner states this above the controls; don't quietly reword it into "peo
   `fair_use`; paid keys return `fair_use`. `moltsetsBudget()` normalizes both — the UI shows rows
   remaining and warns when a run would exceed it, because the free trial is only 100 rows and one
   25-company run can spend more than that.
-- **Shipped ahead of its backend (as of 2026-10-21).** Both actions are on `main`, but `main` was
-  reached before `linkedin-api` was deployed, and the live function still answers `moltsets_status`
-  with `400 Unknown action`. The tab renders and its demographic steps work; the MoltSets search
-  does not until the manual deploy under **Known gaps** is run. The setup banner tells those two
-  apart — `notDeployed` (the action is missing, so deploy) vs a missing key (so add the secret) —
-  because the first wording told users to add a secret that was never the problem.
+- **Deployed 2026-10-21, via Lovable.** Both actions are live: an unauthenticated POST to
+  `moltsets_status` or `find_prospects` returns `401 AUTH_REQUIRED`, which confirms the actions
+  exist *and* that the platform-only JWT gate holds against the public anon key. `get_campaigns`
+  still answers 200, so the deploy regressed nothing. It briefly shipped the other way round —
+  `main` was reached before the function was deployed, so the live function answered
+  `400 Unknown action` — and the setup banner now tells those two failures apart: `notDeployed`
+  (the action is missing, so deploy) vs a missing key (so add the secret). The first wording told
+  users to add a secret that was never the problem.
 
 ## Known gaps
 

@@ -23,7 +23,7 @@ Both are kept current by a Stop hook ([.claude/hooks/docs-freshness.sh](.claude/
 | MCP server (legacy) | `mcp-server/` → `npm run start:remote` | Yes — Railway on push to `main` |
 | MCP server (product) | `mcp-server/` → `npm run start:product` | **Service does not exist yet** — create it |
 | Product site | separate repo `geryslov/ads-manager-hub-2bd81d31` | Lovable |
-| Edge functions | `supabase/functions/**` | Workflow exists but is **currently failing** — treat as manual |
+| Edge functions | `supabase/functions/**` | Workflow exists but is **currently failing** — manual, or ask Lovable |
 | DB migrations | `supabase/migrations/` | **No — manual via SQL Editor** |
 | Product auth fn + schema | separate repo, function `mcp-auth` | its own `scripts/setup.py` |
 
@@ -39,6 +39,13 @@ SUPABASE_ACCESS_TOKEN=<token> npx supabase functions deploy linkedin-api --proje
 Token from https://supabase.com/dashboard/account/tokens. It must be **unrestricted** — a scoped
 token authenticates fine but returns `[]` from `/v1/projects` and 403s on deploy. That is the most
 likely cause of the CI failure too, and it is easy to misread as "expired".
+
+**Or ask Lovable to deploy it** — it owns the Supabase connection, so it needs no `sbp_` token and
+routes around the broken secret entirely. This worked for `linkedin-api` on 2026-10-21. Be explicit
+that it is a deploy and *not* a code change: this file is ~14.3k lines and an agent pointed at it
+will otherwise "improve" it. Say deploy-only, leave `supabase/config.toml` alone (`verify_jwt =
+false` is load-bearing for every dashboard call), and don't touch `analyze-data`. Then verify
+yourself — a POST with the anon key should return the action's own error, not `Unknown action`.
 
 **The standalone product does not live here.** Its edge function (`mcp-auth`), its migrations
 (`mcp_keys`, `resolve_mcp_key`) and its setup script are in `geryslov/ads-manager-hub-2bd81d31`.

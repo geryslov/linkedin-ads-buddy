@@ -387,6 +387,20 @@ the ordering it implies is worth stating outright: for a feature split across a 
 frontend ships itself and the backend does not, **deploy the function before the frontend reaches
 `main`** — otherwise the half that deploys on its own is the half that cannot work alone.
 
+**Lovable deployed the function, which is the useful part.** The CLI route needs an unrestricted
+`sbp_` token, the same credential the CI workflow has been missing since June. Lovable owns the
+Supabase connection already, so asking it to deploy `linkedin-api` unchanged sidestepped the token
+entirely — a third deploy path that the deployment matrix did not record. The prompt had to spend
+most of its length on what *not* to do: this function is ~14.3k lines, and an agent pointed at it
+with a vague brief will refactor it. Deploy-only, no code changes, don't touch `config.toml`
+(`verify_jwt = false` is load-bearing), don't touch `analyze-data`.
+
+Confirmed from outside rather than taken on report: `moltsets_status` and `find_prospects` both
+answer `401 AUTH_REQUIRED` to the public anon key — which proves the actions exist *and* that the
+platform-only gate works, previously an untested claim — while `get_campaigns` still answers 200,
+so nothing else in the function regressed. Checking the control action mattered more than checking
+the new ones: a deploy that half-worked would look identical from the new actions alone.
+
 ## Recurring themes
 
 - **URN resolution is the project's tax.** Creative names, job titles, super titles, company names — each needed multiple rounds of encoding fixes, batch fetchers, and caches.
