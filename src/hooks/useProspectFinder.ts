@@ -74,6 +74,9 @@ export interface MoltSetsBudget {
 export interface MoltSetsStatus {
   connected: boolean;
   reason?: string;
+  /** The deployed function has no `moltsets_status` case at all — a stale deploy,
+   *  not a missing key. Different fix, so the UI must not conflate the two. */
+  notDeployed?: boolean;
   budget?: MoltSetsBudget | null;
 }
 
@@ -118,7 +121,11 @@ export function useProspectFinder(accessToken: string | null) {
       if (error) throw error;
       setStatus({ connected: !!data?.connected, reason: data?.reason, budget: data?.budget ?? null });
     } catch (e) {
-      setStatus({ connected: false, reason: await readInvokeError(e) });
+      const reason = await readInvokeError(e);
+      // A function without the action answers 400 "Unknown action". That is a stale
+      // deploy, not a missing secret — reporting it as a credential problem sends
+      // the user to fix something that is already correct.
+      setStatus({ connected: false, reason, notDeployed: /unknown action/i.test(reason) });
     }
   }, []);
 
