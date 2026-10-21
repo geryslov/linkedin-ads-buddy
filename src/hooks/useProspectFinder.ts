@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 
@@ -77,6 +77,10 @@ export interface MoltSetsStatus {
   /** The deployed function has no `moltsets_status` case at all — a stale deploy,
    *  not a missing key. Different fix, so the UI must not conflate the two. */
   notDeployed?: boolean;
+  /** The probe never reached the action's own logic — stale deploy, no session,
+   *  transport error. The key is not implicated, so do not advise changing it.
+   *  Only a 200 that says `connected: false` is evidence about the key. */
+  callFailed?: boolean;
   budget?: MoltSetsBudget | null;
 }
 
@@ -114,6 +118,15 @@ export function useProspectFinder(accessToken: string | null) {
 
   /** Is the MOLTSETS_API_KEY secret present and working? */
   const checkStatus = useCallback(async () => {
+    // `moltsets_status` is platform-only: with no session, supabase-js sends the
+    // anon key and the JWT gate 401s. That is the gate working, not a verdict on
+    // MoltSets — so stay silent rather than reporting a failure the user cannot act
+    // on. The effect below re-probes once the session lands.
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      setStatus(null);
+      return;
+    }
     try {
       const { data, error } = await supabase.functions.invoke('linkedin-api', {
         body: { action: 'moltsets_status' },
@@ -122,12 +135,30 @@ export function useProspectFinder(accessToken: string | null) {
       setStatus({ connected: !!data?.connected, reason: data?.reason, budget: data?.budget ?? null });
     } catch (e) {
       const reason = await readInvokeError(e);
-      // A function without the action answers 400 "Unknown action". That is a stale
-      // deploy, not a missing secret — reporting it as a credential problem sends
-      // the user to fix something that is already correct.
-      setStatus({ connected: false, reason, notDeployed: /unknown action/i.test(reason) });
+      // Nothing thrown here says anything about the key: a function without the
+      // action answers 400 "Unknown action" (stale deploy), an unauthenticated call
+      // answers 401 AUTH_REQUIRED. Only a 200 carrying `connected: false` is the
+      // action's own report, so flag these as callFailed and let the UI say so.
+      setStatus({
+        connected: false,
+        reason,
+        callFailed: true,
+        notDeployed: /unknown action/i.test(reason),
+      });
     }
   }, []);
+
+  /** Probe on mount, and again when a session arrives. On first paint the session
+   *  may still be hydrating from storage, and a status set from that miss would
+   *  never correct itself — the old mount-only effect left the banner permanently
+   *  wrong for anyone who loaded the tab directly. */
+  useEffect(() => {
+    checkStatus();
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session) checkStatus();
+    });
+    return () => sub.subscription.unsubscribe();
+  }, [checkStatus]);
 
   /** Load both demographic pivots for the chosen campaigns in one pass.
    *  LinkedIn aggregates each pivot independently — there is no company × title
