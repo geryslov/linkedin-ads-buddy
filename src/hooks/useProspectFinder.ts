@@ -114,6 +114,12 @@ export function useProspectFinder(accessToken: string | null) {
   const [findError, setFindError] = useState<string | null>(null);
 
   const [status, setStatus] = useState<MoltSetsStatus | null>(null);
+  /** null = not determined yet. `/dashboard` has NO route guard (see App.tsx) and
+   *  the rest of the dashboard runs on the LinkedIn token in localStorage, so a
+   *  Supabase session is genuinely optional here — but both Prospect Finder
+   *  actions require one. Without this the UI cannot tell "not signed in" from
+   *  "MoltSets is broken", and it reported the second for the first. */
+  const [hasSession, setHasSession] = useState<boolean | null>(null);
   const { toast } = useToast();
 
   /** Is the MOLTSETS_API_KEY secret present and working? */
@@ -123,6 +129,7 @@ export function useProspectFinder(accessToken: string | null) {
     // MoltSets — so stay silent rather than reporting a failure the user cannot act
     // on. The effect below re-probes once the session lands.
     const { data: { session } } = await supabase.auth.getSession();
+    setHasSession(!!session);
     if (!session) {
       setStatus(null);
       return;
@@ -230,6 +237,21 @@ export function useProspectFinder(accessToken: string | null) {
       country?: string;
       perCompanyLimit?: number;
     }) => {
+      // Both actions are JWT-gated, and this dashboard does not require a sign-in,
+      // so answer the real question here instead of letting the edge function
+      // return AUTH_REQUIRED — which reads as "the tool is broken" when it means
+      // "you are not signed in".
+      const { data: { session: findSession } } = await supabase.auth.getSession();
+      setHasSession(!!findSession);
+      if (!findSession) {
+        setFindError(
+          'Prospect Finder needs a signed-in Ads Buddy account — the rest of the dashboard runs on '
+          + 'your LinkedIn connection alone, but this tool spends MoltSets credits, so it is tied to '
+          + 'a user. Sign in and try again.',
+        );
+        return;
+      }
+
       setIsFinding(true);
       setFindError(null);
       setProspects([]);
@@ -290,5 +312,6 @@ export function useProspectFinder(accessToken: string | null) {
     findProspects,
     status,
     checkStatus,
+    hasSession,
   };
 }

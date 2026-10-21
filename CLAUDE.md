@@ -301,6 +301,15 @@ adding them is a product call, not a wider SELECT.
 Both actions are **platform-only**: they require a user JWT, so MCP's anon key 401s them by
 construction (same gate as `bulk_copy_creatives`). That keeps per-record spend behind the dashboard.
 
+🔴 **Platform-only means signed-in, and this dashboard does not require that.** `/dashboard` has no
+route guard; its real credential is the LinkedIn token in `localStorage`. So for a LinkedIn-only
+session both Prospect Finder actions 401 — the gate is working, the feature is simply unreachable.
+Modelling the gate on `bulk_copy_creatives` without checking what the dashboard guarantees is the
+mistake; "MCP cannot reach it" was verified and "the dashboard can" was not. The UI now detects a
+missing session and says to sign in, rather than reporting it as a MoltSets failure. Removing the
+gate is **not** the fix: legacy `call_linkedin_action` is unrestricted, so an MCP key could then
+spend MoltSets credits through the public anon key.
+
 ⚠️ **A platform-only action cannot be probed from a mount effect.** `moltsets_status` ran in
 `useEffect` on mount, which beats the Supabase session's hydration from storage — supabase-js then
 sends the anon key, the gate 401s correctly, and the status sticks because nothing re-probes.

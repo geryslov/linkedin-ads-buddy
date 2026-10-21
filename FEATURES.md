@@ -9,11 +9,19 @@ What exists in LinkedIn Ads Buddy today. See [CLAUDE.md](CLAUDE.md) for architec
 | `/` | [Index.tsx](src/pages/Index.tsx) — landing | No |
 | `/auth` | [Auth.tsx](src/pages/Auth.tsx) — Supabase login | No |
 | `/callback` | [Callback.tsx](src/pages/Callback.tsx) — LinkedIn OAuth return | No |
-| `/dashboard` | [Dashboard.tsx](src/pages/Dashboard.tsx) — everything below | Yes |
+| `/dashboard` | [Dashboard.tsx](src/pages/Dashboard.tsx) — everything below | **No route guard** — see note |
 | `/admin` | [Admin.tsx](src/pages/Admin.tsx) — user + account admin | Yes (admin) |
 | `/social-listener` | [SocialListener.tsx](src/pages/SocialListener.tsx) — Apify-backed post/reactor listening | Yes |
 | `/edge-status` | [EdgeFunctionStatus.tsx](src/pages/EdgeFunctionStatus.tsx) — edge function health | Yes |
 | `/report/:token` | [PublishedReport.tsx](src/pages/PublishedReport.tsx) — public client report | **No** |
+
+**`/dashboard` is not auth-guarded.** [App.tsx](src/App.tsx) renders it as a plain route, and the
+dashboard's real credential is the LinkedIn token in `localStorage` — `Dashboard.tsx`'s only session
+read does `if (!session?.user) return;` and carries on. So a Supabase session is optional for
+everything except the JWT-gated actions (Bulk Editing's writes, Prospect Finder), which fail with
+`AUTH_REQUIRED` for a LinkedIn-only user. That is the same "owner may be null" path that makes
+`get_google_ads_links` leak. Was documented as "Auth: Yes", which is what the page *intends*, not
+what it enforces.
 
 ## Dashboard navigation
 
