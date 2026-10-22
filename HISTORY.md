@@ -416,3 +416,6 @@ The MCP's per-creative analytics only carried delivery, spend and lead metrics. 
 
 ### Oct 21, 2026 — Prospect Finder works on LinkedIn SSO alone
 The JWT-only gate made the tool unreachable for LinkedIn-only users (the "Sign in" link looped back to LinkedIn connect). User decision: LinkedIn session is enough, Claude/MCP must stay blocked. Gate now accepts a live LinkedIn token only when the request carries an app browser Origin; the MCP server sends none. Verified: browser-origin call → connected, no-origin call → 401.
+
+### Oct 22, 2026 — Campaign Editor empty exclusions corrected
+Jibe title updates failed with LinkedIn 422: `/targetingCriteria/exclude/or` was required. Append and Replace serialized `exclude: {}` for campaigns without exclusions. Both now supply `exclude: { or: {} }` when empty, preserving existing exclusion facets. Regression checks exercise the actual criteria builder for both modes with missing, empty, and populated exclusions.

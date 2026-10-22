@@ -9611,7 +9611,7 @@ serve(async (req) => {
 
                 return {
                   include: { and: newAndClauses },
-                  exclude: existingTargeting?.exclude || {}
+                  exclude: { ...existingTargeting?.exclude, or: existingTargeting?.exclude?.or || {} }
                 };
               }
 
@@ -9651,7 +9651,7 @@ serve(async (req) => {
 
               return {
                 include: { and: newAndClauses },
-                exclude: existingTargeting?.exclude || {}
+                exclude: { ...existingTargeting?.exclude, or: existingTargeting?.exclude?.or || {} }
               };
             };
 
