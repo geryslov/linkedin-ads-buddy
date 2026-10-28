@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useCreativeReporting, CreativeData } from '@/hooks/useCreativeReporting';
+import { supabase } from '@/integrations/supabase/client';
 import { CreativeTypeBadge } from './CreativeTypeBadge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Input } from '@/components/ui/input';
@@ -39,6 +40,64 @@ function StatusDot({ status }: { status: string }) {
       )}
       title={status}
     />
+  );
+}
+
+type PreviewItem = { url?: string; html?: string; platform?: string };
+
+/** Live LinkedIn-rendered ad preview, falling back to the stored image. */
+function AdPreviewPanel({ accessToken, accountId, creative }: { accessToken: string | null; accountId: string | null; creative: CreativeData }) {
+  const [previews, setPreviews] = useState<PreviewItem[] | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
+  const [active, setActive] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    setPreviews(null); setFailed(null); setActive(0);
+    if (!accessToken || !accountId) { setFailed('Not connected'); return; }
+    supabase.functions
+      .invoke('linkedin-api', { body: { action: 'get_ad_preview', accessToken, params: { accountId, creativeId: creative.creativeId } } })
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error || data?.error) setFailed(data?.error || error?.message || 'Preview unavailable');
+        else if (!data?.previews?.length) setFailed('No preview returned');
+        else setPreviews(data.previews);
+      });
+    return () => { cancelled = true; };
+  }, [accessToken, accountId, creative.creativeId]);
+
+  const fallback = creative.imageUrl ? (
+    <img src={creative.imageUrl} alt={creative.creativeName} className="w-full h-auto rounded-lg border border-border/60" />
+  ) : null;
+
+  if (failed) return (
+    <div className="space-y-2">
+      {fallback}
+      <p className="text-xs text-muted-foreground">Live preview unavailable: {failed}</p>
+    </div>
+  );
+  if (!previews) return <Skeleton className="w-full h-[420px] rounded-lg" />;
+
+  const p = previews[active];
+  return (
+    <div className="space-y-2">
+      {previews.length > 1 && (
+        <div className="flex gap-1">
+          {previews.map((pv, i) => (
+            <Button key={i} size="sm" variant={i === active ? 'secondary' : 'ghost'} onClick={() => setActive(i)}>
+              {pv.platform || `Preview ${i + 1}`}
+            </Button>
+          ))}
+        </div>
+      )}
+      <div className="rounded-lg border border-border/60 overflow-hidden bg-card">
+        {p.url ? (
+          <iframe src={p.url} title="Ad preview" className="w-full h-[520px] border-0" />
+        ) : (
+          <iframe srcDoc={p.html} title="Ad preview" className="w-full h-[520px] border-0" />
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -291,13 +350,11 @@ export function CreativeGallery({ accessToken, selectedAccount }: CreativeGaller
           <DialogTitle className="sr-only">{selectedCreative?.creativeName || 'Creative Preview'}</DialogTitle>
           {selectedCreative && (
             <div className="space-y-4">
-              {selectedCreative.imageUrl && (
-                <img
-                  src={selectedCreative.imageUrl}
-                  alt={selectedCreative.creativeName}
-                  className="w-full h-auto rounded-lg border border-border/60"
-                />
-              )}
+              <AdPreviewPanel
+                accessToken={accessToken}
+                accountId={selectedAccount}
+                creative={selectedCreative}
+              />
               <div className="space-y-2">
                 <h3 className="font-semibold text-lg break-words">{selectedCreative.creativeName}</h3>
                 <p className="text-sm text-muted-foreground">{selectedCreative.campaignName}</p>
