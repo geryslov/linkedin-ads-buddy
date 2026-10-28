@@ -3,6 +3,7 @@ import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { createCreativeReader, CREATIVE_READ_VERSION, metadataCopy } from './creative-metadata.ts';
+import { isInMailRef, readInMailContent, type MessageAdContent } from './message-ad-content.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -1741,6 +1742,18 @@ serve(async (req) => {
           }));
         }
         console.log(`[get_ad_copy] resolved ${copyByRef.size}/${copyRefs.length} post references (${copyRefFailures} failed)`);
+
+        // ── 3b. Message Ad content (subject, body, sender, CTA) ─────────────────
+        const messageByRef = new Map<string, MessageAdContent>();
+        const messageErrors: Array<{ reference: string; status: number }> = [];
+        const messageRefs = [...new Set(copySelected.map(extractCopyRef).filter(isInMailRef))] as string[];
+        await mapWithConcurrency(messageRefs, 8, async (ref: string) => {
+          try {
+            const r = await readInMailContent(accessToken, ref);
+            if (r.content) messageByRef.set(ref, r.content); else messageErrors.push({ reference: ref, status: r.status });
+          } catch { messageErrors.push({ reference: ref, status: 0 }); }
+        });
+        if (messageRefs.length) console.log(`[get_ad_copy] message content ${messageByRef.size}/${messageRefs.length}`);
 
         // ── 4. Merge ───────────────────────────────────────────────────────────
         const copyElements = copySelected.map((c: any) => {
