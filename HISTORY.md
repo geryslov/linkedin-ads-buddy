@@ -422,3 +422,6 @@ Jibe title updates failed with LinkedIn 422: `/targetingCriteria/exclude/or` was
 
 ### Oct 28, 2026 — October creative metadata reads
 Added explicit single-creative metadata projection using version 202610 for ad copy and source/gallery/name/performance reads. Request-local deduplication, eight-way concurrency for new reads, image-safe asset handling and plain-read fallback protect existing behavior. Creative names and content references remain intact; campaign editing and write versions are unchanged. Eleven regression checks passed. Live account metadata access is not yet verified because no LinkedIn browser session was available.
+
+### Oct 28, 2026 — Message Ad content in ad copy
+`get_ad_copy` now reads Sponsored InMail content (`/rest/inMailContents`, LinkedIn-Version 202610) for creatives whose reference is `urn:li:adInMailContent:*`: subject → `headline`, HTML body → `introText` (plain text) plus `message.{subject,bodyText,bodyHtml,sender,footer,conversationUrn}`, CTA label/landing page. Conversation ads expose only the `sponsoredConversation` URN (individual steps not yet read). Response carries `messageAds.{found,resolved,errors}`. Read-only; duplication of message ads still unsupported. Module: `linkedin-api/message-ad-content.ts` (+ tests). Not yet verified against a live account with message ads.

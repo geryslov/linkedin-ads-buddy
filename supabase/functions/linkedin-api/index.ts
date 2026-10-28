@@ -3,6 +3,7 @@ import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { createCreativeReader, CREATIVE_READ_VERSION, metadataCopy } from './creative-metadata.ts';
+import { isInMailRef, readInMailContent, type MessageAdContent } from './message-ad-content.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -1742,6 +1743,18 @@ serve(async (req) => {
         }
         console.log(`[get_ad_copy] resolved ${copyByRef.size}/${copyRefs.length} post references (${copyRefFailures} failed)`);
 
+        // ── 3b. Message Ad content (subject, body, sender, CTA) ─────────────────
+        const messageByRef = new Map<string, MessageAdContent>();
+        const messageErrors: Array<{ reference: string; status: number }> = [];
+        const messageRefs = [...new Set(copySelected.map(extractCopyRef).filter(isInMailRef))] as string[];
+        await mapWithConcurrency(messageRefs, 8, async (ref: string) => {
+          try {
+            const r = await readInMailContent(accessToken, ref);
+            if (r.content) messageByRef.set(ref, r.content); else messageErrors.push({ reference: ref, status: r.status });
+          } catch { messageErrors.push({ reference: ref, status: 0 }); }
+        });
+        if (messageRefs.length) console.log(`[get_ad_copy] message content ${messageByRef.size}/${messageRefs.length}`);
+
         // ── 4. Merge ───────────────────────────────────────────────────────────
         const copyElements = copySelected.map((c: any) => {
           const creativeId = idOf(c?.id);
@@ -1751,25 +1764,30 @@ serve(async (req) => {
           const rest = copyRestById[creativeId] || {};
 
           const metadata = metadataById.get(creativeId);
-          const introText = metadata?.introText || post?.introText || fromVars.introText || '';
-          const headline = metadata?.headline || post?.headline || fromVars.headline || '';
+          const msg = messageByRef.get(ref);
+          const introText = msg?.bodyText || metadata?.introText || post?.introText || fromVars.introText || '';
+          const headline = msg?.subject || metadata?.headline || post?.headline || fromVars.headline || '';
           return {
             creativeId,
             campaignId: idOf(c?.campaign),
             status: c?.status || '',
-            adType: fromVars.adType,
+            adType: msg ? (msg.messageType === 'CONVERSATION' ? 'CONVERSATION_AD' : 'MESSAGE_AD') : fromVars.adType,
             name: rest.name || '',
             reference: ref || undefined,
             introText,
             headline,
             description: metadata?.description || post?.description || '',
-            destinationUrl: metadata?.destinationUrl || post?.destinationUrl || fromVars.destinationUrl || '',
+            destinationUrl: msg?.destinationUrl || metadata?.destinationUrl || post?.destinationUrl || fromVars.destinationUrl || '',
             adFormat: metadata?.adFormat || undefined,
             assetUrl: metadata?.assetUrl || undefined,
             imageUrl: metadata?.imageUrl || undefined,
-            ctaLabel: rest.ctaLabel || fromVars.ctaLabel || '',
+            ctaLabel: rest.ctaLabel || msg?.ctaLabel || fromVars.ctaLabel || '',
             leadFormUrn: rest.destination && rest.destination.includes('adForm') ? rest.destination : undefined,
             cardCount: fromVars.cardCount,
+            message: msg ? {
+              type: msg.messageType, subject: msg.subject, bodyText: msg.bodyText, bodyHtml: msg.bodyHtml,
+              sender: msg.sender, footer: msg.footer, conversationUrn: msg.conversationUrn || undefined,
+            } : undefined,
             // A creative with a reference we could not resolve is not "no copy" —
             // say so, so callers do not report an empty ad as an empty ad.
             copyResolved: !!(introText || headline) ,
@@ -1784,6 +1802,7 @@ serve(async (req) => {
           unresolvedReferences: copyRefFailures,
           resolutionErrors: copyRefErrors.slice(0, 5),
           metadataErrors: metadataErrors.slice(0, 5),
+          messageAds: { found: messageRefs.length, resolved: messageByRef.size, errors: messageErrors.slice(0, 5) },
           creativeApiVersion: CREATIVE_READ_VERSION,
           elements: copyElements,
         }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
