@@ -1690,7 +1690,7 @@ serve(async (req) => {
         };
         const copyByRef = new Map<string, PostCopy>();
         const copyRefs = [...new Set(
-          copySelected.filter((c: any) => { const m = metadataById.get(idOf(c.id)); return !m?.introText && !m?.headline; }).map(extractCopyRef).filter((r: string) =>
+          copySelected.filter((c: any) => { const m = metadataById.get(idOf(c.id)); return !m?.introText || !m?.headline || !m?.description || !m?.destinationUrl; }).map(extractCopyRef).filter((r: string) =>
             r.includes('ugcPost') || r.includes('share') || r.includes('activity')),
         )] as string[];
 
@@ -1762,7 +1762,7 @@ serve(async (req) => {
             reference: ref || undefined,
             introText,
             headline,
-            description: metadata?.description || post?.description || fromVars.introText || '',
+            description: metadata?.description || post?.description || '',
             destinationUrl: metadata?.destinationUrl || post?.destinationUrl || fromVars.destinationUrl || '',
             adFormat: metadata?.adFormat || undefined,
             assetUrl: metadata?.assetUrl || undefined,
