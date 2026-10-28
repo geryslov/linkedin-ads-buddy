@@ -1509,6 +1509,39 @@ serve(async (req) => {
         });
       }
 
+      case 'get_ad_preview': {
+        // Rendered ad preview (iframe URL) for one creative via /rest/adPreviews.
+        const { accountId: pvAccount, creativeId: pvCreative } = params || {};
+        if (!pvAccount || !pvCreative) {
+          return new Response(JSON.stringify({ error: 'accountId and creativeId are required' }), {
+            status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+        const pvId = String(pvCreative).replace(/\D/g, '');
+        const creativeUrn = encodeURIComponent(`urn:li:sponsoredCreative:${pvId}`);
+        const accountUrn = encodeURIComponent(`urn:li:sponsoredAccount:${String(pvAccount).replace(/\D/g, '')}`);
+        const pvRes = await fetch(
+          `https://api.linkedin.com/rest/adPreviews?q=creative&creative=${creativeUrn}&account=${accountUrn}`,
+          { headers: { Authorization: `Bearer ${accessToken}`, 'LinkedIn-Version': CREATIVE_READ_VERSION, 'X-Restli-Protocol-Version': '2.0.0' } },
+        );
+        const pvText = await pvRes.text();
+        let pvJson: any = {};
+        try { pvJson = JSON.parse(pvText); } catch (_e) { pvJson = { raw: pvText }; }
+        if (!pvRes.ok) {
+          return new Response(JSON.stringify({ error: pvJson?.message || `LinkedIn ${pvRes.status}`, status: pvRes.status }), {
+            status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+        const previews = (pvJson.elements || []).map((el: any) => {
+          const html: string = el.preview || '';
+          const src = html.match(/src=["']([^"']+)["']/)?.[1]?.replace(/&amp;/g, '&');
+          return { url: src || undefined, html: src ? undefined : html || undefined, platform: el.platform || undefined };
+        });
+        return new Response(JSON.stringify({ previews }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
       case 'get_ad_copy': {
         // Ad copy per creative: intro text (the post commentary), headline,
         // description, destination URL and CTA label.
