@@ -419,3 +419,6 @@ The JWT-only gate made the tool unreachable for LinkedIn-only users (the "Sign i
 
 ### Oct 22, 2026 — Campaign Editor empty exclusions corrected
 Jibe title updates failed with LinkedIn 422: `/targetingCriteria/exclude/or` was required. Append and Replace serialized `exclude: {}` for campaigns without exclusions. Both now supply `exclude: { or: {} }` when empty, preserving existing exclusion facets. Regression checks exercise the actual criteria builder for both modes with missing, empty, and populated exclusions.
+
+### Oct 28, 2026 — October creative metadata reads
+Added explicit single-creative metadata projection using version 202610 for ad copy and source/gallery/name/performance reads. Request-local deduplication, eight-way concurrency for new reads, image-safe asset handling and plain-read fallback protect existing behavior. Creative names and content references remain intact; campaign editing and write versions are unchanged. Eleven regression checks passed. Live account metadata access is not yet verified because no LinkedIn browser session was available.

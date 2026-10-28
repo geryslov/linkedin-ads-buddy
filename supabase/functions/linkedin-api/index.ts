@@ -2,6 +2,7 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { createCreativeReader, CREATIVE_READ_VERSION, metadataCopy } from './creative-metadata.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -938,6 +939,8 @@ serve(async (req) => {
     const { action, accessToken, params } = await req.json();
     console.log(`LinkedIn API action: ${action}`);
 
+    const readCreative = createCreativeReader(accessToken);
+
     switch (action) {
       case 'get_auth_url': {
         const redirectUri = params?.redirectUri || `${req.headers.get('origin')}/callback`;
@@ -1414,7 +1417,7 @@ serve(async (req) => {
           const nameById: Record<string, string> = {};
           const restHeaders = {
             'Authorization': `Bearer ${accessToken}`,
-            'LinkedIn-Version': '202511',
+            'LinkedIn-Version': CREATIVE_READ_VERSION,
             'X-Restli-Protocol-Version': '2.0.0',
           };
           for (let i = 0; i < ids.length; i += 50) {
@@ -1445,6 +1448,18 @@ serve(async (req) => {
         } catch (e) {
           console.error('[get_creatives] name resolution error:', e);
         }
+
+        // Metadata is only returned by individual GETs, never list/batch finders.
+        await mapWithConcurrency(enriched.slice(0, 200), 8, async (c) => {
+          try {
+            const response = await readCreative(String(accountId), String(c.id).split(':').pop() || '');
+            if (!response.ok) { await response.body?.cancel(); return; }
+            const detail = await response.json();
+            const copy = metadataCopy(detail);
+            Object.assign(c, { metadata: detail.metadata, imageUrl: copy.imageUrl || c.imageUrl, assetUrl: copy.assetUrl || undefined });
+            if (!c.name) c.name = detail.name || copy.headline || copy.introText.slice(0, 80);
+          } catch { /* retain original creative */ }
+        });
 
         // Second pass: many sponsored ads have no `name` set — their real label is the
         // underlying post's text. Resolve it via /v2/ugcPosts (the non-partner-gated
@@ -1624,7 +1639,7 @@ serve(async (req) => {
         try {
           const restHeaders = {
             'Authorization': `Bearer ${accessToken}`,
-            'LinkedIn-Version': '202511',
+            'LinkedIn-Version': CREATIVE_READ_VERSION,
             'X-Restli-Protocol-Version': '2.0.0',
           };
           const copyIds = copySelected.map((c: any) => idOf(c?.id)).filter(Boolean);
@@ -1656,13 +1671,26 @@ serve(async (req) => {
           console.error('[get_ad_copy] REST creative lookup error:', e);
         }
 
+        const metadataById = new Map<string, ReturnType<typeof metadataCopy>>();
+        const metadataErrors: Array<{ creativeId: string; status: number }> = [];
+        await mapWithConcurrency(copySelected, 8, async (c: any) => {
+          const id = idOf(c.id);
+          try {
+            const response = await readCreative(String(copyAccountId), id);
+            if (!response.ok) { metadataErrors.push({ creativeId: id, status: response.status }); await response.body?.cancel(); return; }
+            const detail = await response.json();
+            metadataById.set(id, metadataCopy(detail));
+            if (detail.name) copyRestById[id] = { ...copyRestById[id], name: detail.name };
+          } catch { metadataErrors.push({ creativeId: id, status: 0 }); }
+        });
+
         // ── 3. Resolve post copy per unique content reference ───────────────────
         type PostCopy = {
           introText: string; headline: string; description: string; destinationUrl: string;
         };
         const copyByRef = new Map<string, PostCopy>();
         const copyRefs = [...new Set(
-          copySelected.map(extractCopyRef).filter((r: string) =>
+          copySelected.filter((c: any) => { const m = metadataById.get(idOf(c.id)); return !m?.introText || !m?.headline || !m?.description || !m?.destinationUrl; }).map(extractCopyRef).filter((r: string) =>
             r.includes('ugcPost') || r.includes('share') || r.includes('activity')),
         )] as string[];
 
@@ -1722,8 +1750,9 @@ serve(async (req) => {
           const post = copyByRef.get(ref);
           const rest = copyRestById[creativeId] || {};
 
-          const introText = post?.introText || fromVars.introText || '';
-          const headline = post?.headline || fromVars.headline || '';
+          const metadata = metadataById.get(creativeId);
+          const introText = metadata?.introText || post?.introText || fromVars.introText || '';
+          const headline = metadata?.headline || post?.headline || fromVars.headline || '';
           return {
             creativeId,
             campaignId: idOf(c?.campaign),
@@ -1733,8 +1762,11 @@ serve(async (req) => {
             reference: ref || undefined,
             introText,
             headline,
-            description: post?.description || '',
-            destinationUrl: post?.destinationUrl || fromVars.destinationUrl || '',
+            description: metadata?.description || post?.description || '',
+            destinationUrl: metadata?.destinationUrl || post?.destinationUrl || fromVars.destinationUrl || '',
+            adFormat: metadata?.adFormat || undefined,
+            assetUrl: metadata?.assetUrl || undefined,
+            imageUrl: metadata?.imageUrl || undefined,
             ctaLabel: rest.ctaLabel || fromVars.ctaLabel || '',
             leadFormUrn: rest.destination && rest.destination.includes('adForm') ? rest.destination : undefined,
             cardCount: fromVars.cardCount,
@@ -1751,6 +1783,8 @@ serve(async (req) => {
           truncated: copyAll.length > copySelected.length && !wantCreatives.size && !wantCampaigns.size,
           unresolvedReferences: copyRefFailures,
           resolutionErrors: copyRefErrors.slice(0, 5),
+          metadataErrors: metadataErrors.slice(0, 5),
+          creativeApiVersion: CREATIVE_READ_VERSION,
           elements: copyElements,
         }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
@@ -2156,13 +2190,7 @@ serve(async (req) => {
                   // Use exact endpoint format: /rest/adAccounts/{accountId}/creatives/{creativeUrn}
                   const creativeUrn = encodeURIComponent(`urn:li:sponsoredCreative:${creativeId}`);
                   const creativeUrl = `https://api.linkedin.com/rest/adAccounts/${accountId}/creatives/${creativeUrn}`;
-                  const creativeResp = await fetch(creativeUrl, {
-                    headers: {
-                      'Authorization': `Bearer ${token}`,
-                      'LinkedIn-Version': '202511',
-                      'X-Restli-Protocol-Version': '2.0.0'
-                    }
-                  });
+                  const creativeResp = await readCreative(accountId, creativeId);
                   
                   if (creativeResp.ok) {
                     const creativeDetail = await creativeResp.json();
@@ -2177,11 +2205,13 @@ serve(async (req) => {
                       if (ref) existing.reference = ref;
                       // Extract image URL from creative content
                       // Try multiple paths where LinkedIn stores image data
-                      let imageUrl = '';
+                      const metadata = metadataCopy(creativeDetail);
+                      if (!existing.name) existing.name = metadata.headline || metadata.introText.slice(0, 80);
+                      let imageUrl = metadata.imageUrl;
                       const content = creativeDetail.content;
                       if (content) {
                         // Standard single image
-                        imageUrl = content.media?.downloadUrl || '';
+                        imageUrl = imageUrl || content.media?.downloadUrl || '';
                         // Try landingPage thumbnail
                         if (!imageUrl && content.landingPage?.landingPageMedia?.thumbnail) {
                           imageUrl = content.landingPage.landingPageMedia.thumbnail;
@@ -4581,19 +4611,15 @@ serve(async (req) => {
             try {
               const creativeUrn = encodeURIComponent(`urn:li:sponsoredCreative:${creativeId}`);
               const creativeUrl = `https://api.linkedin.com/rest/adAccounts/${accountId}/creatives/${creativeUrn}`;
-              const creativeResp = await fetch(creativeUrl, {
-                headers: {
-                  'Authorization': `Bearer ${accessToken}`,
-                  'LinkedIn-Version': '202511',
-                  'X-Restli-Protocol-Version': '2.0.0'
-                }
-              });
+              const creativeResp = await readCreative(String(accountId), creativeId);
               
               if (creativeResp.ok) {
                 const creativeDetail = await creativeResp.json();
                 const existing = creativeInfoMap.get(creativeId);
                 if (existing) {
-                  if (creativeDetail.name) existing.name = creativeDetail.name;
+                  const metadata = metadataCopy(creativeDetail);
+                  existing.name = creativeDetail.name || metadata.headline || metadata.introText.slice(0, 80) || existing.name;
+                  existing.imageUrl = metadata.imageUrl || existing.imageUrl;
                   // Extract campaign info
                   const campaignUrn = creativeDetail.campaign || '';
                   const campaignId = campaignUrn.split(':').pop() || '';
@@ -4601,7 +4627,7 @@ serve(async (req) => {
                     existing.campaignId = campaignId;
                     existing.campaignName = campaignNames.get(campaignId) || `Campaign ${campaignId}`;
                   }
-                  if (creativeDetail.status) existing.status = creativeDetail.status;
+                  if (creativeDetail.intendedStatus || creativeDetail.status) existing.status = creativeDetail.intendedStatus || creativeDetail.status;
                   // Extract reference URN for image resolution
                   const ref = creativeDetail.content?.reference;
                   if (ref) existing.reference = ref;
@@ -4682,7 +4708,7 @@ serve(async (req) => {
               }
             }
             const cachedImage = referenceImageCache.get(info.reference);
-            if (cachedImage) {
+            if (cachedImage && !info.imageUrl) {
               info.imageUrl = cachedImage;
             }
             creativeInfoMap.set(creativeId, info);
@@ -4847,30 +4873,31 @@ serve(async (req) => {
 
         const cpIds = [...allCreativeIds];
         // Fire ALL creative metadata fetches in parallel (max 50 concurrent)
-        const cpBatchSize = 50;
+        const cpBatchSize = 8;
         for (let i = 0; i < cpIds.length; i += cpBatchSize) {
           const batch = cpIds.slice(i, i + cpBatchSize);
           await Promise.all(batch.map(async (creativeId) => {
             try {
               const urn = encodeURIComponent(`urn:li:sponsoredCreative:${creativeId}`);
               const url = `https://api.linkedin.com/rest/adAccounts/${accountId}/creatives/${urn}`;
-              const resp = await fetch(url, { headers: { 'Authorization': `Bearer ${accessToken}`, 'LinkedIn-Version': '202511', 'X-Restli-Protocol-Version': '2.0.0' } });
+              const resp = await readCreative(String(accountId), creativeId);
               if (resp.ok) {
                 const d = await resp.json();
                 const campId = (d.campaign || '').split(':').pop() || '';
-                const creativeStatus = String(d.status || d.servingStatus || 'UNKNOWN').toUpperCase();
+                const creativeStatus = String(d.intendedStatus || d.status || d.servingStatus || 'UNKNOWN').toUpperCase();
                 
                 // Detect creative type from campaign type (reliable) + content hints
                 const campaignType = cpCampaignTypes.get(campId) || '';
                 const content = d.content || {};
                 const ref = (typeof content === 'string' ? content : content.reference) || '';
                 let creativeType = 'SPONSORED_CONTENT';
-                let imageUrl = '';
+                const metadata = metadataCopy(d);
+                let imageUrl = metadata.imageUrl;
 
                 // Extract image URL directly from creative detail content first
                 // (most reliable for sponsored creatives)
                 if (content && typeof content === 'object') {
-                  imageUrl = content.media?.downloadUrl || '';
+                  imageUrl = imageUrl || content.media?.downloadUrl || '';
 
                   if (!imageUrl && content.landingPage?.landingPageMedia?.thumbnail) {
                     imageUrl = content.landingPage.landingPageMedia.thumbnail;
@@ -4925,7 +4952,7 @@ serve(async (req) => {
                 }
 
                 cpCreativeInfo.set(creativeId, {
-                  name: d.name || '',
+                  name: d.name || metadata.headline || metadata.introText.slice(0, 80) || '',
                   campaignId: campId,
                   campaignName: cpCampaignNames.get(campId) || `Campaign ${campId}`,
                   campaignStatus: cpCampaignStatuses.get(campId) || 'UNKNOWN',
