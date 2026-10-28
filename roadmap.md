@@ -1,4 +1,4 @@
 # Creative API update
-- [ ] Upgrade creative reads to 202610 metadata with bounded requests and fallbacks.
+- [x] Upgrade creative reads to 202610 metadata with bounded requests and fallbacks.
 - [ ] Run creative regression checks and deploy only linkedin-api.
-- [ ] Verify live creative data where an authorized LinkedIn session is available; document limits.
+- [ ] Verify live creative data; blocked by no available LinkedIn session. Account access remains unverified.
