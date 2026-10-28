@@ -1764,25 +1764,30 @@ serve(async (req) => {
           const rest = copyRestById[creativeId] || {};
 
           const metadata = metadataById.get(creativeId);
-          const introText = metadata?.introText || post?.introText || fromVars.introText || '';
-          const headline = metadata?.headline || post?.headline || fromVars.headline || '';
+          const msg = messageByRef.get(ref);
+          const introText = msg?.bodyText || metadata?.introText || post?.introText || fromVars.introText || '';
+          const headline = msg?.subject || metadata?.headline || post?.headline || fromVars.headline || '';
           return {
             creativeId,
             campaignId: idOf(c?.campaign),
             status: c?.status || '',
-            adType: fromVars.adType,
+            adType: msg ? (msg.messageType === 'CONVERSATION' ? 'CONVERSATION_AD' : 'MESSAGE_AD') : fromVars.adType,
             name: rest.name || '',
             reference: ref || undefined,
             introText,
             headline,
             description: metadata?.description || post?.description || '',
-            destinationUrl: metadata?.destinationUrl || post?.destinationUrl || fromVars.destinationUrl || '',
+            destinationUrl: msg?.destinationUrl || metadata?.destinationUrl || post?.destinationUrl || fromVars.destinationUrl || '',
             adFormat: metadata?.adFormat || undefined,
             assetUrl: metadata?.assetUrl || undefined,
             imageUrl: metadata?.imageUrl || undefined,
-            ctaLabel: rest.ctaLabel || fromVars.ctaLabel || '',
+            ctaLabel: rest.ctaLabel || msg?.ctaLabel || fromVars.ctaLabel || '',
             leadFormUrn: rest.destination && rest.destination.includes('adForm') ? rest.destination : undefined,
             cardCount: fromVars.cardCount,
+            message: msg ? {
+              type: msg.messageType, subject: msg.subject, bodyText: msg.bodyText, bodyHtml: msg.bodyHtml,
+              sender: msg.sender, footer: msg.footer, conversationUrn: msg.conversationUrn || undefined,
+            } : undefined,
             // A creative with a reference we could not resolve is not "no copy" —
             // say so, so callers do not report an empty ad as an empty ad.
             copyResolved: !!(introText || headline) ,
@@ -1797,6 +1802,7 @@ serve(async (req) => {
           unresolvedReferences: copyRefFailures,
           resolutionErrors: copyRefErrors.slice(0, 5),
           metadataErrors: metadataErrors.slice(0, 5),
+          messageAds: { found: messageRefs.length, resolved: messageByRef.size, errors: messageErrors.slice(0, 5) },
           creativeApiVersion: CREATIVE_READ_VERSION,
           elements: copyElements,
         }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
