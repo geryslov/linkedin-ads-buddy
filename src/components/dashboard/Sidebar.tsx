@@ -74,7 +74,7 @@ export const navGroups: NavGroup[] = [
     items: [
       { id: "campaigns", label: "Campaigns", icon: Megaphone, hidden: true },
       { id: "budget_pacing", label: "Budget Pacing", icon: Wallet },
-      { id: "creatives", label: "Creatives", icon: ImageIcon, hidden: true },
+      { id: "creatives", label: "Creatives", icon: ImageIcon },
     ],
   },
   {

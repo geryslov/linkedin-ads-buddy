@@ -27,7 +27,7 @@ what it enforces.
 
 Defined in [Sidebar.tsx](src/components/dashboard/Sidebar.tsx). Eight groups.
 
-**Frozen items** — nav items marked `hidden: true` on their `NavItem` are filtered out of both the sidebar and the ⌘K command palette, but their routes/tabs still exist and render if reached by direct URL (`?tab=<id>`). Currently frozen: Campaigns (`campaigns`), Creatives (`creatives`), Conv. Breakdown (`conv_breakdown`), Activity Report (`activity_report`), Account Health (`account_health`), Audiences (`audiences`), Titles (`standardized_titles`). Remove the flag to bring one back. A group whose visible items all become hidden renders nothing (no orphan header).
+**Frozen items** — nav items marked `hidden: true` on their `NavItem` are filtered out of both the sidebar and the ⌘K command palette, but their routes/tabs still exist and render if reached by direct URL (`?tab=<id>`). Currently frozen: Campaigns (`campaigns`), Conv. Breakdown (`conv_breakdown`), Activity Report (`activity_report`), Account Health (`account_health`), Audiences (`audiences`), Titles (`standardized_titles`). Remove the flag to bring one back. A group whose visible items all become hidden renders nothing (no orphan header).
 
 Groups and items:
 
@@ -41,7 +41,7 @@ Groups and items:
 |---|---|---|
 | Campaigns | [CampaignTable](src/components/dashboard/CampaignTable.tsx) | [useLinkedInAds](src/hooks/useLinkedInAds.ts) |
 | Budget Pacing | [BudgetPacingDashboard](src/components/dashboard/BudgetPacingDashboard.tsx), [MegaBudgetPacingDashboard](src/components/dashboard/MegaBudgetPacingDashboard.tsx) — per-account LinkedIn, Google, and Additional pacing lanes with inline budget/spend editing; each client can be linked to a Google Ads customer ([GoogleAccountLinkPicker](src/components/dashboard/GoogleAccountLinkPicker.tsx)) so Google spend is pulled live instead of typed | [useBudgetPacing](src/hooks/useBudgetPacing.ts), [useMegaBudgetPacing](src/hooks/useMegaBudgetPacing.ts), [useGoogleAdsLinks](src/hooks/useGoogleAdsLinks.ts) |
-| Creatives | [CreativeGallery](src/components/dashboard/CreativeGallery.tsx) | [useCreativeReporting](src/hooks/useCreativeReporting.ts) |
+| Creatives | [CreativeGallery](src/components/dashboard/CreativeGallery.tsx) — detail dialog embeds a live LinkedIn-rendered ad preview (`get_ad_preview`, `/rest/adPreviews`), with tabs when more than one version is returned, falling back to the stored image plus the reason when LinkedIn refuses | [useCreativeReporting](src/hooks/useCreativeReporting.ts) |
 
 ### Bulk Editing
 | Item | Component | Hook |
