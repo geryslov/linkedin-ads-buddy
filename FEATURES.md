@@ -355,3 +355,5 @@ An info banner states this above the controls; don't quietly reword it into "peo
 - **`get_profile` still calls `/v2/me`**, which requires the deprecated `r_liteprofile`. That is why `get_auth_url` keeps two mutually-exclusive scope sets (`legacy` and `oidc`) instead of one — OIDC callers should read identity from `/v2/userinfo`.
 
 > **Prospect Finder gate (Oct 21, 2026):** `moltsets_status` / `find_prospects` use `prospectGate()` — an app session, OR a browser call from an app Origin with a live LinkedIn token (checked via `/v2/me`). No Origin = MCP = blocked, so Claude cannot spend MoltSets credits. No separate sign-in is needed in the dashboard.
+
+- **Ad Preview** (Oct 28 2026): `get_ad_preview` edge action (`/rest/adPreviews`, 202610) returns LinkedIn-rendered preview iframe URLs; Creative Gallery detail dialog embeds it, falling back to the stored image.
