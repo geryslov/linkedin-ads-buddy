@@ -6,5 +6,5 @@
 # Onfire AI company targeting
 - [x] Diagnose LinkedIn's company-targeting compatibility rejection without removing existing filters.
 - [x] Correct validation/error reporting and run targeting checks (12 passed).
-- [ ] Deploy linkedin-api.
+- [x] Deploy linkedin-api (deployment succeeded).
 - [ ] Verify Onfire AI update; requires the user's connected LinkedIn session.
