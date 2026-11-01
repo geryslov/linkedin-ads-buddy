@@ -403,6 +403,9 @@ the new ones: a deploy that half-worked would look identical from the new action
 
 ## Recurring themes
 
+### Nov 1, 2026 — Onfire AI company targeting conflict
+Live logs identified LinkedIn `INCOMPATIBLE_TARGETING_COMBINATION` for employers and staffCountRanges on campaign 898055363. LinkedIn forbids company-name targeting AND a separate company-size filter. Preflight and writes now validate the final criteria and explain the conflict without removing filters or widening the audience. The editor no longer discards per-campaign results on `success: false`. Twelve targeting regression tests pass; a real Onfire AI retry requires the user's LinkedIn session.
+
 - **URN resolution is the project's tax.** Creative names, job titles, super titles, company names — each needed multiple rounds of encoding fixes, batch fetchers, and caches.
 - **LinkedIn API versioning churn** forced repeated endpoint and version-header rewrites, especially Dec 2025.
 - **Deploy drift.** The edge function deploys manually; several bugs traced back to code that was committed but never deployed.
