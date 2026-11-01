@@ -1,2 +1,3 @@
 # Architecture rules
 - Creative metadata reads use a request-local reader in the linkedin-api function directory; explicitly project metadata on single-creative GETs, bound concurrency, preserve content references and legacy fallbacks, and keep write API versions independent. This avoids cross-user caching and accidental campaign-write changes.
+- Targeting preflight and writes validate the same final criteria for incompatible company filters; never remove filters or rewrite AND to OR automatically, because that changes the intended audience.
