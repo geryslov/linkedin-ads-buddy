@@ -103,6 +103,8 @@ Groups and items:
 
 ## Cross-cutting features
 
+Campaign Editor preflight and writes reject separate Company names AND Company size/Industry include clauses with a clear compatibility message, leaving existing filters unchanged. Failed updates retain the per-campaign result report instead of throwing away details for an aggregate toast.
+
 - **AI chat** — [AgenticChatDrawer](src/components/dashboard/AgenticChatDrawer.tsx), global drawer with tool-calling
 - **AI analysis panel** — [AIAnalysisPanel](src/components/dashboard/AIAnalysisPanel.tsx) + [useAIAnalysis](src/hooks/useAIAnalysis.ts)
 - **Custom fields** — [CustomFieldEditor](src/components/dashboard/CustomFieldEditor.tsx), per campaign / campaign group

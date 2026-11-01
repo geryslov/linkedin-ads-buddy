@@ -574,6 +574,7 @@ export function CampaignTargetingEditor({
   }, [accessToken, selectedCampaignIds, selectedEntities, updateMode, buildUrnParams]);
 
   const overLimitPreflight = (preflight || []).filter(r => r.errorCode === 'FACET_LIMIT_EXCEEDED');
+  const compatibilityPreflight = (preflight || []).filter(r => r.errorCode === 'INCOMPATIBLE_TARGETING_COMBINATION');
 
   const copyReport = useCallback((rows: TargetingUpdateResult[]) => {
     const text = rows
@@ -626,7 +627,9 @@ export function CampaignTargetingEditor({
       });
       
       if (error) throw new Error(await readInvokeError(error));
-      if (data?.message && data?.success === false) throw new Error(data.message);
+      if (data?.success === false && !Array.isArray(data?.results)) {
+        throw new Error(data?.message || 'Update failed');
+      }
 
       const results = (data?.results || []) as TargetingUpdateResult[];
       const successCount = results.filter(r => r.success).length;
@@ -667,7 +670,9 @@ export function CampaignTargetingEditor({
           toastTitle = 'Some campaigns skipped';
           toastDescription = `${successCount}/${totalCount} updated. ${limitCount} skipped — they'd exceed LinkedIn's 100-value facet limit. See the report below.`;
         } else {
-          toastDescription = `${successCount}/${totalCount} campaigns updated. See the report below for per-campaign details.`;
+          toastDescription = failedResults.length === 1
+            ? failedResults[0].message
+            : `${successCount}/${totalCount} campaigns updated. See the report below for per-campaign details.`;
         }
         
         toast({ 
@@ -854,6 +859,14 @@ export function CampaignTargetingEditor({
                   />
                   Fill to the limit instead of skipping — add as many as fit, in selection order
                 </label>
+              </div>
+            )}
+
+            {compatibilityPreflight.length > 0 && (
+              <div role="alert" className="mt-3 border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+                {compatibilityPreflight.map(r => (
+                  <p key={r.campaignId}>{campaignName(r.campaignId)} — {r.message}</p>
+                ))}
               </div>
             )}
 

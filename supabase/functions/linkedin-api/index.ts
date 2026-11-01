@@ -4,6 +4,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { createCreativeReader, CREATIVE_READ_VERSION, metadataCopy } from './creative-metadata.ts';
 import { isInMailRef, readInMailContent, type MessageAdContent } from './message-ad-content.ts';
+import { targetingCompatibilityError } from './targeting-compatibility.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -9618,25 +9619,6 @@ serve(async (req) => {
               continue;
             }
 
-            if (isPreflight) {
-              const offenders = facetStats.filter((s) => s.overLimit);
-              results.push({
-                campaignId: currentCampaignId,
-                success: offenders.length === 0,
-                errorCode: offenders.length ? 'FACET_LIMIT_EXCEEDED' : undefined,
-                accountId: derivedAccountId,
-                facets: facetStats,
-                message: offenders.length
-                  ? offenders
-                      .map((s) => `${facetLabel(s.facet)}: ${s.existing} existing + ${s.willAdd} new = ${s.total} (max ${MAX_FACET_VALUES}, room for ${s.room})`)
-                      .join('; ')
-                  : 'Fits within LinkedIn limits',
-              });
-              continue;
-            }
-
-
-
             // Build the criteria from an arbitrary subset of the requested facets, so a
             // LinkedIn rejection can be narrowed down to the exact offending facet.
             const buildCriteria = (payload: Array<[string, string[]]>): any => {
@@ -9733,6 +9715,29 @@ serve(async (req) => {
                 exclude: { ...existingTargeting?.exclude, or: existingTargeting?.exclude?.or || {} }
               };
             };
+
+            const compatibilityError = targetingCompatibilityError(buildCriteria(facetPayload));
+            if (compatibilityError) {
+              results.push({ campaignId: currentCampaignId, success: false,
+                errorCode: 'INCOMPATIBLE_TARGETING_COMBINATION', accountId: derivedAccountId,
+                facets: facetStats, message: compatibilityError });
+              continue;
+            }
+
+            if (isPreflight) {
+              const offenders = facetStats.filter((s) => s.overLimit);
+              results.push({
+                campaignId: currentCampaignId,
+                success: offenders.length === 0,
+                errorCode: offenders.length ? 'FACET_LIMIT_EXCEEDED' : undefined,
+                accountId: derivedAccountId,
+                facets: facetStats,
+                message: offenders.length
+                  ? offenders.map((s) => `${facetLabel(s.facet)}: ${s.existing} existing + ${s.willAdd} new = ${s.total} (max ${MAX_FACET_VALUES}, room for ${s.room})`).join('; ')
+                  : 'Fits within LinkedIn limits',
+              });
+              continue;
+            }
 
             // Step 6: Perform PATCH update.
             // Use the versioned REST campaign endpoint — the legacy /v2/adCampaignsV2 route
@@ -9848,7 +9853,9 @@ serve(async (req) => {
                 let liMsg = '';
                 try {
                   const errorJson = JSON.parse(errorText);
-                  liMsg = errorJson.message || errorJson.error || '';
+                  liMsg = (errorJson.errorDetails?.inputErrors || [])
+                    .map((entry: any) => entry.description).filter(Boolean).join('; ')
+                    || errorJson.message || errorJson.error || '';
                 } catch {}
                 if (updateResponse.status === 404) {
                   errorMessage = `Campaign not found (404)${liMsg ? `: ${liMsg}` : ''}`;
@@ -9899,7 +9906,8 @@ serve(async (req) => {
           message: isPreflight
             ? (overLimitCount
                 ? `${overLimitCount} of ${idsToUpdate.length} campaigns would exceed LinkedIn's ${MAX_FACET_VALUES}-value facet limit`
-                : `All ${idsToUpdate.length} campaigns fit within LinkedIn limits`)
+              : allSuccess ? `All ${idsToUpdate.length} campaigns fit within LinkedIn limits`
+                : `${idsToUpdate.length - successCount} campaign(s) have targeting conflicts; see per-campaign details`)
             : allSuccess 
               ? `Targeting ${mode === 'append' ? 'appended' : mode === 'exclude' ? 'excluded' : 'replaced'} on ${successCount} campaign(s)`
               : `${successCount}/${idsToUpdate.length} campaigns updated`,
