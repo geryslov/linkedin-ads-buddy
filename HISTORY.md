@@ -443,3 +443,6 @@ After a stale Lovable deploy and a stale MCP session (fixed by toggling the conn
 
 ### Nov 2, 2026 — `get_competitor_ads`
 First production action on the Ad Library. Built to the probe's findings: no `dateRange` (window filtered on impression timestamps), at most 8 pages of 25 to stay under the ~10/min throttle, partial results on 429, a 10-minute module cache of raw pages, an `exactAdvertiser` switch because advertiser search is fuzzy. Targeting reports which facets were used without their values, because LinkedIn returns none for Company/Job/Audience. Kept out of the product MCP allowlist since the rate limit is app-wide. 9 bun tests on the live response shape. Edge change, so it needs a deploy; not yet run live.
+
+### Nov 2, 2026 — `get_competitor_ads` first live run, undated-ads fix
+The first HubSpot run worked: 2,627 matching ads, 100 fetched, no throttling, and 80 of the 100 were HubSpot itself rather than a lookalike. But 54 had no stats at all, and the window filter (`!lastImpressionAt || ...`) counted them as in-window. Undated ads are now reported apart under `undated`, with a raw sample to diagnose why. Lovable's deploy commit also added two type annotations in `ad-library.ts` (implicit `any` on the cached value) that esbuild could not catch; the module now passes strict `tsc`.
