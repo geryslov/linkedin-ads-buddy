@@ -13890,7 +13890,7 @@ serve(async (req) => {
 
         const creativeMetadata = new Map<string, { creativeName: string; campaignUrn: string }>();
         const campaignNames = new Map<string, string>();
-        const creativeUrns = Array.from(new Set(filteredElements.map(associatedCreativeUrn).filter(Boolean)));
+        const creativeUrns: string[] = Array.from(new Set<string>(filteredElements.map(associatedCreativeUrn).filter(Boolean)));
 
         if (creativeUrns.length > 0) {
           const batchSize = 10;
@@ -14004,8 +14004,8 @@ serve(async (req) => {
         };
 
         const formQuestionMap = new Map<string, { byId: Map<string, string>; ordered: string[] }>();
-        const uniqueFormIds = Array.from(
-          new Set(filteredElements.map((el: any) => extractFormId(el.versionedLeadGenFormUrn || '')).filter(Boolean))
+        const uniqueFormIds: string[] = Array.from(
+          new Set<string>(filteredElements.map((el: any) => extractFormId(el.versionedLeadGenFormUrn || '')).filter(Boolean))
         );
         for (let i = 0; i < uniqueFormIds.length; i += 5) {
           await Promise.all(uniqueFormIds.slice(i, i + 5).map(async (formId) => {
