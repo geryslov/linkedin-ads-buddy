@@ -1961,6 +1961,74 @@ serve(async (req) => {
         }, null, 2), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
+      case 'probe_ad_library': {
+        // Diagnostic for the LinkedIn Ad Library API (vetted product, no extra
+        // OAuth scope — it rides on whatever member token the provisioned app
+        // issued). Answers one question before we build on it: does THIS app's
+        // token reach /rest/adLibrary and /rest/jobLibrary, and on which
+        // LinkedIn-Version? A 403 here means the product is on a different
+        // developer app; a 426/400 version error means the version has sunset.
+        // Read-only, keeps status + body like probe_ad_copy_sources.
+        const { advertiser: libAdvertiser, keyword: libKeyword, days: libDays } = params || {};
+        const advertiserQ = String(libAdvertiser || 'LinkedIn').trim();
+        const span = Math.min(Math.max(Number(libDays) || 30, 1), 365);
+        // The API defaults to Today-2..Today-1, so always pass an explicit range.
+        const libEnd = new Date();
+        const libStart = new Date(libEnd.getTime() - span * 24 * 60 * 60 * 1000);
+        const restliDate = (d: Date) => `(day:${d.getUTCDate()},month:${d.getUTCMonth() + 1},year:${d.getUTCFullYear()})`;
+        const libRange = `dateRange=(start:${restliDate(libStart)},end:${restliDate(libEnd)})`;
+        const libKw = libKeyword ? `&keyword=${encodeURIComponent(String(libKeyword))}` : '';
+
+        const libTargets = [
+          { label: 'adLibrary', url: `https://api.linkedin.com/rest/adLibrary?q=criteria&advertiser=${encodeURIComponent(advertiserQ)}${libKw}&${libRange}&start=0&count=5` },
+          { label: 'jobLibrary', url: `https://api.linkedin.com/rest/jobLibrary?q=criteria&organization=${encodeURIComponent(advertiserQ)}${libKw}&${libRange}&start=0&count=5` },
+        ];
+        // Docs samples use 202602 (ads) and 202607 (jobs); 202511 is what the
+        // rest of this function sends. First one that answers wins per endpoint.
+        const libVersions = ['202511', '202602', '202607'];
+
+        const libAttempts: any[] = [];
+        const libSummary: Record<string, any> = {};
+        for (const t of libTargets) {
+          for (const v of libVersions) {
+            try {
+              const r = await fetch(t.url, {
+                headers: {
+                  'Authorization': `Bearer ${accessToken}`,
+                  'LinkedIn-Version': v,
+                  'X-Restli-Protocol-Version': '2.0.0',
+                },
+              });
+              const body = await r.text();
+              libAttempts.push({ endpoint: t.label, version: v, status: r.status, ok: r.ok, bodyPreview: body.slice(0, 400) });
+              if (r.ok) {
+                let parsed: any = null;
+                try { parsed = JSON.parse(body); } catch { /* keep preview only */ }
+                const els = parsed?.elements || [];
+                libSummary[t.label] = {
+                  version: v,
+                  returned: els.length,
+                  total: parsed?.paging?.total ?? null,
+                  sample: els.slice(0, 2),
+                };
+                break;
+              }
+            } catch (e) {
+              libAttempts.push({ endpoint: t.label, version: v, status: 0, ok: false, bodyPreview: `threw: ${e}` });
+            }
+          }
+        }
+
+        return new Response(JSON.stringify({
+          advertiser: advertiserQ,
+          keyword: libKeyword || null,
+          range: { start: libStart.toISOString().split('T')[0], end: libEnd.toISOString().split('T')[0] },
+          reachable: { adLibrary: !!libSummary.adLibrary, jobLibrary: !!libSummary.jobLibrary },
+          summary: libSummary,
+          attempts: libAttempts,
+        }, null, 2), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
       case 'get_creative_analytics': {
         const { accountId, dateRange, timeGranularity, campaignIds } = params || {};
         const startDate = dateRange?.start || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
