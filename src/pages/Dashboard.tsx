@@ -37,6 +37,7 @@ import { AccountHealthCheck } from "@/components/dashboard/AccountHealthCheck";
 import { PerformanceSegmentation } from "@/components/dashboard/PerformanceSegmentation";
 import { ConnectClaude } from "@/components/dashboard/ConnectClaude";
 import { ProspectFinder } from "@/components/dashboard/ProspectFinder";
+import { CompetitorAds } from "@/components/dashboard/CompetitorAds";
 import { CommandPalette } from "@/components/dashboard/CommandPalette";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -70,6 +71,7 @@ const tabMeta: Record<string, { group: string; title: string; subtitle: string }
   company_timeline:    { group: "Audience",   title: "Company Timeline",            subtitle: "Track company engagement over time" },
   influence_matcher:   { group: "Audience",   title: "Influence Matcher",           subtitle: "Match companies to influential contacts" },
   prospect_finder:     { group: "Prospecting", title: "Prospect Finder",           subtitle: "Turn campaign demographics into named people at the companies you reached" },
+  competitor_ads:      { group: "Prospecting", title: "Competitor Ads",            subtitle: "See what any advertiser is running on LinkedIn, from the public Ad Library" },
   title_checker:       { group: "Tools",      title: "Title Checker",               subtitle: "Validate and explore job titles" },
   standardized_titles: { group: "Tools",      title: "Standardized Titles",         subtitle: "Normalize job title variations" },
   name_report:         { group: "Tools",      title: "Name Report",                 subtitle: "Analyze campaign naming conventions" },
@@ -502,6 +504,10 @@ export default function Dashboard() {
             selectedAccount={selectedAccount}
             campaigns={campaigns.map((c) => ({ id: c.id, name: c.name, status: c.status }))}
           />
+        )}
+
+        {activeTab === "competitor_ads" && (
+          <CompetitorAds accessToken={accessToken} />
         )}
 
         {activeTab === "standardized_titles" && (

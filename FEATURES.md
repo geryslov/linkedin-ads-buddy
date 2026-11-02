@@ -87,6 +87,7 @@ Groups and items:
 | Item | Component | Notes |
 |---|---|---|
 | Prospect Finder | [ProspectFinder](src/components/dashboard/ProspectFinder.tsx), [useProspectFinder](src/hooks/useProspectFinder.ts) | Campaign demographics → named people via MoltSets |
+| Competitor Ads | [CompetitorAds](src/components/dashboard/CompetitorAds.tsx), [useCompetitorAds](src/hooks/useCompetitorAds.ts) | Any advertiser's public LinkedIn ads via `get_competitor_ads`: formats, run dates, impression ranges, markets, targeting types. Search-on-demand only (Ad Library throttle), exact-name on by default, CSV export, links to each ad. Account-independent, no Supabase session needed |
 
 ### Tools
 | Item | Component |
