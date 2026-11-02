@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { createCreativeReader, metadataCopy } from './creative-metadata';
+import { createCreativeReader, metadataCopy } from './creative-metadata.ts';
 
 test('October creative metadata maps ad copy and single image assets', () => {
   expect(metadataCopy({ metadata: { adFormat: 'SINGLE_IMAGE', adHeadline: 'Headline', adIntroductionText: 'Intro', adLine: 'Body', landingPage: 'https://example.com', assetURL: 'https://example.com/asset' } })).toEqual({ adFormat: 'SINGLE_IMAGE', headline: 'Headline', introText: 'Intro', description: 'Body', destinationUrl: 'https://example.com', assetUrl: 'https://example.com/asset', imageUrl: 'https://example.com/asset' });
