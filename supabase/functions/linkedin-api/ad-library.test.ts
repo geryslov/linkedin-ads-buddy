@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { fetchCompetitorAds, normalizeAd, summarizeAds } from './ad-library.ts';
+import { exactMatches, fetchCompetitorAds, normalizeAd, normalizeCompanyName, summarizeAds } from './ad-library.ts';
 
 const NOW = Date.UTC(2026, 10, 2);
 const DAY = 24 * 60 * 60 * 1000;
@@ -105,4 +105,36 @@ test('ads without impression stats are reported apart, not counted in the window
 
 test('missing advertiser is rejected', async () => {
   await expect(fetchCompetitorAds('t', { advertiser: ' ' }, pageFetch([]), NOW)).rejects.toThrow('advertiser is required');
+});
+
+test('company name normalization strips legal suffixes', () => {
+  expect(normalizeCompanyName('HubSpot, Inc.')).toBe('hubspot');
+  expect(normalizeCompanyName('Acme LLC')).toBe('acme');
+  expect(normalizeCompanyName('Foo Ltd')).toBe('foo');
+  expect(normalizeCompanyName('Gong')).toBe('gong');
+});
+
+test('exact mode keeps payer matches and same-company-URL ads, drops other fuzzy matches', async () => {
+  const person = liveAd(2, { name: 'Jane Doe' }); // thought-leader ad, payer HubSpot, Inc.
+  const sameUrl = liveAd(3, { name: 'HubSpot Academy' });
+  sameUrl.details.advertiser.adPayer = 'Someone Else';
+  const other = liveAd(4, { name: 'HubSpot For Startups' });
+  other.details.advertiser.adPayer = 'Startups Co';
+  other.details.advertiser.advertiserUrl = 'https://www.linkedin.com/company/999';
+  const r = await fetchCompetitorAds('t', { advertiser: 'HubSpot', exactAdvertiser: true }, pageFetch([[liveAd(1), person, sameUrl, other]]), NOW);
+  expect(r.ads.map((a) => a.adUrl.split('/').pop()).sort()).toEqual(['1', '2', '3']);
+});
+
+test('exactMatches: payer match alone counts when no exact-name ad exists', () => {
+  const a = normalizeAd(liveAd(1, { name: 'Jane Doe' }));
+  expect(exactMatches([a], 'hubspot inc')).toEqual([true]);
+  expect(exactMatches([a], 'Gong')).toEqual([false]);
+});
+
+test('undated ads are returned for listing but stay out of window stats', async () => {
+  const bare = { isRestricted: false, adUrl: 'https://www.linkedin.com/ad-library/detail/8', details: { advertiser: { advertiserName: 'UndatedList' }, type: 'SPONSORED_VIDEO' } };
+  const r = await fetchCompetitorAds('t', { advertiser: 'UndatedList', exactAdvertiser: true }, pageFetch([[bare]]), NOW);
+  expect(r.ads.length).toBe(0);
+  expect(r.summary.ads).toBe(0);
+  expect(r.undated.ads.map((a) => a.adUrl)).toEqual(['https://www.linkedin.com/ad-library/detail/8']);
 });

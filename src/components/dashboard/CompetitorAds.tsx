@@ -94,10 +94,15 @@ export function CompetitorAds({ accessToken }: CompetitorAdsProps) {
   // Advertiser search is fuzzy ("HubSpot" also returns its partners), so exact is the sane default.
   const [exact, setExact] = useState(true);
 
-  const run = () => search({ advertiser, days, exactAdvertiser: exact });
+  const run = (name = advertiser) => search({ advertiser: name, days, exactAdvertiser: exact });
+  const rerunWith = (name: string) => { setAdvertiser(name); run(name); };
 
+  // Dated ads first (most recent), then ads LinkedIn returned without delivery data.
   const ads = useMemo(
-    () => [...(result?.ads ?? [])].sort((a, b) => (b.lastImpressionAt ?? '').localeCompare(a.lastImpressionAt ?? '')),
+    () => [
+      ...[...(result?.ads ?? [])].sort((a, b) => (b.lastImpressionAt ?? '').localeCompare(a.lastImpressionAt ?? '')),
+      ...(result?.undated?.ads ?? []),
+    ],
     [result],
   );
   const s = result?.summary;
@@ -188,12 +193,24 @@ export function CompetitorAds({ accessToken }: CompetitorAdsProps) {
               <StatusPill tone="neutral" label={`Newest ${result.fetched} of ${fmtNum(result.totalMatching ?? 0)} matching ads checked`} />
             )}
             {!!result.undated?.count && (
-              <StatusPill tone="neutral" label={`${result.undated.count} ads had no delivery data and are not counted`} />
+              <StatusPill tone="neutral" label={`${result.undated.count} ads have no delivery data yet — listed, not counted in stats`} />
             )}
             {exact && otherMatches.length > 0 && (
               <StatusPill tone="info" label={`${otherMatches.length} similarly named advertisers excluded`} />
             )}
           </div>
+
+          {exact && ads.length === 0 && otherMatches.length > 0 && (
+            <WidgetCard title="No exact match — did you mean" subtitle="Advertisers LinkedIn's search matched. Click one to search that name.">
+              <div className="flex flex-wrap gap-2">
+                {otherMatches.map(([name, n]) => (
+                  <Button key={name} variant="outline" size="sm" onClick={() => rerunWith(name)} disabled={isLoading}>
+                    {name} <span className="text-muted-foreground tabular-nums">{n}</span>
+                  </Button>
+                ))}
+              </div>
+            </WidgetCard>
+          )}
 
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             <Stat label={`Ads served, last ${result.days} days`} value={String(s.ads)} />
@@ -211,7 +228,7 @@ export function CompetitorAds({ accessToken }: CompetitorAdsProps) {
 
           <WidgetCard
             title={`${ads.length} ${ads.length === 1 ? 'ad' : 'ads'}`}
-            subtitle="Most recently served first"
+            subtitle="Most recently served first, then ads with no delivery data yet"
             toolbar={
               <Button variant="outline" size="sm" onClick={exportCsv} disabled={ads.length === 0}>
                 <Download className="h-4 w-4" />
@@ -221,7 +238,7 @@ export function CompetitorAds({ accessToken }: CompetitorAdsProps) {
             noPadding
           >
             {ads.length === 0 ? (
-              <EmptyState icon={Binoculars} title="No ads in this window" description="Try a longer window, or turn off exact name matching." />
+              <EmptyState icon={Binoculars} title="No ads found" description="Try a longer window, or turn off exact name matching." />
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
@@ -240,7 +257,10 @@ export function CompetitorAds({ accessToken }: CompetitorAdsProps) {
                   <tbody>
                     {ads.map((a) => (
                       <tr key={a.adUrl} className="border-b border-border/40 last:border-0 hover:bg-muted/40">
-                        <td className="px-5 py-2 whitespace-nowrap">{formatLabel(a.format)}</td>
+                        <td className="px-5 py-2 whitespace-nowrap">
+                          {formatLabel(a.format)}
+                          {!a.lastImpressionAt && <span className="block text-[11px] text-muted-foreground">No delivery data yet</span>}
+                        </td>
                         {!exact && <td className="px-3 py-2 max-w-[180px] truncate">{a.advertiserName}</td>}
                         <td className="px-3 py-2 whitespace-nowrap tabular-nums">{fmtDate(a.firstImpressionAt)}</td>
                         <td className="px-3 py-2 whitespace-nowrap tabular-nums">{fmtDate(a.lastImpressionAt)}</td>

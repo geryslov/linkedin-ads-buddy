@@ -48,7 +48,7 @@ export interface CompetitorAdsResult {
   summary: CompetitorAdsSummary;
   ads: CompetitorAd[];
   /** Ads LinkedIn returned without impression stats — can't be placed in the window. */
-  undated?: { count: number; byFormat: Record<string, number>; adUrls: string[] };
+  undated?: { count: number; byFormat: Record<string, number>; adUrls: string[]; ads?: CompetitorAd[] };
 }
 
 export interface CompetitorAdsQuery {
@@ -92,6 +92,8 @@ export function useCompetitorAds(accessToken: string | null) {
       });
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
+      // A 429 before any page arrived is not "no ads" — say so.
+      if (data?.rateLimited && !data?.fetched) throw new Error('LinkedIn rate limit — try again in a minute.');
       setResult(data as CompetitorAdsResult);
     } catch (e) {
       const reason = await readInvokeError(e);
