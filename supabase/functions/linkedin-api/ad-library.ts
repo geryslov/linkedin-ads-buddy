@@ -154,9 +154,9 @@ export async function fetchCompetitorAds(accessToken: string, q: CompetitorAdsQu
     if (!rateLimited && !error) cache.set(key, raw);
   }
 
-  const { elements, total, rateLimited, error } = raw.value;
+  const { elements, total, rateLimited, error } = raw.value as { elements: any[]; total: number | null; rateLimited: boolean; error: string };
   const since = now - days * DAY_MS;
-  let ads = elements.map(normalizeAd);
+  let ads: CompetitorAd[] = elements.map(normalizeAd);
   const matchedAdvertisers = summarizeAds(ads, now).byAdvertiser;
   if (q.exactAdvertiser) ads = ads.filter((a) => a.advertiserName.toLowerCase() === advertiser.toLowerCase());
   // Served in the window = last impression on or after its start.
