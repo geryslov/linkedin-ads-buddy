@@ -106,6 +106,27 @@ export type CompetitorAdsQuery = {
   exactAdvertiser?: boolean;
 };
 
+// "HubSpot, Inc." / "HubSpot Inc" / "Acme LLC" → "hubspot" / "acme".
+export function normalizeCompanyName(name: string): string {
+  let n = String(name || '').toLowerCase().replace(/[.,]/g, ' ').replace(/\s+/g, ' ').trim();
+  const suffix = /\s(inc|incorporated|llc|ltd|limited|corp|corporation|co|gmbh|plc|sa|ag|bv)$/;
+  while (suffix.test(n)) n = n.replace(suffix, '').trim();
+  return n;
+}
+
+// Exact mode: the advertiser name matches, or the payer matches (thought-leader
+// ads carry a person's name with the company as payer), or the ad shares a
+// company URL with an exact-name match.
+export function exactMatches(ads: CompetitorAd[], query: string): boolean[] {
+  const q = query.toLowerCase();
+  const nq = normalizeCompanyName(query);
+  const named = ads.map((a) => a.advertiserName.toLowerCase() === q);
+  const urls = new Set(ads.filter((_, i) => named[i]).map((a) => a.advertiserUrl).filter(Boolean));
+  return ads.map((a, i) => named[i]
+    || (!!nq && normalizeCompanyName(a.payer) === nq)
+    || (!!a.advertiserUrl && urls.has(a.advertiserUrl)));
+}
+
 const cache = new Map<string, { at: number; value: any }>();
 
 export async function fetchCompetitorAds(accessToken: string, q: CompetitorAdsQuery, fetchImpl: typeof fetch = fetch, now = Date.now()) {
@@ -158,10 +179,13 @@ export async function fetchCompetitorAds(accessToken: string, q: CompetitorAdsQu
   const since = now - days * DAY_MS;
   let pairs = elements.map((el) => ({ el, ad: normalizeAd(el) as CompetitorAd }));
   const matchedAdvertisers = summarizeAds(pairs.map((p) => p.ad), now).byAdvertiser;
-  if (q.exactAdvertiser) pairs = pairs.filter((p) => p.ad.advertiserName.toLowerCase() === advertiser.toLowerCase());
+  if (q.exactAdvertiser) {
+    const keep = exactMatches(pairs.map((p) => p.ad), advertiser);
+    pairs = pairs.filter((_, i) => keep[i]);
+  }
   // Live run (Nov 2): 54 of 100 HubSpot ads came back with no impression
   // timestamps, band or targeting. They can't be placed in the window, so
-  // they are reported apart instead of being counted as "in window".
+  // they are reported apart (and listed) instead of being counted as "in window".
   const undated = pairs.filter((p) => !p.ad.lastImpressionAt);
   // Served in the window = last impression on or after its start.
   const ads = pairs.filter((p) => p.ad.lastImpressionAt && Date.parse(p.ad.lastImpressionAt) >= since).map((p) => p.ad);
@@ -184,6 +208,7 @@ export async function fetchCompetitorAds(accessToken: string, q: CompetitorAdsQu
       count: undated.length,
       byFormat: summarizeAds(undated.map((p) => p.ad), now).byFormat,
       adUrls: undated.map((p) => p.ad.adUrl),
+      ads: undated.map((p) => p.ad),
       // One raw element, to see what LinkedIn actually sends for these.
       rawSample: undated[0]?.el ?? null,
     },
