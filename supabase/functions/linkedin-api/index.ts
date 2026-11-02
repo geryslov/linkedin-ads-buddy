@@ -4,6 +4,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { createCreativeReader, CREATIVE_READ_VERSION, metadataCopy } from './creative-metadata.ts';
 import { isInMailRef, readInMailContent, type MessageAdContent } from './message-ad-content.ts';
+import { fetchCompetitorAds } from './ad-library.ts';
 import { targetingCompatibilityError } from './targeting-compatibility.ts';
 
 const corsHeaders = {
@@ -2044,6 +2045,27 @@ serve(async (req) => {
           summary: libSummary,
           attempts: libAttempts,
         }, null, 2), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      case 'get_competitor_ads': {
+        // Competitor ads from the public LinkedIn Ad Library. Read-only; query
+        // shape, throttling and caching live in ad-library.ts.
+        const { advertiser: compAdvertiser, keyword: compKeyword, days: compDays, maxAds: compMax, exactAdvertiser } = params || {};
+        if (!String(compAdvertiser || '').trim()) {
+          return new Response(JSON.stringify({ error: 'advertiser is required' }), {
+            status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+        try {
+          const result = await fetchCompetitorAds(accessToken, {
+            advertiser: compAdvertiser, keyword: compKeyword, days: compDays, maxAds: compMax, exactAdvertiser: exactAdvertiser === true,
+          });
+          return new Response(JSON.stringify(result), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        } catch (e) {
+          return new Response(JSON.stringify({ error: String((e as Error)?.message || e) }), {
+            status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
       }
 
       case 'get_creative_analytics': {
