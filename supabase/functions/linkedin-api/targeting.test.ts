@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
-import { targetingCompatibilityError } from './targeting-compatibility';
+import { targetingCompatibilityError } from './targeting-compatibility.ts';
 
 // Exercise the actual nested builder without starting the edge function or
 // loading its remote imports and secrets.
