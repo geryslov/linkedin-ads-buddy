@@ -92,6 +92,17 @@ test('repeat queries are served from cache', async () => {
   expect(calls.length).toBe(1);
 });
 
+test('ads without impression stats are reported apart, not counted in the window', async () => {
+  const bare = { isRestricted: false, adUrl: 'https://www.linkedin.com/ad-library/detail/7', details: { advertiser: { advertiserName: 'HubSpot' }, type: 'SPONSORED_VIDEO' } };
+  const r = await fetchCompetitorAds('t', { advertiser: 'UndatedTest', days: 30 }, pageFetch([[liveAd(1), bare]]), NOW);
+  expect(r.ads.length).toBe(1);
+  expect(r.summary.ads).toBe(1);
+  expect(r.summary.byFormat).toEqual({ SPONSORED_VIDEO: 1 });
+  expect(r.undated.count).toBe(1);
+  expect(r.undated.adUrls).toEqual(['https://www.linkedin.com/ad-library/detail/7']);
+  expect(r.undated.rawSample).toEqual(bare);
+});
+
 test('missing advertiser is rejected', async () => {
   await expect(fetchCompetitorAds('t', { advertiser: ' ' }, pageFetch([]), NOW)).rejects.toThrow('advertiser is required');
 });

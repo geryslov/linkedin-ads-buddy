@@ -156,11 +156,15 @@ export async function fetchCompetitorAds(accessToken: string, q: CompetitorAdsQu
 
   const { elements, total, rateLimited, error } = raw.value as { elements: any[]; total: number | null; rateLimited: boolean; error: string };
   const since = now - days * DAY_MS;
-  let ads: CompetitorAd[] = elements.map(normalizeAd);
-  const matchedAdvertisers = summarizeAds(ads, now).byAdvertiser;
-  if (q.exactAdvertiser) ads = ads.filter((a) => a.advertiserName.toLowerCase() === advertiser.toLowerCase());
+  let pairs = elements.map((el) => ({ el, ad: normalizeAd(el) as CompetitorAd }));
+  const matchedAdvertisers = summarizeAds(pairs.map((p) => p.ad), now).byAdvertiser;
+  if (q.exactAdvertiser) pairs = pairs.filter((p) => p.ad.advertiserName.toLowerCase() === advertiser.toLowerCase());
+  // Live run (Nov 2): 54 of 100 HubSpot ads came back with no impression
+  // timestamps, band or targeting. They can't be placed in the window, so
+  // they are reported apart instead of being counted as "in window".
+  const undated = pairs.filter((p) => !p.ad.lastImpressionAt);
   // Served in the window = last impression on or after its start.
-  ads = ads.filter((a) => !a.lastImpressionAt || Date.parse(a.lastImpressionAt) >= since);
+  const ads = pairs.filter((p) => p.ad.lastImpressionAt && Date.parse(p.ad.lastImpressionAt) >= since).map((p) => p.ad);
 
   return {
     advertiser,
@@ -176,5 +180,12 @@ export async function fetchCompetitorAds(accessToken: string, q: CompetitorAdsQu
     matchedAdvertisers,
     summary: summarizeAds(ads, now),
     ads,
+    undated: {
+      count: undated.length,
+      byFormat: summarizeAds(undated.map((p) => p.ad), now).byFormat,
+      adUrls: undated.map((p) => p.ad.adUrl),
+      // One raw element, to see what LinkedIn actually sends for these.
+      rawSample: undated[0]?.el ?? null,
+    },
   };
 }
