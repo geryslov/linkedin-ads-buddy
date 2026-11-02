@@ -1979,9 +1979,20 @@ serve(async (req) => {
         const libRange = `dateRange=(start:${restliDate(libStart)},end:${restliDate(libEnd)})`;
         const libKw = libKeyword ? `&keyword=${encodeURIComponent(String(libKeyword))}` : '';
 
+        // First live run (Nov 2): adLibrary answered 200 with total 0 for HubSpot
+        // over 90 days while the public site showed 468 ads in 30 — so the
+        // query shape, not access, is wrong. Each variant isolates one suspect
+        // (dateRange syntax, the advertiser filter, missing countries).
+        const libAdv = encodeURIComponent(advertiserQ);
+        const libUs = `countries=(value:List(${encodeURIComponent('urn:li:country:us')}))`;
+        const libAdsBase = 'https://api.linkedin.com/rest/adLibrary?q=criteria';
         const libTargets = [
-          { label: 'adLibrary', url: `https://api.linkedin.com/rest/adLibrary?q=criteria&advertiser=${encodeURIComponent(advertiserQ)}${libKw}&${libRange}&start=0&count=5` },
-          { label: 'jobLibrary', url: `https://api.linkedin.com/rest/jobLibrary?q=criteria&organization=${encodeURIComponent(advertiserQ)}${libKw}&${libRange}&start=0&count=5` },
+          { label: 'adLibrary', url: `${libAdsBase}&advertiser=${libAdv}${libKw}&${libRange}&start=0&count=5` },
+          { label: 'adLibrary: advertiser, default dates', url: `${libAdsBase}&advertiser=${libAdv}&start=0&count=5` },
+          { label: 'adLibrary: advertiser + countries + dateRange', url: `${libAdsBase}&advertiser=${libAdv}&${libUs}&${libRange}&start=0&count=5` },
+          { label: 'adLibrary: keyword only + dateRange', url: `${libAdsBase}&keyword=${libAdv}&${libRange}&start=0&count=5` },
+          { label: 'adLibrary: keyword only, default dates', url: `${libAdsBase}&keyword=${libAdv}&start=0&count=5` },
+          { label: 'jobLibrary', url: `https://api.linkedin.com/rest/jobLibrary?q=criteria&organization=${libAdv}${libKw}&${libRange}&start=0&count=5` },
         ];
         // Docs samples use 202602 (ads) and 202607 (jobs); 202511 is what the
         // rest of this function sends. First one that answers wins per endpoint.
@@ -2005,13 +2016,17 @@ serve(async (req) => {
                 let parsed: any = null;
                 try { parsed = JSON.parse(body); } catch { /* keep preview only */ }
                 const els = parsed?.elements || [];
-                libSummary[t.label] = {
-                  version: v,
-                  returned: els.length,
-                  total: parsed?.paging?.total ?? null,
-                  sample: els.slice(0, 2),
-                };
-                break;
+                // An empty 200 is not proof the version is right — keep trying
+                // the next version, but don't let it overwrite a non-empty hit.
+                if (!libSummary[t.label] || els.length > 0) {
+                  libSummary[t.label] = {
+                    version: v,
+                    returned: els.length,
+                    total: parsed?.paging?.total ?? null,
+                    sample: els.slice(0, 2),
+                  };
+                }
+                if (els.length > 0) break;
               }
             } catch (e) {
               libAttempts.push({ endpoint: t.label, version: v, status: 0, ok: false, bodyPreview: `threw: ${e}` });
@@ -2024,6 +2039,8 @@ serve(async (req) => {
           keyword: libKeyword || null,
           range: { start: libStart.toISOString().split('T')[0], end: libEnd.toISOString().split('T')[0] },
           reachable: { adLibrary: !!libSummary.adLibrary, jobLibrary: !!libSummary.jobLibrary },
+          // Which ads query shapes actually return rows — the one to build on.
+          adsVariantsWithResults: Object.keys(libSummary).filter((k) => k.startsWith('adLibrary') && libSummary[k].returned > 0),
           summary: libSummary,
           attempts: libAttempts,
         }, null, 2), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
