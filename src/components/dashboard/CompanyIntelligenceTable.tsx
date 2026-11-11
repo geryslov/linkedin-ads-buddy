@@ -409,19 +409,26 @@ export function CompanyIntelligenceTable({ accessToken, selectedAccount, campaig
             value={audienceFiltered ? 'LAST_90_DAYS' : lookback}
             onChange={(v) => !audienceFiltered && setLookback(v)}
           />
-          <Select value={audience} onValueChange={setAudience}>
-            <SelectTrigger className="h-8 w-[220px] text-xs"><SelectValue /></SelectTrigger>
+          {/* Seniority and job function are separate dropdowns, but LinkedIn takes one or the other — picking one clears the other. */}
+          <Select value={audience.startsWith('fn:') ? 'all' : audience} onValueChange={setAudience}>
+            <SelectTrigger className="h-8 w-[200px] text-xs"><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All members</SelectItem>
+              <SelectItem value="all">All seniorities</SelectItem>
               <SelectItem value="dm">Decision makers (Director+)</SelectItem>
               <SelectGroup>
                 <SelectLabel>Seniority</SelectLabel>
                 {Object.entries(SENIORITIES).map(([id, label]) => <SelectItem key={id} value={`sen:${id}`}>{label}</SelectItem>)}
               </SelectGroup>
-              <SelectGroup>
-                <SelectLabel>Job function</SelectLabel>
-                {Object.entries(JOB_FUNCTIONS).map(([id, label]) => <SelectItem key={id} value={`fn:${id}`}>{label}</SelectItem>)}
-              </SelectGroup>
+            </SelectContent>
+          </Select>
+          <Select
+            value={audience.startsWith('fn:') ? audience : 'all'}
+            onValueChange={(v) => setAudience(v === 'all' ? (audience.startsWith('fn:') ? 'all' : audience) : v)}
+          >
+            <SelectTrigger className="h-8 w-[180px] text-xs"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All job functions</SelectItem>
+              {Object.entries(JOB_FUNCTIONS).map(([id, label]) => <SelectItem key={id} value={`fn:${id}`}>{label}</SelectItem>)}
             </SelectContent>
           </Select>
           <Select value={audienceFiltered ? 'all' : campaignId} onValueChange={setCampaignId} disabled={audienceFiltered}>
@@ -436,7 +443,7 @@ export function CompanyIntelligenceTable({ accessToken, selectedAccount, campaig
           <p className="mt-3 text-xs text-muted-foreground flex items-start gap-1.5">
             <Info className="h-3.5 w-3.5 mt-px shrink-0" />
             {audienceFiltered
-              ? 'Seniority and job-function filters are LinkedIn-limited to the last 90 days across all campaigns, and report qualified leads as 0.'
+              ? 'Seniority and job-function filters are LinkedIn-limited to the last 90 days across all campaigns, can\'t be combined with each other, and report qualified leads as 0.'
               : 'LinkedIn reports organic metrics as 0 when a campaign is selected.'}
           </p>
         )}
