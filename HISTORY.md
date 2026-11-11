@@ -502,3 +502,10 @@ A new Prospecting tab that shows one company over a selected time frame: paid vs
 - **Numbers.** Demographic data drops a company's day below 3 events and is approximate, so the bars won't exactly match the Account Intel totals. The UI says so.
 - **Not verified live.** Unit-tested with fakes only, including the split and the fallback.
 - **Separate from the older Company Timeline tab**, which is paid-only and covers all companies.
+
+**Fix, same day:** the first live use of Company Journey returned `org_unresolved`. The vanity-name finder (`/rest/organizations?q=vanityName`) is evidently refused for this app's token. It was only ever a best-effort guess in `get_company_demographic` and had never been verified. Resolution now falls back to the route this codebase knows works:
+- take the account's engaged orgs from an `ALL` `MEMBER_COMPANY` query (top 1,000 by impressions)
+- resolve them with `organizationsLookup`
+- match by vanity name, then website host, then name
+
+It stops at the first batch that contains a match.

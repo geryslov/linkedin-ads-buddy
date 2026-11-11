@@ -103,8 +103,8 @@ export function CompanyJourney({ accessToken, selectedAccount }: CompanyJourneyP
 
   useEffect(() => {
     setSelectedIdx(null);
-    if (selectedAccount && company?.companyPageUrl && !daily[dailyKey]) loadDaily(selectedAccount, lookback, company.companyPageUrl);
-  }, [selectedAccount, company?.companyPageUrl, lookback, dailyKey, daily, loadDaily]);
+    if (selectedAccount && company?.companyPageUrl && !daily[dailyKey]) loadDaily(selectedAccount, lookback, company);
+  }, [selectedAccount, company, company?.companyPageUrl, lookback, dailyKey, daily, loadDaily]);
 
   const windows = useMemo(() => {
     const rows = series?.byCompany[key] ?? [];
@@ -288,7 +288,7 @@ export function CompanyJourney({ accessToken, selectedAccount }: CompanyJourneyP
                 <AlertTriangle className="h-3.5 w-3.5 text-destructive mt-px shrink-0" />
                 <span>
                   {dailyError.message} {ERROR_HELP[dailyError.kind] ?? ''} The organic periods below still come from Account Intel.{' '}
-                  <button className="underline" onClick={() => company && loadDaily(selectedAccount, lookback, company.companyPageUrl)}>Retry</button>
+                  <button className="underline" onClick={() => company && loadDaily(selectedAccount, lookback, company)}>Retry</button>
                 </span>
               </div>
             )}

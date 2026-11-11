@@ -209,3 +209,20 @@ test('company daily falls back to a single MEMBER_COMPANY pivot when LinkedIn re
   expect(r.meta.campaignSplit).toBe(false);
   expect(r.rows[0]).toMatchObject({ campaignId: null, impressions: 7 });
 });
+
+test('company daily falls back to matching engaged orgs when the vanity finders are refused', async () => {
+  const urls: string[] = [];
+  const fake = (async (url: string) => {
+    urls.push(url);
+    if (url.includes('q=vanityName')) return json({ message: 'denied' }, 403);
+    if (url.includes('/adCampaigns')) return json({ elements: [] });
+    if (url.includes('timeGranularity=ALL')) return json({ elements: [{ pivotValues: ['urn:li:organization:5'], impressions: 90 }, { pivotValues: ['urn:li:organization:77'], impressions: 10 }] });
+    if (url.includes('organizationsLookup')) return json({ results: { '5': { localizedName: 'Other Co', vanityName: 'other' }, '77': { localizedName: 'Acme Inc.', vanityName: 'acme-global', localizedWebsite: 'https://www.acme.io/about' } } });
+    return json({ elements: [{ pivotValues: ['urn:li:sponsoredCampaign:1', 'urn:li:organization:77'], dateRange: { start: { year: 2026, month: 11, day: 2 } }, impressions: 12 }] });
+  }) as unknown as typeof fetch;
+  const r = await fetchCompanyDaily('t', { accountId: '9', companyPageUrl: 'https://www.linkedin.com/company/acme', companyWebsite: 'http://acme.io', companyName: 'Acme' }, fake);
+  expect(urls.filter((u) => u.includes('q=vanityName')).length).toBe(2);
+  expect(r.meta.orgUrn).toBe('urn:li:organization:77');
+  expect(r.meta.resolvedVia).toBe('engaged_orgs');
+  expect(r.rows[0].impressions).toBe(12);
+});

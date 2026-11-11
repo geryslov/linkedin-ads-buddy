@@ -3578,7 +3578,7 @@ serve(async (req) => {
           if (ai.breakdown === 'windows' || ai.breakdown === 'daily') {
             const result = ai.breakdown === 'windows'
               ? await fetchWindowSeries(accessToken, { accountId: ai.accountId })
-              : await fetchCompanyDaily(accessToken, { accountId: ai.accountId, lookbackWindow: ai.lookbackWindow, companyPageUrl: ai.companyPageUrl });
+              : await fetchCompanyDaily(accessToken, { accountId: ai.accountId, lookbackWindow: ai.lookbackWindow, companyPageUrl: ai.companyPageUrl, companyWebsite: ai.companyWebsite, companyName: ai.companyName });
             return new Response(JSON.stringify(result), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
           }
           // Campaign → creative drill-down comes from Ad Analytics (Account Intel has no creative filter).

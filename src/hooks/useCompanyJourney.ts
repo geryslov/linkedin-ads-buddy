@@ -40,7 +40,7 @@ export interface DailyRow {
 export interface CompanyDaily {
   rows: DailyRow[];
   campaigns: Record<string, { name: string; objectiveType: string; status: string }>;
-  meta: { orgUrn: string; campaignSplit: boolean; calls: number; truncated: boolean; durationMs: number };
+  meta: { orgUrn: string; resolvedVia: string; campaignSplit: boolean; calls: number; truncated: boolean; durationMs: number };
 }
 
 async function call<T>(accessToken: string, params: Record<string, unknown>, isValid: (d: any) => boolean): Promise<T> {
@@ -82,12 +82,13 @@ export function useCompanyJourney(accessToken: string | null) {
     }
   }, [accessToken]);
 
-  const loadDaily = useCallback(async (accountId: string, lookbackWindow: LookbackWindow, companyPageUrl: string) => {
+  const loadDaily = useCallback(async (accountId: string, lookbackWindow: LookbackWindow, company: Pick<CompanyIntelligence, 'companyPageUrl' | 'companyWebsite' | 'companyName'>) => {
+    const { companyPageUrl, companyWebsite, companyName } = company;
     if (!accessToken || !accountId || !companyPageUrl) return;
     const key = `${accountId}:${lookbackWindow}:${companyPageUrl}`;
     setDaily((m) => ({ ...m, [key]: 'loading' }));
     try {
-      const data = await call<CompanyDaily>(accessToken, { accountId, lookbackWindow, companyPageUrl, breakdown: 'daily' }, (d) => Array.isArray(d?.rows));
+      const data = await call<CompanyDaily>(accessToken, { accountId, lookbackWindow, companyPageUrl, companyWebsite, companyName, breakdown: 'daily' }, (d) => Array.isArray(d?.rows));
       setDaily((m) => ({ ...m, [key]: data }));
     } catch (e) {
       setDaily((m) => ({ ...m, [key]: toIntelError(e) }));

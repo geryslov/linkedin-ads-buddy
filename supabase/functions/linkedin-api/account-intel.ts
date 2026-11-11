@@ -601,21 +601,81 @@ export type DailyRow = {
 const restDate = (t: number) => { const d = ymd(new Date(t)); return `(year:${d.year},month:${d.month},day:${d.day})`; };
 const isoDay = (d: any) => `${d?.year}-${String(d?.month).padStart(2, '0')}-${String(d?.day).padStart(2, '0')}`;
 
-async function resolveOrgId(accessToken: string, companyPageUrl: string, fetchImpl: typeof fetch): Promise<string | null> {
-  const slug = companyPageUrl.match(/\/company\/([^/?#]+)/)?.[1];
-  if (!slug) return null;
-  if (/^\d+$/.test(slug)) return slug;
-  const res = await fetchImpl(`https://api.linkedin.com/rest/organizations?q=vanityName&vanityName=${encodeURIComponent(slug)}`, {
+const hostOf = (url: string) => url.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').split(/[/?#]/)[0];
+const normName = (n: string) => n.toLowerCase().replace(/[^a-z0-9]/g, '');
+const MAX_MATCH_ORGS = 1000;
+
+// Account Intel rows carry no URN. Try the cheap routes first (numeric page URL,
+// vanity-name finders — unverified for this app's token), then fall back to what
+// is known to work: the account's engaged orgs from Ad Analytics, resolved with
+// organizationsLookup and matched by vanity name, website host, then name.
+async function resolveOrgId(
+  accessToken: string, accountId: string, company: { companyPageUrl: string; companyWebsite?: string; companyName?: string },
+  dateRange: string, fetchImpl: typeof fetch,
+): Promise<{ id: string; via: string } | null> {
+  const slug = company.companyPageUrl.match(/\/company\/([^/?#]+)/)?.[1]?.toLowerCase() || '';
+  if (/^\d+$/.test(slug)) return { id: slug, via: 'page_url' };
+
+  const unauthorized = () => new AccountIntelError('LinkedIn token is invalid or expired — reconnect LinkedIn.', 401, 'token_invalid');
+  if (slug) {
+    const finders: [string, Record<string, string>][] = [
+      [`https://api.linkedin.com/rest/organizations?q=vanityName&vanityName=${encodeURIComponent(slug)}`, { 'LinkedIn-Version': ACCOUNT_INTEL_VERSION, 'X-Restli-Protocol-Version': '2.0.0' }],
+      [`https://api.linkedin.com/v2/organizations?q=vanityName&vanityName=${encodeURIComponent(slug)}`, {}],
+    ];
+    for (const [url, headers] of finders) {
+      try {
+        const res = await fetchImpl(url, { headers: { 'Authorization': `Bearer ${accessToken}`, ...headers } });
+        if (res.status === 401) throw unauthorized();
+        if (!res.ok) continue;
+        const id = (await res.json())?.elements?.[0]?.id;
+        if (id) return { id: String(id).split(':').pop()!, via: 'vanity_finder' };
+      } catch (e) {
+        if ((e as AccountIntelError)?.kind === 'token_invalid') throw e;
+      }
+    }
+  }
+
+  const site = company.companyWebsite ? hostOf(company.companyWebsite) : '';
+  const name = company.companyName ? normName(company.companyName) : '';
+  const account = `List(${encodeURIComponent(`urn:li:sponsoredAccount:${accountId}`)})`;
+  const res = await fetchImpl(`https://api.linkedin.com/rest/adAnalytics?q=analytics&pivot=MEMBER_COMPANY&timeGranularity=ALL&dateRange=${dateRange}&accounts=${account}&fields=pivotValues,impressions`, {
     headers: { 'Authorization': `Bearer ${accessToken}`, 'LinkedIn-Version': ACCOUNT_INTEL_VERSION, 'X-Restli-Protocol-Version': '2.0.0' },
   });
-  if (res.status === 401) throw new AccountIntelError('LinkedIn token is invalid or expired — reconnect LinkedIn.', 401, 'token_invalid');
+  if (res.status === 401) throw unauthorized();
   if (!res.ok) return null;
-  const id = (await res.json())?.elements?.[0]?.id;
-  return id ? String(id).split(':').pop()! : null;
+  const ids = ((await res.json())?.elements || [])
+    .map((el: any) => ({ id: String((el?.pivotValues || [])[0] || '').split(':').pop() || '', impressions: num(el?.impressions) }))
+    .filter((o: { id: string }) => /^\d+$/.test(o.id))
+    .sort((a: { impressions: number }, b: { impressions: number }) => b.impressions - a.impressions)
+    .slice(0, MAX_MATCH_ORGS)
+    .map((o: { id: string }) => o.id);
+
+  // Four lookups at a time, stopping at the first batch that contains a match.
+  const batches: string[][] = [];
+  for (let i = 0; i < ids.length; i += 50) batches.push(ids.slice(i, i + 50));
+  for (let i = 0; i < batches.length; i += 4) {
+    const results = await Promise.all(batches.slice(i, i + 4).map(async (batch) => {
+      const q = batch.map((id, n) => `ids[${n}]=${id}`).join('&');
+      try {
+        const r = await fetchImpl(`https://api.linkedin.com/v2/organizationsLookup?${q}&projection=(results*(id,localizedName,localizedWebsite,vanityName))`, {
+          headers: { 'Authorization': `Bearer ${accessToken}` },
+        });
+        return r.ok ? Object.entries<any>((await r.json())?.results || {}) : [];
+      } catch {
+        return [];
+      }
+    }));
+    const orgs = results.flat();
+    const hit = (slug && orgs.find(([, o]) => String(o?.vanityName || '').toLowerCase() === slug))
+      || (site && orgs.find(([, o]) => o?.localizedWebsite && hostOf(String(o.localizedWebsite)) === site))
+      || (name && orgs.find(([, o]) => normName(String(o?.localizedName || '')) === name));
+    if (hit) return { id: String(hit[0]), via: 'engaged_orgs' };
+  }
+  return null;
 }
 
 export async function fetchCompanyDaily(
-  accessToken: string, q: { accountId: string; lookbackWindow?: string; companyPageUrl: string },
+  accessToken: string, q: { accountId: string; lookbackWindow?: string; companyPageUrl: string; companyWebsite?: string; companyName?: string },
   fetchImpl: typeof fetch = fetch, now = Date.now(),
 ) {
   const accountId = String(q.accountId || '').replace(/\D/g, '');
@@ -623,9 +683,11 @@ export async function fetchCompanyDaily(
   const lookbackWindow = q.lookbackWindow || 'LAST_90_DAYS';
   const started = Date.now();
 
-  const orgId = await resolveOrgId(accessToken, q.companyPageUrl, fetchImpl);
-  if (!orgId) throw new AccountIntelError('Could not resolve this company to a LinkedIn organization, so daily paid data is unavailable.', 404, 'org_unresolved');
-  const orgUrn = `urn:li:organization:${orgId}`;
+  const days = LOOKBACK_DAYS[lookbackWindow] ?? 90;
+  const rangeFrom = now - (days - 1) * DAY_MS;
+  const org = await resolveOrgId(accessToken, accountId, q, `(start:${restDate(rangeFrom)},end:${restDate(now)})`, fetchImpl);
+  if (!org) throw new AccountIntelError('Could not match this company to a LinkedIn organization among the companies your ads reached in this time frame, so daily paid data is unavailable.', 404, 'org_unresolved');
+  const orgUrn = `urn:li:organization:${org.id}`;
 
   const account = `List(${encodeURIComponent(`urn:li:sponsoredAccount:${accountId}`)})`;
   const core = 'pivotValues,dateRange,impressions,clicks,totalEngagements,oneClickLeads,externalWebsiteConversions,costInLocalCurrency';
@@ -678,9 +740,8 @@ export async function fetchCompanyDaily(
     }
   };
 
-  const days = LOOKBACK_DAYS[lookbackWindow] ?? 90;
   const [, campaignList] = await Promise.all([
-    collect(now - (days - 1) * DAY_MS, now),
+    collect(rangeFrom, now),
     listCampaigns(accessToken, accountId, fetchImpl).catch(() => [] as any[]),
   ]);
   const used = new Set(rows.map((r) => r.campaignId).filter(Boolean));
@@ -693,6 +754,6 @@ export async function fetchCompanyDaily(
   return {
     rows: rows.sort((a, b) => a.date.localeCompare(b.date)),
     campaigns,
-    meta: { accountId, lookbackWindow, orgUrn, campaignSplit, calls, truncated, durationMs: Date.now() - started },
+    meta: { accountId, lookbackWindow, orgUrn, resolvedVia: org.via, campaignSplit, calls, truncated, durationMs: Date.now() - started },
   };
 }
