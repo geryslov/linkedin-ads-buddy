@@ -90,6 +90,26 @@ const ERROR_HELP: Record<string, string> = {
   bad_request: 'That filter combination is not supported by LinkedIn.',
 };
 
+/** Website favicon via Google's favicon service; initials when there is no site or the icon fails. */
+function CompanyLogo({ name, website }: { name: string; website: string }) {
+  const [failed, setFailed] = useState(false);
+  const domain = website.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').split(/[/?#]/)[0];
+  if (!domain || failed) {
+    return (
+      <span className="h-5 w-5 shrink-0 rounded bg-muted text-[9px] font-semibold text-muted-foreground flex items-center justify-center">
+        {name.replace(/[^A-Za-z0-9 ]/g, '').split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || '?'}
+      </span>
+    );
+  }
+  return (
+    <img
+      src={`https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`}
+      alt="" loading="lazy" onError={() => setFailed(true)}
+      className="h-5 w-5 shrink-0 rounded bg-white object-contain border border-border/50"
+    />
+  );
+}
+
 function Kpi({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
     <div className="rounded-xl border border-border/70 bg-card px-4 py-3" style={{ boxShadow: 'var(--shadow-sm)' }}>
@@ -526,12 +546,13 @@ export function CompanyIntelligenceTable({ accessToken, selectedAccount, campaig
                           <td className="px-3 py-2">
                             <div className="flex items-center gap-1.5 font-medium">
                               {open ? <ChevronDown className="h-3.5 w-3.5 text-primary/70 shrink-0" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
+                              <CompanyLogo name={c.companyName} website={c.companyWebsite} />
                               {c.companyName}
                               {c.companyPageUrl && (
                                 <a href={c.companyPageUrl} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="text-muted-foreground hover:text-primary"><ExternalLink className="h-3 w-3" /></a>
                               )}
                             </div>
-                            {c.companyWebsite && <div className="text-[11px] text-muted-foreground pl-5">{c.companyWebsite.replace(/^https?:\/\/(www\.)?/, '')}</div>}
+                            {c.companyWebsite && <div className="text-[11px] text-muted-foreground pl-[46px]">{c.companyWebsite.replace(/^https?:\/\/(www\.)?/, '')}</div>}
                           </td>
                           <td className="px-3 py-2"><StatusPill tone={LEVEL_TONE[c.engagementLevel] ?? 'neutral'} label={levelLabel(c.engagementLevel)} /></td>
                           {showSeniorities && (
