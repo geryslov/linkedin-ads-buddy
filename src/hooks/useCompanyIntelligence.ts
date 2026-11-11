@@ -1,9 +1,9 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useCallback, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { useToast } from '@/hooks/use-toast';
 
-export type LookbackWindow = 'LAST_7_DAYS' | 'LAST_30_DAYS' | 'LAST_60_DAYS' | 'LAST_90_DAYS' | 'LAST_180_DAYS';
+export type LookbackWindow = 'LAST_7_DAYS' | 'LAST_30_DAYS' | 'LAST_60_DAYS' | 'LAST_90_DAYS' | 'LAST_180_DAYS' | 'LAST_365_DAYS';
 
+/** One engaged company, as normalized by `get_company_intelligence` (account-intel.ts). */
 export interface CompanyIntelligence {
   companyName: string;
   companyPageUrl: string;
@@ -11,114 +11,142 @@ export interface CompanyIntelligence {
   engagementLevel: string;
   paidImpressions: number;
   paidClicks: number;
+  paidEngagements: number;
   paidLeads: number;
   paidQualifiedLeads: number;
   conversions: number;
-  paidEngagements: number;
+  paidVideoViews: number;
   organicImpressions: number;
   organicEngagements: number;
-  paidCtr: string;
+  companySize: string;
+  industry: string;
+  countryCode: string;
+  costPerQualifiedLead: number | null;
+  /** Seniority ids that engaged — only on merged decision-maker runs. */
+  seniorities?: string[];
 }
 
-export interface UseCompanyIntelligenceReturn {
-  companyData: CompanyIntelligence[];
-  isLoading: boolean;
-  error: string | null;
+export interface CompanyIntelligenceMeta {
+  version: string;
+  accountId: string;
+  lookbackWindow: string;
+  filterCriteria: string[];
+  /** LinkedIn's paging.total; null when it was not reported. */
+  total: number | null;
+  fetched: number;
+  pages: number;
+  truncated: boolean;
+  bySeniority?: Record<string, number>;
+  durationMs: number;
+}
+
+/** `all`, `dm` (Director+ merged), `sen:<id>` or `fn:<JOB_FUNCTION>`. */
+export type Audience = string;
+
+export interface CompanyIntelligenceQuery {
   lookbackWindow: LookbackWindow;
-  setLookbackWindow: (window: LookbackWindow) => void;
-  fetchCompanyIntelligence: (accountId: string) => Promise<void>;
-  totals: {
-    paidImpressions: number;
-    paidClicks: number;
-    paidLeads: number;
-    paidEngagements: number;
-    organicImpressions: number;
-    organicEngagements: number;
-  };
+  campaignId: string | null;
+  audience: Audience;
 }
 
-export function useCompanyIntelligence(accessToken: string | null): UseCompanyIntelligenceReturn {
-  const [companyData, setCompanyData] = useState<CompanyIntelligence[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [lookbackWindow, setLookbackWindow] = useState<LookbackWindow>('LAST_30_DAYS');
-  const { toast } = useToast();
+export interface IntelError {
+  message: string;
+  kind: string;
+}
 
-  const fetchCompanyIntelligence = useCallback(async (accountId: string) => {
-    if (!accessToken || !accountId) {
-      console.log('Missing accessToken or accountId, skipping fetch');
-      return;
+export interface ConnectionCheck {
+  ok: boolean;
+  at: string;
+  meta?: CompanyIntelligenceMeta;
+  error?: IntelError;
+}
+
+export const DECISION_MAKER_SENIORITIES = ['6', '7', '8', '9', '10'];
+
+async function readInvokeError(error: unknown): Promise<IntelError> {
+  const fallback = { message: error instanceof Error ? error.message : 'The request failed.', kind: 'error' };
+  const ctx = (error as { context?: unknown })?.context;
+  if (ctx && typeof (ctx as Response).json === 'function') {
+    try {
+      const body = await (ctx as Response).clone().json();
+      if (body?.error) return { message: body.error, kind: body.kind || 'error' };
+    } catch {
+      /* body was not JSON — fall through */
     }
+  }
+  return fallback;
+}
 
+function toParams(accountId: string, q: CompanyIntelligenceQuery) {
+  const params: Record<string, unknown> = { accountId, lookbackWindow: q.lookbackWindow };
+  if (q.audience === 'dm') params.seniorities = DECISION_MAKER_SENIORITIES;
+  else if (q.audience.startsWith('sen:')) params.seniority = q.audience.slice(4);
+  else if (q.audience.startsWith('fn:')) params.jobFunction = q.audience.slice(3);
+  // Audience filters are 90-day only and exclude campaign scoping.
+  if (q.audience !== 'all') params.lookbackWindow = 'LAST_90_DAYS';
+  else if (q.campaignId) params.campaignId = q.campaignId;
+  return params;
+}
+
+async function invoke(accessToken: string, params: Record<string, unknown>) {
+  const { data, error } = await supabase.functions.invoke('linkedin-api', {
+    body: { action: 'get_company_intelligence', accessToken, params },
+  });
+  if (error) throw error;
+  if (data?.error) throw Object.assign(new Error(data.error), { kind: data.kind });
+  // The pre-2026-11 handler returned `elements`; a stale deploy still does.
+  if (!data?.meta) throw Object.assign(new Error('The edge function is running the old Company Intelligence handler — deploy linkedin-api.'), { kind: 'stale_deploy' });
+  return data as { companies: CompanyIntelligence[]; meta: CompanyIntelligenceMeta };
+}
+
+const asIntelError = async (e: unknown): Promise<IntelError> =>
+  (e as { kind?: string })?.kind ? { message: (e as Error).message, kind: (e as { kind: string }).kind } : readInvokeError(e);
+
+export function useCompanyIntelligence(accessToken: string | null) {
+  const [companies, setCompanies] = useState<CompanyIntelligence[]>([]);
+  const [meta, setMeta] = useState<CompanyIntelligenceMeta | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<IntelError | null>(null);
+  const [check, setCheck] = useState<ConnectionCheck | null>(null);
+  const [isChecking, setIsChecking] = useState(false);
+
+  /** One-row request: proves provisioning, account role and scope. */
+  const runCheck = useCallback(async (accountId: string) => {
+    if (!accessToken || !accountId) return;
+    setIsChecking(true);
+    try {
+      const data = await invoke(accessToken, { accountId, lookbackWindow: 'LAST_90_DAYS', check: true });
+      setCheck({ ok: true, at: new Date().toISOString(), meta: data.meta });
+    } catch (e) {
+      setCheck({ ok: false, at: new Date().toISOString(), error: await asIntelError(e) });
+    } finally {
+      setIsChecking(false);
+    }
+  }, [accessToken]);
+
+  const load = useCallback(async (accountId: string, q: CompanyIntelligenceQuery) => {
+    if (!accessToken || !accountId) return;
     setIsLoading(true);
     setError(null);
-    
     try {
-      console.log('Fetching company intelligence with params:', { accountId, lookbackWindow });
-      
-      const { data, error: apiError } = await supabase.functions.invoke('linkedin-api', {
-        body: { 
-          action: 'get_company_intelligence', 
-          accessToken,
-          params: { 
-            accountId,
-            lookbackWindow,
-          } 
-        },
-      });
-
-      if (apiError) throw apiError;
-      
-      console.log('Company intelligence response:', data);
-      
-      if (data.error) {
-        setError(data.error);
-        toast({
-          title: 'Access Restricted',
-          description: data.error,
-          variant: 'destructive',
-        });
-        setCompanyData([]);
-        return;
-      }
-      
-      const companies: CompanyIntelligence[] = data.elements || [];
-      setCompanyData(companies);
-      
-    } catch (err: any) {
-      console.error('Fetch company intelligence error:', err);
-      setError(err.message || 'Failed to fetch company intelligence');
-      toast({
-        title: 'Error',
-        description: err.message || 'Failed to fetch company intelligence',
-        variant: 'destructive',
-      });
+      const data = await invoke(accessToken, toParams(accountId, q));
+      setCompanies(data.companies);
+      setMeta(data.meta);
+    } catch (e) {
+      setError(await asIntelError(e));
+      setCompanies([]);
+      setMeta(null);
     } finally {
       setIsLoading(false);
     }
-  }, [accessToken, lookbackWindow, toast]);
+  }, [accessToken]);
 
-  const totals = useMemo(() => {
-    return companyData.reduce(
-      (acc, company) => ({
-        paidImpressions: acc.paidImpressions + company.paidImpressions,
-        paidClicks: acc.paidClicks + company.paidClicks,
-        paidLeads: acc.paidLeads + company.paidLeads,
-        paidEngagements: acc.paidEngagements + company.paidEngagements,
-        organicImpressions: acc.organicImpressions + company.organicImpressions,
-        organicEngagements: acc.organicEngagements + company.organicEngagements,
-      }),
-      { paidImpressions: 0, paidClicks: 0, paidLeads: 0, paidEngagements: 0, organicImpressions: 0, organicEngagements: 0 }
-    );
-  }, [companyData]);
+  const reset = useCallback(() => {
+    setCompanies([]);
+    setMeta(null);
+    setError(null);
+    setCheck(null);
+  }, []);
 
-  return {
-    companyData,
-    isLoading,
-    error,
-    lookbackWindow,
-    setLookbackWindow,
-    fetchCompanyIntelligence,
-    totals,
-  };
+  return { companies, meta, isLoading, error, load, check, isChecking, runCheck, reset };
 }

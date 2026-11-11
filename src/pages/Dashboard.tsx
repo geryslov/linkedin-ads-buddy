@@ -38,6 +38,7 @@ import { PerformanceSegmentation } from "@/components/dashboard/PerformanceSegme
 import { ConnectClaude } from "@/components/dashboard/ConnectClaude";
 import { ProspectFinder } from "@/components/dashboard/ProspectFinder";
 import { CompetitorAds } from "@/components/dashboard/CompetitorAds";
+import { CompanyIntelligenceTable } from "@/components/dashboard/CompanyIntelligenceTable";
 import { CommandPalette } from "@/components/dashboard/CommandPalette";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -72,6 +73,7 @@ const tabMeta: Record<string, { group: string; title: string; subtitle: string }
   influence_matcher:   { group: "Audience",   title: "Influence Matcher",           subtitle: "Match companies to influential contacts" },
   prospect_finder:     { group: "Prospecting", title: "Prospect Finder",           subtitle: "Turn campaign demographics into named people at the companies you reached" },
   competitor_ads:      { group: "Prospecting", title: "Competitor Ads",            subtitle: "See what any advertiser is running on LinkedIn, from the public Ad Library" },
+  account_intel:       { group: "Prospecting", title: "Account Intel",             subtitle: "Which companies are engaging — paid and organic, by seniority and job function" },
   title_checker:       { group: "Tools",      title: "Title Checker",               subtitle: "Validate and explore job titles" },
   standardized_titles: { group: "Tools",      title: "Standardized Titles",         subtitle: "Normalize job title variations" },
   name_report:         { group: "Tools",      title: "Name Report",                 subtitle: "Analyze campaign naming conventions" },
@@ -500,6 +502,14 @@ export default function Dashboard() {
 
         {activeTab === "prospect_finder" && (
           <ProspectFinder
+            accessToken={accessToken}
+            selectedAccount={selectedAccount}
+            campaigns={campaigns.map((c) => ({ id: c.id, name: c.name, status: c.status }))}
+          />
+        )}
+
+        {activeTab === "account_intel" && (
+          <CompanyIntelligenceTable
             accessToken={accessToken}
             selectedAccount={selectedAccount}
             campaigns={campaigns.map((c) => ({ id: c.id, name: c.name, status: c.status }))}

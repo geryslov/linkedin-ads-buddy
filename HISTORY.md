@@ -449,3 +449,23 @@ The first HubSpot run worked: 2,627 matching ads, 100 fetched, no throttling, an
 
 ### Nov 2, 2026 — Competitor Ads tab
 Dashboard tab under **Prospecting** (`?tab=competitor_ads`) over `get_competitor_ads`: you search an advertiser and get KPI tiles (ads in the window, active in the last 7 days, impressions floor, median days running), breakdowns (format, location, language, targeting types used), and an ads table linking to each ad, with CSV export. Design choices: no load on mount, because the Ad Library allows ~10 calls/min; "Exact name only" on by default, because advertiser search is fuzzy; LinkedIn's enum mapped to plain format names; status pills for truncation, rate-limiting, undated ads and excluded lookalikes. The empty state was checked in the browser. The results view was **not** rendered locally: it needs a LinkedIn login, and a fake token would make the dashboard sync junk into production `mcp_api_keys`.
+
+### Nov 11, 2026 — Account Intel tab (Company Intelligence API)
+LinkedIn granted access to the Company Intelligence API. `get_company_intelligence` already existed, but it had four problems:
+- it was pinned to `202511`, which sunsets 2026-11-16
+- it fetched only one page
+- it URL-encoded the whole `filterCriteria`, where Rest.li wants only the URN values encoded
+- nothing in the app rendered its hook and table
+
+The action was rewritten into [account-intel.ts](supabase/functions/linkedin-api/account-intel.ts) on `202610`:
+- pagination
+- every 2026 field: qualified leads, conversions, video views, firmographics, CPQL
+- every filter, with LinkedIn's combination rules enforced before the call
+- "decision makers" runs five seniority requests (ids 6–10) and merges them, because `seniority` takes one value per request
+
+The unused `useCompanyIntelligence` / `CompanyIntelligenceTable` became the **Account Intel** tab under Prospecting:
+- a connection-check card that proves provisioning, account role and scope with a one-row call
+- a company table with engagement level, paid and organic metrics, and the paid/organic mix
+- an audience filter: all members, decision makers, one seniority or one job function
+
+The response shape changed from `{ elements }` to `{ companies, meta }`; the hook reports a missing `meta` as a stale deploy. Tests use fakes built from the docs' sample response. The new code has **not run live yet**: it needs an edge deploy, and the deployed handler was still the old one at commit time. About 50 other actions are still pinned to `202511`.

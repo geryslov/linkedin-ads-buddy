@@ -34,6 +34,7 @@ import {
   Pencil,
   Radar,
   Binoculars,
+  Flame,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -119,6 +120,7 @@ export const navGroups: NavGroup[] = [
     items: [
       { id: "prospect_finder", label: "Prospect Finder", icon: Radar },
       { id: "competitor_ads", label: "Competitor Ads", icon: Binoculars },
+      { id: "account_intel", label: "Account Intel", icon: Flame },
     ],
   },
   {
