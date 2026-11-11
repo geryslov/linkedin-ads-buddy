@@ -469,3 +469,10 @@ The unused `useCompanyIntelligence` / `CompanyIntelligenceTable` became the **Ac
 - an audience filter: all members, decision makers, one seniority or one job function
 
 The response shape changed from `{ elements }` to `{ companies, meta }`; the hook reports a missing `meta` as a stale deploy. Tests use fakes built from the docs' sample response. The new code has **not run live yet**: it needs an edge deploy, and the deployed handler was still the old one at commit time. About 50 other actions are still pinned to `202511`.
+
+### Nov 11, 2026 — Account Intel per-company drill-down
+Rows now expand like Company Demographics. The API has no company × campaign breakdown, but a campaign-filtered call returns every company at once. So `breakdown: 'campaign'` sends one call per campaign and reorganizes the results by company. One batch fills the drill-down for every company, loaded on the first expand and cached per account and lookback. The view groups objective → campaign, with LinkedIn's engagement level on each row. `breakdown: 'audience'` does the same with 8 seniorities and 8 job functions, over 90 days.
+
+Some campaign rows show "—" for organic. That is LinkedIn's rule: organic metrics are 0 under any campaign filter.
+
+`get_company_intelligence` is in the product MCP allowlist (`PASSTHROUGH_READ`), so breakdowns are reachable there too. Each breakdown sends up to 60 calls, against a LinkedIn rate limit that is not published. Watch for 429s before encouraging Claude to use it. Tested with fakes only; it needs an edge deploy.

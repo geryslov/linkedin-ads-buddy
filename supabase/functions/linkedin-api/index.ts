@@ -5,7 +5,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { createCreativeReader, CREATIVE_READ_VERSION, metadataCopy } from './creative-metadata.ts';
 import { isInMailRef, readInMailContent, type MessageAdContent } from './message-ad-content.ts';
 import { fetchCompetitorAds } from './ad-library.ts';
-import { AccountIntelError, fetchAccountIntel } from './account-intel.ts';
+import { AccountIntelError, fetchAccountIntel, fetchAudienceBreakdown, fetchCampaignBreakdown } from './account-intel.ts';
 import { targetingCompatibilityError } from './targeting-compatibility.ts';
 
 const corsHeaders = {
@@ -3574,6 +3574,13 @@ serve(async (req) => {
         // organic. Filters, paging and error kinds live in account-intel.ts.
         const ai = params || {};
         try {
+          // Per-company breakdowns: one call per campaign / seniority / job function, pivoted.
+          if (ai.breakdown === 'campaign' || ai.breakdown === 'audience') {
+            const result = ai.breakdown === 'campaign'
+              ? await fetchCampaignBreakdown(accessToken, { accountId: ai.accountId, lookbackWindow: ai.lookbackWindow })
+              : await fetchAudienceBreakdown(accessToken, { accountId: ai.accountId });
+            return new Response(JSON.stringify(result), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+          }
           const result = await fetchAccountIntel(accessToken, {
             accountId: ai.accountId, lookbackWindow: ai.lookbackWindow, campaignId: ai.campaignId,
             campaignGroupId: ai.campaignGroupId, objectiveType: ai.objectiveType, seniority: ai.seniority,

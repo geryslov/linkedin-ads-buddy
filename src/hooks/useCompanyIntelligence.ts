@@ -61,6 +61,40 @@ export interface ConnectionCheck {
   error?: IntelError;
 }
 
+/** One slice of a company's breakdown: a campaign id, `sen:<id>` or `fn:<FUNCTION>`. */
+export interface BreakdownRow {
+  slice: string;
+  engagementLevel: string;
+  paidImpressions: number;
+  paidClicks: number;
+  paidEngagements: number;
+  paidLeads: number;
+  paidQualifiedLeads: number;
+  conversions: number;
+  organicImpressions: number;
+  organicEngagements: number;
+}
+
+export interface BreakdownCampaign {
+  id: string;
+  name: string;
+  status: string;
+  objectiveType: string;
+  companies: number;
+}
+
+export interface Breakdown {
+  /** What it was built for — a stale breakdown is ignored, not shown. */
+  key: string;
+  byCompany: Record<string, BreakdownRow[]>;
+  campaigns?: BreakdownCampaign[];
+  meta: { durationMs: number; failed: { slice: string; error: string }[]; truncated: boolean; campaignsQueried?: number; campaignsSkipped?: number };
+}
+
+/** Same key the edge pivots on (account-intel.ts `companyKey`). */
+export const companyKey = (c: Pick<CompanyIntelligence, 'companyPageUrl' | 'companyWebsite' | 'companyName'>) =>
+  c.companyPageUrl || c.companyWebsite || c.companyName;
+
 export const DECISION_MAKER_SENIORITIES = ['6', '7', '8', '9', '10'];
 
 async function readInvokeError(error: unknown): Promise<IntelError> {
@@ -88,7 +122,7 @@ function toParams(accountId: string, q: CompanyIntelligenceQuery) {
   return params;
 }
 
-async function invoke(accessToken: string, params: Record<string, unknown>) {
+async function invoke<T = { companies: CompanyIntelligence[]; meta: CompanyIntelligenceMeta }>(accessToken: string, params: Record<string, unknown>): Promise<T> {
   const { data, error } = await supabase.functions.invoke('linkedin-api', {
     body: { action: 'get_company_intelligence', accessToken, params },
   });
@@ -96,7 +130,9 @@ async function invoke(accessToken: string, params: Record<string, unknown>) {
   if (data?.error) throw Object.assign(new Error(data.error), { kind: data.kind });
   // The pre-2026-11 handler returned `elements`; a stale deploy still does.
   if (!data?.meta) throw Object.assign(new Error('The edge function is running the old Company Intelligence handler — deploy linkedin-api.'), { kind: 'stale_deploy' });
-  return data as { companies: CompanyIntelligence[]; meta: CompanyIntelligenceMeta };
+  // A deploy without breakdown support answers a breakdown request with plain companies.
+  if (params.breakdown && !data.byCompany) throw Object.assign(new Error('The deployed edge function has no per-company breakdowns yet — deploy linkedin-api.'), { kind: 'stale_deploy' });
+  return data as T;
 }
 
 const asIntelError = async (e: unknown): Promise<IntelError> =>
@@ -109,6 +145,10 @@ export function useCompanyIntelligence(accessToken: string | null) {
   const [error, setError] = useState<IntelError | null>(null);
   const [check, setCheck] = useState<ConnectionCheck | null>(null);
   const [isChecking, setIsChecking] = useState(false);
+  const [campaignBreakdown, setCampaignBreakdown] = useState<Breakdown | null>(null);
+  const [audienceBreakdown, setAudienceBreakdown] = useState<Breakdown | null>(null);
+  const [loadingBreakdown, setLoadingBreakdown] = useState<'campaign' | 'audience' | null>(null);
+  const [breakdownError, setBreakdownError] = useState<IntelError | null>(null);
 
   /** One-row request: proves provisioning, account role and scope. */
   const runCheck = useCallback(async (accountId: string) => {
@@ -141,12 +181,34 @@ export function useCompanyIntelligence(accessToken: string | null) {
     }
   }, [accessToken]);
 
+  /** One batch per account (+ lookback for campaigns) fills every company's breakdown. */
+  const loadBreakdown = useCallback(async (kind: 'campaign' | 'audience', accountId: string, lookbackWindow: LookbackWindow) => {
+    if (!accessToken || !accountId) return;
+    const key = kind === 'campaign' ? `${accountId}:${lookbackWindow}` : accountId;
+    setLoadingBreakdown(kind);
+    setBreakdownError(null);
+    try {
+      const data = await invoke<Omit<Breakdown, 'key'>>(accessToken, { accountId, lookbackWindow, breakdown: kind });
+      (kind === 'campaign' ? setCampaignBreakdown : setAudienceBreakdown)({ ...data, key });
+    } catch (e) {
+      setBreakdownError(await asIntelError(e));
+    } finally {
+      setLoadingBreakdown(null);
+    }
+  }, [accessToken]);
+
   const reset = useCallback(() => {
+    setCampaignBreakdown(null);
+    setAudienceBreakdown(null);
+    setBreakdownError(null);
     setCompanies([]);
     setMeta(null);
     setError(null);
     setCheck(null);
   }, []);
 
-  return { companies, meta, isLoading, error, load, check, isChecking, runCheck, reset };
+  return {
+    companies, meta, isLoading, error, load, check, isChecking, runCheck, reset,
+    campaignBreakdown, audienceBreakdown, loadingBreakdown, breakdownError, loadBreakdown,
+  };
 }

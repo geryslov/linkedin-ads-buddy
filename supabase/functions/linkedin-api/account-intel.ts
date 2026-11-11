@@ -146,13 +146,13 @@ function classify403(text: string): AccountIntelError {
   return new AccountIntelError('LinkedIn refused the Company Intelligence request.', 403, 'forbidden', text);
 }
 
-async function fetchPages(accessToken: string, accountId: string, filterCriteria: string, check: boolean, fetchImpl: typeof fetch) {
+async function fetchPages(accessToken: string, accountId: string, filterCriteria: string, check: boolean, fetchImpl: typeof fetch, maxPages = MAX_PAGES) {
   const companies: AccountIntelCompany[] = [];
   let total: number | null = null;
   let pages = 0;
   const count = check ? 1 : PAGE_SIZE;
   const account = urn('sponsoredAccount', accountId);
-  for (let start = 0; pages < (check ? 1 : MAX_PAGES); start += count) {
+  for (let start = 0; pages < (check ? 1 : maxPages); start += count) {
     const url = `https://api.linkedin.com/rest/accountIntelligence?q=account&account=${account}&filterCriteria=${filterCriteria}&start=${start}&count=${count}`;
     const res = await fetchImpl(url, {
       headers: {
@@ -216,6 +216,167 @@ export async function fetchAccountIntel(accessToken: string, q: AccountIntelQuer
       filterCriteria: [filterCriteria],
       total: r.total, fetched: r.companies.length, pages: r.pages, truncated: r.truncated,
       durationMs: Date.now() - started,
+    },
+  };
+}
+
+// ── Per-company breakdowns ───────────────────────────────────────────────
+// The API has no company × campaign pivot, but every campaign-filtered call
+// returns all companies at once, so one call per campaign (or per seniority /
+// job function) pivots into a breakdown for every company in a single batch.
+
+const MAX_BREAKDOWN_CAMPAIGNS = 60;
+const BREAKDOWN_PAGES = 4; // 2,000 companies per slice
+const CONCURRENCY = 4;
+const LOOKBACK_DAYS: Record<string, number> = {
+  LAST_7_DAYS: 7, LAST_30_DAYS: 30, LAST_60_DAYS: 60, LAST_90_DAYS: 90, LAST_180_DAYS: 180, LAST_365_DAYS: 365,
+};
+export const BREAKDOWN_SENIORITIES = ['3', '4', '5', '6', '7', '8', '9', '10'];
+
+export { companyKey };
+
+export type BreakdownCampaign = { id: string; name: string; status: string; objectiveType: string };
+
+export type BreakdownRow = {
+  // campaign id, seniority id or job function
+  slice: string;
+  engagementLevel: string;
+  paidImpressions: number;
+  paidClicks: number;
+  paidEngagements: number;
+  paidLeads: number;
+  paidQualifiedLeads: number;
+  conversions: number;
+  organicImpressions: number;
+  organicEngagements: number;
+};
+
+const toRow = (slice: string, c: AccountIntelCompany): BreakdownRow => ({
+  slice,
+  engagementLevel: c.engagementLevel,
+  paidImpressions: c.paidImpressions,
+  paidClicks: c.paidClicks,
+  paidEngagements: c.paidEngagements,
+  paidLeads: c.paidLeads,
+  paidQualifiedLeads: c.paidQualifiedLeads,
+  conversions: c.conversions,
+  organicImpressions: c.organicImpressions,
+  organicEngagements: c.organicEngagements,
+});
+
+async function pool<T, R>(items: T[], n: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await fn(items[i]);
+    }
+  }));
+  return out;
+}
+
+// Runs one Account Intel query per slice and pivots to company → rows.
+// A provisioning/role/scope 403 aborts (every slice would fail the same way);
+// other per-slice failures are counted and the rest still returns.
+async function pivotSlices(
+  accessToken: string, accountId: string,
+  slices: { slice: string; filterCriteria: string }[],
+  fetchImpl: typeof fetch,
+) {
+  const byCompany: Record<string, BreakdownRow[]> = {};
+  const sliceCompanies: Record<string, number> = {};
+  const failed: { slice: string; error: string }[] = [];
+  let truncated = false;
+  await pool(slices, CONCURRENCY, async ({ slice, filterCriteria }) => {
+    try {
+      const r = await fetchPages(accessToken, accountId, filterCriteria, false, fetchImpl, BREAKDOWN_PAGES);
+      truncated ||= r.truncated;
+      sliceCompanies[slice] = r.companies.length;
+      for (const c of r.companies) (byCompany[companyKey(c)] ||= []).push(toRow(slice, c));
+    } catch (e) {
+      const err = e as AccountIntelError;
+      if (['not_provisioned', 'no_account_role', 'no_reporting_scope', 'token_invalid'].includes(err?.kind)) throw e;
+      failed.push({ slice, error: String(err?.message || e) });
+    }
+  });
+  return { byCompany, sliceCompanies, failed, truncated };
+}
+
+export function selectBreakdownCampaigns(elements: any[], lookbackWindow: string, now = Date.now()): { campaigns: BreakdownCampaign[]; skipped: number } {
+  const windowStart = now - (LOOKBACK_DAYS[lookbackWindow] ?? 90) * 24 * 60 * 60 * 1000;
+  const eligible = elements.filter((c) => {
+    const status = String(c?.status || '').toUpperCase();
+    if (status === 'DRAFT' || status === 'PENDING_DELETION' || status === 'REMOVED') return false;
+    const start = c?.runSchedule?.start;
+    const end = c?.runSchedule?.end;
+    if (typeof start === 'number' && start > now) return false;
+    if (typeof end === 'number' && end < windowStart) return false;
+    return true;
+  });
+  // Active first, then the most recently started.
+  const rank = (s: string) => (s === 'ACTIVE' ? 0 : s === 'PAUSED' ? 1 : 2);
+  eligible.sort((a, b) => rank(String(a.status).toUpperCase()) - rank(String(b.status).toUpperCase())
+    || (b?.runSchedule?.start || 0) - (a?.runSchedule?.start || 0));
+  const campaigns = eligible.slice(0, MAX_BREAKDOWN_CAMPAIGNS).map((c) => ({
+    id: String(c.id ?? String(c.$URN || '').split(':').pop()),
+    name: String(c.name || `Campaign ${c.id}`),
+    status: String(c.status || 'UNKNOWN').toUpperCase(),
+    objectiveType: String(c.objectiveType || 'UNCLASSIFIED').toUpperCase(),
+  }));
+  return { campaigns, skipped: elements.length - campaigns.length };
+}
+
+async function listCampaigns(accessToken: string, accountId: string, fetchImpl: typeof fetch) {
+  const all: any[] = [];
+  for (let start = 0, i = 0; i < 20; i++) {
+    const res = await fetchImpl(`https://api.linkedin.com/rest/adAccounts/${accountId}/adCampaigns?q=search&sortOrder=DESCENDING&count=100&start=${start}`, {
+      headers: { 'Authorization': `Bearer ${accessToken}`, 'LinkedIn-Version': ACCOUNT_INTEL_VERSION, 'X-Restli-Protocol-Version': '2.0.0' },
+    });
+    if (!res.ok) throw new AccountIntelError(`Could not list campaigns (${res.status})`, res.status, 'api_error', await res.text());
+    const data = await res.json();
+    const els: any[] = Array.isArray(data?.elements) ? data.elements : [];
+    all.push(...els);
+    if (els.length < 100) break;
+    start += els.length;
+  }
+  return all;
+}
+
+export async function fetchCampaignBreakdown(accessToken: string, q: { accountId: string; lookbackWindow?: string }, fetchImpl: typeof fetch = fetch) {
+  const accountId = String(q.accountId || '').replace(/\D/g, '');
+  if (!accountId) throw new AccountIntelError('accountId is required', 400, 'bad_request');
+  const lookbackWindow = q.lookbackWindow || 'LAST_90_DAYS';
+  const started = Date.now();
+  const { campaigns, skipped } = selectBreakdownCampaigns(await listCampaigns(accessToken, accountId, fetchImpl), lookbackWindow);
+  const slices = campaigns.map((c) => ({ slice: c.id, filterCriteria: buildFilterCriteria({ accountId, lookbackWindow, campaignId: c.id }) }));
+  const r = await pivotSlices(accessToken, accountId, slices, fetchImpl);
+  return {
+    byCompany: r.byCompany,
+    campaigns: campaigns.map((c) => ({ ...c, companies: r.sliceCompanies[c.id] ?? 0 })),
+    meta: {
+      version: ACCOUNT_INTEL_VERSION, accountId, lookbackWindow,
+      campaignsQueried: campaigns.length, campaignsSkipped: skipped,
+      failed: r.failed, truncated: r.truncated, durationMs: Date.now() - started,
+    },
+  };
+}
+
+export async function fetchAudienceBreakdown(accessToken: string, q: { accountId: string }, fetchImpl: typeof fetch = fetch) {
+  const accountId = String(q.accountId || '').replace(/\D/g, '');
+  if (!accountId) throw new AccountIntelError('accountId is required', 400, 'bad_request');
+  const started = Date.now();
+  const slices = [
+    ...BREAKDOWN_SENIORITIES.map((s) => ({ slice: `sen:${s}`, filterCriteria: buildFilterCriteria({ accountId, seniority: s }) })),
+    ...JOB_FUNCTIONS.map((f) => ({ slice: `fn:${f}`, filterCriteria: buildFilterCriteria({ accountId, jobFunction: f }) })),
+  ];
+  const r = await pivotSlices(accessToken, accountId, slices, fetchImpl);
+  return {
+    byCompany: r.byCompany,
+    meta: {
+      version: ACCOUNT_INTEL_VERSION, accountId, lookbackWindow: 'LAST_90_DAYS',
+      slices: slices.length, sliceCompanies: r.sliceCompanies,
+      failed: r.failed, truncated: r.truncated, durationMs: Date.now() - started,
     },
   };
 }
