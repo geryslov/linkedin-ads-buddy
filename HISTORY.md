@@ -487,3 +487,18 @@ Under *By campaign*, clicking a campaign row now shows that company's creatives.
 - **Company matching.** Ad Analytics returns organization URNs and Account Intel returns none, so rows are matched by LinkedIn vanity name, then website host, then name. A company that can't be matched shows "no creative-level data".
 - **Numbers.** Creative rows show "—" for engagement level and qualified leads. Their totals won't equal the Account Intel campaign row, because they are different datasets with different privacy thresholds.
 - **Not verified live.** Unit-tested with a fake fetch only, and it needs a `linkedin-api` deploy.
+
+### Nov 11, 2026 — Company Journey tab
+A new Prospecting tab that shows one company over a selected time frame: paid vs organic over time, and per-campaign details when you click a bar.
+- **No time series in Account Intel.** It only offers six nested lookback windows, with no daily granularity.
+  - So the tab queries all six once, every company per call, and caches them for the whole account.
+  - Differencing nested windows (30d minus 7d, and so on) gives exact non-overlapping periods. This is the only way to see organic over time.
+  - In the chart, organic is each period's total spread evenly over its days, and labelled as that.
+- **Daily paid comes from Ad Analytics.**
+  - It uses the `q=statistics` finder with `pivots=List(CAMPAIGN,MEMBER_COMPANY)`, filtered client-side to the company's org. Ad Analytics has no member-company filter, only the pivot.
+  - That finder caps a response at 15,000 elements with no pagination, so full responses split the date range recursively.
+  - The docs don't say whether MEMBER_COMPANY may be combined with CAMPAIGN. If LinkedIn rejects it, the code falls back to a single MEMBER_COMPANY pivot and shows paid as one total.
+- **Org resolution.** Account Intel rows carry only a page URL, so the org is resolved by vanity name.
+- **Numbers.** Demographic data drops a company's day below 3 events and is approximate, so the bars won't exactly match the Account Intel totals. The UI says so.
+- **Not verified live.** Unit-tested with fakes only, including the split and the fallback.
+- **Separate from the older Company Timeline tab**, which is paid-only and covers all companies.

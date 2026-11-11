@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { buildFilterCriteria, fetchAccountIntel, fetchAudienceBreakdown, fetchCampaignBreakdown, fetchCreativeBreakdown, mergeBySeniority, normalizeCompany, selectBreakdownCampaigns } from './account-intel.ts';
+import { buildFilterCriteria, fetchAccountIntel, fetchAudienceBreakdown, fetchCampaignBreakdown, fetchCompanyDaily, fetchCreativeBreakdown, fetchWindowSeries, mergeBySeniority, normalizeCompany, selectBreakdownCampaigns } from './account-intel.ts';
 
 // Element shape from the docs' 202606+ sample response.
 const el = (name: string, o: Record<string, unknown> = {}) => ({
@@ -156,4 +156,56 @@ test('creative breakdown queries served creatives per company and resolves orgs'
   expect(r.creatives.map((c) => c.name)).toEqual(['Hero video', 'Creative 8']);
   expect(r.companies[0].vanityName).toBe('microsoft');
   expect(r.companies[0].creatives.find((c) => c.creativeId === '7')!.spend).toBe(12.35);
+});
+
+test('window series queries all six lookbacks and keys rows per company', async () => {
+  const seen: string[] = [];
+  const fake = (async (url: string) => {
+    const w = url.match(/lookbackWindow:(\w+)/)![1];
+    seen.push(w);
+    return json({ elements: [el('Acme', { paidImpressions: w === 'LAST_7_DAYS' ? 10 : 100 })], paging: { total: 1, links: [] } });
+  }) as unknown as typeof fetch;
+  const r = await fetchWindowSeries('t', { accountId: '9' }, fake);
+  expect(seen.sort()).toEqual(['LAST_180_DAYS', 'LAST_30_DAYS', 'LAST_365_DAYS', 'LAST_60_DAYS', 'LAST_7_DAYS', 'LAST_90_DAYS']);
+  expect(r.byCompany['https://www.linkedin.com/company/acme'].length).toBe(6);
+  expect(r.companies[0].companyName).toBe('Acme');
+});
+
+test('company daily resolves the org, keeps only its rows, and splits full responses', async () => {
+  const stats: string[] = [];
+  const fake = (async (url: string) => {
+    if (url.includes('/organizations?q=vanityName')) return json({ elements: [{ id: 1035 }] });
+    if (url.includes('/adCampaigns')) return json({ elements: [{ id: 11, name: 'Q4 ABM', objectiveType: 'WEBSITE_VISIT', status: 'ACTIVE' }] });
+    stats.push(url);
+    const full = stats.length === 1; // first (whole-range) call hits the element cap
+    const els = full
+      ? Array.from({ length: 15000 }, () => ({ pivotValues: ['urn:li:sponsoredCampaign:11', 'urn:li:organization:1'] }))
+      : [
+        { pivotValues: ['urn:li:sponsoredCampaign:11', 'urn:li:organization:1035'], dateRange: { start: { year: 2026, month: 11, day: 3 } }, impressions: 40, clicks: 2, videoViews: 5, costInLocalCurrency: '3.2' },
+        { pivotValues: ['urn:li:sponsoredCampaign:11', 'urn:li:organization:7'], dateRange: { start: { year: 2026, month: 11, day: 3 } }, impressions: 999 },
+      ];
+    return json({ elements: els });
+  }) as unknown as typeof fetch;
+  const r = await fetchCompanyDaily('t', { accountId: '9', lookbackWindow: 'LAST_30_DAYS', companyPageUrl: 'https://www.linkedin.com/company/microsoft' }, fake, Date.UTC(2026, 10, 11));
+  expect(stats[0]).toContain('pivots=List(CAMPAIGN,MEMBER_COMPANY)');
+  expect(stats[0]).toContain('dateRange=(start:(year:2026,month:10,day:13),end:(year:2026,month:11,day:11))');
+  expect(stats.length).toBe(3);
+  expect(r.rows.length).toBe(2);
+  expect(r.rows[0]).toMatchObject({ date: '2026-11-03', campaignId: '11', impressions: 40, videoViews: 5, spend: 3.2 });
+  expect(r.campaigns['11'].name).toBe('Q4 ABM');
+  expect(r.meta.campaignSplit).toBe(true);
+});
+
+test('company daily falls back to a single MEMBER_COMPANY pivot when LinkedIn rejects the split', async () => {
+  const stats: string[] = [];
+  const fake = (async (url: string) => {
+    if (url.includes('/adCampaigns')) return json({ elements: [] });
+    stats.push(url);
+    if (url.includes('q=statistics')) return json({ message: 'bad pivots' }, 400);
+    return json({ elements: [{ pivotValues: ['urn:li:organization:42'], dateRange: { start: { year: 2026, month: 11, day: 1 } }, impressions: 7 }] });
+  }) as unknown as typeof fetch;
+  const r = await fetchCompanyDaily('t', { accountId: '9', companyPageUrl: 'https://www.linkedin.com/company/42/' }, fake);
+  expect(stats.map((u) => u.includes('videoViews'))).toEqual([true, false, false]);
+  expect(r.meta.campaignSplit).toBe(false);
+  expect(r.rows[0]).toMatchObject({ campaignId: null, impressions: 7 });
 });

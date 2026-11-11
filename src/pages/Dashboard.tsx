@@ -14,6 +14,7 @@ import { AudienceInsightsHub } from "@/components/dashboard/AudienceInsightsHub"
 import { ReportingSection } from "@/components/dashboard/ReportingSection";
 import { TitleCheckerPage } from "@/components/dashboard/TitleCheckerPage";
 import { CompanyEngagementTimeline } from "@/components/dashboard/CompanyEngagementTimeline";
+import { CompanyJourney } from "@/components/dashboard/CompanyJourney";
 import { MegaBudgetPacingDashboard } from "@/components/dashboard/MegaBudgetPacingDashboard";
 import { CreativeGallery } from "@/components/dashboard/CreativeGallery";
 import { BulkCreativeCopy } from "@/components/dashboard/BulkCreativeCopy";
@@ -74,6 +75,7 @@ const tabMeta: Record<string, { group: string; title: string; subtitle: string }
   prospect_finder:     { group: "Prospecting", title: "Prospect Finder",           subtitle: "Turn campaign demographics into named people at the companies you reached" },
   competitor_ads:      { group: "Prospecting", title: "Competitor Ads",            subtitle: "See what any advertiser is running on LinkedIn, from the public Ad Library" },
   account_intel:       { group: "Prospecting", title: "Account Intel",             subtitle: "Which companies are engaging — paid and organic, by seniority and job function" },
+  company_journey:     { group: "Prospecting", title: "Company Journey",           subtitle: "One company over time — paid by campaign, organic by period" },
   title_checker:       { group: "Tools",      title: "Title Checker",               subtitle: "Validate and explore job titles" },
   standardized_titles: { group: "Tools",      title: "Standardized Titles",         subtitle: "Normalize job title variations" },
   name_report:         { group: "Tools",      title: "Name Report",                 subtitle: "Analyze campaign naming conventions" },
@@ -514,6 +516,10 @@ export default function Dashboard() {
             selectedAccount={selectedAccount}
             campaigns={campaigns.map((c) => ({ id: c.id, name: c.name, status: c.status }))}
           />
+        )}
+
+        {activeTab === "company_journey" && (
+          <CompanyJourney accessToken={accessToken} selectedAccount={selectedAccount} />
         )}
 
         {activeTab === "competitor_ads" && (

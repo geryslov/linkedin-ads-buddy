@@ -80,7 +80,7 @@ const creativeTotals = (m: CreativeMetrics): Omit<BreakdownRow, 'slice'> => ({
 const sliceLabel = (slice: string) =>
   slice.startsWith('sen:') ? SENIORITIES[slice.slice(4)] ?? slice : slice.startsWith('fn:') ? JOB_FUNCTIONS[slice.slice(3)] ?? slice : slice;
 
-const ERROR_HELP: Record<string, string> = {
+export const ERROR_HELP: Record<string, string> = {
   not_provisioned: 'The LinkedIn developer app needs the Company Intelligence API product added in the LinkedIn developer portal.',
   no_account_role: 'Your LinkedIn user needs Viewer access or higher on this ad account.',
   no_reporting_scope: 'Log out and reconnect LinkedIn so the token carries r_ads_reporting.',
@@ -91,7 +91,7 @@ const ERROR_HELP: Record<string, string> = {
 };
 
 /** Website favicon via Google's favicon service; initials when there is no site or the icon fails. */
-function CompanyLogo({ name, website }: { name: string; website: string }) {
+export function CompanyLogo({ name, website }: { name: string; website: string }) {
   const [failed, setFailed] = useState(false);
   const domain = website.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').split(/[/?#]/)[0];
   if (!domain || failed) {

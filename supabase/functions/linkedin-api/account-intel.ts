@@ -531,3 +531,168 @@ export async function fetchCreativeBreakdown(
     },
   };
 }
+
+// ---- Company Journey ----------------------------------------------------------
+// Account Intel has no time granularity, only nested lookback windows. Querying
+// all six windows once (every company per call) lets the client difference them
+// into non-overlapping buckets (0–7d, 8–30d, …) — the only time view of organic.
+// Daily paid data for one company comes from Ad Analytics' statistics finder.
+
+const WINDOW_ORDER = ['LAST_7_DAYS', 'LAST_30_DAYS', 'LAST_60_DAYS', 'LAST_90_DAYS', 'LAST_180_DAYS', 'LAST_365_DAYS'];
+
+export type WindowRow = {
+  window: string;
+  engagementLevel: string;
+  paidImpressions: number;
+  paidClicks: number;
+  paidEngagements: number;
+  paidLeads: number;
+  paidQualifiedLeads: number;
+  conversions: number;
+  paidVideoViews: number;
+  organicImpressions: number;
+  organicEngagements: number;
+};
+
+export async function fetchWindowSeries(accessToken: string, q: { accountId: string }, fetchImpl: typeof fetch = fetch) {
+  const accountId = String(q.accountId || '').replace(/\D/g, '');
+  if (!accountId) throw new AccountIntelError('accountId is required', 400, 'bad_request');
+  const started = Date.now();
+  const byCompany: Record<string, WindowRow[]> = {};
+  let companies: AccountIntelCompany[] = [];
+  let truncated = false;
+  // Every window must succeed — a missing one would make the differenced buckets wrong.
+  await pool(WINDOW_ORDER, CONCURRENCY, async (window) => {
+    const r = await fetchPages(accessToken, accountId, buildFilterCriteria({ accountId, lookbackWindow: window }), false, fetchImpl);
+    truncated ||= r.truncated;
+    if (window === 'LAST_365_DAYS') companies = r.companies;
+    for (const c of r.companies) {
+      (byCompany[companyKey(c)] ||= []).push({
+        window, engagementLevel: c.engagementLevel,
+        paidImpressions: c.paidImpressions, paidClicks: c.paidClicks, paidEngagements: c.paidEngagements,
+        paidLeads: c.paidLeads, paidQualifiedLeads: c.paidQualifiedLeads, conversions: c.conversions,
+        paidVideoViews: c.paidVideoViews, organicImpressions: c.organicImpressions, organicEngagements: c.organicEngagements,
+      });
+    }
+  });
+  return {
+    companies: companies.sort((a, b) => b.paidImpressions + b.organicImpressions - a.paidImpressions - a.organicImpressions),
+    byCompany,
+    meta: { version: ACCOUNT_INTEL_VERSION, accountId, windows: WINDOW_ORDER, truncated, durationMs: Date.now() - started },
+  };
+}
+
+const STATS_LIMIT = 15000; // statistics finder: max elements, no pagination
+const MAX_DAILY_CALLS = 40;
+const DAY_MS = 86400000;
+
+export type DailyRow = {
+  date: string;
+  campaignId: string | null;
+  impressions: number;
+  clicks: number;
+  engagements: number;
+  leads: number;
+  conversions: number;
+  videoViews: number;
+  spend: number;
+};
+
+const restDate = (t: number) => { const d = ymd(new Date(t)); return `(year:${d.year},month:${d.month},day:${d.day})`; };
+const isoDay = (d: any) => `${d?.year}-${String(d?.month).padStart(2, '0')}-${String(d?.day).padStart(2, '0')}`;
+
+async function resolveOrgId(accessToken: string, companyPageUrl: string, fetchImpl: typeof fetch): Promise<string | null> {
+  const slug = companyPageUrl.match(/\/company\/([^/?#]+)/)?.[1];
+  if (!slug) return null;
+  if (/^\d+$/.test(slug)) return slug;
+  const res = await fetchImpl(`https://api.linkedin.com/rest/organizations?q=vanityName&vanityName=${encodeURIComponent(slug)}`, {
+    headers: { 'Authorization': `Bearer ${accessToken}`, 'LinkedIn-Version': ACCOUNT_INTEL_VERSION, 'X-Restli-Protocol-Version': '2.0.0' },
+  });
+  if (res.status === 401) throw new AccountIntelError('LinkedIn token is invalid or expired — reconnect LinkedIn.', 401, 'token_invalid');
+  if (!res.ok) return null;
+  const id = (await res.json())?.elements?.[0]?.id;
+  return id ? String(id).split(':').pop()! : null;
+}
+
+export async function fetchCompanyDaily(
+  accessToken: string, q: { accountId: string; lookbackWindow?: string; companyPageUrl: string },
+  fetchImpl: typeof fetch = fetch, now = Date.now(),
+) {
+  const accountId = String(q.accountId || '').replace(/\D/g, '');
+  if (!accountId || !q.companyPageUrl) throw new AccountIntelError('accountId and companyPageUrl are required', 400, 'bad_request');
+  const lookbackWindow = q.lookbackWindow || 'LAST_90_DAYS';
+  const started = Date.now();
+
+  const orgId = await resolveOrgId(accessToken, q.companyPageUrl, fetchImpl);
+  if (!orgId) throw new AccountIntelError('Could not resolve this company to a LinkedIn organization, so daily paid data is unavailable.', 404, 'org_unresolved');
+  const orgUrn = `urn:li:organization:${orgId}`;
+
+  const account = `List(${encodeURIComponent(`urn:li:sponsoredAccount:${accountId}`)})`;
+  const core = 'pivotValues,dateRange,impressions,clicks,totalEngagements,oneClickLeads,externalWebsiteConversions,costInLocalCurrency';
+  let fields = `${core},videoViews`;
+  let campaignSplit = true;
+  let calls = 0;
+  let truncated = false;
+  const rows: DailyRow[] = [];
+
+  const query = async (from: number, to: number) => {
+    const base = campaignSplit
+      ? `q=statistics&pivots=List(CAMPAIGN,MEMBER_COMPANY)`
+      : `q=analytics&pivot=MEMBER_COMPANY`;
+    calls++;
+    return fetchImpl(`https://api.linkedin.com/rest/adAnalytics?${base}&timeGranularity=DAILY&dateRange=(start:${restDate(from)},end:${restDate(to)})&accounts=${account}&fields=${fields}`, {
+      headers: { 'Authorization': `Bearer ${accessToken}`, 'LinkedIn-Version': ACCOUNT_INTEL_VERSION, 'X-Restli-Protocol-Version': '2.0.0' },
+    });
+  };
+
+  // A full response may be cut at the element limit, so split the range until it fits.
+  const collect = async (from: number, to: number): Promise<void> => {
+    if (calls >= MAX_DAILY_CALLS) { truncated = true; return; }
+    let res = await query(from, to);
+    // Degrade once on 400: drop videoViews, then drop the campaign split (single MEMBER_COMPANY pivot).
+    while (res.status === 400 && (fields !== core || campaignSplit)) {
+      if (fields !== core) fields = core; else campaignSplit = false;
+      res = await query(from, to);
+    }
+    if (res.status === 401) throw new AccountIntelError('LinkedIn token is invalid or expired — reconnect LinkedIn.', 401, 'token_invalid');
+    if (!res.ok) throw new AccountIntelError(`Ad Analytics request failed (${res.status})`, res.status, res.status === 429 ? 'rate_limited' : 'api_error', await res.text());
+    const els: any[] = (await res.json())?.elements || [];
+    if (els.length >= STATS_LIMIT && to - from >= DAY_MS) {
+      const mid = from + Math.floor((to - from) / DAY_MS / 2) * DAY_MS;
+      await collect(from, mid);
+      await collect(mid + DAY_MS, to);
+      return;
+    }
+    if (els.length >= STATS_LIMIT) truncated = true;
+    for (const el of els) {
+      const pv: string[] = Array.isArray(el?.pivotValues) ? el.pivotValues : [];
+      if (!pv.includes(orgUrn)) continue;
+      const camp = pv.find((v) => v.startsWith('urn:li:sponsoredCampaign:'));
+      rows.push({
+        date: isoDay(el?.dateRange?.start),
+        campaignId: camp ? camp.split(':').pop()! : null,
+        impressions: num(el.impressions), clicks: num(el.clicks), engagements: num(el.totalEngagements),
+        leads: num(el.oneClickLeads), conversions: num(el.externalWebsiteConversions), videoViews: num(el.videoViews),
+        spend: Math.round((parseFloat(el.costInLocalCurrency) || 0) * 100) / 100,
+      });
+    }
+  };
+
+  const days = LOOKBACK_DAYS[lookbackWindow] ?? 90;
+  const [, campaignList] = await Promise.all([
+    collect(now - (days - 1) * DAY_MS, now),
+    listCampaigns(accessToken, accountId, fetchImpl).catch(() => [] as any[]),
+  ]);
+  const used = new Set(rows.map((r) => r.campaignId).filter(Boolean));
+  const campaigns: Record<string, { name: string; objectiveType: string; status: string }> = {};
+  for (const c of campaignList) {
+    const id = String(c?.id ?? '');
+    if (used.has(id)) campaigns[id] = { name: String(c.name || `Campaign ${id}`), objectiveType: String(c.objectiveType || 'UNCLASSIFIED').toUpperCase(), status: String(c.status || '').toUpperCase() };
+  }
+
+  return {
+    rows: rows.sort((a, b) => a.date.localeCompare(b.date)),
+    campaigns,
+    meta: { accountId, lookbackWindow, orgUrn, campaignSplit, calls, truncated, durationMs: Date.now() - started },
+  };
+}

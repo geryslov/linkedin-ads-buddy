@@ -35,6 +35,7 @@ import {
   Radar,
   Binoculars,
   Flame,
+  Route,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -121,6 +122,7 @@ export const navGroups: NavGroup[] = [
       { id: "prospect_finder", label: "Prospect Finder", icon: Radar },
       { id: "competitor_ads", label: "Competitor Ads", icon: Binoculars },
       { id: "account_intel", label: "Account Intel", icon: Flame },
+      { id: "company_journey", label: "Company Journey", icon: Route },
     ],
   },
   {
