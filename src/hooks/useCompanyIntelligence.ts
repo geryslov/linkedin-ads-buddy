@@ -91,6 +91,40 @@ export interface Breakdown {
   meta: { durationMs: number; failed: { slice: string; error: string }[]; truncated: boolean; campaignsQueried?: number; campaignsSkipped?: number };
 }
 
+export interface CreativeMetrics {
+  creativeId: string;
+  impressions: number;
+  clicks: number;
+  engagements: number;
+  leads: number;
+  conversions: number;
+  spend: number;
+}
+
+/** Campaign → creative drill-down. From Ad Analytics, keyed by organization, not Account Intel. */
+export interface CreativeBreakdown {
+  companies: { orgUrn: string; name: string; vanityName: string; website: string; creatives: CreativeMetrics[] }[];
+  creatives: { id: string; name: string; status: string; impressions: number }[];
+  meta: { creativesQueried: number; creativesSkipped: number; failed: { slice: string; error: string }[]; durationMs: number };
+}
+
+const host = (url: string) => url.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').split(/[/?#]/)[0];
+const normName = (n: string) => n.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+/**
+ * Account Intel rows carry no organization URN, so match an Ad Analytics org by
+ * LinkedIn vanity name, then website host, then normalized name.
+ */
+export function findCreativeCompany(b: CreativeBreakdown, c: Pick<CompanyIntelligence, 'companyPageUrl' | 'companyWebsite' | 'companyName'>) {
+  const vanity = c.companyPageUrl.match(/\/company\/([^/?#]+)/)?.[1]?.toLowerCase();
+  const site = c.companyWebsite && host(c.companyWebsite);
+  const name = normName(c.companyName);
+  return (vanity && b.companies.find((o) => o.vanityName.toLowerCase() === vanity))
+    || (site && b.companies.find((o) => o.website && host(o.website) === site))
+    || (name && b.companies.find((o) => normName(o.name) === name))
+    || null;
+}
+
 /** Same key the edge pivots on (account-intel.ts `companyKey`). */
 export const companyKey = (c: Pick<CompanyIntelligence, 'companyPageUrl' | 'companyWebsite' | 'companyName'>) =>
   c.companyPageUrl || c.companyWebsite || c.companyName;
@@ -149,6 +183,8 @@ export function useCompanyIntelligence(accessToken: string | null) {
   const [audienceBreakdown, setAudienceBreakdown] = useState<Breakdown | null>(null);
   const [loadingBreakdown, setLoadingBreakdown] = useState<'campaign' | 'audience' | null>(null);
   const [breakdownError, setBreakdownError] = useState<IntelError | null>(null);
+  // Keyed `${accountId}:${lookback}:${campaignId}` — one load fills every company for that campaign.
+  const [creativeBreakdowns, setCreativeBreakdowns] = useState<Record<string, CreativeBreakdown | IntelError | 'loading'>>({});
 
   /** One-row request: proves provisioning, account role and scope. */
   const runCheck = useCallback(async (accountId: string) => {
@@ -197,7 +233,28 @@ export function useCompanyIntelligence(accessToken: string | null) {
     }
   }, [accessToken]);
 
+  const loadCreativeBreakdown = useCallback(async (accountId: string, lookbackWindow: LookbackWindow, campaignId: string) => {
+    if (!accessToken || !accountId) return;
+    const key = `${accountId}:${lookbackWindow}:${campaignId}`;
+    setCreativeBreakdowns((m) => ({ ...m, [key]: 'loading' }));
+    try {
+      const { data, error } = await supabase.functions.invoke('linkedin-api', {
+        body: { action: 'get_company_intelligence', accessToken, params: { accountId, lookbackWindow, campaignId, breakdown: 'creative' } },
+      });
+      if (error) throw error;
+      if (data?.error) throw Object.assign(new Error(data.error), { kind: data.kind });
+      if (!Array.isArray(data?.companies) || !Array.isArray(data?.creatives)) {
+        throw Object.assign(new Error('The deployed edge function has no creative breakdown yet — deploy linkedin-api.'), { kind: 'stale_deploy' });
+      }
+      setCreativeBreakdowns((m) => ({ ...m, [key]: data as CreativeBreakdown }));
+    } catch (e) {
+      const err = await asIntelError(e);
+      setCreativeBreakdowns((m) => ({ ...m, [key]: err }));
+    }
+  }, [accessToken]);
+
   const reset = useCallback(() => {
+    setCreativeBreakdowns({});
     setCampaignBreakdown(null);
     setAudienceBreakdown(null);
     setBreakdownError(null);
@@ -210,5 +267,6 @@ export function useCompanyIntelligence(accessToken: string | null) {
   return {
     companies, meta, isLoading, error, load, check, isChecking, runCheck, reset,
     campaignBreakdown, audienceBreakdown, loadingBreakdown, breakdownError, loadBreakdown,
+    creativeBreakdowns, loadCreativeBreakdown,
   };
 }

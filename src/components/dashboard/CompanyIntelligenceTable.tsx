@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import {
   useCompanyIntelligence, CompanyIntelligence, LookbackWindow, Audience, BreakdownRow, BreakdownCampaign, companyKey,
+  CreativeMetrics, findCreativeCompany,
 } from '@/hooks/useCompanyIntelligence';
 import { WidgetCard, EmptyState, StatusPill, SegmentedControl } from '@/components/dashboard/widgets';
 import { Button } from '@/components/ui/button';
@@ -71,6 +72,11 @@ function sumRows(rows: BreakdownRow[]): Omit<BreakdownRow, 'slice'> {
   return t;
 }
 
+const creativeTotals = (m: CreativeMetrics): Omit<BreakdownRow, 'slice'> => ({
+  engagementLevel: '', paidImpressions: m.impressions, paidClicks: m.clicks, paidEngagements: m.engagements,
+  paidLeads: m.leads, paidQualifiedLeads: 0, conversions: m.conversions, organicImpressions: 0, organicEngagements: 0,
+});
+
 const sliceLabel = (slice: string) =>
   slice.startsWith('sen:') ? SENIORITIES[slice.slice(4)] ?? slice : slice.startsWith('fn:') ? JOB_FUNCTIONS[slice.slice(3)] ?? slice : slice;
 
@@ -98,6 +104,7 @@ export function CompanyIntelligenceTable({ accessToken, selectedAccount, campaig
   const {
     companies, meta, isLoading, error, load, check, isChecking, runCheck, reset,
     campaignBreakdown, audienceBreakdown, loadingBreakdown, breakdownError, loadBreakdown,
+    creativeBreakdowns, loadCreativeBreakdown,
   } = useCompanyIntelligence(accessToken);
 
   const [lookback, setLookback] = useState<LookbackWindow>('LAST_90_DAYS');
@@ -108,6 +115,7 @@ export function CompanyIntelligenceTable({ accessToken, selectedAccount, campaig
   const [sortKey, setSortKey] = useState<SortKey>('paidImpressions');
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [expandedObjectives, setExpandedObjectives] = useState<Set<string>>(new Set());
+  const [expandedCampaigns, setExpandedCampaigns] = useState<Set<string>>(new Set());
   const [view, setView] = useState<BreakdownView>('campaign');
 
   const audienceFiltered = audience !== 'all';
@@ -144,6 +152,7 @@ export function CompanyIntelligenceTable({ accessToken, selectedAccount, campaig
   const run = () => {
     setExpanded(new Set());
     setExpandedObjectives(new Set());
+    setExpandedCampaigns(new Set());
     if (!selectedAccount) return;
     load(selectedAccount, { lookbackWindow: lookback, audience, campaignId: campaignId === 'all' ? null : campaignId });
   };
@@ -185,32 +194,63 @@ export function CompanyIntelligenceTable({ accessToken, selectedAccount, campaig
   const colCount = 11 + (showSeniorities ? 1 : 0);
 
   /** A breakdown row aligned to the main table's columns. */
-  const SubRow = ({ label, extra, t, depth, onClick, open, organicNa }: {
-    label: React.ReactNode; extra?: React.ReactNode; t: Omit<BreakdownRow, 'slice'>; depth: 1 | 2;
-    onClick?: () => void; open?: boolean; organicNa?: boolean;
+  const SubRow = ({ label, extra, t, depth, onClick, open, organicNa, qualNa }: {
+    label: React.ReactNode; extra?: React.ReactNode; t: Omit<BreakdownRow, 'slice'>; depth: 1 | 2 | 3;
+    onClick?: () => void; open?: boolean; organicNa?: boolean; qualNa?: boolean;
   }) => (
     <tr
       onClick={onClick}
-      className={`border-t border-border/40 ${depth === 1 ? 'bg-primary/[0.03]' : 'bg-primary/[0.06]'} ${onClick ? 'cursor-pointer hover:bg-primary/[0.08]' : ''}`}
+      className={`border-t border-border/40 ${depth === 1 ? 'bg-primary/[0.03]' : depth === 2 ? 'bg-primary/[0.06]' : 'bg-primary/[0.09]'} ${onClick ? 'cursor-pointer hover:bg-primary/[0.08]' : ''}`}
     >
-      <td className={`px-3 py-1.5 ${depth === 1 ? 'pl-9' : 'pl-14'}`}>
+      <td className={`px-3 py-1.5 ${depth === 1 ? 'pl-9' : depth === 2 ? 'pl-14' : 'pl-20'}`}>
         <div className="flex items-center gap-1.5 text-muted-foreground">
           {onClick && (open ? <ChevronDown className="h-3 w-3 shrink-0" /> : <ChevronRight className="h-3 w-3 shrink-0" />)}
           {label}
         </div>
       </td>
-      <td className="px-3 py-1.5"><StatusPill tone={LEVEL_TONE[t.engagementLevel] ?? 'neutral'} label={levelLabel(t.engagementLevel)} /></td>
+      <td className="px-3 py-1.5">{t.engagementLevel ? <StatusPill tone={LEVEL_TONE[t.engagementLevel] ?? 'neutral'} label={levelLabel(t.engagementLevel)} /> : <span className="text-muted-foreground">—</span>}</td>
       {showSeniorities && <td />}
       <td className="px-3 py-1.5 text-muted-foreground">{extra}</td>
       <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{fmt(t.paidImpressions)}</td>
       <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{fmt(t.paidClicks)}</td>
       <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{fmt(t.paidLeads)}</td>
-      <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{fmt(t.paidQualifiedLeads)}</td>
+      <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{qualNa ? '—' : fmt(t.paidQualifiedLeads)}</td>
       <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{organicNa ? '—' : fmt(t.organicImpressions)}</td>
       <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{organicNa ? '—' : fmt(t.organicEngagements)}</td>
       <td colSpan={2} />
     </tr>
   );
+
+  /** Campaign → creative rows. Ad Analytics data, so numbers won't sum to the Account Intel campaign row. */
+  const renderCreatives = (c: CompanyIntelligence, campaignId: string) => {
+    const cell = (text: React.ReactNode) => (
+      <tr className="bg-primary/[0.09]"><td colSpan={colCount} className="pl-20 px-3 py-1.5 text-[11px] text-muted-foreground">{text}</td></tr>
+    );
+    const b = creativeBreakdowns[`${selectedAccount}:${breakdownLookback}:${campaignId}`];
+    if (!b || b === 'loading') return cell(<span className="flex items-center gap-2"><Loader2 className="h-3 w-3 animate-spin" />Querying this campaign's creatives — fills every company…</span>);
+    if ('message' in b) {
+      return cell(<span className="text-destructive">{b.message} <button className="underline ml-1" onClick={() => loadCreativeBreakdown(selectedAccount!, breakdownLookback, campaignId)}>Retry</button></span>);
+    }
+    const org = findCreativeCompany(b, c);
+    const names = new Map(b.creatives.map((x) => [x.id, x]));
+    const caveat = `Ad Analytics, ${levelLabel(breakdownLookback)} · no engagement level or qualified leads per creative${b.meta.creativesSkipped ? ` · top ${b.meta.creativesQueried} creatives` : ''}${b.meta.failed.length ? ` · ${b.meta.failed.length} failed` : ''}`;
+    if (!org || !org.creatives.length) return <>{cell(caveat)}{cell('No creative-level data for this company — below LinkedIn\'s privacy threshold, or not matched to a LinkedIn page.')}</>;
+    return (
+      <>
+        {cell(caveat)}
+        {[...org.creatives].sort((x, y) => y.impressions - x.impressions).map((m) => {
+          const cr = names.get(m.creativeId);
+          return (
+            <SubRow
+              key={m.creativeId} depth={3} t={creativeTotals(m)} organicNa qualNa
+              label={<span className="break-words">{cr?.name ?? `Creative ${m.creativeId}`}</span>}
+              extra={[cr?.status && formatObjective(cr.status), m.spend ? `${m.spend.toLocaleString()} spent` : ''].filter(Boolean).join(' · ')}
+            />
+          );
+        })}
+      </>
+    );
+  };
 
   const renderBreakdown = (c: CompanyIntelligence) => {
     const key = companyKey(c);
@@ -285,12 +325,23 @@ export function CompanyIntelligenceTable({ accessToken, selectedAccount, campaig
               />
               {open && [...rs].sort((a, b) => b.paidImpressions - a.paidImpressions).map((r) => {
                 const camp = campaignsById.get(r.slice);
+                const campKey = `${key}::${r.slice}`;
+                const campOpen = expandedCampaigns.has(campKey);
                 return (
-                  <SubRow
-                    key={r.slice} depth={2} t={r} organicNa
-                    label={<span className="break-words">{camp?.name ?? `Campaign ${r.slice}`}</span>}
-                    extra={camp ? formatObjective(camp.status) : undefined}
-                  />
+                  <Fragment key={r.slice}>
+                    <SubRow
+                      depth={2} t={r} organicNa open={campOpen}
+                      onClick={() => {
+                        toggle(expandedCampaigns, setExpandedCampaigns, campKey);
+                        const ck = `${selectedAccount}:${breakdownLookback}:${r.slice}`;
+                        const cached = creativeBreakdowns[ck];
+                        if (!campOpen && (!cached || (cached !== 'loading' && 'message' in cached))) loadCreativeBreakdown(selectedAccount!, breakdownLookback, r.slice);
+                      }}
+                      label={<span className="break-words">{camp?.name ?? `Campaign ${r.slice}`}</span>}
+                      extra={camp ? formatObjective(camp.status) : undefined}
+                    />
+                    {campOpen && renderCreatives(c, r.slice)}
+                  </Fragment>
                 );
               })}
             </Fragment>

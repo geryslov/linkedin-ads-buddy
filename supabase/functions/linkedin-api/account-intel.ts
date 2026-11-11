@@ -380,3 +380,154 @@ export async function fetchAudienceBreakdown(accessToken: string, q: { accountId
     },
   };
 }
+
+// ---- Creative drill-down (Ad Analytics, not Account Intel) -------------------
+// Account Intel has no creative filter, so the campaign → creative level comes
+// from adAnalyticsV2: a CREATIVE pivot finds the campaign's creatives that served
+// in the window, then one MEMBER_COMPANY query per creative. Companies come back
+// as organization URNs, resolved to vanity name / website / name so the client
+// can match them to Account Intel rows (which carry no URN).
+
+const MAX_BREAKDOWN_CREATIVES = 25;
+const ANALYTICS_PAGE = 10000;
+
+export type CreativeMetrics = {
+  creativeId: string;
+  impressions: number;
+  clicks: number;
+  engagements: number;
+  leads: number;
+  conversions: number;
+  spend: number;
+};
+
+export type CreativeCompany = { orgUrn: string; name: string; vanityName: string; website: string; creatives: CreativeMetrics[] };
+
+const ymd = (d: Date) => ({ year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() });
+
+function analyticsUrl(dateRange: { start: ReturnType<typeof ymd>; end: ReturnType<typeof ymd> }, pivot: string, filter: string, fields: string, start = 0) {
+  const qp = new URLSearchParams({
+    q: 'analytics', timeGranularity: 'ALL', pivot,
+    'dateRange.start.day': String(dateRange.start.day), 'dateRange.start.month': String(dateRange.start.month), 'dateRange.start.year': String(dateRange.start.year),
+    'dateRange.end.day': String(dateRange.end.day), 'dateRange.end.month': String(dateRange.end.month), 'dateRange.end.year': String(dateRange.end.year),
+    fields, count: String(ANALYTICS_PAGE), start: String(start),
+  });
+  return `https://api.linkedin.com/v2/adAnalyticsV2?${qp.toString()}&${filter}`;
+}
+
+// Continues only on a completely full page — paging.total lies for pivots (CLAUDE.md).
+async function analyticsRows(accessToken: string, url: (start: number) => string, fetchImpl: typeof fetch) {
+  const rows: any[] = [];
+  for (let start = 0, i = 0; i < 5; i++) {
+    const res = await fetchImpl(url(start), { headers: { 'Authorization': `Bearer ${accessToken}` } });
+    if (res.status === 401) throw new AccountIntelError('LinkedIn token is invalid or expired — reconnect LinkedIn.', 401, 'token_invalid');
+    if (!res.ok) throw new AccountIntelError(`Ad Analytics request failed (${res.status})`, res.status, res.status === 429 ? 'rate_limited' : 'api_error', await res.text());
+    const els: any[] = (await res.json())?.elements || [];
+    rows.push(...els);
+    if (els.length < ANALYTICS_PAGE) break;
+    start += els.length;
+  }
+  return rows;
+}
+
+async function creativeNames(accessToken: string, accountId: string, campaignId: string, fetchImpl: typeof fetch) {
+  const names: Record<string, { name: string; status: string }> = {};
+  try {
+    const campaigns = `List(${encodeURIComponent(`urn:li:sponsoredCampaign:${campaignId}`)})`;
+    const res = await fetchImpl(`https://api.linkedin.com/rest/adAccounts/${accountId}/creatives?q=criteria&campaigns=${campaigns}&count=100`, {
+      headers: { 'Authorization': `Bearer ${accessToken}`, 'LinkedIn-Version': ACCOUNT_INTEL_VERSION, 'X-Restli-Protocol-Version': '2.0.0' },
+    });
+    if (!res.ok) return names;
+    for (const el of (await res.json())?.elements || []) {
+      const id = String(el?.id || '').split(':').pop();
+      if (id) names[id] = { name: String(el?.name || ''), status: String(el?.intendedStatus || '').toUpperCase() };
+    }
+  } catch {
+    // Names are cosmetic; rows fall back to "Creative <id>".
+  }
+  return names;
+}
+
+async function resolveOrgs(accessToken: string, orgIds: string[], fetchImpl: typeof fetch) {
+  const out: Record<string, { name: string; vanityName: string; website: string }> = {};
+  for (let i = 0; i < orgIds.length; i += 50) {
+    const ids = orgIds.slice(i, i + 50).map((id, n) => `ids[${n}]=${id}`).join('&');
+    try {
+      const res = await fetchImpl(`https://api.linkedin.com/v2/organizationsLookup?${ids}&projection=(results*(id,localizedName,localizedWebsite,vanityName))`, {
+        headers: { 'Authorization': `Bearer ${accessToken}` },
+      });
+      if (!res.ok) continue;
+      for (const [id, org] of Object.entries<any>((await res.json())?.results || {})) {
+        out[id] = { name: String(org?.localizedName || ''), vanityName: String(org?.vanityName || ''), website: String(org?.localizedWebsite || '') };
+      }
+    } catch {
+      // Unresolved orgs simply can't be matched.
+    }
+  }
+  return out;
+}
+
+export async function fetchCreativeBreakdown(
+  accessToken: string, q: { accountId: string; campaignId: string; lookbackWindow?: string },
+  fetchImpl: typeof fetch = fetch, now = Date.now(),
+) {
+  const accountId = String(q.accountId || '').replace(/\D/g, '');
+  const campaignId = String(q.campaignId || '').replace(/\D/g, '');
+  if (!accountId || !campaignId) throw new AccountIntelError('accountId and campaignId are required', 400, 'bad_request');
+  const lookbackWindow = q.lookbackWindow || 'LAST_90_DAYS';
+  const started = Date.now();
+  const dateRange = { start: ymd(new Date(now - (LOOKBACK_DAYS[lookbackWindow] ?? 90) * 86400000)), end: ymd(new Date(now)) };
+
+  const [served, names] = await Promise.all([
+    analyticsRows(accessToken, (s) => analyticsUrl(dateRange, 'CREATIVE', `campaigns[0]=urn:li:sponsoredCampaign:${campaignId}`, 'pivotValue,impressions', s), fetchImpl),
+    creativeNames(accessToken, accountId, campaignId, fetchImpl),
+  ]);
+  const ranked = served
+    .map((r) => ({ id: String(r?.pivotValue || '').split(':').pop() || '', impressions: Number(r?.impressions) || 0 }))
+    .filter((r) => r.id && r.impressions > 0)
+    .sort((a, b) => b.impressions - a.impressions);
+  const queried = ranked.slice(0, MAX_BREAKDOWN_CREATIVES);
+
+  const byOrg: Record<string, CreativeMetrics[]> = {};
+  const failed: { slice: string; error: string }[] = [];
+  await pool(queried, CONCURRENCY, async ({ id }) => {
+    try {
+      const rows = await analyticsRows(accessToken, (s) => analyticsUrl(dateRange, 'MEMBER_COMPANY', `creatives[0]=urn:li:sponsoredCreative:${id}`,
+        'pivotValue,impressions,clicks,totalEngagements,oneClickLeads,externalWebsiteConversions,costInLocalCurrency', s), fetchImpl);
+      for (const r of rows) {
+        const org = String(r?.pivotValue || '');
+        if (!org.startsWith('urn:li:organization:')) continue;
+        const m: CreativeMetrics = {
+          creativeId: id,
+          impressions: Number(r.impressions) || 0, clicks: Number(r.clicks) || 0, engagements: Number(r.totalEngagements) || 0,
+          leads: Number(r.oneClickLeads) || 0, conversions: Number(r.externalWebsiteConversions) || 0,
+          spend: Math.round((parseFloat(r.costInLocalCurrency) || 0) * 100) / 100,
+        };
+        if (m.impressions || m.clicks || m.leads || m.conversions) (byOrg[org] ||= []).push(m);
+      }
+    } catch (e) {
+      const err = e as AccountIntelError;
+      if (err?.kind === 'token_invalid') throw e;
+      failed.push({ slice: id, error: String(err?.message || e) });
+    }
+  });
+
+  const orgs = await resolveOrgs(accessToken, Object.keys(byOrg).map((u) => u.split(':').pop()!), fetchImpl);
+  const companies: CreativeCompany[] = Object.entries(byOrg).map(([orgUrn, creatives]) => {
+    const o = orgs[orgUrn.split(':').pop()!] ?? { name: '', vanityName: '', website: '' };
+    return { orgUrn, ...o, creatives };
+  });
+
+  return {
+    companies,
+    creatives: queried.map((c) => ({
+      id: c.id, impressions: c.impressions,
+      name: names[c.id]?.name || `Creative ${c.id}`, status: names[c.id]?.status || '',
+    })),
+    meta: {
+      accountId, campaignId, lookbackWindow, source: 'adAnalytics',
+      creativesQueried: queried.length, creativesSkipped: ranked.length - queried.length,
+      failed, durationMs: Date.now() - started,
+    },
+  };
+}

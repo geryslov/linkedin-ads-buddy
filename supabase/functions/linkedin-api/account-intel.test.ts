@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { buildFilterCriteria, fetchAccountIntel, fetchAudienceBreakdown, fetchCampaignBreakdown, mergeBySeniority, normalizeCompany, selectBreakdownCampaigns } from './account-intel.ts';
+import { buildFilterCriteria, fetchAccountIntel, fetchAudienceBreakdown, fetchCampaignBreakdown, fetchCreativeBreakdown, mergeBySeniority, normalizeCompany, selectBreakdownCampaigns } from './account-intel.ts';
 
 // Element shape from the docs' 202606+ sample response.
 const el = (name: string, o: Record<string, unknown> = {}) => ({
@@ -134,4 +134,26 @@ test('audience breakdown runs 16 slices and keeps failures partial', async () =>
 test('a provisioning 403 aborts the whole breakdown', async () => {
   const fake = (async () => json({ message: 'ACCESS_DENIED: Not enough permissions to access /accountIntelligence API' }, 403)) as unknown as typeof fetch;
   await expect(fetchAudienceBreakdown('t', { accountId: '9' }, fake)).rejects.toMatchObject({ kind: 'not_provisioned' });
+});
+
+test('creative breakdown queries served creatives per company and resolves orgs', async () => {
+  const urls: string[] = [];
+  const fake = (async (url: string) => {
+    urls.push(url);
+    if (url.includes('/creatives?q=criteria')) return json({ elements: [{ id: 'urn:li:sponsoredCreative:7', name: 'Hero video', intendedStatus: 'ACTIVE' }] });
+    if (url.includes('pivot=CREATIVE')) return json({ elements: [
+      { pivotValue: 'urn:li:sponsoredCreative:7', impressions: 900 },
+      { pivotValue: 'urn:li:sponsoredCreative:8', impressions: 50 },
+      { pivotValue: 'urn:li:sponsoredCreative:9', impressions: 0 },
+    ] });
+    if (url.includes('organizationsLookup')) return json({ results: { '1035': { localizedName: 'Microsoft', vanityName: 'microsoft', localizedWebsite: 'https://microsoft.com' } } });
+    const creative = decodeURIComponent(url).match(/sponsoredCreative:(\d+)/)?.[1];
+    return json({ elements: [{ pivotValue: 'urn:li:organization:1035', impressions: creative === '7' ? 300 : 20, clicks: 4, costInLocalCurrency: '12.345' }] });
+  }) as unknown as typeof fetch;
+  const r = await fetchCreativeBreakdown('t', { accountId: '9', campaignId: '11', lookbackWindow: 'LAST_30_DAYS' }, fake, Date.UTC(2026, 10, 11));
+  expect(urls.filter((u) => u.includes('pivot=MEMBER_COMPANY')).length).toBe(2);
+  expect(urls.find((u) => u.includes('pivot=CREATIVE'))).toContain('dateRange.start.month=10');
+  expect(r.creatives.map((c) => c.name)).toEqual(['Hero video', 'Creative 8']);
+  expect(r.companies[0].vanityName).toBe('microsoft');
+  expect(r.companies[0].creatives.find((c) => c.creativeId === '7')!.spend).toBe(12.35);
 });

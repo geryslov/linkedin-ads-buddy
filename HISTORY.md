@@ -476,3 +476,14 @@ Rows now expand like Company Demographics. The API has no company × campaign br
 Some campaign rows show "—" for organic. That is LinkedIn's rule: organic metrics are 0 under any campaign filter.
 
 `get_company_intelligence` is in the product MCP allowlist (`PASSTHROUGH_READ`), so breakdowns are reachable there too. Each breakdown sends up to 60 calls, against a LinkedIn rate limit that is not published. Watch for 429s before encouraging Claude to use it. Tested with fakes only; it needs an edge deploy.
+
+### Nov 11, 2026 — Account Intel creative drill-down
+Under *By campaign*, clicking a campaign row now shows that company's creatives.
+- **Data source.** The Company Intelligence API has no creative filter or field (checked against the 2026-10 docs), so this level comes from Ad Analytics:
+  - one `CREATIVE` pivot finds the creatives that served in the window
+  - then one `MEMBER_COMPANY` query per creative, top 25
+  - this is the same per-creative pattern as `get_creative_company_breakdown`
+- **Caching.** One load per campaign and lookback fills that campaign for every company.
+- **Company matching.** Ad Analytics returns organization URNs and Account Intel returns none, so rows are matched by LinkedIn vanity name, then website host, then name. A company that can't be matched shows "no creative-level data".
+- **Numbers.** Creative rows show "—" for engagement level and qualified leads. Their totals won't equal the Account Intel campaign row, because they are different datasets with different privacy thresholds.
+- **Not verified live.** Unit-tested with a fake fetch only, and it needs a `linkedin-api` deploy.
