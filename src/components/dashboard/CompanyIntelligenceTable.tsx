@@ -125,11 +125,13 @@ export function CompanyIntelligenceTable({ accessToken, selectedAccount, campaig
     companies, meta, isLoading, error, load, check, isChecking, runCheck, reset,
     campaignBreakdown, audienceBreakdown, loadingBreakdown, breakdownError, loadBreakdown,
     creativeBreakdowns, loadCreativeBreakdown,
+    segments, segmentsError, loadSegments,
   } = useCompanyIntelligence(accessToken);
 
   const [lookback, setLookback] = useState<LookbackWindow>('LAST_90_DAYS');
   const [audience, setAudience] = useState<Audience>('all');
   const [campaignId, setCampaignId] = useState<string>('all');
+  const [segmentId, setSegmentId] = useState<string>('all');
   const [mix, setMix] = useState<Mix | 'all'>('all');
   const [query, setQuery] = useState('');
   const [sortKey, setSortKey] = useState<SortKey>('paidImpressions');
@@ -139,12 +141,25 @@ export function CompanyIntelligenceTable({ accessToken, selectedAccount, campaig
   const [view, setView] = useState<BreakdownView>('campaign');
 
   const audienceFiltered = audience !== 'all';
-  const campaignScoped = !audienceFiltered && campaignId !== 'all';
+  const segmentScoped = segmentId !== 'all';
+  const campaignScoped = !audienceFiltered && !segmentScoped && campaignId !== 'all';
+  const segmentName = segments?.find((x) => x.id === segmentId)?.name;
+  // A matched audience combines with the lookback only, so it and the other filters clear each other.
+  const pickAudience = (v: Audience) => { setAudience(v); if (v !== 'all') setSegmentId('all'); };
+  const pickCampaign = (v: string) => { setCampaignId(v); if (v !== 'all') setSegmentId('all'); };
+  const pickSegment = (v: string) => {
+    setSegmentId(v);
+    if (v !== 'all') { setAudience('all'); setCampaignId('all'); }
+  };
 
   useEffect(() => {
     reset();
-    if (selectedAccount) runCheck(selectedAccount);
-  }, [selectedAccount, runCheck, reset]);
+    setSegmentId('all');
+    if (selectedAccount) {
+      runCheck(selectedAccount);
+      loadSegments(selectedAccount);
+    }
+  }, [selectedAccount, runCheck, reset, loadSegments]);
 
   // Breakdowns follow the lookback the table was loaded with.
   const breakdownLookback = (meta?.lookbackWindow ?? lookback) as LookbackWindow;
@@ -174,7 +189,7 @@ export function CompanyIntelligenceTable({ accessToken, selectedAccount, campaig
     setExpandedObjectives(new Set());
     setExpandedCampaigns(new Set());
     if (!selectedAccount) return;
-    load(selectedAccount, { lookbackWindow: lookback, audience, campaignId: campaignId === 'all' ? null : campaignId });
+    load(selectedAccount, { lookbackWindow: lookback, audience, campaignId: campaignId === 'all' ? null : campaignId, segmentId: segmentScoped ? segmentId : null });
   };
 
   const stats = useMemo(() => {
@@ -429,7 +444,7 @@ export function CompanyIntelligenceTable({ accessToken, selectedAccount, campaig
             onChange={(v) => !audienceFiltered && setLookback(v)}
           />
           {/* Seniority and job function are separate dropdowns, but LinkedIn takes one or the other — picking one clears the other. */}
-          <Select value={audience.startsWith('fn:') ? 'all' : audience} onValueChange={setAudience}>
+          <Select value={audience.startsWith('fn:') ? 'all' : audience} onValueChange={pickAudience}>
             <SelectTrigger className="h-8 w-[200px] text-xs"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All seniorities</SelectItem>
@@ -442,7 +457,7 @@ export function CompanyIntelligenceTable({ accessToken, selectedAccount, campaig
           </Select>
           <Select
             value={audience.startsWith('fn:') ? audience : 'all'}
-            onValueChange={(v) => setAudience(v === 'all' ? (audience.startsWith('fn:') ? 'all' : audience) : v)}
+            onValueChange={(v) => pickAudience(v === 'all' ? (audience.startsWith('fn:') ? 'all' : audience) : v)}
           >
             <SelectTrigger className="h-8 w-[180px] text-xs"><SelectValue /></SelectTrigger>
             <SelectContent>
@@ -450,14 +465,43 @@ export function CompanyIntelligenceTable({ accessToken, selectedAccount, campaig
               {Object.entries(JOB_FUNCTIONS).map(([id, label]) => <SelectItem key={id} value={`fn:${id}`}>{label}</SelectItem>)}
             </SelectContent>
           </Select>
-          <Select value={audienceFiltered ? 'all' : campaignId} onValueChange={setCampaignId} disabled={audienceFiltered}>
+          <Select value={audienceFiltered ? 'all' : campaignId} onValueChange={pickCampaign} disabled={audienceFiltered}>
             <SelectTrigger className="h-8 w-[240px] text-xs"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All campaigns + organic</SelectItem>
               {campaigns.filter((c) => c.id).map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
             </SelectContent>
           </Select>
+          <Select value={segmentId} onValueChange={pickSegment} disabled={!segments?.length}>
+            <SelectTrigger className="h-8 w-[240px] text-xs" title={segmentsError?.message}>
+              <SelectValue placeholder="Matched audience" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">{segments === null && !segmentsError ? 'Loading matched audiences…' : segments?.length ? 'All companies (no audience)' : 'No matched audiences in campaigns'}</SelectItem>
+              {segments && segments.length > 0 && (
+                <SelectGroup>
+                  <SelectLabel>Matched audience</SelectLabel>
+                  {segments.map((x) => (
+                    <SelectItem key={x.id} value={x.id}>
+                      {x.name}<span className="ml-1.5 text-muted-foreground">· {x.activeCampaigns ? `${x.activeCampaigns} active` : x.campaigns ? `${x.campaigns} campaign${x.campaigns === 1 ? '' : 's'}` : 'unused'}</span>
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              )}
+            </SelectContent>
+          </Select>
         </div>
+        {segmentsError && (
+          <p className="mt-2 text-xs text-muted-foreground flex items-start gap-1.5">
+            <AlertTriangle className="h-3.5 w-3.5 mt-px shrink-0 text-warning" />Matched audiences couldn't be listed: {segmentsError.message}
+          </p>
+        )}
+        {segmentScoped && (
+          <p className="mt-3 text-xs text-muted-foreground flex items-start gap-1.5">
+            <Info className="h-3.5 w-3.5 mt-px shrink-0" />
+            Only companies in "{segmentName ?? segmentId}" (company or contact list). Combines with the lookback only, so seniority, job function and campaign are cleared.
+          </p>
+        )}
         {(audienceFiltered || campaignScoped) && (
           <p className="mt-3 text-xs text-muted-foreground flex items-start gap-1.5">
             <Info className="h-3.5 w-3.5 mt-px shrink-0" />

@@ -757,6 +757,69 @@ export async function fetchCompanyTouches(
   };
 }
 
+export type AdSegment = { id: string; name: string; campaigns: number; activeCampaigns: number };
+
+/**
+ * Matched audiences (ad segments) for the Account Intel `adSegments` filter: every
+ * `urn:li:adSegment` included in a campaign's targeting, plus API-created DMP segments,
+ * named via adTargetingEntities (falling back to the DMP name, then the id).
+ */
+export async function fetchAdSegments(accessToken: string, q: { accountId: string }, fetchImpl: typeof fetch = fetch) {
+  const accountId = String(q.accountId || '').replace(/\D/g, '');
+  if (!accountId) throw new AccountIntelError('accountId is required', 400, 'bad_request');
+  const segs = new Map<string, AdSegment>();
+  const get = (id: string) => {
+    let s = segs.get(id);
+    if (!s) segs.set(id, s = { id, name: '', campaigns: 0, activeCampaigns: 0 });
+    return s;
+  };
+  const headers = { 'Authorization': `Bearer ${accessToken}`, 'LinkedIn-Version': ACCOUNT_INTEL_VERSION, 'X-Restli-Protocol-Version': '2.0.0' };
+
+  const [campaignList, dmp] = await Promise.all([
+    listCampaigns(accessToken, accountId, fetchImpl),
+    fetchImpl(`https://api.linkedin.com/v2/dmpSegments?q=account&account=urn:li:sponsoredAccount:${accountId}&count=100`, { headers: { 'Authorization': `Bearer ${accessToken}` } })
+      .then((r) => (r.ok ? r.json() : null)).catch(() => null),
+  ]);
+  for (const c of campaignList) {
+    const status = String(c?.status || '').toUpperCase();
+    if (status === 'DRAFT' || status === 'REMOVED' || status === 'PENDING_DELETION') continue;
+    const ids = new Set(JSON.stringify(c?.targetingCriteria?.include ?? {}).match(/urn:li:adSegment:\d+/g) || []);
+    for (const u of ids) {
+      const s = get(u.split(':').pop()!);
+      s.campaigns++;
+      if (status === 'ACTIVE') s.activeCampaigns++;
+    }
+  }
+  for (const el of dmp?.elements || []) {
+    for (const d of el?.destinations || []) {
+      const id = String(d?.destinationSegmentId || '').match(/urn:li:adSegment:(\d+)/)?.[1];
+      if (id) get(id).name ||= String(el?.name || '');
+    }
+  }
+
+  const ids = [...segs.keys()];
+  for (let i = 0; i < ids.length; i += 30) {
+    const list = ids.slice(i, i + 30).map((id) => encodeURIComponent(`urn:li:adSegment:${id}`)).join(',');
+    try {
+      const r = await fetchImpl(`https://api.linkedin.com/rest/adTargetingEntities?q=urns&urns=List(${list})`, { headers });
+      if (r.status === 401) throw new AccountIntelError('LinkedIn token is invalid or expired — reconnect LinkedIn.', 401, 'token_invalid');
+      if (!r.ok) continue;
+      for (const el of (await r.json())?.elements || []) {
+        const id = String(el?.urn || '').match(/urn:li:adSegment:(\d+)/)?.[1];
+        const name = el?.name || el?.localizedName;
+        if (id && name && segs.has(id)) segs.get(id)!.name = String(name);
+      }
+    } catch (e) {
+      if ((e as AccountIntelError)?.kind === 'token_invalid') throw e;
+    }
+  }
+
+  const segments = [...segs.values()]
+    .map((s) => ({ ...s, name: s.name || `Audience ${s.id}` }))
+    .sort((a, b) => b.activeCampaigns - a.activeCampaigns || b.campaigns - a.campaigns || a.name.localeCompare(b.name));
+  return { segments };
+}
+
 const MAX_SPLIT_CAMPAIGNS = 60;
 const MAX_SPLIT_CALLS = 150;
 const SPLIT_BUDGET_MS = 110000;

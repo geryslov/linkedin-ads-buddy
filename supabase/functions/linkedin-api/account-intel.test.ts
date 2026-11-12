@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { buildFilterCriteria, fetchAccountIntel, fetchAudienceBreakdown, fetchCampaignBreakdown, fetchCompanyDaily, fetchCompanyTouches, fetchCreativeBreakdown, fetchTouchCampaigns, fetchWindowSeries, mergeBySeniority, normalizeCompany, selectBreakdownCampaigns } from './account-intel.ts';
+import { buildFilterCriteria, fetchAccountIntel, fetchAudienceBreakdown, fetchCampaignBreakdown, fetchCompanyDaily, fetchCompanyTouches, fetchCreativeBreakdown, fetchTouchCampaigns, fetchWindowSeries, fetchAdSegments, mergeBySeniority, normalizeCompany, selectBreakdownCampaigns } from './account-intel.ts';
 
 // Element shape from the docs' 202606+ sample response.
 const el = (name: string, o: Record<string, unknown> = {}) => ({
@@ -297,4 +297,23 @@ test('touch campaigns queries MEMBER_COMPANY per served campaign and tags rows w
   expect(r.rows).toEqual([expect.objectContaining({ orgId: '1', campaignId: '11', impressions: 4, engagements: 1 })]);
   expect(r.campaigns['11'].name).toBe('Q4 ABM');
   expect(r.meta).toMatchObject({ campaignsServed: 1, campaignsQueried: 1, truncated: false });
+});
+
+test('ad segments come from campaign targeting and DMP segments, named via adTargetingEntities', async () => {
+  const fake = (async (url: string) => {
+    if (url.includes('/adCampaigns')) return json({ elements: [
+      { id: 1, status: 'ACTIVE', targetingCriteria: { include: { and: [{ or: { 'urn:li:adTargetingFacet:audienceMatchingSegments': ['urn:li:adSegment:100', 'urn:li:adSegment:200'] } }] }, exclude: { or: { 'urn:li:adTargetingFacet:audienceMatchingSegments': ['urn:li:adSegment:999'] } } } },
+      { id: 2, status: 'PAUSED', targetingCriteria: { include: { and: [{ or: { 'urn:li:adTargetingFacet:audienceMatchingSegments': ['urn:li:adSegment:100'] } }] } } },
+      { id: 3, status: 'DRAFT', targetingCriteria: { include: { and: [{ or: { 'urn:li:adTargetingFacet:audienceMatchingSegments': ['urn:li:adSegment:300'] } }] } } },
+    ] });
+    if (url.includes('dmpSegments')) return json({ elements: [{ name: 'API list', destinations: [{ destinationSegmentId: 'urn:li:adSegment:400' }] }] });
+    if (url.includes('adTargetingEntities')) return json({ elements: [{ urn: 'urn:li:adSegment:100', name: 'Target accounts Q4' }] });
+    return json({}, 404);
+  }) as unknown as typeof fetch;
+  const r = await fetchAdSegments('t', { accountId: '9' }, fake);
+  expect(r.segments).toEqual([
+    { id: '100', name: 'Target accounts Q4', campaigns: 2, activeCampaigns: 1 },
+    { id: '200', name: 'Audience 200', campaigns: 1, activeCampaigns: 1 },
+    { id: '400', name: 'API list', campaigns: 0, activeCampaigns: 0 },
+  ]);
 });

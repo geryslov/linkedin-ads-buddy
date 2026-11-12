@@ -5,7 +5,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { createCreativeReader, CREATIVE_READ_VERSION, metadataCopy } from './creative-metadata.ts';
 import { isInMailRef, readInMailContent, type MessageAdContent } from './message-ad-content.ts';
 import { fetchCompetitorAds } from './ad-library.ts';
-import { AccountIntelError, fetchAccountIntel, fetchAudienceBreakdown, fetchCampaignBreakdown, fetchCompanyDaily, fetchCompanyTouches, fetchCreativeBreakdown, fetchTouchCampaigns, fetchWindowSeries } from './account-intel.ts';
+import { AccountIntelError, fetchAccountIntel, fetchAudienceBreakdown, fetchCampaignBreakdown, fetchCompanyDaily, fetchCompanyTouches, fetchCreativeBreakdown, fetchTouchCampaigns, fetchWindowSeries, fetchAdSegments } from './account-intel.ts';
 import { targetingCompatibilityError } from './targeting-compatibility.ts';
 
 const corsHeaders = {
@@ -3579,6 +3579,11 @@ serve(async (req) => {
             const result = ai.breakdown === 'windows'
               ? await fetchWindowSeries(accessToken, { accountId: ai.accountId })
               : await fetchCompanyDaily(accessToken, { accountId: ai.accountId, lookbackWindow: ai.lookbackWindow, companyPageUrl: ai.companyPageUrl, companyWebsite: ai.companyWebsite, companyName: ai.companyName });
+            return new Response(JSON.stringify(result), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+          }
+          // Matched audiences the account's campaigns target — options for the adSegments filter.
+          if (ai.breakdown === 'segments') {
+            const result = await fetchAdSegments(accessToken, { accountId: ai.accountId });
             return new Response(JSON.stringify(result), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
           }
           // Influence Matcher: daily paid touches for many orgs over an explicit range (deal alignment).

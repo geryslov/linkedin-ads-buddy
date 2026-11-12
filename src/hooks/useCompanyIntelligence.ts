@@ -47,6 +47,15 @@ export interface CompanyIntelligenceQuery {
   lookbackWindow: LookbackWindow;
   campaignId: string | null;
   audience: Audience;
+  /** Matched audience (ad segment) id — scopes to companies in that list. */
+  segmentId?: string | null;
+}
+
+export interface AdSegment {
+  id: string;
+  name: string;
+  campaigns: number;
+  activeCampaigns: number;
 }
 
 export interface IntelError {
@@ -147,6 +156,8 @@ async function readInvokeError(error: unknown): Promise<IntelError> {
 
 function toParams(accountId: string, q: CompanyIntelligenceQuery) {
   const params: Record<string, unknown> = { accountId, lookbackWindow: q.lookbackWindow };
+  // A matched audience combines with the lookback only (the UI clears the other filters).
+  if (q.segmentId) return { ...params, adSegmentIds: [q.segmentId] };
   if (q.audience === 'dm') params.seniorities = DECISION_MAKER_SENIORITIES;
   else if (q.audience.startsWith('sen:')) params.seniority = q.audience.slice(4);
   else if (q.audience.startsWith('fn:')) params.jobFunction = q.audience.slice(3);
@@ -184,6 +195,8 @@ export function useCompanyIntelligence(accessToken: string | null) {
   const [loadingBreakdown, setLoadingBreakdown] = useState<'campaign' | 'audience' | null>(null);
   const [breakdownError, setBreakdownError] = useState<IntelError | null>(null);
   // Keyed `${accountId}:${lookback}:${campaignId}` — one load fills every company for that campaign.
+  const [segments, setSegments] = useState<AdSegment[] | null>(null);
+  const [segmentsError, setSegmentsError] = useState<IntelError | null>(null);
   const [creativeBreakdowns, setCreativeBreakdowns] = useState<Record<string, CreativeBreakdown | IntelError | 'loading'>>({});
 
   /** One-row request: proves provisioning, account role and scope. */
@@ -253,7 +266,27 @@ export function useCompanyIntelligence(accessToken: string | null) {
     }
   }, [accessToken]);
 
+  /** Matched audiences the account's campaigns target, for the audience filter. */
+  const loadSegments = useCallback(async (accountId: string) => {
+    if (!accessToken || !accountId) return;
+    setSegmentsError(null);
+    try {
+      const { data, error } = await supabase.functions.invoke('linkedin-api', {
+        body: { action: 'get_company_intelligence', accessToken, params: { accountId, breakdown: 'segments' } },
+      });
+      if (error) throw error;
+      if (data?.error) throw Object.assign(new Error(data.error), { kind: data.kind });
+      if (!Array.isArray(data?.segments)) throw Object.assign(new Error('The deployed edge function has no matched audience list yet — deploy linkedin-api.'), { kind: 'stale_deploy' });
+      setSegments(data.segments);
+    } catch (e) {
+      setSegments(null);
+      setSegmentsError(await asIntelError(e));
+    }
+  }, [accessToken]);
+
   const reset = useCallback(() => {
+    setSegments(null);
+    setSegmentsError(null);
     setCreativeBreakdowns({});
     setCampaignBreakdown(null);
     setAudienceBreakdown(null);
@@ -268,5 +301,6 @@ export function useCompanyIntelligence(accessToken: string | null) {
     companies, meta, isLoading, error, load, check, isChecking, runCheck, reset,
     campaignBreakdown, audienceBreakdown, loadingBreakdown, breakdownError, loadBreakdown,
     creativeBreakdowns, loadCreativeBreakdown,
+    segments, segmentsError, loadSegments,
   };
 }
