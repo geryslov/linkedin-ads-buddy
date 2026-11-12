@@ -964,7 +964,7 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
 
       {/* Deal influence: paid touches aligned on each deal date */}
       {hasData && matched.length > 0 && (
-        <DealInfluence accessToken={accessToken} selectedAccount={selectedAccount} matched={matched} dateColumn={dateColumn} />
+        <DealInfluence accessToken={accessToken} selectedAccount={selectedAccount} matched={matched} unmatched={unmatched} uploaded={uploadedCompanies} dateColumn={dateColumn} />
       )}
 
       {/* Results Table */}

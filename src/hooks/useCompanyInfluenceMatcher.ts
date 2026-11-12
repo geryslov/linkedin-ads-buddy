@@ -56,7 +56,7 @@ export type InfluenceTab = 'matched' | 'unmatched' | 'all';
 
 const COMPANY_SUFFIXES = /\b(inc\.?|incorporated|llc|ltd\.?|limited|corp\.?|corporation|gmbh|co\.?|company|plc|ag|sa|s\.?a\.?|s\.?r\.?l\.?|pty|pvt|n\.?v\.?|b\.?v\.?|l\.?p\.?)\s*$/i;
 
-function normalizeName(name: string): string {
+export function normalizeName(name: string): string {
   return (name || '')
     .toLowerCase()
     .trim()
@@ -74,7 +74,7 @@ function extractDomainFromEmail(value: string): string {
   return '';
 }
 
-function standardizeUrl(url: string): string {
+export function standardizeUrl(url: string): string {
   if (!url) return '';
   const trimmed = url.trim();
   if (trimmed.includes('@')) {

@@ -1,9 +1,9 @@
 import { Fragment, useMemo, useState } from 'react';
 import { Bar, CartesianGrid, ComposedChart, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { MatchedCompany } from '@/hooks/useCompanyInfluenceMatcher';
+import { MatchedCompany, UnmatchedCompany, UploadedCompany } from '@/hooks/useCompanyInfluenceMatcher';
 import {
-  useDealInfluence, analyzeDeals, summarizeDeals, dealDateOf, orgIdOf, bucketLabel,
-  BUCKETS, WEEKS_BEFORE, DealCompany, DealVerdict,
+  useDealInfluence, analyzeDeals, summarizeDeals, campaignCredit, neverReached, engagedNotInCrm, dealDateOf, orgIdOf, bucketLabel,
+  BUCKETS, WEEKS_BEFORE, DealCompany, DealVerdict, GapCompany,
 } from '@/hooks/useDealInfluence';
 import { WidgetCard, EmptyState, StatusPill, SegmentedControl, ChartLegend } from '@/components/dashboard/widgets';
 import { CompanyLogo, ERROR_HELP } from '@/components/dashboard/CompanyIntelligenceTable';
@@ -16,8 +16,12 @@ interface DealInfluenceProps {
   accessToken: string | null;
   selectedAccount: string | null;
   matched: MatchedCompany[];
+  unmatched: UnmatchedCompany[];
+  uploaded: UploadedCompany[];
   dateColumn: string | null;
 }
+
+type ActionList = 'gaps' | 'hot';
 
 type Metric = 'engagements' | 'impressions';
 
@@ -33,15 +37,25 @@ const VERDICT: Record<DealVerdict, { label: string; tone: 'success' | 'warning' 
   no_date: { label: 'No date', tone: 'neutral' },
 };
 const ROWS_COLLAPSED = 40;
+const LIST_COLLAPSED = 25;
+const GAP_REASON: Record<GapCompany['reason'], string> = {
+  no_impressions: 'No ad impressions in the LinkedIn period above',
+  not_before_deal: 'Not reached in the 26 weeks before the deal',
+  only_after_deal: 'Reached only after the deal',
+};
+const levelLabel = (l: string) => (l ? l.toLowerCase().replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase()) : '—');
+const today = () => new Date().toISOString().slice(0, 10);
 const DAY = 86400000;
 const fmt = (n: number) => Math.round(n).toLocaleString();
 const shiftDays = (d: string, n: number) => new Date(Date.parse(`${d}T00:00:00Z`) + n * DAY).toISOString().slice(0, 10);
 
-export function DealInfluence({ accessToken, selectedAccount, matched, dateColumn }: DealInfluenceProps) {
+export function DealInfluence({ accessToken, selectedAccount, matched, unmatched, uploaded, dateColumn }: DealInfluenceProps) {
   const { touches, intel, intelErrors, isLoading, error, loadedKey, load } = useDealInfluence(accessToken);
   const [metric, setMetric] = useState<Metric>('engagements');
   const [showAll, setShowAll] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [actionList, setActionList] = useState<ActionList>('gaps');
+  const [showAllList, setShowAllList] = useState(false);
 
   // What a load would request: every matched org, from 26 weeks before the
   // earliest deal to 4 weeks after the latest (the edge clamps to today / 2 years).
@@ -56,6 +70,9 @@ export function DealInfluence({ accessToken, selectedAccount, matched, dateColum
 
   const deals = useMemo(() => (touches ? analyzeDeals(matched, touches, intel) : []), [matched, touches, intel]);
   const summary = useMemo(() => (touches ? summarizeDeals(deals, touches.meta) : null), [deals, touches]);
+  const credit = useMemo(() => (touches ? campaignCredit(deals, touches) : []), [deals, touches]);
+  const gaps = useMemo(() => (touches ? neverReached(unmatched, deals) : []), [unmatched, deals, touches]);
+  const hot = useMemo(() => engagedNotInCrm(uploaded, intel), [uploaded, intel]);
   const maxCell = useMemo(() => Math.max(1, ...deals.flatMap((d) => Object.values(d.weeks).map((w) => w[metric]))), [deals, metric]);
 
   const stale = !!touches && !!request && loadedKey !== request.key;
@@ -250,6 +267,143 @@ export function DealInfluence({ accessToken, selectedAccount, matched, dateColum
             {shown.length > ROWS_COLLAPSED && (
               <Button variant="ghost" size="sm" className="mt-2 text-xs" onClick={() => setShowAll(!showAll)}>
                 {showAll ? 'Show top 40' : `Show all ${shown.length}`}
+              </Button>
+            )}
+          </div>
+
+          <div>
+            <div className="mb-2">
+              <h4 className="text-sm font-semibold">Campaign credit by deals</h4>
+              <p className="text-xs text-muted-foreground">
+                How many deals each campaign reached before the deal date. First touch = the campaign on the earliest pre-deal day, last touch = the latest (most impressions that day breaks ties). A low-CTR campaign can still open most deals.
+              </p>
+            </div>
+            {!touches.meta.campaignSplit ? (
+              <p className="text-xs text-muted-foreground">LinkedIn returned company totals only for this account (no campaign split), so campaigns can't be credited.</p>
+            ) : credit.length === 0 ? (
+              <p className="text-xs text-muted-foreground">No campaign reached a deal before its date.</p>
+            ) : (
+              <div className="rounded-lg border overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead className="bg-muted/30 text-[10px] uppercase tracking-wide text-muted-foreground">
+                    <tr>
+                      <th className="text-left px-3 py-2">Campaign</th>
+                      <th className="text-right px-3 py-2">Deals touched</th>
+                      <th className="text-right px-3 py-2">Share</th>
+                      <th className="text-right px-3 py-2">First touch</th>
+                      <th className="text-right px-3 py-2">Last touch</th>
+                      <th className="text-right px-3 py-2">Impr. to deals</th>
+                      <th className="text-right px-3 py-2">Eng. to deals</th>
+                    </tr>
+                  </thead>
+                  <tbody className="tabular-nums">
+                    {credit.map((c) => (
+                      <tr key={c.id} className="border-t">
+                        <td className="px-3 py-1.5">
+                          <span className="font-medium">{c.name}</span>
+                          <span className="ml-2 text-[10px] text-muted-foreground">{[c.objectiveType, c.status].filter(Boolean).map(levelLabel).join(' · ')}</span>
+                        </td>
+                        <td className="text-right px-3 py-1.5 font-semibold">{c.deals}</td>
+                        <td className="text-right px-3 py-1.5">{summary.influenced ? `${Math.round((c.deals / summary.influenced) * 100)}%` : '—'}</td>
+                        <td className="text-right px-3 py-1.5">{c.firstTouch || '—'}</td>
+                        <td className="text-right px-3 py-1.5">{c.lastTouch || '—'}</td>
+                        <td className="text-right px-3 py-1.5">{fmt(c.impressions)}</td>
+                        <td className="text-right px-3 py-1.5">{fmt(c.engagements)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          <div>
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+              <div>
+                <h4 className="text-sm font-semibold">Action lists</h4>
+                <p className="text-xs text-muted-foreground">
+                  {actionList === 'gaps'
+                    ? 'CRM companies LinkedIn did not reach before their deal: a target list for the next campaign.'
+                    : 'Companies engaging with your ads or page (Account Intel, last 365 days) that are not in your CSV: pipeline gaps to hand to sales.'}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <SegmentedControl
+                  size="sm"
+                  value={actionList}
+                  onChange={(v) => { setActionList(v); setShowAllList(false); }}
+                  options={[{ label: `Never reached (${gaps.length})`, value: 'gaps' }, { label: `Engaged, not in CRM (${hot?.length ?? '—'})`, value: 'hot' }]}
+                />
+                <Button
+                  variant="outline" size="sm" className="h-8 text-xs"
+                  disabled={actionList === 'gaps' ? !gaps.length : !hot?.length}
+                  onClick={() => (actionList === 'gaps'
+                    ? exportToCSV(gaps.map((g) => ({ company: g.name, url: g.url, dealDate: g.dealDate || '', reason: GAP_REASON[g.reason] })), `never-reached-${today()}`)
+                    : hot && exportToCSV(hot.map((c) => ({
+                      company: c.companyName, linkedInPage: c.companyPageUrl, website: c.companyWebsite, engagementLevel365d: c.engagementLevel,
+                      paidImpressions: c.paidImpressions, paidEngagements: c.paidEngagements, organicEngagements: c.organicEngagements,
+                      leads: c.paidLeads, decisionMakersEngaged90d: c.decisionMakers === null ? '' : c.decisionMakers ? 'yes' : 'no',
+                      industry: c.industry, companySize: c.companySize, country: c.countryCode,
+                    })), `engaged-not-in-crm-${today()}`))}
+                >
+                  <Download className="h-3.5 w-3.5 mr-1" />Export
+                </Button>
+              </div>
+            </div>
+            {actionList === 'gaps' ? (
+              gaps.length === 0 ? <p className="text-xs text-muted-foreground">Every CRM company was reached before its deal.</p> : (
+                <div className="rounded-lg border overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead className="bg-muted/30 text-[10px] uppercase tracking-wide text-muted-foreground">
+                      <tr><th className="text-left px-3 py-2">Company</th><th className="text-left px-3 py-2">Deal date</th><th className="text-left px-3 py-2">Why it's here</th></tr>
+                    </thead>
+                    <tbody>
+                      {(showAllList ? gaps : gaps.slice(0, LIST_COLLAPSED)).map((g, i) => (
+                        <tr key={`${g.name}-${g.url}-${i}`} className="border-t">
+                          <td className="px-3 py-1.5"><span className="flex items-center gap-2"><CompanyLogo name={g.name || g.url} website={g.url} /><span className="font-medium">{g.name || g.url}</span></span></td>
+                          <td className="px-3 py-1.5 tabular-nums">{g.dealDate || '—'}</td>
+                          <td className="px-3 py-1.5 text-muted-foreground">{GAP_REASON[g.reason]}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )
+            ) : hot === null ? (
+              <p className="text-xs text-muted-foreground">Account Intel didn't load, so this list is unavailable. Re-analyze to retry.</p>
+            ) : hot.length === 0 ? (
+              <p className="text-xs text-muted-foreground">Every engaged company is already in your CSV.</p>
+            ) : (
+              <div className="rounded-lg border overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead className="bg-muted/30 text-[10px] uppercase tracking-wide text-muted-foreground">
+                    <tr>
+                      <th className="text-left px-3 py-2">Company</th>
+                      <th className="text-left px-3 py-2">Engagement level</th>
+                      <th className="text-right px-3 py-2">Paid eng.</th>
+                      <th className="text-right px-3 py-2">Organic eng.</th>
+                      <th className="text-right px-3 py-2">Leads</th>
+                      <th className="text-right px-3 py-2" title="Director+ engaged, last 90 days">DM</th>
+                    </tr>
+                  </thead>
+                  <tbody className="tabular-nums">
+                    {(showAllList ? hot : hot.slice(0, LIST_COLLAPSED)).map((c) => (
+                      <tr key={c.companyPageUrl || c.companyWebsite || c.companyName} className="border-t">
+                        <td className="px-3 py-1.5"><span className="flex items-center gap-2"><CompanyLogo name={c.companyName} website={c.companyWebsite} /><span className="font-medium">{c.companyName}</span></span></td>
+                        <td className="px-3 py-1.5">{levelLabel(c.engagementLevel)}</td>
+                        <td className="text-right px-3 py-1.5">{fmt(c.paidEngagements)}</td>
+                        <td className="text-right px-3 py-1.5">{fmt(c.organicEngagements)}</td>
+                        <td className="text-right px-3 py-1.5">{fmt(c.paidLeads)}</td>
+                        <td className="text-right px-3 py-1.5">{c.decisionMakers === null ? '—' : c.decisionMakers ? 'Yes' : 'No'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {(actionList === 'gaps' ? gaps.length : hot?.length || 0) > LIST_COLLAPSED && (
+              <Button variant="ghost" size="sm" className="mt-2 text-xs" onClick={() => setShowAllList(!showAllList)}>
+                {showAllList ? `Show top ${LIST_COLLAPSED}` : `Show all ${actionList === 'gaps' ? gaps.length : hot?.length}`}
               </Button>
             )}
           </div>

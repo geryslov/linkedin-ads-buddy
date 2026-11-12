@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { CompanyIntelligence, DECISION_MAKER_SENIORITIES, IntelError } from '@/hooks/useCompanyIntelligence';
-import { MatchedCompany } from '@/hooks/useCompanyInfluenceMatcher';
+import { MatchedCompany, UnmatchedCompany, UploadedCompany, normalizeName, standardizeUrl } from '@/hooks/useCompanyInfluenceMatcher';
 
 /** One org × day (× campaign when the split is available) from Ad Analytics. */
 export interface TouchRow {
@@ -43,6 +43,9 @@ export interface DealCompany {
   /** Week bucket (-26…3, see `bucketOf`) → paid totals. */
   weeks: Record<number, { impressions: number; engagements: number }>;
   preCampaigns: { id: string; name: string; impressions: number; engagements: number }[];
+  /** Campaign of the earliest / latest pre-deal day (most impressions that day). */
+  firstCampaignId: string | null;
+  lastCampaignId: string | null;
   /** null = Account Intel not loaded / not matched. */
   decisionMakers: boolean | null;
   organicEngagements: number | null;
@@ -160,6 +163,8 @@ export function analyzeDeals(matched: MatchedCompany[], touches: CompanyTouches,
       postImpressions: 0,
       weeks: {} as DealCompany['weeks'],
       preCampaigns: [] as DealCompany['preCampaigns'],
+      firstCampaignId: null as string | null,
+      lastCampaignId: null as string | null,
       decisionMakers: dmOf ? !!dmOf(m) : null,
       organicEngagements: organicOf ? (o?.organicEngagements ?? 0) : null,
       engagementLevel: o?.engagementLevel || null,
@@ -172,6 +177,8 @@ export function analyzeDeals(matched: MatchedCompany[], touches: CompanyTouches,
       base.partial = days(touches.meta.from, dealDate) < WEEKS_BEFORE * 7 - 1;
       const camps = new Map<string, { impressions: number; engagements: number }>();
       const activeWeeks = new Set<number>();
+      let first = { before: -1, impressions: 0 };
+      let last = { before: Infinity, impressions: 0 };
       for (const r of byOrg.get(orgIdOf(m)) || []) {
         const rel = days(dealDate, r.date);
         const b = bucketOf(rel);
@@ -190,6 +197,14 @@ export function analyzeDeals(matched: MatchedCompany[], touches: CompanyTouches,
         base.pre.leads += r.leads;
         base.pre.spend += r.spend;
         if (r.campaignId) {
+          if (before > first.before || (before === first.before && r.impressions > first.impressions)) {
+            first = { before, impressions: r.impressions };
+            base.firstCampaignId = r.campaignId;
+          }
+          if (before < last.before || (before === last.before && r.impressions > last.impressions)) {
+            last = { before, impressions: r.impressions };
+            base.lastCampaignId = r.campaignId;
+          }
           const c = camps.get(r.campaignId) || { impressions: 0, engagements: 0 };
           c.impressions += r.impressions;
           c.engagements += r.engagements;
@@ -205,6 +220,76 @@ export function analyzeDeals(matched: MatchedCompany[], touches: CompanyTouches,
     const c = { ...base, verdict };
     return { ...c, score: scoreOf(c) };
   }).sort((a, b) => b.score - a.score || b.pre.impressions - a.pre.impressions || b.postImpressions - a.postImpressions);
+}
+
+export interface CampaignCredit {
+  id: string;
+  name: string;
+  objectiveType: string;
+  status: string;
+  /** Deals this campaign touched before the deal date. */
+  deals: number;
+  firstTouch: number;
+  lastTouch: number;
+  impressions: number;
+  engagements: number;
+}
+
+/** Credit by deals, not CTR: any-touch, first-touch and last-touch counts per campaign. */
+export function campaignCredit(deals: DealCompany[], touches: CompanyTouches): CampaignCredit[] {
+  const out = new Map<string, CampaignCredit>();
+  const get = (id: string) => {
+    let c = out.get(id);
+    if (!c) {
+      const meta = touches.campaigns[id];
+      c = { id, name: meta?.name || `Campaign ${id}`, objectiveType: meta?.objectiveType || '', status: meta?.status || '', deals: 0, firstTouch: 0, lastTouch: 0, impressions: 0, engagements: 0 };
+      out.set(id, c);
+    }
+    return c;
+  };
+  for (const d of deals) {
+    if (d.verdict !== 'influenced') continue;
+    for (const pc of d.preCampaigns) {
+      const c = get(pc.id);
+      c.deals++;
+      c.impressions += pc.impressions;
+      c.engagements += pc.engagements;
+    }
+    if (d.firstCampaignId) get(d.firstCampaignId).firstTouch++;
+    if (d.lastCampaignId) get(d.lastCampaignId).lastTouch++;
+  }
+  return [...out.values()].sort((a, b) => b.deals - a.deals || b.firstTouch - a.firstTouch || b.impressions - a.impressions);
+}
+
+export interface GapCompany {
+  name: string;
+  url: string;
+  dealDate: string | null;
+  reason: 'no_impressions' | 'not_before_deal' | 'only_after_deal';
+}
+
+/** CRM companies LinkedIn never reached: unmatched rows, plus matched ones with no pre-deal touch. */
+export function neverReached(unmatched: UnmatchedCompany[], deals: DealCompany[]): GapCompany[] {
+  return [
+    ...unmatched.map((u) => ({ name: u.uploaded.name, url: u.uploaded.url, dealDate: parseDealDate(u.uploaded.date), reason: 'no_impressions' as const })),
+    ...deals.filter((d) => d.verdict === 'not_reached' || d.verdict === 'post_only')
+      .map((d) => ({ name: d.name, url: d.website, dealDate: d.dealDate, reason: d.verdict === 'post_only' ? 'only_after_deal' as const : 'not_before_deal' as const })),
+  ];
+}
+
+const LEVEL_RANK: Record<string, number> = { VERY_HIGH: 5, HIGH: 4, MEDIUM: 3, LOW: 2, VERY_LOW: 1 };
+
+/** Companies engaging in Account Intel (365d) that match no CSV row — pipeline gaps for sales. */
+export function engagedNotInCrm(uploaded: UploadedCompany[], intel: IntelContext) {
+  if (!intel.organic365) return null;
+  const names = new Set(uploaded.map((u) => normalizeName(u.name)).filter(Boolean));
+  const domains = new Set(uploaded.map((u) => standardizeUrl(u.url)).filter(Boolean));
+  const dm = new Set((intel.dm90 || []).map((c) => c.companyPageUrl || c.companyWebsite || c.companyName));
+  return intel.organic365
+    .filter((c) => !names.has(normalizeName(c.companyName)) && !(c.companyWebsite && domains.has(standardizeUrl(c.companyWebsite))))
+    .map((c) => ({ ...c, decisionMakers: intel.dm90 ? dm.has(c.companyPageUrl || c.companyWebsite || c.companyName) : null }))
+    .sort((a, b) => (LEVEL_RANK[b.engagementLevel] || 0) - (LEVEL_RANK[a.engagementLevel] || 0)
+      || (b.paidEngagements + b.organicEngagements) - (a.paidEngagements + a.organicEngagements));
 }
 
 const median = (xs: number[]) => {
