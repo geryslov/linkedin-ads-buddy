@@ -242,7 +242,7 @@ test('company touches keeps only the requested orgs, chunks by month and clamps 
   }) as unknown as typeof fetch;
   const r = await fetchCompanyTouches('t', { accountId: '9', orgIds: ['urn:li:organization:1035', '2'], from: '2026-08-01', to: '2027-01-01' }, fake, Date.UTC(2026, 10, 11));
   expect(stats.length).toBe(4); // Aug 1 → Nov 11 in 31-day chunks
-  expect(stats[stats.length - 1]).toContain('end:(year:2026,month:11,day:11)');
+  expect(stats[0]).toContain('end:(year:2026,month:11,day:11)'); // most recent chunk probes first
   expect(r.rows.every((x) => x.orgId === '1035')).toBe(true);
   expect(r.rows[0]).toMatchObject({ date: '2026-09-03', campaignId: '11', engagements: 3 });
   expect(r.campaigns['11'].name).toBe('Q4 ABM');
@@ -261,4 +261,20 @@ test('company touches surfaces LinkedIn\'s error message when every query shape 
   }) as unknown as typeof fetch;
   await expect(fetchCompanyTouches('t', { accountId: '9', orgIds: ['1'], from: '2026-10-01', to: '2026-10-10' }, fake, Date.UTC(2026, 10, 11)))
     .rejects.toThrow('Ad Analytics request failed (400): Invalid date range');
+});
+
+test('company touches skips a range LinkedIn rejects without downgrading the query shape', async () => {
+  const stats: string[] = [];
+  const fake = (async (url: string) => {
+    if (url.includes('/adCampaigns')) return json({ elements: [] });
+    stats.push(url);
+    if (url.includes('start:(year:2026,month:8,day:1)')) return json({ message: 'Invalid param. Please see errorDetails for more information.', errorDetails: { inputErrors: [{ description: 'Start date too old', input: { inputPath: { fieldPath: 'dateRange.start' } }, code: 'INVALID_VALUE' }] } }, 400);
+    return json({ elements: [{ pivotValues: ['urn:li:sponsoredCampaign:11', 'urn:li:organization:1'], dateRange: { start: { year: 2026, month: 10, day: 3 } }, impressions: 5 }] });
+  }) as unknown as typeof fetch;
+  const r = await fetchCompanyTouches('t', { accountId: '9', orgIds: ['1'], from: '2026-08-01', to: '2026-11-11' }, fake, Date.UTC(2026, 10, 11));
+  expect(stats[0]).toContain('start:(year:2026,month:11,day:2)'); // probe = most recent chunk
+  expect(stats.every((u) => u.includes('/rest/adAnalytics'))).toBe(true);
+  expect(r.meta.campaignSplit).toBe(true);
+  expect(r.meta.failedRanges).toEqual([{ from: '2026-08-01', to: '2026-08-31', error: 'Ad Analytics request failed (400): Invalid param. Please see errorDetails for more information. — dateRange.start: Start date too old' }]);
+  expect(r.rows.length).toBe(3);
 });

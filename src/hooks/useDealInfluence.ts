@@ -18,7 +18,7 @@ export interface TouchRow {
 export interface CompanyTouches {
   rows: TouchRow[];
   campaigns: Record<string, { name: string; objectiveType: string; status: string }>;
-  meta: { from: string; to: string; clampedFrom: boolean; orgsRequested: number; orgsTouched: number; campaignSplit: boolean; calls: number; truncated: boolean; durationMs: number };
+  meta: { from: string; to: string; clampedFrom: boolean; orgsRequested: number; orgsTouched: number; campaignSplit: boolean; calls: number; truncated: boolean; failedRanges?: { from: string; to: string; error: string }[]; durationMs: number };
 }
 
 /** Account Intel context — not aligned to deal dates (windows end today). */

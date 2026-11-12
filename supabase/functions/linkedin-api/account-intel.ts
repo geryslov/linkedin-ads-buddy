@@ -747,7 +747,7 @@ export async function fetchCompanyTouches(
     meta: {
       accountId, from: isoDay(ymd(new Date(from))), to: isoDay(ymd(new Date(to))), clampedFrom,
       orgsRequested: ids.length, orgsTouched: new Set(daily.rows.map((r) => r.orgId)).size,
-      campaignSplit: daily.campaignSplit, calls: daily.calls, truncated: daily.truncated, durationMs: Date.now() - started,
+      campaignSplit: daily.campaignSplit, calls: daily.calls, truncated: daily.truncated, failedRanges: daily.failedRanges, durationMs: Date.now() - started,
     },
   };
 }
@@ -800,18 +800,24 @@ async function collectDaily(
     });
   };
 
-  const collect = async (from: number, to: number): Promise<void> => {
+  const failedRanges: { from: string; to: string; error: string }[] = [];
+
+  // `probe` may step down the query shapes; later chunks use the shape it settled on,
+  // so one chunk LinkedIn rejects (e.g. too old) is skipped instead of downgrading the rest.
+  const collect = async (from: number, to: number, probe = false): Promise<void> => {
     if (calls >= maxCalls) { truncated = true; return; }
     let res = await query(from, to);
-    while (res.status === 400 && mode < modes.length - 1) {
+    while (probe && res.status === 400 && mode < modes.length - 1) {
       mode++;
       res = await query(from, to);
     }
     if (res.status === 401) throw new AccountIntelError('LinkedIn token is invalid or expired — reconnect LinkedIn.', 401, 'token_invalid');
     if (!res.ok) {
       const text = await res.text();
-      const detail = (() => { try { return String(JSON.parse(text)?.message || ''); } catch { return text.slice(0, 200); } })();
-      throw new AccountIntelError(`Ad Analytics request failed (${res.status})${detail ? `: ${detail}` : ''}`, res.status, res.status === 429 ? 'rate_limited' : 'api_error', text);
+      const message = `Ad Analytics request failed (${res.status})${linkedInError(text)}`;
+      if (probe || res.status !== 400) throw new AccountIntelError(message, res.status, res.status === 429 ? 'rate_limited' : 'api_error', text);
+      failedRanges.push({ from: isoDay(ymd(new Date(from))), to: isoDay(ymd(new Date(to))), error: message });
+      return;
     }
     const els: any[] = (await res.json())?.elements || [];
     // v2 analytics paging is unreliable for pivots (CLAUDE.md), so a full page is split like a capped response.
@@ -839,6 +845,23 @@ async function collectDaily(
     }
   };
 
-  await pool(ranges, concurrency, ([from, to]) => collect(from, to));
-  return { rows, campaignSplit: modes[mode] !== 'v2_company', calls, truncated };
+  // Probe with the most recent range — it is always inside LinkedIn's retention.
+  const ordered = [...ranges].sort((a, b) => b[0] - a[0]);
+  await collect(ordered[0][0], ordered[0][1], true);
+  await pool(ordered.slice(1), concurrency, ([from, to]) => collect(from, to));
+  return { rows, campaignSplit: modes[mode] !== 'v2_company', calls, truncated, failedRanges };
+}
+
+/** LinkedIn's message plus errorDetails.inputErrors (field path + description), for the UI. */
+function linkedInError(text: string) {
+  try {
+    const body = JSON.parse(text);
+    const inputs = (body?.errorDetails?.inputErrors || [])
+      .map((e: any) => [e?.input?.inputPath?.fieldPath, e?.description || e?.code].filter(Boolean).join(': '))
+      .filter(Boolean);
+    const parts = [body?.message, ...inputs].filter(Boolean).map(String);
+    return parts.length ? `: ${parts.join(' — ')}` : '';
+  } catch {
+    return text ? `: ${text.slice(0, 200)}` : '';
+  }
 }

@@ -131,11 +131,16 @@ export function DealInfluence({ accessToken, selectedAccount, matched, dateColum
 
       {touches && summary && (
         <div className="space-y-5">
-          {(stale || touches.meta.truncated || touches.meta.clampedFrom || intelErrors.length > 0) && (
+          {(stale || touches.meta.truncated || touches.meta.clampedFrom || intelErrors.length > 0 || !!touches.meta.failedRanges?.length) && (
             <div className="space-y-1 text-xs">
               {stale && <Note>The matched companies or dates changed since this analysis. Re-analyze to update it.</Note>}
               {touches.meta.truncated && <Note>LinkedIn returned more rows than one run can fetch, so some days are missing. Companies may show as not reached when they were. Narrow the CSV to a shorter date span.</Note>}
               {touches.meta.clampedFrom && <Note>LinkedIn keeps two years of ad data. Deals before {touches.meta.from} are marked "Too old", and those near it have a partial window.</Note>}
+              {!!touches.meta.failedRanges?.length && (
+                <Note>
+                  LinkedIn rejected {touches.meta.failedRanges.length} date range(s): {touches.meta.failedRanges.map((f) => `${f.from} → ${f.to}`).join(', ')} ({touches.meta.failedRanges[0].error}). Deals whose weeks fall there may show as not reached.
+                </Note>
+              )}
               {intelErrors.map((e) => <Note key={e}>{e}. Decision-maker and organic columns are blank.</Note>)}
             </div>
           )}
