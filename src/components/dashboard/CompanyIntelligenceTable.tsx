@@ -203,7 +203,7 @@ export function CompanyIntelligenceTable({ accessToken, selectedAccount, campaig
   );
 
   const Th = ({ k, children }: { k: SortKey; children: string }) => (
-    <th className="px-3 py-2 text-right font-medium">
+    <th className="px-2 py-2 text-right font-medium whitespace-nowrap">
       <button onClick={() => setSortKey(k)} className={sortKey === k ? 'text-foreground' : 'hover:text-foreground'}>
         {children}{sortKey === k ? ' ↓' : ''}
       </button>
@@ -211,7 +211,7 @@ export function CompanyIntelligenceTable({ accessToken, selectedAccount, campaig
   );
 
   const showSeniorities = audience === 'dm';
-  const colCount = 11 + (showSeniorities ? 1 : 0);
+  const colCount = 9 + (showSeniorities ? 1 : 0);
 
   /** A breakdown row aligned to the main table's columns. */
   const SubRow = ({ label, extra, t, depth, onClick, open, organicNa, qualNa }: {
@@ -223,21 +223,20 @@ export function CompanyIntelligenceTable({ accessToken, selectedAccount, campaig
       className={`border-t border-border/40 ${depth === 1 ? 'bg-primary/[0.03]' : depth === 2 ? 'bg-primary/[0.06]' : 'bg-primary/[0.09]'} ${onClick ? 'cursor-pointer hover:bg-primary/[0.08]' : ''}`}
     >
       <td className={`px-3 py-1.5 ${depth === 1 ? 'pl-9' : depth === 2 ? 'pl-14' : 'pl-20'}`}>
-        <div className="flex items-center gap-1.5 text-muted-foreground">
+        <div className="flex items-center gap-1.5 text-muted-foreground min-w-0 break-words">
           {onClick && (open ? <ChevronDown className="h-3 w-3 shrink-0" /> : <ChevronRight className="h-3 w-3 shrink-0" />)}
           {label}
         </div>
       </td>
-      <td className="px-3 py-1.5">{t.engagementLevel ? <StatusPill tone={LEVEL_TONE[t.engagementLevel] ?? 'neutral'} label={levelLabel(t.engagementLevel)} /> : <span className="text-muted-foreground">—</span>}</td>
+      <td className="px-2 py-1.5">{t.engagementLevel ? <StatusPill tone={LEVEL_TONE[t.engagementLevel] ?? 'neutral'} label={levelLabel(t.engagementLevel)} /> : <span className="text-muted-foreground">—</span>}</td>
       {showSeniorities && <td />}
-      <td className="px-3 py-1.5 text-muted-foreground">{extra}</td>
-      <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{fmt(t.paidImpressions)}</td>
-      <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{fmt(t.paidClicks)}</td>
-      <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{fmt(t.paidLeads)}</td>
-      <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{qualNa ? '—' : fmt(t.paidQualifiedLeads)}</td>
-      <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{organicNa ? '—' : fmt(t.organicImpressions)}</td>
-      <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{organicNa ? '—' : fmt(t.organicEngagements)}</td>
-      <td colSpan={2} />
+      <td className="px-2 py-1.5 text-[11px] text-muted-foreground break-words">{extra}</td>
+      <td className="px-2 py-1.5 text-right tabular-nums text-muted-foreground">{fmt(t.paidImpressions)}</td>
+      <td className="px-2 py-1.5 text-right tabular-nums text-muted-foreground">{fmt(t.paidClicks)}</td>
+      <td className="px-2 py-1.5 text-right tabular-nums text-muted-foreground">{fmt(t.paidLeads)}</td>
+      <td className="px-2 py-1.5 text-right tabular-nums text-muted-foreground">{qualNa ? '—' : fmt(t.paidQualifiedLeads)}</td>
+      <td className="px-2 py-1.5 text-right tabular-nums text-muted-foreground">{organicNa ? '—' : fmt(t.organicImpressions)}</td>
+      <td className="px-2 py-1.5 text-right tabular-nums text-muted-foreground">{organicNa ? '—' : fmt(t.organicEngagements)}</td>
     </tr>
   );
 
@@ -514,25 +513,36 @@ export function CompanyIntelligenceTable({ accessToken, selectedAccount, campaig
               <EmptyState icon={Building2} title="No companies" description="Nothing matches this filter. Small numbers are reported as 0 by LinkedIn for privacy." />
             ) : (
               <div className="overflow-x-auto max-h-[640px]">
-                <table className="w-full text-xs">
-                  <thead className="sticky top-0 bg-muted/60 backdrop-blur text-muted-foreground">
+                {/* Fixed layout: long campaign/creative names in drill-down rows wrap instead of widening the table. */}
+                <table className={`w-full table-fixed text-xs ${showSeniorities ? 'min-w-[1040px]' : 'min-w-[900px]'}`}>
+                  <colgroup>
+                    <col />
+                    <col className="w-[96px]" />
+                    {showSeniorities && <col className="w-[140px]" />}
+                    <col className="w-[100px]" />
+                    <col className="w-[84px]" />
+                    <col className="w-[64px]" />
+                    <col className="w-[60px]" />
+                    <col className="w-[76px]" />
+                    <col className="w-[88px]" />
+                    <col className="w-[84px]" />
+                  </colgroup>
+                  <thead className="sticky top-0 z-10 bg-muted/60 backdrop-blur text-muted-foreground">
                     <tr>
                       <th className="px-3 py-2 text-left font-medium">Company</th>
-                      <th className="px-3 py-2 text-left font-medium">
+                      <th className="px-2 py-2 text-left font-medium whitespace-nowrap">
                         <button onClick={() => setSortKey('engagementLevel')} className={sortKey === 'engagementLevel' ? 'text-foreground' : 'hover:text-foreground'}>
                           Engagement{sortKey === 'engagementLevel' ? ' ↓' : ''}
                         </button>
                       </th>
-                      {showSeniorities && <th className="px-3 py-2 text-left font-medium">Seniorities</th>}
-                      <th className="px-3 py-2 text-left font-medium">Mix</th>
+                      {showSeniorities && <th className="px-2 py-2 text-left font-medium">Seniorities</th>}
+                      <th className="px-2 py-2 text-left font-medium">Mix</th>
                       <Th k="paidImpressions">Paid impr.</Th>
                       <Th k="paidClicks">Clicks</Th>
                       <Th k="paidLeads">Leads</Th>
                       <Th k="paidQualifiedLeads">Qual. leads</Th>
                       <Th k="organicImpressions">Organic impr.</Th>
                       <Th k="organicEngagements">Organic eng.</Th>
-                      <th className="px-3 py-2 text-left font-medium">Size</th>
-                      <th className="px-3 py-2 text-left font-medium">HQ</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -544,29 +554,29 @@ export function CompanyIntelligenceTable({ accessToken, selectedAccount, campaig
                         <Fragment key={key}>
                         <tr onClick={() => toggle(expanded, setExpanded, key)} className={`border-t border-border/50 cursor-pointer ${open ? 'bg-primary/[0.05]' : 'hover:bg-muted/30'}`}>
                           <td className="px-3 py-2">
-                            <div className="flex items-center gap-1.5 font-medium">
+                            <div className="flex items-center gap-1.5 font-medium min-w-0">
                               {open ? <ChevronDown className="h-3.5 w-3.5 text-primary/70 shrink-0" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
                               <CompanyLogo name={c.companyName} website={c.companyWebsite} />
-                              {c.companyName}
+                              <span className="truncate" title={c.companyName}>{c.companyName}</span>
                               {c.companyPageUrl && (
-                                <a href={c.companyPageUrl} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="text-muted-foreground hover:text-primary"><ExternalLink className="h-3 w-3" /></a>
+                                <a href={c.companyPageUrl} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="text-muted-foreground hover:text-primary shrink-0"><ExternalLink className="h-3 w-3" /></a>
                               )}
                             </div>
-                            {c.companyWebsite && <div className="text-[11px] text-muted-foreground pl-[46px]">{c.companyWebsite.replace(/^https?:\/\/(www\.)?/, '')}</div>}
+                            <div className="text-[11px] text-muted-foreground pl-[46px] truncate">
+                              {[c.companyWebsite.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, ''), SIZE_LABELS[c.companySize], c.countryCode].filter(Boolean).join(' · ')}
+                            </div>
                           </td>
-                          <td className="px-3 py-2"><StatusPill tone={LEVEL_TONE[c.engagementLevel] ?? 'neutral'} label={levelLabel(c.engagementLevel)} /></td>
+                          <td className="px-2 py-2"><StatusPill tone={LEVEL_TONE[c.engagementLevel] ?? 'neutral'} label={levelLabel(c.engagementLevel)} /></td>
                           {showSeniorities && (
-                            <td className="px-3 py-2 text-muted-foreground">{(c.seniorities || []).map((s) => SENIORITIES[s] || s).join(', ')}</td>
+                            <td className="px-2 py-2 text-muted-foreground">{(c.seniorities || []).map((s) => SENIORITIES[s] || s).join(', ')}</td>
                           )}
-                          <td className={`px-3 py-2 ${m === 'organic' ? 'text-primary font-medium' : 'text-muted-foreground'}`}>{MIX_LABEL[m]}</td>
-                          <td className="px-3 py-2 text-right tabular-nums">{fmt(c.paidImpressions)}</td>
-                          <td className="px-3 py-2 text-right tabular-nums">{fmt(c.paidClicks)}</td>
-                          <td className="px-3 py-2 text-right tabular-nums">{fmt(c.paidLeads)}</td>
-                          <td className="px-3 py-2 text-right tabular-nums">{fmt(c.paidQualifiedLeads)}</td>
-                          <td className="px-3 py-2 text-right tabular-nums">{fmt(c.organicImpressions)}</td>
-                          <td className="px-3 py-2 text-right tabular-nums">{fmt(c.organicEngagements)}</td>
-                          <td className="px-3 py-2 text-muted-foreground">{SIZE_LABELS[c.companySize] ?? '—'}</td>
-                          <td className="px-3 py-2 text-muted-foreground">{c.countryCode || '—'}</td>
+                          <td className={`px-2 py-2 ${m === 'organic' ? 'text-primary font-medium' : 'text-muted-foreground'}`}>{MIX_LABEL[m]}</td>
+                          <td className="px-2 py-2 text-right tabular-nums">{fmt(c.paidImpressions)}</td>
+                          <td className="px-2 py-2 text-right tabular-nums">{fmt(c.paidClicks)}</td>
+                          <td className="px-2 py-2 text-right tabular-nums">{fmt(c.paidLeads)}</td>
+                          <td className="px-2 py-2 text-right tabular-nums">{fmt(c.paidQualifiedLeads)}</td>
+                          <td className="px-2 py-2 text-right tabular-nums">{fmt(c.organicImpressions)}</td>
+                          <td className="px-2 py-2 text-right tabular-nums">{fmt(c.organicEngagements)}</td>
                         </tr>
                         {open && renderBreakdown(c)}
                         </Fragment>

@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { buildFilterCriteria, fetchAccountIntel, fetchAudienceBreakdown, fetchCampaignBreakdown, fetchCompanyDaily, fetchCompanyTouches, fetchCreativeBreakdown, fetchWindowSeries, mergeBySeniority, normalizeCompany, selectBreakdownCampaigns } from './account-intel.ts';
+import { buildFilterCriteria, fetchAccountIntel, fetchAudienceBreakdown, fetchCampaignBreakdown, fetchCompanyDaily, fetchCompanyTouches, fetchCreativeBreakdown, fetchTouchCampaigns, fetchWindowSeries, mergeBySeniority, normalizeCompany, selectBreakdownCampaigns } from './account-intel.ts';
 
 // Element shape from the docs' 202606+ sample response.
 const el = (name: string, o: Record<string, unknown> = {}) => ({
@@ -277,4 +277,24 @@ test('company touches skips a range LinkedIn rejects without downgrading the que
   expect(r.meta.campaignSplit).toBe(true);
   expect(r.meta.failedRanges).toEqual([{ from: '2026-08-01', to: '2026-08-31', error: 'Ad Analytics request failed (400): Invalid param. Please see errorDetails for more information. — dateRange.start: Start date too old' }]);
   expect(r.rows.length).toBe(3);
+});
+
+test('touch campaigns queries MEMBER_COMPANY per served campaign and tags rows with it', async () => {
+  const daily: string[] = [];
+  const fake = (async (url: string) => {
+    if (url.includes('/adCampaigns')) return json({ elements: [{ id: 11, name: 'Q4 ABM', objectiveType: 'brand_awareness', status: 'ACTIVE' }] });
+    if (url.includes('pivot=CAMPAIGN')) return json({ elements: [{ pivotValue: 'urn:li:sponsoredCampaign:11', impressions: 50 }, { pivotValue: 'urn:li:sponsoredCampaign:12', impressions: 0 }] });
+    daily.push(url);
+    return json({ elements: [
+      { pivotValue: 'urn:li:organization:1', dateRange: { start: { year: 2026, month: 9, day: 3 } }, impressions: 4, totalEngagements: 1 },
+      { pivotValue: 'urn:li:organization:99', dateRange: { start: { year: 2026, month: 9, day: 3 } }, impressions: 7 },
+    ] });
+  }) as unknown as typeof fetch;
+  const r = await fetchTouchCampaigns('t', { accountId: '9', orgIds: ['1'], from: '2026-08-01', to: '2026-11-11' }, fake, Date.UTC(2026, 10, 11));
+  expect(daily.length).toBe(1);
+  expect(daily[0]).toContain('/v2/adAnalyticsV2?q=analytics&pivot=MEMBER_COMPANY');
+  expect(daily[0]).toContain('&campaigns[0]=urn:li:sponsoredCampaign:11');
+  expect(r.rows).toEqual([expect.objectContaining({ orgId: '1', campaignId: '11', impressions: 4, engagements: 1 })]);
+  expect(r.campaigns['11'].name).toBe('Q4 ABM');
+  expect(r.meta).toMatchObject({ campaignsServed: 1, campaignsQueried: 1, truncated: false });
 });

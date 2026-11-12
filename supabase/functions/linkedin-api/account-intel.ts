@@ -714,10 +714,7 @@ const RETENTION_DAYS = 730;
  * so deals can be aligned on their own dates. Same account-wide statistics
  * query as fetchCompanyDaily, cut into month chunks run four at a time.
  */
-export async function fetchCompanyTouches(
-  accessToken: string, q: { accountId: string; orgIds: unknown; from: string; to: string },
-  fetchImpl: typeof fetch = fetch, now = Date.now(),
-) {
+function touchRange(q: { accountId: string; orgIds: unknown; from: string; to: string }, now: number) {
   const accountId = String(q.accountId || '').replace(/\D/g, '');
   const ids = Array.isArray(q.orgIds) ? [...new Set(q.orgIds.map((v) => String(v).split(':').pop()!.replace(/\D/g, '')).filter(Boolean))] : [];
   const parse = (d: string) => (/^\d{4}-\d{2}-\d{2}$/.test(String(d)) ? Date.parse(`${d}T00:00:00Z`) : NaN);
@@ -731,6 +728,14 @@ export async function fetchCompanyTouches(
   from = Math.max(from, today - (RETENTION_DAYS - 1) * DAY_MS);
   to = Math.min(to, today);
   if (from > to) throw new AccountIntelError('The date range is outside the two years LinkedIn keeps.', 400, 'bad_request');
+  return { accountId, ids, from, to, clampedFrom };
+}
+
+export async function fetchCompanyTouches(
+  accessToken: string, q: { accountId: string; orgIds: unknown; from: string; to: string },
+  fetchImpl: typeof fetch = fetch, now = Date.now(),
+) {
+  const { accountId, ids, from, to, clampedFrom } = touchRange(q, now);
   const started = Date.now();
 
   const chunks: [number, number][] = [];
@@ -752,6 +757,63 @@ export async function fetchCompanyTouches(
   };
 }
 
+const MAX_SPLIT_CAMPAIGNS = 60;
+const MAX_SPLIT_CALLS = 150;
+const SPLIT_BUDGET_MS = 110000;
+
+/**
+ * Campaign attribution for deal timing when LinkedIn refuses CAMPAIGN × MEMBER_COMPANY
+ * in one query: finds the campaigns that served in the range (v2 CAMPAIGN pivot), then
+ * runs the single MEMBER_COMPANY daily query per campaign (top 60 by impressions),
+ * the way Company Demographics' campaign breakdown does.
+ */
+export async function fetchTouchCampaigns(
+  accessToken: string, q: { accountId: string; orgIds: unknown; from: string; to: string },
+  fetchImpl: typeof fetch = fetch, now = Date.now(),
+) {
+  const { accountId, ids, from, to } = touchRange(q, now);
+  const started = Date.now();
+  const served = await analyticsRows(accessToken, (start) => analyticsUrl(
+    { start: ymd(new Date(from)), end: ymd(new Date(to)) }, 'CAMPAIGN', `accounts[0]=urn:li:sponsoredAccount:${accountId}`, 'pivotValue,impressions', start,
+  ), fetchImpl);
+  const ranked = served
+    .map((el) => ({ id: String(el?.pivotValue || '').split(':').pop() || '', impressions: num(el?.impressions) }))
+    .filter((c) => /^\d+$/.test(c.id) && c.impressions > 0)
+    .sort((a, b) => b.impressions - a.impressions);
+  const chosen = ranked.slice(0, MAX_SPLIT_CAMPAIGNS);
+
+  const wanted = new Set(ids);
+  const rows: (DailyRow & { orgId: string })[] = [];
+  const failed: { slice: string; error: string }[] = [];
+  let calls = 0;
+  let truncated = false;
+  const [, campaignList] = await Promise.all([
+    pool(chosen, CONCURRENCY, async (c) => {
+      if (calls >= MAX_SPLIT_CALLS || Date.now() - started > SPLIT_BUDGET_MS) { truncated = true; return; }
+      try {
+        const d = await collectDaily(accessToken, accountId, [[from, to]], (id) => wanted.has(id), fetchImpl,
+          Math.max(1, MAX_SPLIT_CALLS - calls), 1, { mode: 'v2_company', filter: `campaigns[0]=urn:li:sponsoredCampaign:${c.id}` });
+        calls += d.calls;
+        truncated ||= d.truncated;
+        for (const r of d.rows) rows.push({ ...r, campaignId: c.id });
+      } catch (e) {
+        if ((e as AccountIntelError)?.kind === 'token_invalid') throw e;
+        failed.push({ slice: c.id, error: String((e as Error)?.message || e) });
+      }
+    }),
+    listCampaigns(accessToken, accountId, fetchImpl).catch(() => [] as any[]),
+  ]);
+
+  return {
+    rows: rows.sort((a, b) => a.date.localeCompare(b.date)),
+    campaigns: usedCampaigns(campaignList, rows),
+    meta: {
+      from: isoDay(ymd(new Date(from))), to: isoDay(ymd(new Date(to))),
+      campaignsServed: ranked.length, campaignsQueried: chosen.length, failed, calls, truncated, durationMs: Date.now() - started,
+    },
+  };
+}
+
 function usedCampaigns(campaignList: any[], rows: { campaignId: string | null }[]) {
   const used = new Set(rows.map((r) => r.campaignId).filter(Boolean));
   const campaigns: Record<string, { name: string; objectiveType: string; status: string }> = {};
@@ -768,6 +830,7 @@ function usedCampaigns(campaignList: any[], rows: { campaignId: string | null }[
 async function collectDaily(
   accessToken: string, accountId: string, ranges: [number, number][], keep: (orgId: string) => boolean,
   fetchImpl: typeof fetch, maxCalls: number, concurrency: number,
+  opts: { mode?: 'v2_company'; filter?: string } = {},
 ) {
   const account = `List(${encodeURIComponent(`urn:li:sponsoredAccount:${accountId}`)})`;
   const metrics = 'dateRange,impressions,clicks,totalEngagements,oneClickLeads,externalWebsiteConversions,costInLocalCurrency';
@@ -775,7 +838,7 @@ async function collectDaily(
   // for MEMBER_COMPANY × CAMPAIGN; the last step is the v2 single-pivot daily query
   // get_company_engagement_timeline has always used.
   const modes = ['rest_video', 'rest', 'v2_stats', 'v2_company'] as const;
-  let mode = 0;
+  let mode = opts.mode ? modes.indexOf(opts.mode) : 0;
   let calls = 0;
   let truncated = false;
   const rows: (DailyRow & { orgId: string })[] = [];
@@ -795,7 +858,7 @@ async function collectDaily(
     const finder = m === 'v2_stats'
       ? `q=statistics&pivots[0]=CAMPAIGN&pivots[1]=MEMBER_COMPANY&fields=pivotValues,${metrics}`
       : `q=analytics&pivot=MEMBER_COMPANY&fields=pivotValue,${metrics}&count=${V2_DAILY_LIMIT}`;
-    return fetchImpl(`https://api.linkedin.com/v2/adAnalyticsV2?${finder}&timeGranularity=DAILY&${range}&accounts[0]=urn:li:sponsoredAccount:${accountId}`, {
+    return fetchImpl(`https://api.linkedin.com/v2/adAnalyticsV2?${finder}&timeGranularity=DAILY&${range}&accounts[0]=urn:li:sponsoredAccount:${accountId}${opts.filter ? `&${opts.filter}` : ''}`, {
       headers: { 'Authorization': `Bearer ${accessToken}` },
     });
   };

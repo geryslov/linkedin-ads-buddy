@@ -50,7 +50,9 @@ const fmt = (n: number) => Math.round(n).toLocaleString();
 const shiftDays = (d: string, n: number) => new Date(Date.parse(`${d}T00:00:00Z`) + n * DAY).toISOString().slice(0, 10);
 
 export function DealInfluence({ accessToken, selectedAccount, matched, unmatched, uploaded, dateColumn }: DealInfluenceProps) {
-  const { touches, intel, intelErrors, isLoading, error, loadedKey, load } = useDealInfluence(accessToken);
+  const { touches, intel, intelErrors, isLoading, error, loadedKey, load, campaignTouches, loadCampaigns } = useDealInfluence(accessToken);
+  const split = campaignTouches && typeof campaignTouches === 'object' && 'rows' in campaignTouches ? campaignTouches : null;
+  const splitError = campaignTouches && typeof campaignTouches === 'object' && 'kind' in campaignTouches ? campaignTouches : null;
   const [metric, setMetric] = useState<Metric>('engagements');
   const [showAll, setShowAll] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -68,9 +70,9 @@ export function DealInfluence({ accessToken, selectedAccount, matched, unmatched
     return { orgIds, from, to, dated: dates.length, key: `${selectedAccount}:${from}:${to}:${orgIds.join(',')}` };
   }, [matched, selectedAccount]);
 
-  const deals = useMemo(() => (touches ? analyzeDeals(matched, touches, intel) : []), [matched, touches, intel]);
+  const deals = useMemo(() => (touches ? analyzeDeals(matched, touches, intel, split) : []), [matched, touches, intel, split]);
   const summary = useMemo(() => (touches ? summarizeDeals(deals, touches.meta) : null), [deals, touches]);
-  const credit = useMemo(() => (touches ? campaignCredit(deals, touches) : []), [deals, touches]);
+  const credit = useMemo(() => (touches ? campaignCredit(deals, { ...touches.campaigns, ...split?.campaigns }) : []), [deals, touches, split]);
   const gaps = useMemo(() => (touches ? neverReached(unmatched, deals) : []), [unmatched, deals, touches]);
   const hot = useMemo(() => engagedNotInCrm(uploaded, intel), [uploaded, intel]);
   const maxCell = useMemo(() => Math.max(1, ...deals.flatMap((d) => Object.values(d.weeks).map((w) => w[metric]))), [deals, metric]);
@@ -278,9 +280,22 @@ export function DealInfluence({ accessToken, selectedAccount, matched, unmatched
                 How many deals each campaign reached before the deal date. First touch = the campaign on the earliest pre-deal day, last touch = the latest (most impressions that day breaks ties). A low-CTR campaign can still open most deals.
               </p>
             </div>
-            {!touches.meta.campaignSplit ? (
-              <p className="text-xs text-muted-foreground">LinkedIn returned company totals only for this account (no campaign split), so campaigns can't be credited.</p>
-            ) : credit.length === 0 ? (
+            {!touches.meta.campaignSplit && campaignTouches === 'loading' && (
+              <p className="text-xs text-muted-foreground flex items-center gap-2"><Loader2 className="h-3 w-3 animate-spin" /> LinkedIn won't split company data by campaign in one query for this account, so it's being fetched one campaign at a time…</p>
+            )}
+            {!touches.meta.campaignSplit && splitError && (
+              <p className="text-xs flex items-start gap-2">
+                <AlertTriangle className="h-3.5 w-3.5 text-destructive mt-px shrink-0" />
+                <span>Per-campaign data failed: {splitError.message} <button className="underline" onClick={() => request && selectedAccount && loadCampaigns(selectedAccount, request.orgIds, request.from, request.to)}>Retry</button></span>
+              </p>
+            )}
+            {split && (split.meta.campaignsServed > split.meta.campaignsQueried || split.meta.truncated || split.meta.failed.length > 0) && (
+              <p className="mb-2 text-xs text-muted-foreground">
+                Fetched one campaign at a time: the top {split.meta.campaignsQueried} of {split.meta.campaignsServed} campaigns by impressions
+                {split.meta.failed.length ? `, ${split.meta.failed.length} failed` : ''}{split.meta.truncated ? ', and the request budget ran out before all were done' : ''}. Smaller campaigns may be missing from the credit.
+              </p>
+            )}
+            {!touches.meta.campaignSplit && !split ? null : credit.length === 0 ? (
               <p className="text-xs text-muted-foreground">No campaign reached a deal before its date.</p>
             ) : (
               <div className="rounded-lg border overflow-x-auto">
@@ -442,7 +457,7 @@ function DealDetail({ d }: { d: DealCompany }) {
           </tbody>
         </table>
       ) : (
-        <p className="text-muted-foreground">{d.verdict === 'influenced' ? 'Campaign split unavailable for this account (LinkedIn returned company totals only).' : 'No paid touches in the 26 weeks before the deal.'}</p>
+        <p className="text-muted-foreground">{d.verdict === 'influenced' ? 'Campaign data is still loading or unavailable for this company (see Campaign credit below).' : 'No paid touches in the 26 weeks before the deal.'}</p>
       )}
     </div>
   );

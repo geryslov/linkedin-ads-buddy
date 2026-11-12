@@ -21,6 +21,13 @@ export interface CompanyTouches {
   meta: { from: string; to: string; clampedFrom: boolean; orgsRequested: number; orgsTouched: number; campaignSplit: boolean; calls: number; truncated: boolean; failedRanges?: { from: string; to: string; error: string }[]; durationMs: number };
 }
 
+/** Per-campaign rows, queried one campaign at a time when `touches` has no campaign split. */
+export interface CampaignTouches {
+  rows: TouchRow[];
+  campaigns: CompanyTouches['campaigns'];
+  meta: { campaignsServed: number; campaignsQueried: number; failed: { slice: string; error: string }[]; calls: number; truncated: boolean; durationMs: number };
+}
+
 /** Account Intel context — not aligned to deal dates (windows end today). */
 interface IntelContext {
   organic365: CompanyIntelligence[] | null;
@@ -140,12 +147,20 @@ function scoreOf(c: Omit<DealCompany, 'score'>) {
   );
 }
 
-export function analyzeDeals(matched: MatchedCompany[], touches: CompanyTouches, intel: IntelContext): DealCompany[] {
+export function analyzeDeals(matched: MatchedCompany[], touches: CompanyTouches, intel: IntelContext, split?: CampaignTouches | null): DealCompany[] {
   const byOrg = new Map<string, TouchRow[]>();
   for (const r of touches.rows) {
     const list = byOrg.get(r.orgId);
     if (list) list.push(r); else byOrg.set(r.orgId, [r]);
   }
+  // Campaign attribution: from the totals when they carry a campaign, else from the per-campaign rows.
+  const campaignRows = new Map<string, TouchRow[]>();
+  for (const r of split ? split.rows : touches.rows) {
+    if (!r.campaignId) continue;
+    const list = campaignRows.get(r.orgId);
+    if (list) list.push(r); else campaignRows.set(r.orgId, [r]);
+  }
+  const campaignNames = { ...touches.campaigns, ...split?.campaigns };
   const organicOf = intelIndex(intel.organic365);
   const dmOf = intelIndex(intel.dm90);
 
@@ -196,24 +211,28 @@ export function analyzeDeals(matched: MatchedCompany[], touches: CompanyTouches,
         base.pre.engagements += r.engagements;
         base.pre.leads += r.leads;
         base.pre.spend += r.spend;
-        if (r.campaignId) {
-          if (before > first.before || (before === first.before && r.impressions > first.impressions)) {
-            first = { before, impressions: r.impressions };
-            base.firstCampaignId = r.campaignId;
-          }
-          if (before < last.before || (before === last.before && r.impressions > last.impressions)) {
-            last = { before, impressions: r.impressions };
-            base.lastCampaignId = r.campaignId;
-          }
-          const c = camps.get(r.campaignId) || { impressions: 0, engagements: 0 };
-          c.impressions += r.impressions;
-          c.engagements += r.engagements;
-          camps.set(r.campaignId, c);
-        }
       }
       base.pre.activeWeeks = activeWeeks.size;
+      for (const r of campaignRows.get(orgIdOf(m)) || []) {
+        const rel = days(dealDate, r.date);
+        if (rel > 0 || bucketOf(rel) < -WEEKS_BEFORE || r.impressions <= 0) continue;
+        const before = -rel;
+        const id = r.campaignId!;
+        if (before > first.before || (before === first.before && r.impressions > first.impressions)) {
+          first = { before, impressions: r.impressions };
+          base.firstCampaignId = id;
+        }
+        if (before < last.before || (before === last.before && r.impressions > last.impressions)) {
+          last = { before, impressions: r.impressions };
+          base.lastCampaignId = id;
+        }
+        const c = camps.get(id) || { impressions: 0, engagements: 0 };
+        c.impressions += r.impressions;
+        c.engagements += r.engagements;
+        camps.set(id, c);
+      }
       base.preCampaigns = [...camps.entries()]
-        .map(([id, c]) => ({ id, name: touches.campaigns[id]?.name || `Campaign ${id}`, ...c }))
+        .map(([id, c]) => ({ id, name: campaignNames[id]?.name || `Campaign ${id}`, ...c }))
         .sort((a, b) => b.impressions - a.impressions);
       verdict = base.pre.impressions > 0 ? 'influenced' : base.postImpressions > 0 ? 'post_only' : 'not_reached';
     }
@@ -236,12 +255,12 @@ export interface CampaignCredit {
 }
 
 /** Credit by deals, not CTR: any-touch, first-touch and last-touch counts per campaign. */
-export function campaignCredit(deals: DealCompany[], touches: CompanyTouches): CampaignCredit[] {
+export function campaignCredit(deals: DealCompany[], campaigns: CompanyTouches['campaigns']): CampaignCredit[] {
   const out = new Map<string, CampaignCredit>();
   const get = (id: string) => {
     let c = out.get(id);
     if (!c) {
-      const meta = touches.campaigns[id];
+      const meta = campaigns[id];
       c = { id, name: meta?.name || `Campaign ${id}`, objectiveType: meta?.objectiveType || '', status: meta?.status || '', deals: 0, firstTouch: 0, lastTouch: 0, impressions: 0, engagements: 0 };
       out.set(id, c);
     }
@@ -358,6 +377,20 @@ export function useDealInfluence(accessToken: string | null) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<IntelError | null>(null);
   const [loadedKey, setLoadedKey] = useState<string | null>(null);
+  const [campaignTouches, setCampaignTouches] = useState<CampaignTouches | IntelError | 'loading' | null>(null);
+
+  /** One MEMBER_COMPANY query per served campaign — only needed when `touches` has no campaign split. */
+  const loadCampaigns = useCallback(async (accountId: string, orgIds: string[], from: string, to: string) => {
+    if (!accessToken) return;
+    setCampaignTouches('loading');
+    try {
+      setCampaignTouches(await invoke<CampaignTouches>(accessToken, { accountId, orgIds, from, to, breakdown: 'touch_campaigns' },
+        (d) => Array.isArray(d?.rows) && typeof d?.meta?.campaignsQueried === 'number',
+        'The deployed edge function has no per-campaign deal touches yet — deploy linkedin-api.'));
+    } catch (e) {
+      setCampaignTouches(toIntelError(e));
+    }
+  }, [accessToken]);
 
   /** Paid touches for every matched org, plus Account Intel organic (365d) and decision makers (90d). */
   const load = useCallback(async (accountId: string, orgIds: string[], from: string, to: string, key: string) => {
@@ -365,6 +398,7 @@ export function useDealInfluence(accessToken: string | null) {
     setIsLoading(true);
     setError(null);
     setIntelErrors([]);
+    setCampaignTouches(null);
     const intelCall = (params: Record<string, unknown>) =>
       invoke<{ companies: CompanyIntelligence[] }>(accessToken, { accountId, ...params }, (d) => Array.isArray(d?.companies), 'stale').then((d) => d.companies);
     const [t, organic, dm] = await Promise.allSettled([
@@ -376,6 +410,7 @@ export function useDealInfluence(accessToken: string | null) {
     if (t.status === 'fulfilled') {
       setTouches(t.value);
       setLoadedKey(key);
+      if (!t.value.meta.campaignSplit) loadCampaigns(accountId, orgIds, from, to);
     } else {
       setTouches(null);
       setLoadedKey(null);
@@ -387,7 +422,7 @@ export function useDealInfluence(accessToken: string | null) {
       dm.status === 'rejected' ? `Decision makers (Account Intel): ${toIntelError(dm.reason).message}` : '',
     ].filter(Boolean));
     setIsLoading(false);
-  }, [accessToken]);
+  }, [accessToken, loadCampaigns]);
 
   const reset = useCallback(() => {
     setTouches(null);
@@ -395,7 +430,8 @@ export function useDealInfluence(accessToken: string | null) {
     setError(null);
     setIntelErrors([]);
     setIntel({ organic365: null, dm90: null });
+    setCampaignTouches(null);
   }, []);
 
-  return { touches, intel, intelErrors, isLoading, error, loadedKey, load, reset };
+  return { touches, intel, intelErrors, isLoading, error, loadedKey, load, reset, campaignTouches, loadCampaigns };
 }
