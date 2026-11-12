@@ -196,16 +196,19 @@ test('company daily resolves the org, keeps only its rows, and splits full respo
   expect(r.meta.campaignSplit).toBe(true);
 });
 
-test('company daily falls back to a single MEMBER_COMPANY pivot when LinkedIn rejects the split', async () => {
+test('company daily steps down to the v2 single MEMBER_COMPANY pivot when LinkedIn rejects the split', async () => {
   const stats: string[] = [];
   const fake = (async (url: string) => {
     if (url.includes('/adCampaigns')) return json({ elements: [] });
     stats.push(url);
     if (url.includes('q=statistics')) return json({ message: 'bad pivots' }, 400);
-    return json({ elements: [{ pivotValues: ['urn:li:organization:42'], dateRange: { start: { year: 2026, month: 11, day: 1 } }, impressions: 7 }] });
+    return json({ elements: [{ pivotValue: 'urn:li:organization:42', dateRange: { start: { year: 2026, month: 11, day: 1 } }, impressions: 7 }] });
   }) as unknown as typeof fetch;
   const r = await fetchCompanyDaily('t', { accountId: '9', companyPageUrl: 'https://www.linkedin.com/company/42/' }, fake);
-  expect(stats.map((u) => u.includes('videoViews'))).toEqual([true, false, false]);
+  expect(stats.map((u) => u.includes('videoViews'))).toEqual([true, false, false, false]);
+  expect(stats[2]).toContain('/v2/adAnalyticsV2?q=statistics&pivots[0]=CAMPAIGN&pivots[1]=MEMBER_COMPANY');
+  expect(stats[3]).toContain('/v2/adAnalyticsV2?q=analytics&pivot=MEMBER_COMPANY&fields=pivotValue,');
+  expect(stats[3]).toContain('timeGranularity=DAILY&dateRange.start.day=');
   expect(r.meta.campaignSplit).toBe(false);
   expect(r.rows[0]).toMatchObject({ campaignId: null, impressions: 7 });
 });
@@ -249,4 +252,13 @@ test('company touches keeps only the requested orgs, chunks by month and clamps 
   expect(old.meta.clampedFrom).toBe(true);
   expect(old.meta.from).toBe('2024-11-12');
   await expect(fetchCompanyTouches('t', { accountId: '9', orgIds: [], from: '2026-01-01', to: '2026-02-01' }, fake)).rejects.toThrow();
+});
+
+test('company touches surfaces LinkedIn\'s error message when every query shape is rejected', async () => {
+  const fake = (async (url: string) => {
+    if (url.includes('/adCampaigns')) return json({ elements: [] });
+    return json({ message: 'Invalid date range' }, 400);
+  }) as unknown as typeof fetch;
+  await expect(fetchCompanyTouches('t', { accountId: '9', orgIds: ['1'], from: '2026-10-01', to: '2026-10-10' }, fake, Date.UTC(2026, 10, 11)))
+    .rejects.toThrow('Ad Analytics request failed (400): Invalid date range');
 });

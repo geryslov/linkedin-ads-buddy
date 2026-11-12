@@ -584,6 +584,7 @@ export async function fetchWindowSeries(accessToken: string, q: { accountId: str
 
 const STATS_LIMIT = 15000; // statistics finder: max elements, no pagination
 const MAX_DAILY_CALLS = 40;
+const V2_DAILY_LIMIT = 10000; // v2 analytics finder page size
 const DAY_MS = 86400000;
 
 export type DailyRow = {
@@ -769,43 +770,60 @@ async function collectDaily(
   fetchImpl: typeof fetch, maxCalls: number, concurrency: number,
 ) {
   const account = `List(${encodeURIComponent(`urn:li:sponsoredAccount:${accountId}`)})`;
-  const core = 'pivotValues,dateRange,impressions,clicks,totalEngagements,oneClickLeads,externalWebsiteConversions,costInLocalCurrency';
-  let fields = `${core},videoViews`;
-  let campaignSplit = true;
+  const metrics = 'dateRange,impressions,clicks,totalEngagements,oneClickLeads,externalWebsiteConversions,costInLocalCurrency';
+  // Tried in order, stepping down on a 400. The REST statistics finder is undocumented
+  // for MEMBER_COMPANY × CAMPAIGN; the last step is the v2 single-pivot daily query
+  // get_company_engagement_timeline has always used.
+  const modes = ['rest_video', 'rest', 'v2_stats', 'v2_company'] as const;
+  let mode = 0;
   let calls = 0;
   let truncated = false;
   const rows: (DailyRow & { orgId: string })[] = [];
+  const limit = () => (modes[mode] === 'v2_company' ? V2_DAILY_LIMIT : STATS_LIMIT);
 
   const query = async (from: number, to: number) => {
-    const base = campaignSplit
-      ? `q=statistics&pivots=List(CAMPAIGN,MEMBER_COMPANY)`
-      : `q=analytics&pivot=MEMBER_COMPANY`;
     calls++;
-    return fetchImpl(`https://api.linkedin.com/rest/adAnalytics?${base}&timeGranularity=DAILY&dateRange=(start:${restDate(from)},end:${restDate(to)})&accounts=${account}&fields=${fields}`, {
-      headers: { 'Authorization': `Bearer ${accessToken}`, 'LinkedIn-Version': ACCOUNT_INTEL_VERSION, 'X-Restli-Protocol-Version': '2.0.0' },
+    const m = modes[mode];
+    if (m === 'rest_video' || m === 'rest') {
+      const fields = `pivotValues,${metrics}${m === 'rest_video' ? ',videoViews' : ''}`;
+      return fetchImpl(`https://api.linkedin.com/rest/adAnalytics?q=statistics&pivots=List(CAMPAIGN,MEMBER_COMPANY)&timeGranularity=DAILY&dateRange=(start:${restDate(from)},end:${restDate(to)})&accounts=${account}&fields=${fields}`, {
+        headers: { 'Authorization': `Bearer ${accessToken}`, 'LinkedIn-Version': ACCOUNT_INTEL_VERSION, 'X-Restli-Protocol-Version': '2.0.0' },
+      });
+    }
+    const a = ymd(new Date(from)), b = ymd(new Date(to));
+    const range = `dateRange.start.day=${a.day}&dateRange.start.month=${a.month}&dateRange.start.year=${a.year}&dateRange.end.day=${b.day}&dateRange.end.month=${b.month}&dateRange.end.year=${b.year}`;
+    const finder = m === 'v2_stats'
+      ? `q=statistics&pivots[0]=CAMPAIGN&pivots[1]=MEMBER_COMPANY&fields=pivotValues,${metrics}`
+      : `q=analytics&pivot=MEMBER_COMPANY&fields=pivotValue,${metrics}&count=${V2_DAILY_LIMIT}`;
+    return fetchImpl(`https://api.linkedin.com/v2/adAnalyticsV2?${finder}&timeGranularity=DAILY&${range}&accounts[0]=urn:li:sponsoredAccount:${accountId}`, {
+      headers: { 'Authorization': `Bearer ${accessToken}` },
     });
   };
 
   const collect = async (from: number, to: number): Promise<void> => {
     if (calls >= maxCalls) { truncated = true; return; }
     let res = await query(from, to);
-    // Degrade once on 400: drop videoViews, then drop the campaign split (single MEMBER_COMPANY pivot).
-    while (res.status === 400 && (fields !== core || campaignSplit)) {
-      if (fields !== core) fields = core; else campaignSplit = false;
+    while (res.status === 400 && mode < modes.length - 1) {
+      mode++;
       res = await query(from, to);
     }
     if (res.status === 401) throw new AccountIntelError('LinkedIn token is invalid or expired — reconnect LinkedIn.', 401, 'token_invalid');
-    if (!res.ok) throw new AccountIntelError(`Ad Analytics request failed (${res.status})`, res.status, res.status === 429 ? 'rate_limited' : 'api_error', await res.text());
+    if (!res.ok) {
+      const text = await res.text();
+      const detail = (() => { try { return String(JSON.parse(text)?.message || ''); } catch { return text.slice(0, 200); } })();
+      throw new AccountIntelError(`Ad Analytics request failed (${res.status})${detail ? `: ${detail}` : ''}`, res.status, res.status === 429 ? 'rate_limited' : 'api_error', text);
+    }
     const els: any[] = (await res.json())?.elements || [];
-    if (els.length >= STATS_LIMIT && to - from >= DAY_MS) {
+    // v2 analytics paging is unreliable for pivots (CLAUDE.md), so a full page is split like a capped response.
+    if (els.length >= limit() && to - from >= DAY_MS) {
       const mid = from + Math.floor((to - from) / DAY_MS / 2) * DAY_MS;
       await collect(from, mid);
       await collect(mid + DAY_MS, to);
       return;
     }
-    if (els.length >= STATS_LIMIT) truncated = true;
+    if (els.length >= limit()) truncated = true;
     for (const el of els) {
-      const pv: string[] = Array.isArray(el?.pivotValues) ? el.pivotValues : [];
+      const pv: string[] = Array.isArray(el?.pivotValues) ? el.pivotValues : el?.pivotValue ? [el.pivotValue] : [];
       const org = pv.find((v) => v.startsWith('urn:li:organization:'));
       const orgId = org ? org.split(':').pop()! : '';
       if (!orgId || !keep(orgId)) continue;
@@ -822,5 +840,5 @@ async function collectDaily(
   };
 
   await pool(ranges, concurrency, ([from, to]) => collect(from, to));
-  return { rows, campaignSplit, calls, truncated };
+  return { rows, campaignSplit: modes[mode] !== 'v2_company', calls, truncated };
 }
