@@ -509,3 +509,12 @@ A new Prospecting tab that shows one company over a selected time frame: paid vs
 - match by vanity name, then website host, then name
 
 It stops at the first batch that contains a match.
+
+### Nov 12, 2026 — Deal influence in the Influence Matcher
+The Influence Matcher already had the CRM CSV's deal dates but only displayed them. The new **Deal influence** panel uses them:
+- **Deal alignment.** Each matched company is lined up on its own deal date (earliest parseable date among its CSV rows), and paid touches are bucketed into weeks relative to it: 26 before, 4 after. Touches on the deal day count as before.
+- **Data.** A new `breakdown: 'touches'` on `get_company_intelligence` pulls daily paid activity for all matched orgs at once. Ad Analytics has no company filter, so it is the same account-wide `CAMPAIGN × MEMBER_COMPANY` statistics query as Company Journey, now shared via `collectDaily()` and cut into month chunks run 4 at a time. The matched orgs already carry URNs from the demographic pivot, so no name matching is needed for paid.
+- **Account Intel context.** Decision makers (Director+, 90d merged) and organic engagement (365d) are matched by slug/host/name. Their windows end today, so they are labelled as not aligned to deal dates. Either failing leaves those columns blank, not the panel.
+- **Score.** A transparent 0–100 for companies touched before the deal (reach, engagement, recency, weeks touched, decision makers, organic). The UI says it shows association, not causation.
+- **Cost.** Long CSV date spans mean many calls. The panel is button-triggered and flags truncation, the 2-year clamp, and stale results when the matched set changes.
+- **Not verified live.** Edge unit-tested with a fake fetch; the client analysis was checked with a throwaway test. Needs a `linkedin-api` deploy.

@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { buildFilterCriteria, fetchAccountIntel, fetchAudienceBreakdown, fetchCampaignBreakdown, fetchCompanyDaily, fetchCreativeBreakdown, fetchWindowSeries, mergeBySeniority, normalizeCompany, selectBreakdownCampaigns } from './account-intel.ts';
+import { buildFilterCriteria, fetchAccountIntel, fetchAudienceBreakdown, fetchCampaignBreakdown, fetchCompanyDaily, fetchCompanyTouches, fetchCreativeBreakdown, fetchWindowSeries, mergeBySeniority, normalizeCompany, selectBreakdownCampaigns } from './account-intel.ts';
 
 // Element shape from the docs' 202606+ sample response.
 const el = (name: string, o: Record<string, unknown> = {}) => ({
@@ -225,4 +225,28 @@ test('company daily falls back to matching engaged orgs when the vanity finders 
   expect(r.meta.orgUrn).toBe('urn:li:organization:77');
   expect(r.meta.resolvedVia).toBe('engaged_orgs');
   expect(r.rows[0].impressions).toBe(12);
+});
+
+test('company touches keeps only the requested orgs, chunks by month and clamps to retention', async () => {
+  const stats: string[] = [];
+  const fake = (async (url: string) => {
+    if (url.includes('/adCampaigns')) return json({ elements: [{ id: 11, name: 'Q4 ABM', objectiveType: 'brand_awareness', status: 'ACTIVE' }] });
+    stats.push(url);
+    return json({ elements: [
+      { pivotValues: ['urn:li:sponsoredCampaign:11', 'urn:li:organization:1035'], dateRange: { start: { year: 2026, month: 9, day: 3 } }, impressions: 40, totalEngagements: 3 },
+      { pivotValues: ['urn:li:sponsoredCampaign:11', 'urn:li:organization:7'], dateRange: { start: { year: 2026, month: 9, day: 3 } }, impressions: 999 },
+    ] });
+  }) as unknown as typeof fetch;
+  const r = await fetchCompanyTouches('t', { accountId: '9', orgIds: ['urn:li:organization:1035', '2'], from: '2026-08-01', to: '2027-01-01' }, fake, Date.UTC(2026, 10, 11));
+  expect(stats.length).toBe(4); // Aug 1 → Nov 11 in 31-day chunks
+  expect(stats[stats.length - 1]).toContain('end:(year:2026,month:11,day:11)');
+  expect(r.rows.every((x) => x.orgId === '1035')).toBe(true);
+  expect(r.rows[0]).toMatchObject({ date: '2026-09-03', campaignId: '11', engagements: 3 });
+  expect(r.campaigns['11'].name).toBe('Q4 ABM');
+  expect(r.meta).toMatchObject({ orgsRequested: 2, orgsTouched: 1, clampedFrom: false, to: '2026-11-11' });
+
+  const old = await fetchCompanyTouches('t', { accountId: '9', orgIds: ['1035'], from: '2020-01-01', to: '2026-11-11' }, fake, Date.UTC(2026, 10, 11));
+  expect(old.meta.clampedFrom).toBe(true);
+  expect(old.meta.from).toBe('2024-11-12');
+  await expect(fetchCompanyTouches('t', { accountId: '9', orgIds: [], from: '2026-01-01', to: '2026-02-01' }, fake)).rejects.toThrow();
 });

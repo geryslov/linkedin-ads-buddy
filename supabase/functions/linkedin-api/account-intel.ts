@@ -689,13 +689,92 @@ export async function fetchCompanyDaily(
   if (!org) throw new AccountIntelError('Could not match this company to a LinkedIn organization among the companies your ads reached in this time frame, so daily paid data is unavailable.', 404, 'org_unresolved');
   const orgUrn = `urn:li:organization:${org.id}`;
 
+  const [daily, campaignList] = await Promise.all([
+    collectDaily(accessToken, accountId, [[rangeFrom, now]], (id) => id === org.id, fetchImpl, MAX_DAILY_CALLS, 1),
+    listCampaigns(accessToken, accountId, fetchImpl).catch(() => [] as any[]),
+  ]);
+  const rows: DailyRow[] = daily.rows.map(({ orgId: _, ...r }) => r);
+
+  return {
+    rows: rows.sort((a, b) => a.date.localeCompare(b.date)),
+    campaigns: usedCampaigns(campaignList, rows),
+    meta: { accountId, lookbackWindow, orgUrn, resolvedVia: org.via, campaignSplit: daily.campaignSplit, calls: daily.calls, truncated: daily.truncated, durationMs: Date.now() - started },
+  };
+}
+
+const MAX_TOUCH_ORGS = 1000;
+const MAX_TOUCH_CALLS = 80;
+const TOUCH_CHUNK_DAYS = 31;
+const RETENTION_DAYS = 730;
+
+/**
+ * Influence Matcher: daily paid touches for a set of organizations (by numeric
+ * id, from the demographic MEMBER_COMPANY pivot) over an explicit date range,
+ * so deals can be aligned on their own dates. Same account-wide statistics
+ * query as fetchCompanyDaily, cut into month chunks run four at a time.
+ */
+export async function fetchCompanyTouches(
+  accessToken: string, q: { accountId: string; orgIds: unknown; from: string; to: string },
+  fetchImpl: typeof fetch = fetch, now = Date.now(),
+) {
+  const accountId = String(q.accountId || '').replace(/\D/g, '');
+  const ids = Array.isArray(q.orgIds) ? [...new Set(q.orgIds.map((v) => String(v).split(':').pop()!.replace(/\D/g, '')).filter(Boolean))] : [];
+  const parse = (d: string) => (/^\d{4}-\d{2}-\d{2}$/.test(String(d)) ? Date.parse(`${d}T00:00:00Z`) : NaN);
+  let from = parse(q.from);
+  let to = parse(q.to);
+  if (!accountId || !ids.length || Number.isNaN(from) || Number.isNaN(to)) throw new AccountIntelError('accountId, orgIds and from/to (YYYY-MM-DD) are required', 400, 'bad_request');
+  if (ids.length > MAX_TOUCH_ORGS) throw new AccountIntelError(`At most ${MAX_TOUCH_ORGS} companies per request`, 400, 'bad_request');
+  const today = Date.UTC(new Date(now).getUTCFullYear(), new Date(now).getUTCMonth(), new Date(now).getUTCDate());
+  // Ad Analytics keeps two years of data.
+  const clampedFrom = from < today - (RETENTION_DAYS - 1) * DAY_MS;
+  from = Math.max(from, today - (RETENTION_DAYS - 1) * DAY_MS);
+  to = Math.min(to, today);
+  if (from > to) throw new AccountIntelError('The date range is outside the two years LinkedIn keeps.', 400, 'bad_request');
+  const started = Date.now();
+
+  const chunks: [number, number][] = [];
+  for (let t = from; t <= to; t += TOUCH_CHUNK_DAYS * DAY_MS) chunks.push([t, Math.min(to, t + (TOUCH_CHUNK_DAYS - 1) * DAY_MS)]);
+  const wanted = new Set(ids);
+  const [daily, campaignList] = await Promise.all([
+    collectDaily(accessToken, accountId, chunks, (id) => wanted.has(id), fetchImpl, MAX_TOUCH_CALLS, CONCURRENCY),
+    listCampaigns(accessToken, accountId, fetchImpl).catch(() => [] as any[]),
+  ]);
+
+  return {
+    rows: daily.rows.sort((a, b) => a.date.localeCompare(b.date)),
+    campaigns: usedCampaigns(campaignList, daily.rows),
+    meta: {
+      accountId, from: isoDay(ymd(new Date(from))), to: isoDay(ymd(new Date(to))), clampedFrom,
+      orgsRequested: ids.length, orgsTouched: new Set(daily.rows.map((r) => r.orgId)).size,
+      campaignSplit: daily.campaignSplit, calls: daily.calls, truncated: daily.truncated, durationMs: Date.now() - started,
+    },
+  };
+}
+
+function usedCampaigns(campaignList: any[], rows: { campaignId: string | null }[]) {
+  const used = new Set(rows.map((r) => r.campaignId).filter(Boolean));
+  const campaigns: Record<string, { name: string; objectiveType: string; status: string }> = {};
+  for (const c of campaignList) {
+    const id = String(c?.id ?? '');
+    if (used.has(id)) campaigns[id] = { name: String(c.name || `Campaign ${id}`), objectiveType: String(c.objectiveType || 'UNCLASSIFIED').toUpperCase(), status: String(c.status || '').toUpperCase() };
+  }
+  return campaigns;
+}
+
+// Ad Analytics has no member-company filter, so this pulls account-wide
+// CAMPAIGN × MEMBER_COMPANY daily rows and keeps the orgs `keep` accepts.
+// A full response may be cut at the element limit, so a range is halved until it fits.
+async function collectDaily(
+  accessToken: string, accountId: string, ranges: [number, number][], keep: (orgId: string) => boolean,
+  fetchImpl: typeof fetch, maxCalls: number, concurrency: number,
+) {
   const account = `List(${encodeURIComponent(`urn:li:sponsoredAccount:${accountId}`)})`;
   const core = 'pivotValues,dateRange,impressions,clicks,totalEngagements,oneClickLeads,externalWebsiteConversions,costInLocalCurrency';
   let fields = `${core},videoViews`;
   let campaignSplit = true;
   let calls = 0;
   let truncated = false;
-  const rows: DailyRow[] = [];
+  const rows: (DailyRow & { orgId: string })[] = [];
 
   const query = async (from: number, to: number) => {
     const base = campaignSplit
@@ -707,9 +786,8 @@ export async function fetchCompanyDaily(
     });
   };
 
-  // A full response may be cut at the element limit, so split the range until it fits.
   const collect = async (from: number, to: number): Promise<void> => {
-    if (calls >= MAX_DAILY_CALLS) { truncated = true; return; }
+    if (calls >= maxCalls) { truncated = true; return; }
     let res = await query(from, to);
     // Degrade once on 400: drop videoViews, then drop the campaign split (single MEMBER_COMPANY pivot).
     while (res.status === 400 && (fields !== core || campaignSplit)) {
@@ -728,9 +806,12 @@ export async function fetchCompanyDaily(
     if (els.length >= STATS_LIMIT) truncated = true;
     for (const el of els) {
       const pv: string[] = Array.isArray(el?.pivotValues) ? el.pivotValues : [];
-      if (!pv.includes(orgUrn)) continue;
+      const org = pv.find((v) => v.startsWith('urn:li:organization:'));
+      const orgId = org ? org.split(':').pop()! : '';
+      if (!orgId || !keep(orgId)) continue;
       const camp = pv.find((v) => v.startsWith('urn:li:sponsoredCampaign:'));
       rows.push({
+        orgId,
         date: isoDay(el?.dateRange?.start),
         campaignId: camp ? camp.split(':').pop()! : null,
         impressions: num(el.impressions), clicks: num(el.clicks), engagements: num(el.totalEngagements),
@@ -740,20 +821,6 @@ export async function fetchCompanyDaily(
     }
   };
 
-  const [, campaignList] = await Promise.all([
-    collect(rangeFrom, now),
-    listCampaigns(accessToken, accountId, fetchImpl).catch(() => [] as any[]),
-  ]);
-  const used = new Set(rows.map((r) => r.campaignId).filter(Boolean));
-  const campaigns: Record<string, { name: string; objectiveType: string; status: string }> = {};
-  for (const c of campaignList) {
-    const id = String(c?.id ?? '');
-    if (used.has(id)) campaigns[id] = { name: String(c.name || `Campaign ${id}`), objectiveType: String(c.objectiveType || 'UNCLASSIFIED').toUpperCase(), status: String(c.status || '').toUpperCase() };
-  }
-
-  return {
-    rows: rows.sort((a, b) => a.date.localeCompare(b.date)),
-    campaigns,
-    meta: { accountId, lookbackWindow, orgUrn, resolvedVia: org.via, campaignSplit, calls, truncated, durationMs: Date.now() - started },
-  };
+  await pool(ranges, concurrency, ([from, to]) => collect(from, to));
+  return { rows, campaignSplit, calls, truncated };
 }

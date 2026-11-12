@@ -10,6 +10,7 @@ import {
 } from '@/hooks/useCompanyInfluenceMatcher';
 import { TimeFrameSelector } from '@/components/dashboard/TimeFrameSelector';
 import { MetricCard } from '@/components/dashboard/MetricCard';
+import { DealInfluence } from '@/components/dashboard/DealInfluence';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -959,6 +960,11 @@ export function CompanyInfluenceMatcher({ accessToken, selectedAccount }: Compan
             <MetricCard title="Shares" value={fmtNum(matchedTotals.shares)} icon={Share2} delay={210} />
           </div>
         </div>
+      )}
+
+      {/* Deal influence: paid touches aligned on each deal date */}
+      {hasData && matched.length > 0 && (
+        <DealInfluence accessToken={accessToken} selectedAccount={selectedAccount} matched={matched} dateColumn={dateColumn} />
       )}
 
       {/* Results Table */}
