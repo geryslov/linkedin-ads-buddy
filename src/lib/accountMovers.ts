@@ -14,7 +14,10 @@ export const MOMENTUM_RULE =
   `New = engaged in the last 30 days with no impressions or engagements in the 60 days before. ` +
   `Warming = at least ${MIN_ENGAGEMENTS} engagements in the last 30 days and a daily engagement rate ${MOMENTUM_RATIO}× or more the prior 60 days'. ` +
   `Cooling = at least ${MIN_ENGAGEMENTS} engagements in the prior 60 days and a daily rate there ${MOMENTUM_RATIO}× or more the last 30 days'. ` +
-  `Engagements are paid + organic.`;
+  `Engagements and impressions count paid, organic or both, per the filter.`;
+
+/** Which engagements drive the classification. */
+export type EngagementSource = 'both' | 'paid' | 'organic';
 
 export interface Activity {
   paidImpressions: number;
@@ -23,14 +26,16 @@ export interface Activity {
   organicEngagements: number;
 }
 
-const eng = (a: Activity) => a.paidEngagements + a.organicEngagements;
-const imp = (a: Activity) => a.paidImpressions + a.organicImpressions;
+const eng = (a: Activity, s: EngagementSource = 'both') =>
+  (s !== 'organic' ? a.paidEngagements : 0) + (s !== 'paid' ? a.organicEngagements : 0);
+const imp = (a: Activity, s: EngagementSource = 'both') =>
+  (s !== 'organic' ? a.paidImpressions : 0) + (s !== 'paid' ? a.organicImpressions : 0);
 
-export function momentumOf(m30: Activity | null, m90: Activity) {
-  const recent = m30 ? eng(m30) : 0;
+export function momentumOf(m30: Activity | null, m90: Activity, source: EngagementSource = 'both') {
+  const recent = m30 ? eng(m30, source) : 0;
   // The two calls aren't atomic — a 30d figure can exceed the 90d one.
-  const prior = Math.max(0, eng(m90) - recent);
-  const priorImpressions = Math.max(0, imp(m90) - (m30 ? imp(m30) : 0));
+  const prior = Math.max(0, eng(m90, source) - recent);
+  const priorImpressions = Math.max(0, imp(m90, source) - (m30 ? imp(m30, source) : 0));
   const recentRate = recent / 30;
   const priorRate = prior / 60;
   let momentum: Momentum | null = null;
@@ -63,7 +68,7 @@ export interface MoversResult {
   unknownPrior: number;
 }
 
-export function buildMovers(c30: CompanyIntelligence[], c90: CompanyIntelligence[], dm: CompanyIntelligence[] | null): MoversResult {
+export function buildMovers(c30: CompanyIntelligence[], c90: CompanyIntelligence[], dm: CompanyIntelligence[] | null, source: EngagementSource = 'both'): MoversResult {
   const recent = new Map(c30.map((c) => [companyKey(c), c]));
   const dmBy = new Map((dm ?? []).map((c) => [companyKey(c), c]));
   const keys90 = new Set<string>();
@@ -73,7 +78,7 @@ export function buildMovers(c30: CompanyIntelligence[], c90: CompanyIntelligence
     const key = companyKey(c);
     keys90.add(key);
     const r = recent.get(key) ?? null;
-    const m = momentumOf(r, c);
+    const m = momentumOf(r, c, source);
     if (!m.momentum) continue;
     counts[m.momentum]++;
     const d = dmBy.get(key);
@@ -85,8 +90,8 @@ export function buildMovers(c30: CompanyIntelligence[], c90: CompanyIntelligence
   const unknownPrior = c30.filter((c) => !keys90.has(companyKey(c))).length;
   return {
     movers, counts,
-    engaged30: c30.filter((c) => eng(c) > 0).length,
-    engaged90: c90.filter((c) => eng(c) > 0).length,
+    engaged30: c30.filter((c) => eng(c, source) > 0).length,
+    engaged90: c90.filter((c) => eng(c, source) > 0).length,
     dmCompanies: dmBy.size,
     unknownPrior,
   };

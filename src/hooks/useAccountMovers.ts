@@ -1,11 +1,14 @@
 import { useCallback, useState } from 'react';
 import { invoke, asIntelError, DECISION_MAKER_SENIORITIES, IntelError } from '@/hooks/useCompanyIntelligence';
 import { buildMovers, MoversResult } from '@/lib/accountMovers';
+import type { CompanyIntelligence } from '@/hooks/useCompanyIntelligence';
 
 export interface AccountMovers extends MoversResult {
   accountId: string;
   at: string;
   truncated: boolean;
+  /** Raw runs, so the card can re-classify by paid / organic without refetching. */
+  raw: { c30: CompanyIntelligence[]; c90: CompanyIntelligence[]; dm: CompanyIntelligence[] | null };
   /** The decision-maker run failed — the DM flag is missing, the lists are not. */
   dmError: IntelError | null;
 }
@@ -31,6 +34,7 @@ export function useAccountMovers(accessToken: string | null) {
       const dm = rdm.status === 'fulfilled' ? rdm.value : null;
       setMovers({
         ...buildMovers(r30.value.companies, r90.value.companies, dm?.companies ?? null),
+        raw: { c30: r30.value.companies, c90: r90.value.companies, dm: dm?.companies ?? null },
         accountId,
         at: new Date().toISOString(),
         truncated: r30.value.meta.truncated || r90.value.meta.truncated || !!dm?.meta.truncated,

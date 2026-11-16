@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { WidgetCard, EmptyState, StatusPill, SegmentedControl } from '@/components/dashboard/widgets';
 import { Button } from '@/components/ui/button';
 import { exportToCSV } from '@/lib/exportUtils';
-import { MOMENTUM_RULE, Momentum, rankMovers } from '@/lib/accountMovers';
+import { MOMENTUM_RULE, Momentum, EngagementSource, buildMovers, rankMovers } from '@/lib/accountMovers';
 import type { useAccountMovers } from '@/hooks/useAccountMovers';
 import { CompanyLogo, ERROR_HELP, LEVEL_TONE, SENIORITIES, SIZE_LABELS, levelLabel } from '@/components/dashboard/CompanyIntelligenceTable';
 import { Activity, AlertTriangle, Download, Loader2, RefreshCw } from 'lucide-react';
@@ -11,6 +11,12 @@ const TABS: { value: Momentum; label: string; hint: string }[] = [
   { value: 'warming', label: 'Warming up', hint: 'Engaging faster than before. Hand these to sales.' },
   { value: 'new', label: 'Newly engaged', hint: 'First engagement in the last 30 days.' },
   { value: 'cooling', label: 'Cooling down', hint: 'Engagement is fading. Retarget or check in.' },
+];
+
+const SOURCES: { value: EngagementSource; label: string }[] = [
+  { value: 'both', label: 'Paid + organic' },
+  { value: 'paid', label: 'Paid' },
+  { value: 'organic', label: 'Organic' },
 ];
 
 const PAGE = 25;
@@ -30,7 +36,13 @@ export function AccountMovers({ selectedAccount, ready, state }: {
   const { movers, isLoading, error, load } = state;
   const [tab, setTab] = useState<Momentum>('warming');
   const [showAll, setShowAll] = useState(false);
-  const current = movers && movers.accountId === selectedAccount ? movers : null;
+  const [source, setSource] = useState<EngagementSource>('both');
+  const loaded = movers && movers.accountId === selectedAccount ? movers : null;
+  // Re-classified client-side; the scorecard and weekly report keep paid + organic.
+  const current = useMemo(
+    () => (loaded ? { ...loaded, ...buildMovers(loaded.raw.c30, loaded.raw.c90, loaded.raw.dm, source) } : null),
+    [loaded, source],
+  );
   const list = current ? rankMovers(current, tab) : [];
   const shown = showAll ? list : list.slice(0, PAGE);
 
@@ -38,11 +50,11 @@ export function AccountMovers({ selectedAccount, ready, state }: {
     list.map((m) => ({
       company: m.company.companyName, website: m.company.companyWebsite, linkedin: m.company.companyPageUrl,
       size: SIZE_LABELS[m.company.companySize] ?? m.company.companySize, country: m.company.countryCode,
-      momentum: m.momentum, level_30d: m.level30, level_90d: m.level90,
+      momentum: m.momentum, engagements: source, level_30d: m.level30, level_90d: m.level90,
       engagements_30d: m.recent, engagements_prior_60d: m.prior, rate_change: change(m.recent, m.prior),
       decision_makers_90d: m.dm ? m.dmSeniorities.map((s) => SENIORITIES[s] || s).join(' ') || 'yes' : '',
     })),
-    `account-movers-${tab}-${selectedAccount}`,
+    `account-movers-${tab}-${source}-${selectedAccount}`,
   );
 
   return (
@@ -86,6 +98,7 @@ export function AccountMovers({ selectedAccount, ready, state }: {
             ))}
           </div>
           <div className="flex flex-wrap items-center gap-3">
+            <SegmentedControl size="sm" options={SOURCES} value={source} onChange={(v) => { setSource(v); setShowAll(false); }} />
             <SegmentedControl size="sm" options={TABS.map((t) => ({ value: t.value, label: `${t.label} (${current.counts[t.value]})` }))} value={tab} onChange={(v) => { setTab(v); setShowAll(false); }} />
             <span className="text-xs text-muted-foreground">{TABS.find((t) => t.value === tab)?.hint}</span>
           </div>
@@ -107,7 +120,7 @@ export function AccountMovers({ selectedAccount, ready, state }: {
                     <th className="px-3 py-2 text-left font-medium">Company</th>
                     <th className="px-2 py-2 text-left font-medium whitespace-nowrap">Level 30d</th>
                     <th className="px-2 py-2 text-left font-medium whitespace-nowrap">Level 90d</th>
-                    <th className="px-2 py-2 text-right font-medium whitespace-nowrap">Eng. 30d</th>
+                    <th className="px-2 py-2 text-right font-medium whitespace-nowrap">{source === 'paid' ? 'Paid eng. 30d' : source === 'organic' ? 'Org. eng. 30d' : 'Eng. 30d'}</th>
                     <th className="px-2 py-2 text-right font-medium whitespace-nowrap">Prior 60d</th>
                     <th className="px-2 py-2 text-right font-medium whitespace-nowrap" title="Daily engagement rate, last 30 days vs the 60 days before">Rate</th>
                     <th className="px-2 py-2 text-left font-medium whitespace-nowrap">Decision makers</th>
