@@ -536,3 +536,12 @@ Phase 2 of the panel, all client-side from data it already loads:
 
 ### Nov 12, 2026 — Account Intel: matched audience filter
 LinkedIn's sample scripts for the Company Intelligence API showed the `adSegments:List(...)` filter in use. `buildFilterCriteria` already supported `adSegmentIds`, but nothing in the UI set it. New `breakdown: 'segments'` lists the account's matched audiences: segments are found in campaign targeting, because Campaign Manager list uploads aren't listed by `dmpSegments` (that only returns API-created segments, which are merged in too). Names come from `adTargetingEntities?q=urns`; whether that resolves ad segment names is **unverified**, hence the `Audience <id>` fallback. A selected audience combines with the lookback only. Combining it with seniority or campaign filters is undocumented, so they clear each other rather than risk a `bad_request`. The samples also page 1,000 rows per call (we use 500), which is worth testing; they have mislabelled CSV columns, so don't reuse their output.
+
+### Nov 16, 2026 — Account momentum, weekly-report accounts, campaign scorecard
+
+Company Intelligence was only read by its own three tabs; nothing agency-facing or optimization-side used it. Two additions:
+
+- **Account momentum** on Account Intel: every company classified *new / warming / cooling* from 30d vs (90d − 30d), using engagement sums (levels don't subtract). The rule lives in `src/lib/accountMovers.ts` and now also drives Company Journey's badge, which used to compare 30d and 90d levels and could disagree with the list on the same company. Guards: per-metric clamp at 0 (the 30d and 90d calls aren't atomic), and a 30d company missing from 90d is *prior unknown*, not *new*.
+- **Weekly report**: opt-in `accounts` block in the Claude payload, labelled 30d vs prior 60d in both the toggle and the ask message so Claude doesn't call it "this week". Company names are a second opt-in, default off, because `get_published_report` returns `raw_data` to anyone with the token. The instruction lives in the ask message, so analyze-data needed no deploy.
+- **Campaign scorecard**: `fetchCampaignBreakdown` adds per-campaign spend (v2 `CAMPAIGN` pivot); the card computes cost per engaged / High+ company / qualified lead. Decision makers per campaign are impossible (audience filters exclude campaign scope). The UI hides costs on an older deploy rather than throwing, since the same breakdown feeds the per-company drill-down.
+

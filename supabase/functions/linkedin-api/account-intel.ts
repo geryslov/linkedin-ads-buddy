@@ -343,21 +343,45 @@ async function listCampaigns(accessToken: string, accountId: string, fetchImpl: 
   return all;
 }
 
-export async function fetchCampaignBreakdown(accessToken: string, q: { accountId: string; lookbackWindow?: string }, fetchImpl: typeof fetch = fetch) {
+// Spend per campaign over the lookback (Ad Analytics), for cost per engaged company.
+// Never fails the breakdown: on error the campaigns carry spend: null and meta.spendError.
+async function campaignSpend(accessToken: string, accountId: string, lookbackWindow: string, fetchImpl: typeof fetch, now: number) {
+  const dateRange = { start: ymd(new Date(now - (LOOKBACK_DAYS[lookbackWindow] ?? 90) * 86400000)), end: ymd(new Date(now)) };
+  const rows = await analyticsRows(accessToken, (s) => analyticsUrl(dateRange, 'CAMPAIGN', `accounts[0]=urn:li:sponsoredAccount:${accountId}`, 'pivotValue,costInLocalCurrency,impressions', s), fetchImpl);
+  const spend: Record<string, number> = {};
+  for (const r of rows) {
+    const id = String(r?.pivotValue || '').match(/sponsoredCampaign:(\d+)/)?.[1];
+    if (id) spend[id] = (spend[id] || 0) + (Number(r?.costInLocalCurrency) || 0);
+  }
+  return spend;
+}
+
+export async function fetchCampaignBreakdown(accessToken: string, q: { accountId: string; lookbackWindow?: string }, fetchImpl: typeof fetch = fetch, now = Date.now()) {
   const accountId = String(q.accountId || '').replace(/\D/g, '');
   if (!accountId) throw new AccountIntelError('accountId is required', 400, 'bad_request');
   const lookbackWindow = q.lookbackWindow || 'LAST_90_DAYS';
   const started = Date.now();
-  const { campaigns, skipped } = selectBreakdownCampaigns(await listCampaigns(accessToken, accountId, fetchImpl), lookbackWindow);
+  const { campaigns, skipped } = selectBreakdownCampaigns(await listCampaigns(accessToken, accountId, fetchImpl), lookbackWindow, now);
   const slices = campaigns.map((c) => ({ slice: c.id, filterCriteria: buildFilterCriteria({ accountId, lookbackWindow, campaignId: c.id }) }));
-  const r = await pivotSlices(accessToken, accountId, slices, fetchImpl);
+  const [r, spend] = await Promise.all([
+    pivotSlices(accessToken, accountId, slices, fetchImpl),
+    campaignSpend(accessToken, accountId, lookbackWindow, fetchImpl, now).then(
+      (bySpend) => ({ bySpend, error: null as string | null }),
+      (e) => ({ bySpend: null, error: String((e as Error)?.message || e) }),
+    ),
+  ]);
+  const selected = new Set(campaigns.map((c) => c.id));
+  const outside = spend.bySpend ? Object.entries(spend.bySpend).filter(([id, v]) => !selected.has(id) && v > 0) : [];
   return {
     byCompany: r.byCompany,
-    campaigns: campaigns.map((c) => ({ ...c, companies: r.sliceCompanies[c.id] ?? 0 })),
+    campaigns: campaigns.map((c) => ({ ...c, companies: r.sliceCompanies[c.id] ?? 0, spend: spend.bySpend ? spend.bySpend[c.id] ?? 0 : null })),
     meta: {
       version: ACCOUNT_INTEL_VERSION, accountId, lookbackWindow,
       campaignsQueried: campaigns.length, campaignsSkipped: skipped,
       failed: r.failed, truncated: r.truncated, durationMs: Date.now() - started,
+      spendError: spend.error,
+      // Spend on campaigns outside the ≤60 analysed, so the scorecard doesn't pass for the whole account.
+      spendOutside: { campaigns: outside.length, spend: outside.reduce((t, [, v]) => t + v, 0) },
     },
   };
 }

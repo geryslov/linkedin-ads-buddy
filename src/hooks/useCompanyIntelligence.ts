@@ -90,6 +90,8 @@ export interface BreakdownCampaign {
   status: string;
   objectiveType: string;
   companies: number;
+  /** Account-currency spend over the lookback; null when the spend query failed, undefined on an older deploy. */
+  spend?: number | null;
 }
 
 export interface Breakdown {
@@ -97,7 +99,7 @@ export interface Breakdown {
   key: string;
   byCompany: Record<string, BreakdownRow[]>;
   campaigns?: BreakdownCampaign[];
-  meta: { durationMs: number; failed: { slice: string; error: string }[]; truncated: boolean; campaignsQueried?: number; campaignsSkipped?: number };
+  meta: { durationMs: number; failed: { slice: string; error: string }[]; truncated: boolean; campaignsQueried?: number; campaignsSkipped?: number; spendError?: string | null; spendOutside?: { campaigns: number; spend: number } };
 }
 
 export interface CreativeMetrics {
@@ -167,7 +169,7 @@ function toParams(accountId: string, q: CompanyIntelligenceQuery) {
   return params;
 }
 
-async function invoke<T = { companies: CompanyIntelligence[]; meta: CompanyIntelligenceMeta }>(accessToken: string, params: Record<string, unknown>): Promise<T> {
+export async function invoke<T = { companies: CompanyIntelligence[]; meta: CompanyIntelligenceMeta }>(accessToken: string, params: Record<string, unknown>): Promise<T> {
   const { data, error } = await supabase.functions.invoke('linkedin-api', {
     body: { action: 'get_company_intelligence', accessToken, params },
   });
@@ -180,7 +182,7 @@ async function invoke<T = { companies: CompanyIntelligence[]; meta: CompanyIntel
   return data as T;
 }
 
-const asIntelError = async (e: unknown): Promise<IntelError> =>
+export const asIntelError = async (e: unknown): Promise<IntelError> =>
   (e as { kind?: string })?.kind ? { message: (e as Error).message, kind: (e as { kind: string }).kind } : readInvokeError(e);
 
 export function useCompanyIntelligence(accessToken: string | null) {

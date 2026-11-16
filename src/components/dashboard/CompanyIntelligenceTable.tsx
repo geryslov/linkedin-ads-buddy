@@ -8,6 +8,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { exportToCSV } from '@/lib/exportUtils';
+import { useAccountMovers } from '@/hooks/useAccountMovers';
+import { AccountMovers } from '@/components/dashboard/AccountMovers';
+import { CampaignScorecard } from '@/components/dashboard/CampaignScorecard';
 import { Building2, Loader2, RefreshCw, Download, ExternalLink, Info, AlertTriangle, PlugZap, ChevronRight, ChevronDown } from 'lucide-react';
 
 interface CompanyIntelligenceTableProps {
@@ -24,7 +27,7 @@ const LOOKBACKS: { label: string; value: LookbackWindow }[] = [
   { label: '365d', value: 'LAST_365_DAYS' },
 ];
 
-const SENIORITIES: Record<string, string> = {
+export const SENIORITIES: Record<string, string> = {
   '3': 'Entry', '4': 'Senior', '5': 'Manager', '6': 'Director', '7': 'VP', '8': 'CXO', '9': 'Partner', '10': 'Owner',
 };
 
@@ -33,13 +36,13 @@ const JOB_FUNCTIONS: Record<string, string> = {
   OPERATIONS: 'Operations', FINANCE: 'Finance', HUMAN_RESOURCES: 'HR', OTHER: 'Other',
 };
 
-const LEVEL_TONE: Record<string, 'success' | 'info' | 'warning' | 'neutral'> = {
+export const LEVEL_TONE: Record<string, 'success' | 'info' | 'warning' | 'neutral'> = {
   VERY_HIGH: 'success', HIGH: 'success', MEDIUM: 'info', LOW: 'warning', VERY_LOW: 'neutral',
 };
-const LEVEL_RANK = ['UNKNOWN', 'VERY_LOW', 'LOW', 'MEDIUM', 'HIGH', 'VERY_HIGH'];
-const levelLabel = (l: string) => l.toLowerCase().replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
+export const LEVEL_RANK = ['UNKNOWN', 'VERY_LOW', 'LOW', 'MEDIUM', 'HIGH', 'VERY_HIGH'];
+export const levelLabel = (l: string) => l.toLowerCase().replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
 
-const SIZE_LABELS: Record<string, string> = {
+export const SIZE_LABELS: Record<string, string> = {
   SIZE_1: '1', SIZE_2_TO_10: '2–10', SIZE_11_TO_50: '11–50', SIZE_51_TO_200: '51–200', SIZE_201_TO_500: '201–500',
   SIZE_501_TO_1000: '501–1K', SIZE_1001_TO_5000: '1K–5K', SIZE_5001_TO_10000: '5K–10K', SIZE_10001_OR_MORE: '10K+',
 };
@@ -127,6 +130,8 @@ export function CompanyIntelligenceTable({ accessToken, selectedAccount, campaig
     creativeBreakdowns, loadCreativeBreakdown,
     segments, segmentsError, loadSegments,
   } = useCompanyIntelligence(accessToken);
+  const moversState = useAccountMovers(accessToken);
+  const resetMovers = moversState.reset;
 
   const [lookback, setLookback] = useState<LookbackWindow>('LAST_90_DAYS');
   const [audience, setAudience] = useState<Audience>('all');
@@ -154,12 +159,13 @@ export function CompanyIntelligenceTable({ accessToken, selectedAccount, campaig
 
   useEffect(() => {
     reset();
+    resetMovers();
     setSegmentId('all');
     if (selectedAccount) {
       runCheck(selectedAccount);
       loadSegments(selectedAccount);
     }
-  }, [selectedAccount, runCheck, reset, loadSegments]);
+  }, [selectedAccount, runCheck, reset, resetMovers, loadSegments]);
 
   // Breakdowns follow the lookback the table was loaded with.
   const breakdownLookback = (meta?.lookbackWindow ?? lookback) as LookbackWindow;
@@ -424,6 +430,19 @@ export function CompanyIntelligenceTable({ accessToken, selectedAccount, campaig
           </div>
         )}
       </WidgetCard>
+
+      <AccountMovers selectedAccount={selectedAccount} ready={!!check?.ok} state={moversState} />
+
+      <CampaignScorecard
+        selectedAccount={selectedAccount}
+        lookback={breakdownLookback}
+        ready={!!check?.ok}
+        breakdown={campaignBreakdown}
+        loading={loadingBreakdown === 'campaign'}
+        error={breakdownError}
+        load={() => selectedAccount && loadBreakdown('campaign', selectedAccount, breakdownLookback)}
+        movers={moversState.movers}
+      />
 
       {/* 2. Query */}
       <WidgetCard

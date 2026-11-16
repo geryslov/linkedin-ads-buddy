@@ -728,6 +728,7 @@ export function WeeklyReport({ accessToken, selectedAccount }: Props) {
           onOpenChange={setPublishOpen}
           data={data}
           accountId={selectedAccount}
+          accessToken={accessToken}
         />
       )}
 

@@ -118,6 +118,37 @@ test('campaign breakdown pivots one call per campaign into rows per company', as
   expect(urls.filter((u) => u.includes('accountIntelligence')).every((u) => u.includes('LAST_30_DAYS'))).toBe(true);
 });
 
+test('campaign breakdown joins spend per campaign and reports spend outside the analysed set', async () => {
+  const campaigns = [
+    { id: 11, name: 'A', status: 'ACTIVE', objectiveType: 'LEAD_GENERATION', runSchedule: { start: Date.now() - DAY } },
+    { id: 22, name: 'B', status: 'ACTIVE', objectiveType: 'WEBSITE_VISIT', runSchedule: { start: Date.now() - DAY } },
+  ];
+  const make = (spendFails: boolean) => (async (url: string) => {
+    if (url.includes('/adCampaigns')) return json({ elements: campaigns });
+    if (url.includes('adAnalyticsV2')) {
+      if (spendFails) return json({ message: 'nope' }, 400);
+      expect(url).toContain('pivot=CAMPAIGN');
+      expect(url).toContain('accounts[0]=urn:li:sponsoredAccount:9');
+      return json({ elements: [
+        { pivotValue: 'urn:li:sponsoredCampaign:11', costInLocalCurrency: '120.5', impressions: 1000 },
+        { pivotValue: 'urn:li:sponsoredCampaign:99', costInLocalCurrency: '30', impressions: 10 },
+      ] });
+    }
+    return json({ elements: [el('Acme')], paging: { total: 1, links: [] } });
+  }) as unknown as typeof fetch;
+
+  const r = await fetchCampaignBreakdown('t', { accountId: '9', lookbackWindow: 'LAST_30_DAYS' }, make(false));
+  expect(r.campaigns.find((c) => c.id === '11')!.spend).toBe(120.5);
+  expect(r.campaigns.find((c) => c.id === '22')!.spend).toBe(0);
+  expect(r.meta.spendOutside).toEqual({ campaigns: 1, spend: 30 });
+  expect(r.meta.spendError).toBeNull();
+
+  const f = await fetchCampaignBreakdown('t', { accountId: '9', lookbackWindow: 'LAST_30_DAYS' }, make(true));
+  expect(f.campaigns.every((c) => c.spend === null)).toBe(true);
+  expect(f.meta.spendError).toContain('400');
+  expect(f.byCompany['https://www.linkedin.com/company/acme'].length).toBe(2);
+});
+
 test('audience breakdown runs 16 slices and keeps failures partial', async () => {
   let calls = 0;
   const fake = (async (url: string) => {

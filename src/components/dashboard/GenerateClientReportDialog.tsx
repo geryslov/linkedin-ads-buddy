@@ -11,6 +11,9 @@ import { useToast } from '@/hooks/use-toast';
 import { useAIAnalysis } from '@/hooks/useAIAnalysis';
 import type { WeeklyReportData } from '@/hooks/useWeeklyReport';
 import { extractKpiSnapshot, serializeReportForClaude, type KpiSnapshot } from '@/lib/serializeReportForClaude';
+import { useAccountMovers } from '@/hooks/useAccountMovers';
+import { summarizeMovers } from '@/lib/accountMovers';
+import { Switch } from '@/components/ui/switch';
 import { Sparkles, Copy, Check, ExternalLink, Loader2, Trash2, Share2, FileText } from 'lucide-react';
 
 interface Props {
@@ -18,6 +21,7 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   data: WeeklyReportData;
   accountId: string;
+  accessToken: string | null;
   fallbackAccountName?: string;
 }
 
@@ -34,7 +38,7 @@ interface PublishedRow {
 
 type Step = 'preview' | 'streaming' | 'edit' | 'published';
 
-export function GenerateClientReportDialog({ open, onOpenChange, data, accountId, fallbackAccountName }: Props) {
+export function GenerateClientReportDialog({ open, onOpenChange, data, accountId, accessToken, fallbackAccountName }: Props) {
   const [clientName, setClientName] = useState(fallbackAccountName || '');
   const [step, setStep] = useState<Step>('preview');
   const [narrative, setNarrative] = useState('');
@@ -47,7 +51,21 @@ export function GenerateClientReportDialog({ open, onOpenChange, data, accountId
   const ai = useAIAnalysis();
 
   const kpiSnapshot: KpiSnapshot = useMemo(() => extractKpiSnapshot(data), [data]);
-  const claudePayload = useMemo(() => serializeReportForClaude(data), [data]);
+  // Account momentum (Company Intelligence) is opt-in; company names are a second opt-in,
+  // because published raw data is readable by anyone with the link.
+  const [includeAccounts, setIncludeAccounts] = useState(false);
+  const [includeNames, setIncludeNames] = useState(false);
+  const accounts = useAccountMovers(accessToken);
+  const moversReady = includeAccounts && accounts.movers?.accountId === accountId;
+  const claudePayload = useMemo(() => ({
+    ...serializeReportForClaude(data),
+    ...(moversReady && accounts.movers ? { accounts: summarizeMovers(accounts.movers, includeNames) } : {}),
+  }), [data, moversReady, accounts.movers, includeNames]);
+
+  // Also covers an account switch while the dialog stays mounted.
+  useEffect(() => {
+    if (open && includeAccounts && accounts.movers?.accountId !== accountId && !accounts.isLoading && !accounts.error) accounts.load(accountId);
+  }, [open, includeAccounts, accountId, accounts]);
 
   // Pre-fill name from linkedin_ad_accounts when the account changes
   useEffect(() => {
@@ -91,7 +109,10 @@ export function GenerateClientReportDialog({ open, onOpenChange, data, accountId
     setNarrative('');
     setStep('streaming');
     ai.ask(
-      "Write this client's weekly LinkedIn ads report following the exact structure in your instructions.",
+      "Write this client's weekly LinkedIn ads report following the exact structure in your instructions." +
+        (claudePayload.accounts
+          ? " The data includes `accounts`: company-level engagement from LinkedIn Company Intelligence, comparing the last 30 days with the 60 days before. It is NOT week-over-week, so say \"over the last 30 days\" when you use it. Mention warming and newly engaged accounts in What's Working, cooling accounts in What's Not Working or Actions, and name companies only if names are present in the data."
+          : ''),
       claudePayload,
       'client_weekly_report',
     );
@@ -202,7 +223,40 @@ export function GenerateClientReportDialog({ open, onOpenChange, data, accountId
                   </div>
                 </div>
 
-                <Button onClick={handleGenerate} disabled={!clientName.trim()} className="w-full gap-2">
+                <div className="p-4 rounded-xl border border-border/70 bg-card space-y-3" style={{ boxShadow: 'var(--shadow-xs)' }}>
+                  <label className="flex items-start justify-between gap-3 cursor-pointer">
+                    <span>
+                      <span className="text-sm font-medium block">Include account momentum (last 30 days)</span>
+                      <span className="text-xs text-muted-foreground">Companies warming up, newly engaged and cooling down, from Company Intelligence. Compares the last 30 days with the 60 before, not this week.</span>
+                    </span>
+                    <Switch checked={includeAccounts} onCheckedChange={setIncludeAccounts} />
+                  </label>
+                  {includeAccounts && (
+                    <>
+                      {accounts.isLoading && <p className="text-xs text-muted-foreground flex items-center gap-1.5"><Loader2 className="h-3 w-3 animate-spin" />Loading account momentum…</p>}
+                      {accounts.error && (
+                        <p className="text-xs text-destructive">
+                          {accounts.error.message} <button className="underline ml-1" onClick={() => accounts.load(accountId)}>Retry</button>
+                          <span className="text-muted-foreground"> · or generate without it</span>
+                        </p>
+                      )}
+                      {moversReady && accounts.movers && (
+                        <p className="text-xs text-muted-foreground tabular-nums">
+                          {accounts.movers.counts.warming} warming · {accounts.movers.counts.new} new · {accounts.movers.counts.cooling} cooling · {accounts.movers.engaged30} engaged in 30 days
+                        </p>
+                      )}
+                      <label className="flex items-start justify-between gap-3 cursor-pointer">
+                        <span>
+                          <span className="text-sm font-medium block">Name the top companies</span>
+                          <span className="text-xs text-muted-foreground">Up to 5 per group. Anyone with the report link can see them, including in the published data.</span>
+                        </span>
+                        <Switch checked={includeNames} onCheckedChange={setIncludeNames} />
+                      </label>
+                    </>
+                  )}
+                </div>
+
+                <Button onClick={handleGenerate} disabled={!clientName.trim() || (includeAccounts && !moversReady && !accounts.error)} className="w-full gap-2">
                   <Sparkles className="h-4 w-4" />
                   Generate with Claude
                 </Button>

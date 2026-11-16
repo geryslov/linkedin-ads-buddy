@@ -4,6 +4,7 @@ import { companyKey, LookbackWindow } from '@/hooks/useCompanyIntelligence';
 import { useCompanyJourney, DailyRow, WindowRow } from '@/hooks/useCompanyJourney';
 import { WidgetCard, EmptyState, StatusPill, SegmentedControl, ChartLegend } from '@/components/dashboard/widgets';
 import { CompanyLogo, ERROR_HELP } from '@/components/dashboard/CompanyIntelligenceTable';
+import { momentumOf, MOMENTUM_RULE } from '@/lib/accountMovers';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
@@ -41,7 +42,6 @@ type Show = 'both' | 'paid' | 'organic';
 const LEVEL_TONE: Record<string, 'success' | 'info' | 'warning' | 'neutral'> = {
   VERY_HIGH: 'success', HIGH: 'success', MEDIUM: 'info', LOW: 'warning', VERY_LOW: 'neutral',
 };
-const LEVEL_RANK = ['UNKNOWN', 'VERY_LOW', 'LOW', 'MEDIUM', 'HIGH', 'VERY_HIGH'];
 const levelLabel = (l: string) => l.toLowerCase().replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
 const fmt = (n: number) => Math.round(n).toLocaleString();
 const titleCase = (s: string) => s.toLowerCase().replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
@@ -166,11 +166,11 @@ export function CompanyJourney({ accessToken, selectedAccount }: CompanyJourneyP
   const showPaid = show !== 'organic';
   const showOrganic = show !== 'paid' && ORGANIC_FIELD[metric] !== undefined;
 
+  // Same rule as Account Intel's momentum card (lib/accountMovers).
   const momentum = (() => {
-    const short = LEVEL_RANK.indexOf(windows[1].engagementLevel); // 30d
-    const long = LEVEL_RANK.indexOf(windows[3].engagementLevel); // 90d
-    if (short <= 0 && long <= 0) return null;
-    return short > long ? { label: 'Warming up', tone: 'success' as const } : short < long ? { label: 'Cooling down', tone: 'warning' as const } : { label: 'Steady', tone: 'info' as const };
+    const m = momentumOf(windows[1], windows[3]).momentum; // 30d vs 90d
+    if (!m) return null;
+    return { new: { label: 'Newly engaged', tone: 'success' as const }, warming: { label: 'Warming up', tone: 'success' as const }, cooling: { label: 'Cooling down', tone: 'warning' as const }, steady: { label: 'Steady', tone: 'info' as const } }[m];
   })();
 
   const selected = selectedIdx !== null ? points[selectedIdx] : null;
@@ -258,7 +258,7 @@ export function CompanyJourney({ accessToken, selectedAccount }: CompanyJourneyP
                 <StatusPill tone={LEVEL_TONE[windows[i].engagementLevel] ?? 'neutral'} label={levelLabel(windows[i].engagementLevel)} />
               </span>
             ))}
-            {momentum && <span className="ml-auto flex items-center gap-1.5"><span className="text-muted-foreground">30d vs 90d</span><StatusPill tone={momentum.tone} label={momentum.label} /></span>}
+            {momentum && <span className="ml-auto flex items-center gap-1.5"><span className="text-muted-foreground" title={MOMENTUM_RULE}>Last 30d vs prior 60d</span><StatusPill tone={momentum.tone} label={momentum.label} /></span>}
           </div>
 
           <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
