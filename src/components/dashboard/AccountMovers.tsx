@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { exportToCSV } from '@/lib/exportUtils';
 import { MOMENTUM_RULE, Momentum, EngagementSource, buildMovers, rankMovers } from '@/lib/accountMovers';
 import type { useAccountMovers } from '@/hooks/useAccountMovers';
+import { CompanyAudienceActions } from '@/components/dashboard/CompanyAudienceActions';
 import { CompanyLogo, ERROR_HELP, LEVEL_TONE, SENIORITIES, SIZE_LABELS, levelLabel } from '@/components/dashboard/CompanyIntelligenceTable';
 import { Activity, AlertTriangle, Download, Loader2, RefreshCw } from 'lucide-react';
 
@@ -28,7 +29,8 @@ const change = (recent: number, prior: number) => {
   return `${pct > 0 ? '+' : ''}${pct}%`;
 };
 
-export function AccountMovers({ selectedAccount, ready, state }: {
+export function AccountMovers({ accessToken, selectedAccount, ready, state }: {
+  accessToken: string | null;
   selectedAccount: string | null;
   ready: boolean;
   state: ReturnType<typeof useAccountMovers>;
@@ -102,6 +104,15 @@ export function AccountMovers({ selectedAccount, ready, state }: {
             <SegmentedControl size="sm" options={TABS.map((t) => ({ value: t.value, label: `${t.label} (${current.counts[t.value]})` }))} value={tab} onChange={(v) => { setTab(v); setShowAll(false); }} />
             <span className="text-xs text-muted-foreground">{TABS.find((t) => t.value === tab)?.hint}</span>
           </div>
+          {selectedAccount && (
+            <CompanyAudienceActions
+              accessToken={accessToken}
+              accountId={selectedAccount}
+              companies={list.map((m) => m.company)}
+              defaultName={`${TABS.find((t) => t.value === tab)?.label} · ${SOURCES.find((x) => x.value === source)?.label} · ${new Date().toISOString().slice(0, 10)}`}
+              filename={`linkedin-company-list-${selectedAccount}-${tab}-${source}-${new Date().toISOString().slice(0, 10)}`}
+            />
+          )}
           {(current.truncated || current.unknownPrior > 0 || current.dmError) && (
             <div className="text-xs text-muted-foreground space-y-1">
               {current.truncated && <p className="flex gap-1.5"><AlertTriangle className="h-3.5 w-3.5 text-warning shrink-0" />LinkedIn returned more companies than one run reads (10,000), so some are missing.</p>}

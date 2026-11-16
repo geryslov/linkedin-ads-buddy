@@ -1003,7 +1003,7 @@ async function collectDaily(
 }
 
 /** LinkedIn's message plus errorDetails.inputErrors (field path + description), for the UI. */
-function linkedInError(text: string) {
+export function linkedInError(text: string) {
   try {
     const body = JSON.parse(text);
     const inputs = (body?.errorDetails?.inputErrors || [])

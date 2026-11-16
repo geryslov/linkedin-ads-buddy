@@ -431,7 +431,7 @@ export function CompanyIntelligenceTable({ accessToken, selectedAccount, campaig
         )}
       </WidgetCard>
 
-      <AccountMovers selectedAccount={selectedAccount} ready={!!check?.ok} state={moversState} />
+      <AccountMovers accessToken={accessToken} selectedAccount={selectedAccount} ready={!!check?.ok} state={moversState} />
 
       <CampaignScorecard
         selectedAccount={selectedAccount}

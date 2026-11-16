@@ -7,6 +7,7 @@ import { isInMailRef, readInMailContent, type MessageAdContent } from './message
 import { fetchCompetitorAds } from './ad-library.ts';
 import { AccountIntelError, fetchAccountIntel, fetchAudienceBreakdown, fetchCampaignBreakdown, fetchCompanyDaily, fetchCompanyTouches, fetchCreativeBreakdown, fetchTouchCampaigns, fetchWindowSeries, fetchAdSegments } from './account-intel.ts';
 import { targetingCompatibilityError } from './targeting-compatibility.ts';
+import { createCompanyAudience, getCompanyAudience } from './audiences.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -3611,6 +3612,27 @@ serve(async (req) => {
             jobFunction: ai.jobFunction, adSegmentIds: Array.isArray(ai.adSegmentIds) ? ai.adSegmentIds.map(String) : undefined,
             check: ai.check === true,
           });
+          return new Response(JSON.stringify(result), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        } catch (e) {
+          const err = e as AccountIntelError;
+          return new Response(JSON.stringify({ error: String(err?.message || e), kind: err?.kind || 'error', details: err?.details || '' }), {
+            status: err?.status || 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+      }
+
+      // Company matched audience from a company list (Account momentum lists) via
+      // LinkedIn's CSV list upload. Creates the list only — attaches it to no campaign.
+      // Not platform-gated: the dashboard doesn't require sign-in, and LinkedIn
+      // itself refuses audience management to VIEWER roles. Not in the product
+      // MCP allowlist.
+      case 'create_company_audience':
+      case 'get_company_audience': {
+        try {
+          const p = params || {};
+          const result = action === 'create_company_audience'
+            ? await createCompanyAudience(accessToken, { accountId: p.accountId, name: p.name, companies: p.companies })
+            : await getCompanyAudience(accessToken, { segmentId: p.segmentId });
           return new Response(JSON.stringify(result), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         } catch (e) {
           const err = e as AccountIntelError;
