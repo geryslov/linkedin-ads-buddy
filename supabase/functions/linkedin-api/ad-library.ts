@@ -8,7 +8,7 @@
 // - Company/Job/Audience facets come back without segment values; only
 //   Language and Location carry them. No ad text or image is returned.
 
-export const AD_LIBRARY_VERSION = '202511';
+export const AD_LIBRARY_VERSION = '202610';
 const PAGE_SIZE = 25; // API maximum
 const MAX_PAGES = 8; // stays under the per-minute throttle
 const CACHE_TTL_MS = 10 * 60 * 1000;

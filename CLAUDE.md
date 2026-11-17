@@ -379,6 +379,7 @@ Sidebar group with two tools. Both are **platform-only writes** (JWT + can_write
 - **`SPONSORED_INMAILS` ads reference `urn:li:adInMailContent:` URNs**, not posts. Filter these out before calling share content APIs — they will never resolve.
 - **Demographic analytics returns empty below LinkedIn's 300-impression privacy threshold.** Not a bug.
 - **`adAnalyticsV2?q=analytics` `paging.total` lies for demographic pivots** — it reports the underlying record count (campaign×creative×company), not the number of pivot rows, and the finder does not reliably honor `&start=`. Pagination loops must terminate on "page came back not completely full" (+ a duplicate-page guard), never on `paging.total`, or metrics inflate ~10× (see HISTORY, Jul 23).
+- **LinkedIn-Version is one constant, `LINKEDIN_VERSION` in `index.ts`** (default `202610`, overridable via the `LINKEDIN_API_VERSION` edge secret). LinkedIn sunsets each version ~12 months on and a sunset version 426s *every* call (`NONEXISTENT_VERSION`) — 202511 took the whole function down on 2026-11-16. Never hardcode a version string in a new call site; `account-intel.ts`, `creative-metadata.ts` and `ad-library.ts` have their own constants to bump too.
 - **Edge function `linkedin-api` is monolithic** (~14.3k lines). Search by `case '<action>':` to find handlers.
 
 ## UI / design

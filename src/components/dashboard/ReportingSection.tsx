@@ -1411,7 +1411,7 @@ export function ReportingSection({ accessToken, selectedAccount, canWrite = fals
                 <div className="text-xs text-muted-foreground space-y-1">
                   <p><strong>Endpoint:</strong> GET https://api.linkedin.com/v2/standardizedTitles</p>
                   <p><strong>Query params:</strong> q=criteria, name=Engineer</p>
-                  <p><strong>Headers:</strong> X-Restli-Protocol-Version: 2.0.0, LinkedIn-Version: 202511</p>
+                  <p><strong>Headers:</strong> X-Restli-Protocol-Version: 2.0.0, LinkedIn-Version: 202610</p>
                 </div>
               </div>
             </CardContent>
