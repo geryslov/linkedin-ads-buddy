@@ -235,7 +235,8 @@ export const BREAKDOWN_SENIORITIES = ['3', '4', '5', '6', '7', '8', '9', '10'];
 
 export { companyKey };
 
-export type BreakdownCampaign = { id: string; name: string; status: string; objectiveType: string };
+// format/type feed the scorecard's activity grouping (thought leadership, CTV, message ads…).
+export type BreakdownCampaign = { id: string; name: string; status: string; objectiveType: string; format: string; type: string; ctv: boolean };
 
 export type BreakdownRow = {
   // campaign id, seniority id or job function
@@ -323,6 +324,10 @@ export function selectBreakdownCampaigns(elements: any[], lookbackWindow: string
     name: String(c.name || `Campaign ${c.id}`),
     status: String(c.status || 'UNKNOWN').toUpperCase(),
     objectiveType: String(c.objectiveType || 'UNCLASSIFIED').toUpperCase(),
+    format: String(c.format || '').toUpperCase(),
+    type: String(c.type || '').toUpperCase(),
+    // No documented CTV field to rely on; take any true top-level flag naming it.
+    ctv: Object.entries(c || {}).some(([k, v]) => v === true && /television|ctv/i.test(k)),
   }));
   return { campaigns, skipped: elements.length - campaigns.length };
 }

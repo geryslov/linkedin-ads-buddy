@@ -89,6 +89,10 @@ export interface BreakdownCampaign {
   name: string;
   status: string;
   objectiveType: string;
+  /** LinkedIn campaign format/type and a CTV flag; undefined on an older deploy. */
+  format?: string;
+  type?: string;
+  ctv?: boolean;
   companies: number;
   /** Account-currency spend over the lookback; null when the spend query failed, undefined on an older deploy. */
   spend?: number | null;

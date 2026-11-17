@@ -87,11 +87,12 @@ test('breakdown campaigns skip drafts, future and long-ended campaigns, active f
     { id: 1, name: 'Old', status: 'COMPLETED', runSchedule: { start: now - 200 * DAY, end: now - 120 * DAY } },
     { id: 2, name: 'Draft', status: 'DRAFT', runSchedule: { start: now - DAY } },
     { id: 3, name: 'Paused', status: 'PAUSED', objectiveType: 'LEAD_GENERATION', runSchedule: { start: now - 10 * DAY } },
-    { id: 4, name: 'Live', status: 'ACTIVE', objectiveType: 'BRAND_AWARENESS', runSchedule: { start: now - 5 * DAY } },
+    { id: 4, name: 'Live', status: 'ACTIVE', objectiveType: 'BRAND_AWARENESS', type: 'SPONSORED_UPDATES', format: 'single_video', connectedTelevisionOnly: true, runSchedule: { start: now - 5 * DAY } },
     { id: 5, name: 'Future', status: 'ACTIVE', runSchedule: { start: now + DAY } },
   ], 'LAST_90_DAYS', now);
   expect(campaigns.map((c) => c.id)).toEqual(['4', '3']);
-  expect(campaigns[0].objectiveType).toBe('BRAND_AWARENESS');
+  expect(campaigns[0]).toMatchObject({ objectiveType: 'BRAND_AWARENESS', type: 'SPONSORED_UPDATES', format: 'SINGLE_VIDEO', ctv: true });
+  expect(campaigns[1]).toMatchObject({ format: '', type: '', ctv: false });
   expect(skipped).toBe(3);
 });
 
