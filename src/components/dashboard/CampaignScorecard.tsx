@@ -48,7 +48,8 @@ const SEN_METRICS: { value: SenMetric; label: string }[] = [
   { value: 'cpl', label: 'Cost / lead' },
 ];
 
-const SENIORITY_LABELS: Record<string, string> = { '1': 'Unpaid', '2': 'Training', ...SENIORITIES };
+// Lazy: CompanyIntelligenceTable imports this file, so SENIORITIES isn't initialized at module load.
+const seniorityLabel = (id: string): string => ({ '1': 'Unpaid', '2': 'Training' } as Record<string, string>)[id] || SENIORITIES[id] || id;
 const SENIORITY_ORDER = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'];
 
 const per = (spend: number | null, n: number) => (spend !== null && spend > 0 && n > 0 ? spend / n : null);
@@ -245,7 +246,7 @@ export function CampaignScorecard({ accessToken, selectedAccount, lookback, read
     view === 'seniority' && senByCampaign
       ? sorted.flatMap((r) => (senByCampaign[r.id] || []).map((s) => ({
         campaign: r.name, campaign_id: r.id, objective: r.objectiveType, activity: r.activity, ad_type: r.adType,
-        seniority: SENIORITY_LABELS[s.seniority] || s.seniority, impressions: s.impressions, clicks: s.clicks, spend: s.spend, leads: s.leads, conversions: s.conversions,
+        seniority: seniorityLabel(s.seniority), impressions: s.impressions, clicks: s.clicks, spend: s.spend, leads: s.leads, conversions: s.conversions,
       })))
       : sorted.map((r) => ({
         campaign: r.name, campaign_id: r.id, objective: r.objectiveType, activity: r.activity, activity_from: r.activitySource, ad_type: r.adType, status: r.status, spend: r.spend ?? '',
@@ -393,7 +394,7 @@ export function CampaignScorecard({ accessToken, selectedAccount, lookback, read
                         <tr>
                           <th className="px-3 py-2 text-left font-medium">Campaign</th>
                           <th className="px-2 py-2 text-right font-medium" title="Impressions LinkedIn reported by seniority">Impr.</th>
-                          {senCols.map((id) => <th key={id} className="px-2 py-2 text-right font-medium whitespace-nowrap">{SENIORITY_LABELS[id] || id}</th>)}
+                          {senCols.map((id) => <th key={id} className="px-2 py-2 text-right font-medium whitespace-nowrap">{seniorityLabel(id)}</th>)}
                         </tr>
                       </thead>
                       <tbody>
