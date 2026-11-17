@@ -3,7 +3,7 @@ import { Bar, CartesianGrid, ComposedChart, Line, ReferenceLine, ResponsiveConta
 import { MatchedCompany, UnmatchedCompany, UploadedCompany } from '@/hooks/useCompanyInfluenceMatcher';
 import {
   useDealInfluence, analyzeDeals, summarizeDeals, campaignCredit, neverReached, engagedNotInCrm, dealDateOf, orgIdOf, bucketLabel,
-  BUCKETS, WEEKS_BEFORE, DealCompany, DealVerdict, GapCompany,
+  BUCKETS, WEEKS_BEFORE, DealCompany, DealVerdict, GapCompany, InfluenceSource,
 } from '@/hooks/useDealInfluence';
 import { WidgetCard, EmptyState, StatusPill, SegmentedControl, ChartLegend } from '@/components/dashboard/widgets';
 import { CompanyLogo, ERROR_HELP } from '@/components/dashboard/CompanyIntelligenceTable';
@@ -36,6 +36,13 @@ const VERDICT: Record<DealVerdict, { label: string; tone: 'success' | 'warning' 
   out_of_range: { label: 'Too old', tone: 'neutral' },
   no_date: { label: 'No date', tone: 'neutral' },
 };
+const SOURCE: Record<InfluenceSource, { label: string; tone: 'success' | 'info' | 'warning' | 'neutral' }> = {
+  both: { label: 'Paid + organic', tone: 'success' },
+  paid: { label: 'Paid', tone: 'info' },
+  organic: { label: 'Organic', tone: 'warning' },
+  none: { label: 'None', tone: 'neutral' },
+};
+type SourceFilter = 'all' | InfluenceSource;
 const ROWS_COLLAPSED = 40;
 const LIST_COLLAPSED = 25;
 const GAP_REASON: Record<GapCompany['reason'], string> = {
@@ -58,6 +65,7 @@ export function DealInfluence({ accessToken, selectedAccount, matched, unmatched
   const [expanded, setExpanded] = useState<string | null>(null);
   const [actionList, setActionList] = useState<ActionList>('gaps');
   const [showAllList, setShowAllList] = useState(false);
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
 
   // What a load would request: every matched org, from 26 weeks before the
   // earliest deal to 4 weeks after the latest (the edge clamps to today / 2 years).
@@ -79,13 +87,15 @@ export function DealInfluence({ accessToken, selectedAccount, matched, unmatched
 
   const stale = !!touches && !!request && loadedKey !== request.key;
   const run = () => request && selectedAccount && load(selectedAccount, request.orgIds, request.from, request.to, request.key);
-  const shown = deals.filter((d) => d.verdict !== 'no_date');
+  const dated = deals.filter((d) => d.verdict !== 'no_date');
+  const shown = dated.filter((d) => sourceFilter === 'all' || d.source === sourceFilter);
   const rows = showAll ? shown : shown.slice(0, ROWS_COLLAPSED);
 
   const handleExport = () => exportToCSV(deals.map((d) => ({
     company: d.name,
     website: d.website,
     dealDate: d.dealDate || '',
+    influencedBy: SOURCE[d.source].label,
     verdict: VERDICT[d.verdict].label,
     score: d.score,
     firstTouchDaysBefore: d.firstTouch ?? '',
@@ -99,6 +109,8 @@ export function DealInfluence({ accessToken, selectedAccount, matched, unmatched
     impressionsAfterDeal: d.postImpressions,
     campaignsBeforeDeal: d.preCampaigns.map((c) => c.name).join('; '),
     decisionMakersEngaged90d: d.decisionMakers === null ? '' : d.decisionMakers ? 'yes' : 'no',
+    organicEngagementsBeforeDeal: d.organicBefore ?? '',
+    organicEngagementsAroundDeal: d.organicAround || '',
     organicEngagements365d: d.organicEngagements ?? '',
     engagementLevel365d: d.engagementLevel || '',
     partialWindow: d.partial ? 'yes' : '',
@@ -171,7 +183,7 @@ export function DealInfluence({ accessToken, selectedAccount, matched, unmatched
             <MetricCard title="Median first touch" value={summary.medianFirstTouch === null ? '—' : `${summary.medianFirstTouch}d`} change="before the deal" icon={Timer} />
             <MetricCard title="Median last touch" value={summary.medianLastTouch === null ? '—' : `${summary.medianLastTouch}d`} change="before the deal" icon={CalendarClock} />
             <MetricCard title="Decision makers" value={summary.dmShare === null ? '—' : `${summary.dmShare}%`} change="of touched deals, last 90d" icon={Crown} />
-            <MetricCard title="Organic engaged" value={summary.organicShare === null ? '—' : `${summary.organicShare}%`} change="of touched deals, last 365d" icon={Radio} />
+            <MetricCard title="Organic before deal" value={summary.organicShare === null ? '—' : `${summary.organicShare}%`} change="of paid-touched deals" icon={Radio} />
           </div>
 
           <div>
@@ -204,30 +216,53 @@ export function DealInfluence({ accessToken, selectedAccount, matched, unmatched
           </div>
 
           <div>
-            <div className="mb-2">
-              <h4 className="text-sm font-semibold">Company by company</h4>
-              <p className="text-xs text-muted-foreground">
-                One row per deal, ranked by influence score. Each cell is a week, darker = more paid {metric}. The line marks the deal. Click a row for the campaigns that touched it before the deal.
-              </p>
+            <div className="flex flex-wrap items-end justify-between gap-2 mb-2">
+              <div>
+                <h4 className="text-sm font-semibold">Company by company</h4>
+                <p className="text-xs text-muted-foreground">
+                  One row per deal, ranked by influence score. Each cell is a week, darker = more paid {metric}. The line marks the deal. Click a row for the campaigns that touched it before the deal.
+                </p>
+              </div>
+              <SegmentedControl
+                size="sm"
+                value={sourceFilter}
+                onChange={(v) => { setSourceFilter(v); setShowAll(false); }}
+                options={[
+                  { value: 'all', label: `All (${dated.length})` },
+                  { value: 'both', label: `Paid + organic (${summary.bySource.both})` },
+                  { value: 'paid', label: `Paid only (${summary.bySource.paid})` },
+                  { value: 'organic', label: `Organic only (${summary.bySource.organic})` },
+                  { value: 'none', label: `Neither (${summary.bySource.none})` },
+                ]}
+              />
             </div>
+            <p className="mb-2 text-[11px] text-muted-foreground flex items-start gap-1.5">
+              <Info className="h-3.5 w-3.5 mt-px shrink-0" />
+              <span>
+                Same {deals.length} matched companies as the table below{deals.length > dated.length ? `, minus ${deals.length - dated.length} with no readable deal date` : ''}, but measured differently.
+                Below, <em>Influenced</em> means any paid impression in the page&apos;s date range, before or after the deal, sorted by spend.
+                Here, influence is counted only <strong>before each deal</strong>: paid from daily Ad Analytics in the {WEEKS_BEFORE} weeks before it, organic from Account Intel windows (LinkedIn keeps 365 days and only in 7/30/60/90/180/365-day windows, so organic in the window holding the deal date is shown separately and not counted).
+                A company can be <em>Influenced</em> below and <em>Only after deal</em> or <em>None</em> here.
+              </span>
+            </p>
             {shown.length === 0 ? (
-              <EmptyState icon={CalendarClock} title="No dated deals" />
+              <EmptyState icon={CalendarClock} title={dated.length ? 'No deals in this group' : 'No dated deals'} />
             ) : (
               <div className="rounded-lg border overflow-x-auto">
-                <div className="min-w-[980px]">
-                  <div className="grid grid-cols-[220px_1fr_300px] items-end gap-3 px-3 py-2 bg-muted/30 text-[10px] uppercase tracking-wide text-muted-foreground">
+                <div className="min-w-[1080px]">
+                  <div className="grid grid-cols-[220px_1fr_400px] items-end gap-3 px-3 py-2 bg-muted/30 text-[10px] uppercase tracking-wide text-muted-foreground">
                     <span>Company · deal date</span>
                     <div className="grid" style={{ gridTemplateColumns: `repeat(${BUCKETS.length}, minmax(0, 1fr))` }}>
                       {BUCKETS.map((b) => <span key={b} className={`text-center ${b === 0 ? 'border-l border-foreground/60' : ''}`}>{b % 4 === 0 || b === -1 ? bucketLabel(b) : ''}</span>)}
                     </div>
-                    <div className="grid grid-cols-[1fr_44px_56px_40px_52px] gap-2 text-right">
-                      <span className="text-left">Verdict</span><span>Score</span><span>First</span><span title="Decision makers engaged (Account Intel, last 90 days)">DM</span><span title="Organic engagements (Account Intel, last 365 days)">Organic</span>
+                    <div className="grid grid-cols-[96px_1fr_40px_48px_36px_52px] gap-2 text-right">
+                      <span className="text-left" title="What reached the company before its deal">Influenced by</span><span className="text-left">Paid timing</span><span>Score</span><span>First</span><span title="Decision makers engaged (Account Intel, last 90 days)">DM</span><span title="Organic engagements before the deal (Account Intel windows)">Organic</span>
                     </div>
                   </div>
                   {rows.map((d) => (
                     <Fragment key={d.key}>
                       <button
-                        className="w-full grid grid-cols-[220px_1fr_300px] items-center gap-3 px-3 py-1.5 border-t text-left hover:bg-muted/30"
+                        className="w-full grid grid-cols-[220px_1fr_400px] items-center gap-3 px-3 py-1.5 border-t text-left hover:bg-muted/30"
                         onClick={() => setExpanded(expanded === d.key ? null : d.key)}
                       >
                         <span className="flex items-center gap-2 min-w-0">
@@ -252,12 +287,15 @@ export function DealInfluence({ accessToken, selectedAccount, matched, unmatched
                             );
                           })}
                         </div>
-                        <div className="grid grid-cols-[1fr_44px_56px_40px_52px] gap-2 items-center text-right text-xs tabular-nums">
+                        <div className="grid grid-cols-[96px_1fr_40px_48px_36px_52px] gap-2 items-center text-right text-xs tabular-nums">
+                          <span className="text-left"><StatusPill tone={SOURCE[d.source].tone} label={SOURCE[d.source].label} /></span>
                           <span className="text-left"><StatusPill tone={VERDICT[d.verdict].tone} label={VERDICT[d.verdict].label} /></span>
-                          <span className="font-semibold">{d.verdict === 'influenced' ? d.score : '—'}</span>
+                          <span className="font-semibold">{d.source !== 'none' ? d.score : '—'}</span>
                           <span>{d.firstTouch === null ? '—' : `${d.firstTouch}d`}</span>
                           <span>{d.decisionMakers === null ? '—' : d.decisionMakers ? 'Yes' : 'No'}</span>
-                          <span>{d.organicEngagements === null ? '—' : fmt(d.organicEngagements)}</span>
+                          <span title={d.organicBefore === null ? 'Organic timing unknown: no Account Intel window data, or the deal is over 365 days old' : d.organicAround ? `${fmt(d.organicAround)} more in the window that contains the deal date (could be before or after)` : undefined}>
+                            {d.organicBefore === null ? '—' : fmt(d.organicBefore)}{d.organicAround ? '*' : ''}
+                          </span>
                         </div>
                       </button>
                       {expanded === d.key && <DealDetail d={d} />}

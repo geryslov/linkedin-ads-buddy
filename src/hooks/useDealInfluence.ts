@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { CompanyIntelligence, DECISION_MAKER_SENIORITIES, IntelError } from '@/hooks/useCompanyIntelligence';
+import { CompanyIntelligence, DECISION_MAKER_SENIORITIES, IntelError, companyKey } from '@/hooks/useCompanyIntelligence';
+import type { WindowRow } from '@/hooks/useCompanyJourney';
 import { MatchedCompany, UnmatchedCompany, UploadedCompany, normalizeName, standardizeUrl } from '@/hooks/useCompanyInfluenceMatcher';
 
 /** One org × day (× campaign when the split is available) from Ad Analytics. */
@@ -28,13 +29,19 @@ export interface CampaignTouches {
   meta: { campaignsServed: number; campaignsQueried: number; failed: { slice: string; error: string }[]; calls: number; truncated: boolean; durationMs: number };
 }
 
-/** Account Intel context — not aligned to deal dates (windows end today). */
+/** Account Intel context — windows end on `asOf` (the load date), not on the deal. */
 interface IntelContext {
   organic365: CompanyIntelligence[] | null;
   dm90: CompanyIntelligence[] | null;
+  /** The six nested windows per company (keyed by companyKey), to place organic before or after a deal. */
+  windows: Record<string, WindowRow[]> | null;
+  asOf: string | null;
 }
 
 export type DealVerdict = 'influenced' | 'post_only' | 'not_reached' | 'out_of_range' | 'no_date';
+
+/** What reached the company before its deal. Unknown organic timing counts as no organic. */
+export type InfluenceSource = 'both' | 'paid' | 'organic' | 'none';
 
 export interface DealCompany {
   key: string;
@@ -56,6 +63,11 @@ export interface DealCompany {
   /** null = Account Intel not loaded / not matched. */
   decisionMakers: boolean | null;
   organicEngagements: number | null;
+  /** Organic engagements in Account Intel windows entirely before the deal; null = unknown (no window data, or deal over 365 days ago). */
+  organicBefore: number | null;
+  /** Organic engagements in the window that contains the deal date (could be either side). */
+  organicAround: number;
+  source: InfluenceSource;
   engagementLevel: string | null;
   score: number;
   /** The deal's window starts before the oldest day LinkedIn returned. */
@@ -129,12 +141,37 @@ function intelIndex(list: CompanyIntelligence[] | null) {
   };
 }
 
+// Account Intel's nested windows, in days. Differencing neighbours gives age bands
+// (0–7, 8–30, … 181–365 days before `asOf`), the only time view of organic.
+const WINDOW_DAYS: [WindowRow['window'], number][] = [['LAST_7_DAYS', 7], ['LAST_30_DAYS', 30], ['LAST_60_DAYS', 60], ['LAST_90_DAYS', 90], ['LAST_180_DAYS', 180], ['LAST_365_DAYS', 365]];
+
 /**
- * Influence score, 0–100, only for companies touched before the deal:
+ * Organic engagements before a deal, from the age bands. A band counts as before
+ * when all of it is at least as old as the deal; the band holding the deal date is
+ * reported separately. Deals older than 365 days have no organic data: null.
+ */
+export function organicTiming(rows: WindowRow[] | undefined, dealDate: string, asOf: string) {
+  const age = days(dealDate, asOf);
+  if (age > 365) return { before: null, around: 0 };
+  const by = new Map((rows || []).map((r) => [r.window, r.organicEngagements]));
+  let before = 0, around = 0, prev = 0, lo = 0;
+  for (const [w, hi] of WINDOW_DAYS) {
+    const cum = by.get(w) ?? prev;
+    const band = Math.max(0, cum - prev);
+    if (lo >= age) before += band;
+    else if (hi >= age) around += band;
+    prev = Math.max(prev, cum);
+    lo = hi;
+  }
+  return { before, around };
+}
+
+/**
+ * Influence score, 0–100, for companies reached before the deal (paid or organic):
  * reach 25 + engagement 25 + recency 15 + persistence 10 + decision makers 15 + organic 10.
  */
 function scoreOf(c: Omit<DealCompany, 'score'>) {
-  if (c.verdict !== 'influenced') return 0;
+  if (c.source === 'none') return 0;
   const log = (v: number, cap: number) => Math.min(1, Math.log10(1 + v) / Math.log10(1 + cap));
   const recency = c.lastTouch === null ? 0 : c.lastTouch <= 30 ? 15 : c.lastTouch <= 90 ? 8 : 3;
   return Math.round(
@@ -143,7 +180,7 @@ function scoreOf(c: Omit<DealCompany, 'score'>) {
     + recency
     + Math.min(10, c.pre.activeWeeks * 2.5)
     + (c.decisionMakers ? 15 : 0)
-    + ((c.organicEngagements || 0) > 0 ? 10 : 0),
+    + ((c.organicBefore || 0) > 0 ? 10 : 0),
   );
 }
 
@@ -162,6 +199,8 @@ export function analyzeDeals(matched: MatchedCompany[], touches: CompanyTouches,
   }
   const campaignNames = { ...touches.campaigns, ...split?.campaigns };
   const organicOf = intelIndex(intel.organic365);
+  const windows = intel.windows;
+  const asOf = intel.asOf;
   const dmOf = intelIndex(intel.dm90);
 
   return matched.map((m) => {
@@ -182,6 +221,9 @@ export function analyzeDeals(matched: MatchedCompany[], touches: CompanyTouches,
       lastCampaignId: null as string | null,
       decisionMakers: dmOf ? !!dmOf(m) : null,
       organicEngagements: organicOf ? (o?.organicEngagements ?? 0) : null,
+      organicBefore: null as number | null,
+      organicAround: 0,
+      source: 'none' as InfluenceSource,
       engagementLevel: o?.engagementLevel || null,
       partial: false,
     };
@@ -236,6 +278,14 @@ export function analyzeDeals(matched: MatchedCompany[], touches: CompanyTouches,
         .sort((a, b) => b.impressions - a.impressions);
       verdict = base.pre.impressions > 0 ? 'influenced' : base.postImpressions > 0 ? 'post_only' : 'not_reached';
     }
+    if (dealDate && windows && asOf) {
+      const t = organicTiming(o ? windows[companyKey(o)] : undefined, dealDate, asOf);
+      base.organicBefore = t.before;
+      base.organicAround = t.around;
+    }
+    const paid = verdict === 'influenced';
+    const organic = (base.organicBefore ?? 0) > 0;
+    base.source = paid && organic ? 'both' : paid ? 'paid' : organic ? 'organic' : 'none';
     const c = { ...base, verdict };
     return { ...c, score: scoreOf(c) };
   }).sort((a, b) => b.score - a.score || b.pre.impressions - a.pre.impressions || b.postImpressions - a.postImpressions);
@@ -349,7 +399,13 @@ export function summarizeDeals(deals: DealCompany[], meta: CompanyTouches['meta'
     medianFirstTouch: median(influenced.map((d) => d.firstTouch!).filter((v) => v !== null)),
     medianLastTouch: median(influenced.map((d) => d.lastTouch!).filter((v) => v !== null)),
     dmShare: share(influenced, (d) => d.decisionMakers),
-    organicShare: share(influenced, (d) => (d.organicEngagements === null ? null : d.organicEngagements > 0)),
+    organicShare: share(influenced, (d) => (d.organicBefore === null ? null : d.organicBefore > 0)),
+    bySource: {
+      both: dated.filter((d) => d.source === 'both').length,
+      paid: dated.filter((d) => d.source === 'paid').length,
+      organic: dated.filter((d) => d.source === 'organic').length,
+      none: dated.filter((d) => d.source === 'none').length,
+    },
     curve,
   };
 }
@@ -372,7 +428,7 @@ const toIntelError = (e: unknown): IntelError => ({ message: (e as Error)?.messa
 
 export function useDealInfluence(accessToken: string | null) {
   const [touches, setTouches] = useState<CompanyTouches | null>(null);
-  const [intel, setIntel] = useState<IntelContext>({ organic365: null, dm90: null });
+  const [intel, setIntel] = useState<IntelContext>({ organic365: null, dm90: null, windows: null, asOf: null });
   const [intelErrors, setIntelErrors] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<IntelError | null>(null);
@@ -401,10 +457,16 @@ export function useDealInfluence(accessToken: string | null) {
     setCampaignTouches(null);
     const intelCall = (params: Record<string, unknown>) =>
       invoke<{ companies: CompanyIntelligence[] }>(accessToken, { accountId, ...params }, (d) => Array.isArray(d?.companies), 'stale').then((d) => d.companies);
+    // The six windows place organic before/after each deal; their 365d list doubles as the organic list.
+    // If windows fail, fall back to the single 365d call (organic timing then shows as unknown).
+    const asOf = new Date().toISOString().slice(0, 10);
+    const organicCall = invoke<{ companies: CompanyIntelligence[]; byCompany: Record<string, WindowRow[]> }>(accessToken, { accountId, breakdown: 'windows' },
+      (d) => Array.isArray(d?.companies) && !!d?.byCompany, 'stale')
+      .catch(async () => ({ companies: await intelCall({ lookbackWindow: 'LAST_365_DAYS' }), byCompany: null }));
     const [t, organic, dm] = await Promise.allSettled([
       invoke<CompanyTouches>(accessToken, { accountId, orgIds, from, to, breakdown: 'touches' }, (d) => Array.isArray(d?.rows) && !!d?.meta?.from,
         'The deployed edge function has no deal touches yet — deploy linkedin-api.'),
-      intelCall({ lookbackWindow: 'LAST_365_DAYS' }),
+      organicCall,
       intelCall({ lookbackWindow: 'LAST_90_DAYS', seniorities: DECISION_MAKER_SENIORITIES }),
     ]);
     if (t.status === 'fulfilled') {
@@ -416,9 +478,15 @@ export function useDealInfluence(accessToken: string | null) {
       setLoadedKey(null);
       setError(toIntelError(t.reason));
     }
-    setIntel({ organic365: organic.status === 'fulfilled' ? organic.value : null, dm90: dm.status === 'fulfilled' ? dm.value : null });
+    setIntel({
+      organic365: organic.status === 'fulfilled' ? organic.value.companies : null,
+      dm90: dm.status === 'fulfilled' ? dm.value : null,
+      windows: organic.status === 'fulfilled' ? organic.value.byCompany : null,
+      asOf,
+    });
     setIntelErrors([
       organic.status === 'rejected' ? `Organic (Account Intel): ${toIntelError(organic.reason).message}` : '',
+      organic.status === 'fulfilled' && !organic.value.byCompany ? 'Organic timing (Account Intel windows) failed, so organic shows the last 365 days, not before each deal' : '',
       dm.status === 'rejected' ? `Decision makers (Account Intel): ${toIntelError(dm.reason).message}` : '',
     ].filter(Boolean));
     setIsLoading(false);
@@ -429,7 +497,7 @@ export function useDealInfluence(accessToken: string | null) {
     setLoadedKey(null);
     setError(null);
     setIntelErrors([]);
-    setIntel({ organic365: null, dm90: null });
+    setIntel({ organic365: null, dm90: null, windows: null, asOf: null });
     setCampaignTouches(null);
   }, []);
 
