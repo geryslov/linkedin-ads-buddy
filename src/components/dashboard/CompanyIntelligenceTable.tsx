@@ -434,6 +434,7 @@ export function CompanyIntelligenceTable({ accessToken, selectedAccount, campaig
       <AccountMovers accessToken={accessToken} selectedAccount={selectedAccount} ready={!!check?.ok} state={moversState} />
 
       <CampaignScorecard
+        accessToken={accessToken}
         selectedAccount={selectedAccount}
         lookback={breakdownLookback}
         ready={!!check?.ok}

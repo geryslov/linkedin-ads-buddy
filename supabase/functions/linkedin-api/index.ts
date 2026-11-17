@@ -5,7 +5,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { createCreativeReader, CREATIVE_READ_VERSION, metadataCopy } from './creative-metadata.ts';
 import { isInMailRef, readInMailContent, type MessageAdContent } from './message-ad-content.ts';
 import { fetchCompetitorAds } from './ad-library.ts';
-import { AccountIntelError, fetchAccountIntel, fetchAudienceBreakdown, fetchCampaignBreakdown, fetchCompanyDaily, fetchCompanyTouches, fetchCreativeBreakdown, fetchTouchCampaigns, fetchWindowSeries, fetchAdSegments } from './account-intel.ts';
+import { AccountIntelError, fetchAccountIntel, fetchAudienceBreakdown, fetchCampaignBreakdown, fetchCampaignSeniority, fetchCompanyDaily, fetchCompanyTouches, fetchCreativeBreakdown, fetchTouchCampaigns, fetchWindowSeries, fetchAdSegments } from './account-intel.ts';
 import { targetingCompatibilityError } from './targeting-compatibility.ts';
 import { createCompanyAudience, getCompanyAudience } from './audiences.ts';
 
@@ -3599,6 +3599,10 @@ serve(async (req) => {
           // Campaign → creative drill-down comes from Ad Analytics (Account Intel has no creative filter).
           if (ai.breakdown === 'creative') {
             const result = await fetchCreativeBreakdown(accessToken, { accountId: ai.accountId, campaignId: ai.campaignId, lookbackWindow: ai.lookbackWindow });
+            return new Response(JSON.stringify(result), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+          }
+          if (ai.breakdown === 'campaign_seniority') {
+            const result = await fetchCampaignSeniority(accessToken, { accountId: ai.accountId, lookbackWindow: ai.lookbackWindow, campaignIds: Array.isArray(ai.campaignIds) ? ai.campaignIds.map(String) : [] });
             return new Response(JSON.stringify(result), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
           }
           // Per-company breakdowns: one call per campaign / seniority / job function, pivoted.

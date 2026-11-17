@@ -44,7 +44,8 @@ const FORMAT_LABELS: Record<string, string> = {
   FOLLOW_COMPANY: 'Dynamic ads',
   JOBS: 'Dynamic ads',
   SPONSORED_UPDATE_EVENT: 'Event ads',
-  STANDARD_UPDATE: 'Single image / sponsored content',
+  // Campaign level can't tell a single image from a document; both are STANDARD_UPDATE.
+  STANDARD_UPDATE: 'Single image / document',
 };
 
 const humanize = (s: string) => s.toLowerCase().replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
@@ -62,4 +63,17 @@ export function activityOf(c: ActivityInput): CampaignActivity {
   if (type === 'TEXT_AD') return { activity: 'Text ads', source: 'format' };
   if (format && format !== 'UNSUPPORTED') return { activity: humanize(format), source: 'format' };
   return { activity: 'Other', source: 'none' };
+}
+
+/** LinkedIn's ad format only, no names: what the campaign is, not what it's for. */
+export function adTypeOf(c: Omit<ActivityInput, 'name'>): string {
+  const format = (c.format || '').toUpperCase();
+  const type = (c.type || '').toUpperCase();
+  if (c.ctv || /TELEVISION|CTV/.test(format)) return 'CTV';
+  if (type === 'SPONSORED_INMAILS') return 'Message ads';
+  if (FORMAT_LABELS[format]) return FORMAT_LABELS[format];
+  if (type === 'DYNAMIC') return 'Dynamic ads';
+  if (type === 'TEXT_AD') return 'Text ads';
+  if (format && format !== 'UNSUPPORTED') return humanize(format);
+  return c.format === undefined ? 'Unknown (redeploy)' : 'Unknown';
 }

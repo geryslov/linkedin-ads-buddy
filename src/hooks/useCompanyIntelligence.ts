@@ -116,6 +116,14 @@ export interface CreativeMetrics {
   spend: number;
 }
 
+export interface SeniorityMetrics { seniority: string; impressions: number; clicks: number; spend: number; leads: number; conversions: number }
+
+/** Member seniority per campaign (Ad Analytics) for the scorecard's seniority view. */
+export interface CampaignSeniority {
+  bySeniority: Record<string, SeniorityMetrics[]>;
+  meta: { campaignsQueried: number; failed: { slice: string; error: string }[]; durationMs: number };
+}
+
 /** Campaign → creative drill-down. From Ad Analytics, keyed by organization, not Account Intel. */
 export interface CreativeBreakdown {
   companies: { orgUrn: string; name: string; vanityName: string; website: string; creatives: CreativeMetrics[] }[];
@@ -182,7 +190,7 @@ export async function invoke<T = { companies: CompanyIntelligence[]; meta: Compa
   // The pre-2026-11 handler returned `elements`; a stale deploy still does.
   if (!data?.meta) throw Object.assign(new Error('The edge function is running the old Company Intelligence handler — deploy linkedin-api.'), { kind: 'stale_deploy' });
   // A deploy without breakdown support answers a breakdown request with plain companies.
-  if (params.breakdown && !data.byCompany) throw Object.assign(new Error('The deployed edge function has no per-company breakdowns yet — deploy linkedin-api.'), { kind: 'stale_deploy' });
+  if (params.breakdown && !(params.breakdown === 'campaign_seniority' ? data.bySeniority : data.byCompany)) throw Object.assign(new Error('The deployed edge function has no per-company breakdowns yet — deploy linkedin-api.'), { kind: 'stale_deploy' });
   return data as T;
 }
 

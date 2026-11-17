@@ -391,6 +391,46 @@ export async function fetchCampaignBreakdown(accessToken: string, q: { accountId
   };
 }
 
+export type SeniorityMetrics = { seniority: string; impressions: number; clicks: number; spend: number; leads: number; conversions: number };
+
+// Member seniority per campaign from Ad Analytics, for the scorecard's seniority view.
+// Company Intelligence can't combine a campaign filter with seniority, so these are
+// members, not companies. Per campaign × seniority, LinkedIn drops slices under its
+// privacy threshold, so rows can sum to less than the campaign total.
+export async function fetchCampaignSeniority(
+  accessToken: string,
+  q: { accountId: string; lookbackWindow?: string; campaignIds: string[] },
+  fetchImpl: typeof fetch = fetch,
+  now = Date.now(),
+) {
+  const accountId = String(q.accountId || '').replace(/\D/g, '');
+  if (!accountId) throw new AccountIntelError('accountId is required', 400, 'bad_request');
+  const ids = [...new Set((Array.isArray(q.campaignIds) ? q.campaignIds : []).map((id) => String(id).replace(/\D/g, '')).filter(Boolean))].slice(0, MAX_BREAKDOWN_CAMPAIGNS);
+  if (!ids.length) throw new AccountIntelError('campaignIds must be a non-empty array', 400, 'bad_request');
+  const lookbackWindow = q.lookbackWindow || 'LAST_90_DAYS';
+  const dateRange = { start: ymd(new Date(now - (LOOKBACK_DAYS[lookbackWindow] ?? 90) * 86400000)), end: ymd(new Date(now)) };
+  const started = Date.now();
+  const bySeniority: Record<string, SeniorityMetrics[]> = {};
+  const failed: { slice: string; error: string }[] = [];
+  await pool(ids, CONCURRENCY, async (id) => {
+    try {
+      const rows = await analyticsRows(accessToken, (s) => analyticsUrl(dateRange, 'MEMBER_SENIORITY', `campaigns[0]=${encodeURIComponent(`urn:li:sponsoredCampaign:${id}`)}`,
+        'pivotValue,impressions,clicks,costInLocalCurrency,oneClickLeads,externalWebsiteConversions', s), fetchImpl);
+      bySeniority[id] = rows.map((r) => ({
+        seniority: String(r?.pivotValue || '').split(':').pop() || '',
+        impressions: Number(r?.impressions) || 0, clicks: Number(r?.clicks) || 0,
+        spend: Number(r?.costInLocalCurrency) || 0, leads: Number(r?.oneClickLeads) || 0,
+        conversions: Number(r?.externalWebsiteConversions) || 0,
+      })).filter((r) => r.seniority);
+    } catch (e) {
+      // A dead token fails every slice the same way; say so once.
+      if ((e as AccountIntelError)?.kind === 'token_invalid') throw e;
+      failed.push({ slice: id, error: String((e as Error)?.message || e) });
+    }
+  });
+  return { bySeniority, meta: { accountId, lookbackWindow, campaignsQueried: ids.length, failed, durationMs: Date.now() - started } };
+}
+
 export async function fetchAudienceBreakdown(accessToken: string, q: { accountId: string }, fetchImpl: typeof fetch = fetch) {
   const accountId = String(q.accountId || '').replace(/\D/g, '');
   if (!accountId) throw new AccountIntelError('accountId is required', 400, 'bad_request');

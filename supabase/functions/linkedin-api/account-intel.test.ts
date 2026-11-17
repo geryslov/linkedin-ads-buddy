@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { buildFilterCriteria, fetchAccountIntel, fetchAudienceBreakdown, fetchCampaignBreakdown, fetchCompanyDaily, fetchCompanyTouches, fetchCreativeBreakdown, fetchTouchCampaigns, fetchWindowSeries, fetchAdSegments, mergeBySeniority, normalizeCompany, selectBreakdownCampaigns } from './account-intel.ts';
+import { buildFilterCriteria, fetchAccountIntel, fetchAudienceBreakdown, fetchCampaignBreakdown, fetchCampaignSeniority, fetchCompanyDaily, fetchCompanyTouches, fetchCreativeBreakdown, fetchTouchCampaigns, fetchWindowSeries, fetchAdSegments, mergeBySeniority, normalizeCompany, selectBreakdownCampaigns } from './account-intel.ts';
 
 // Element shape from the docs' 202606+ sample response.
 const el = (name: string, o: Record<string, unknown> = {}) => ({
@@ -348,4 +348,31 @@ test('ad segments come from campaign targeting and DMP segments, named via adTar
     { id: '200', name: 'Audience 200', campaigns: 1, activeCampaigns: 1 },
     { id: '400', name: 'API list', campaigns: 0, activeCampaigns: 0 },
   ]);
+});
+
+test('campaign seniority: one MEMBER_SENIORITY call per campaign, failures per slice', async () => {
+  const urls: string[] = [];
+  const fake = (async (url: string) => {
+    urls.push(url);
+    if (url.includes('sponsoredCampaign%3A2')) return json({ message: 'boom' }, 500);
+    return json({ elements: [
+      { pivotValue: 'urn:li:seniority:6', impressions: 1000, clicks: 12, costInLocalCurrency: '50.5', oneClickLeads: 2, externalWebsiteConversions: 1 },
+      { pivotValue: 'urn:li:seniority:8', impressions: 300, clicks: 3, costInLocalCurrency: '20', oneClickLeads: 0 },
+    ] });
+  }) as unknown as typeof fetch;
+  const r = await fetchCampaignSeniority('t', { accountId: '9', lookbackWindow: 'LAST_30_DAYS', campaignIds: ['1', '2', '1'] }, fake, Date.UTC(2026, 10, 17));
+  expect(urls.length).toBe(2);
+  expect(urls[0]).toContain('pivot=MEMBER_SENIORITY');
+  expect(urls[0]).toContain('dateRange.start.month=10&dateRange.start.year=2026');
+  expect(r.bySeniority['1']).toEqual([
+    { seniority: '6', impressions: 1000, clicks: 12, spend: 50.5, leads: 2, conversions: 1 },
+    { seniority: '8', impressions: 300, clicks: 3, spend: 20, leads: 0, conversions: 0 },
+  ]);
+  expect(r.bySeniority['2']).toBeUndefined();
+  expect(r.meta.failed.map((f) => f.slice)).toEqual(['2']);
+});
+
+test('campaign seniority: an invalid token fails the whole request', async () => {
+  const fake = (async () => json({}, 401)) as unknown as typeof fetch;
+  await expect(fetchCampaignSeniority('t', { accountId: '9', campaignIds: ['1'] }, fake)).rejects.toMatchObject({ kind: 'token_invalid' });
 });
