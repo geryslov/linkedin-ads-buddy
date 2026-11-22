@@ -135,7 +135,12 @@ surface, and duplicating auth into it is how the two systems start to drift.
 **Keep the legacy server's behaviour unchanged.** It is the user's own working integration. The one
 change since the original (2026-11-22) is how it reads a key's token: `lookupLinkedInToken` calls the
 `lookup_mcp_token(p_api_key)` RPC, falling back to the old table select if the RPC is missing; `/health`
-reports `tokenLookup: "rpc"` so the Railway deploy can be confirmed. `src/index.ts` (stdio) is
+reports `tokenLookup: "rpc"` so the Railway deploy can be confirmed. Second change (same day): a POST
+carrying an unknown `mcp-session-id` that isn't an `initialize` is answered **statelessly** instead of
+400 "Server not initialized". Sessions are in memory and Railway restarts on every push to `main`, so
+Claude kept a dead session id and every call failed until it happened to re-initialize. A GET with an
+unknown session gets 404 (the spec's "re-initialize" signal). `/health` reports `staleSessions:
+"stateless"`. `src/index.ts` (stdio) is
 untouched. Everything new in `tools.ts` is behind `mode: "product"` and **defaults to `"legacy"`** — do
 not flip that default. If you need new behaviour, add an option that defaults to off.
 

@@ -3,6 +3,7 @@
 import { randomUUID } from "crypto";
 import express from "express";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { createLinkedInAdsServer } from "./tools.js";
 
 const app = express();
@@ -257,11 +258,23 @@ app.post("/mcp", async (req, res) => {
     return;
   }
 
+  const server = createLinkedInAdsServer(() => token, { enableGoogleAds: GOOGLE_ADS_MCP_TOOLS });
+
+  // Sessions live in memory, so every Railway restart forgets them and the
+  // client keeps sending a dead mcp-session-id. Answer anything that isn't an
+  // initialize statelessly instead of rejecting it with "Server not initialized".
+  const isInit = Array.isArray(req.body) ? req.body.some(isInitializeRequest) : isInitializeRequest(req.body);
+  if (!isInit) {
+    const stateless = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+    await server.connect(stateless);
+    res.on("close", () => { stateless.close(); server.close(); });
+    await stateless.handleRequest(req, res, req.body);
+    return;
+  }
+
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: () => randomUUID(),
   });
-
-  const server = createLinkedInAdsServer(() => token, { enableGoogleAds: GOOGLE_ADS_MCP_TOOLS });
   await server.connect(transport);
 
   transport.onclose = () => {
@@ -278,7 +291,8 @@ app.post("/mcp", async (req, res) => {
 app.get("/mcp", async (req, res) => {
   const sessionId = req.headers["mcp-session-id"] as string | undefined;
   if (!sessionId || !mcpSessions.has(sessionId)) {
-    res.status(400).json({ error: "Valid mcp-session-id required" });
+    // 404 tells the client its session is gone and it should re-initialize.
+    res.status(sessionId ? 404 : 400).json({ error: "Valid mcp-session-id required" });
     return;
   }
   const { transport } = mcpSessions.get(sessionId)!;
@@ -299,6 +313,7 @@ app.get("/health", (_req, res) => {
     sessions: mcpSessions.size,
     clientId: CLAUDE_CLIENT_ID,
     tokenLookup: "rpc",
+    staleSessions: "stateless",
     googleAdsTools: GOOGLE_ADS_MCP_TOOLS ? "on" : "off",
   });
 });
