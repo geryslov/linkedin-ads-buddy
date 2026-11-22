@@ -615,6 +615,7 @@ export type Database = {
         }
         Returns: boolean
       }
+      lookup_mcp_token: { Args: { p_api_key: string }; Returns: string }
     }
     Enums: {
       app_role: "admin" | "user"
