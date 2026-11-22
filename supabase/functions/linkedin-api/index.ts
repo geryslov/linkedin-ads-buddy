@@ -13851,45 +13851,80 @@ serve(async (req) => {
         // Example from docs: owner=(sponsoredAccount:urn%3Ali%3AsponsoredAccount%3A522529623)
         const encodedAccountUrn = encodeURIComponent(accountUrn);
 
-        let leadsUrl = `https://api.linkedin.com/rest/leadFormResponses?q=owner`
+        const leadsPageUrl = (start: number) => `https://api.linkedin.com/rest/leadFormResponses?q=owner`
           + `&owner=(sponsoredAccount:${encodedAccountUrn})`
           + `&leadType=(leadType:SPONSORED)`
           + `&count=100`
-          + `&start=${leadsOffset}`;
+          + `&start=${start}`;
 
-        if (formUrn) {
-          leadsUrl += `&versionedLeadGenFormUrn=${encodeURIComponent(formUrn)}`;
-        }
+        const fetchLeadsPage = async (start: number) => {
+          const resp = await fetch(leadsPageUrl(start), {
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+              'LinkedIn-Version': LINKEDIN_VERSION,
+              'X-Restli-Protocol-Version': '2.0.0',
+            },
+          });
+          if (!resp.ok) return { error: { status: resp.status, text: (await resp.text()).substring(0, 300) } };
+          const data = await resp.json();
+          const elements = data.elements || [];
+          const paging = data.paging || {};
+          const total = paging.total ?? elements.length;
+          const count = paging.count ?? 100;
+          const pageStart = paging.start ?? start;
+          return { elements, total, hasMore: elements.length === count && (pageStart + count) < total };
+        };
 
         console.log(`[get_lead_form_responses] Fetching leads for account ${accountId}, offset ${leadsOffset}, formUrn: ${formUrn || 'all'}`);
 
-        const leadsResp = await fetch(leadsUrl, {
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'LinkedIn-Version': LINKEDIN_VERSION,
-            'X-Restli-Protocol-Version': '2.0.0',
-          },
-        });
+        let leadsElements: any[];
+        let leadsTotal: number;
+        let leadsHasMore: boolean;
+        let leadsError: { status: number; text: string } | undefined;
 
-        if (!leadsResp.ok) {
-          const errText = await leadsResp.text();
-          console.error(`[get_lead_form_responses] API error: ${leadsResp.status} - ${errText.substring(0, 300)}`);
+        if (formUrn) {
+          // LinkedIn's versionedLeadGenFormUrn filter needs a versioned URN and
+          // 500s on the plain urn:li:leadGenForm:<id> the UI has; even versioned
+          // it would miss leads from the form's other versions. So page through
+          // the account's leads and keep this form's, across all versions.
+          const formId = (String(formUrn).match(/leadGenForm:\(?(\d+)/) || [])[1] || String(formUrn).split(':').pop();
+          const MAX_PAGES = 30;
+          const matches: any[] = [];
+          let start = 0;
+          let more = true;
+          let pages = 0;
+          while (more && pages < MAX_PAGES) {
+            const page = await fetchLeadsPage(start);
+            if (page.error) { leadsError = page.error; break; }
+            for (const el of page.elements) {
+              if ((String(el.versionedLeadGenFormUrn || '').match(/leadGenForm:\(?(\d+)/) || [])[1] === formId) matches.push(el);
+            }
+            more = page.hasMore;
+            start += 100;
+            pages++;
+          }
+          leadsElements = matches.slice(leadsOffset, leadsOffset + 100);
+          leadsTotal = matches.length;
+          leadsHasMore = matches.length > leadsOffset + 100;
+          if (more && !leadsError) console.warn(`[get_lead_form_responses] Stopped after ${MAX_PAGES} pages; older leads for form ${formId} not scanned`);
+        } else {
+          const page = await fetchLeadsPage(leadsOffset);
+          leadsError = page.error;
+          leadsElements = page.elements || [];
+          leadsTotal = page.total ?? 0;
+          leadsHasMore = page.hasMore ?? false;
+        }
+
+        if (leadsError) {
+          console.error(`[get_lead_form_responses] API error: ${leadsError.status} - ${leadsError.text}`);
           return new Response(JSON.stringify({
-            error: `LinkedIn API error: ${leadsResp.status}`,
-            details: errText.substring(0, 300),
+            error: `LinkedIn API error: ${leadsError.status}`,
+            details: leadsError.text,
           }), {
             status: 200,
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           });
         }
-
-        const leadsData = await leadsResp.json();
-        const leadsElements = leadsData.elements || [];
-        const leadsPaging = leadsData.paging || {};
-        const leadsTotal = leadsPaging.total ?? leadsElements.length;
-        const leadsCount = leadsPaging.count ?? 100;
-        const leadsStart = leadsPaging.start ?? 0;
-        const leadsHasMore = leadsElements.length === leadsCount && (leadsStart + leadsCount) < leadsTotal;
 
         // Client-side date filtering
         const filteredElements = leadsElements.filter((el: any) => {

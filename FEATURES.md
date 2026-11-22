@@ -196,7 +196,7 @@ rows. Details and the open decision in CLAUDE.md.
 
 **Company analysis** — `get_company_demographic`, `get_company_intelligence`, `get_company_influence`, `get_company_campaign_breakdown`, `get_company_conversion_breakdown`, `get_company_engagement_report`, `get_company_engagement_timeline`, `get_creative_company_breakdown`, `exclude_companies_from_campaigns`, `update_company_name`
 
-**Leads** — `get_lead_gen_forms`, `get_lead_gen_overview`, `get_lead_form_responses`, `get_lead_company_journey`
+**Leads** — `get_lead_gen_forms`, `get_lead_gen_overview`, `get_lead_form_responses` (with `formUrn`: pages the account's leads, up to 30×100, and keeps that form's across all versions — LinkedIn's `versionedLeadGenFormUrn` filter 500s on a plain form URN), `get_lead_company_journey`
 
 **Targeting** — `get_campaign_targeting_entities`, `preflight_campaign_targeting`, `search_targeting_entities`, `search_companies`, `search_industries`
 
