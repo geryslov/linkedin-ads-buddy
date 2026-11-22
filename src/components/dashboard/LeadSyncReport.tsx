@@ -63,6 +63,9 @@ function JourneyPanel({
 
   return (
     <div className="px-6 py-4 bg-secondary/30 border-t border-border/60">
+      {journey.error && (
+        <p className="mb-2 text-xs text-warning">{journey.error}</p>
+      )}
       {/* Summary row */}
       <div className="flex items-center gap-4 mb-3 flex-wrap">
         <div className="flex items-center gap-1.5 text-xs font-medium">
@@ -80,7 +83,11 @@ function JourneyPanel({
       </div>
 
       {campaigns.length === 0 ? (
-        <p className="text-xs text-muted-foreground">No campaign activity found for this company in the window.</p>
+        <p className="text-xs text-muted-foreground">
+          {journey.campaignSplit === false && total.impressions > 0
+            ? 'LinkedIn returned this company\'s totals only, without a per-campaign split.'
+            : 'No campaign activity found for this company in the window.'}
+        </p>
       ) : (
         <div className="overflow-x-auto rounded-lg border border-border/60 bg-card">
           <Table className="min-w-[560px] text-xs">
@@ -129,13 +136,13 @@ function LeadRow({
   index: number;
   accountId: string;
   fetchJourney: (accountId: string, orgName: string, submittedAtMs: number) => void;
-  getJourney: (accountId: string, orgName: string) => JourneyData | undefined;
-  isLoadingJourney: (accountId: string, orgName: string) => boolean;
+  getJourney: (accountId: string, orgName: string, submittedAtMs: number) => JourneyData | undefined;
+  isLoadingJourney: (accountId: string, orgName: string, submittedAtMs: number) => boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   const company = lead.company;
-  const journey = company ? getJourney(accountId, company) : undefined;
-  const loading = company ? isLoadingJourney(accountId, company) : false;
+  const journey = company ? getJourney(accountId, company, lead.submittedAt) : undefined;
+  const loading = company ? isLoadingJourney(accountId, company, lead.submittedAt) : false;
 
   const handleToggle = useCallback(() => {
     if (!company) return;
@@ -264,18 +271,8 @@ export function LeadSyncReport({ accessToken, selectedAccount }: LeadSyncReportP
     }
   }, [selectedFormUrn, selectedAccount, fetchLeads, clearLeads]);
 
-  // Auto-fetch journeys for all visible leads once they load
-  useEffect(() => {
-    if (!selectedAccount || leads.length === 0) return;
-    const unique = [...new Set(leads.map(l => l.company).filter(Boolean))] as string[];
-    // Stagger requests slightly to avoid hammering the edge function
-    unique.forEach((company, i) => {
-      const lead = leads.find(l => l.company === company)!;
-      setTimeout(() => {
-        fetchJourney(selectedAccount, company, lead.submittedAt);
-      }, i * 150);
-    });
-  }, [leads, selectedAccount, fetchJourney]);
+  // Journeys load on demand (expand / Load): each one scans the account's
+  // company × campaign daily analytics, too heavy to run for every row.
 
   // Clear journey cache when account or date range changes
   useEffect(() => {

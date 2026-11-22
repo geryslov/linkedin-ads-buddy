@@ -13711,104 +13711,38 @@ serve(async (req) => {
         const toDate = (ms: number) => new Date(ms).toISOString().split('T')[0];
         const windowStart = toDate(startMs);
         const windowEnd = toDate(endMs);
-        const [ws_y, ws_m, ws_d] = windowStart.split('-').map(Number);
-        const [we_y, we_m, we_d] = windowEnd.split('-').map(Number);
 
-        // --- Step B: Company-level analytics in the window ---
+        // --- Company's own paid activity in the window ---
+        // Ad Analytics has no member-company filter (a memberCompanies param is
+        // ignored, which made the old totals and campaign list account-wide), so
+        // use the account-wide CAMPAIGN × MEMBER_COMPANY daily rows that Deal
+        // Influence uses and keep only this org's.
         let totalImpressions = 0, totalClicks = 0, totalSpend = 0;
-        try {
-          const companyAnalyticsUrl = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics` +
-            `&pivot=MEMBER_COMPANY` +
-            `&memberCompanies[0]=urn:li:organization:${resolvedOrgId}` +
-            `&accounts[0]=urn:li:sponsoredAccount:${accountId}` +
-            `&dateRange.start.day=${ws_d}&dateRange.start.month=${ws_m}&dateRange.start.year=${ws_y}` +
-            `&dateRange.end.day=${we_d}&dateRange.end.month=${we_m}&dateRange.end.year=${we_y}` +
-            `&timeGranularity=ALL` +
-            `&fields=impressions,clicks,costInLocalCurrency,pivotValue`;
-
-          const compResp = await fetch(companyAnalyticsUrl, {
-            headers: { 'Authorization': `Bearer ${accessToken}` },
-          });
-          if (compResp.ok) {
-            const compData = await compResp.json();
-            for (const el of (compData.elements || [])) {
-              totalImpressions += el.impressions || 0;
-              totalClicks += el.clicks || 0;
-              totalSpend += parseFloat(el.costInLocalCurrency || '0');
-            }
-            console.log(`[get_lead_company_journey] Company totals: impr=${totalImpressions} clicks=${totalClicks} spend=${totalSpend}`);
-          } else {
-            const t = await compResp.text();
-            console.error(`[get_lead_company_journey] Company analytics error: ${compResp.status}`, t.slice(0, 200));
-          }
-        } catch (e) {
-          console.error('[get_lead_company_journey] Company analytics error:', e);
-        }
-
-        // --- Step C: Campaign-level analytics in the window ---
-        const campaignMetrics = new Map<string, { impressions: number; clicks: number; spend: number }>();
-        try {
-          const campAnalyticsUrl = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics` +
-            `&pivot=CAMPAIGN` +
-            `&accounts[0]=urn:li:sponsoredAccount:${accountId}` +
-            `&dateRange.start.day=${ws_d}&dateRange.start.month=${ws_m}&dateRange.start.year=${ws_y}` +
-            `&dateRange.end.day=${we_d}&dateRange.end.month=${we_m}&dateRange.end.year=${we_y}` +
-            `&timeGranularity=ALL` +
-            `&fields=impressions,clicks,costInLocalCurrency,pivotValue` +
-            `&count=500`;
-
-          const campAnalyticsResp = await fetch(campAnalyticsUrl, {
-            headers: { 'Authorization': `Bearer ${accessToken}` },
-          });
-          if (campAnalyticsResp.ok) {
-            const campData = await campAnalyticsResp.json();
-            for (const el of (campData.elements || [])) {
-              const impr = el.impressions || 0;
-              if (impr === 0) continue;
-              const campUrn = el.pivotValue || '';
-              const campId = campUrn.split(':').pop() || '';
-              if (campId) {
-                campaignMetrics.set(campId, {
-                  impressions: impr,
-                  clicks: el.clicks || 0,
-                  spend: parseFloat(el.costInLocalCurrency || '0'),
-                });
-              }
-            }
-            console.log(`[get_lead_company_journey] ${campaignMetrics.size} campaigns with impressions`);
-          }
-        } catch (e) {
-          console.error('[get_lead_company_journey] Campaign analytics error:', e);
-        }
-
-        // --- Step D: Fetch campaign metadata (name + objectiveType) ---
         const campaigns: Array<{ id: string; name: string; objectiveType: string; impressions: number; clicks: number; spend: number }> = [];
-
-        if (campaignMetrics.size > 0) {
-          try {
-            const campMetaResp = await fetch(
-              `https://api.linkedin.com/v2/adCampaignsV2?q=search&search.account.values[0]=urn:li:sponsoredAccount:${accountId}&count=500&fields=id,name,objectiveType,status`,
-              { headers: { 'Authorization': `Bearer ${accessToken}` } }
-            );
-            if (campMetaResp.ok) {
-              const campMeta = await campMetaResp.json();
-              for (const c of (campMeta.elements || [])) {
-                const id = String(c.id || '');
-                if (!id || !campaignMetrics.has(id)) continue;
-                const m = campaignMetrics.get(id)!;
-                campaigns.push({
-                  id,
-                  name: c.name || `Campaign ${id}`,
-                  objectiveType: c.objectiveType || '',
-                  impressions: m.impressions,
-                  clicks: m.clicks,
-                  spend: m.spend,
-                });
-              }
-            }
-          } catch (e) {
-            console.error('[get_lead_company_journey] Campaign metadata error:', e);
+        let campaignSplit = true;
+        let journeyError: string | undefined;
+        try {
+          const touches = await fetchCompanyTouches(accessToken, { accountId: String(accountId), orgIds: [resolvedOrgId], from: windowStart, to: windowEnd });
+          campaignSplit = touches.meta.campaignSplit;
+          const byCampaign = new Map<string, { impressions: number; clicks: number; spend: number }>();
+          for (const r of touches.rows) {
+            totalImpressions += r.impressions;
+            totalClicks += r.clicks;
+            totalSpend += r.spend;
+            if (!r.campaignId) continue;
+            const m = byCampaign.get(r.campaignId) || { impressions: 0, clicks: 0, spend: 0 };
+            m.impressions += r.impressions; m.clicks += r.clicks; m.spend += r.spend;
+            byCampaign.set(r.campaignId, m);
           }
+          for (const [id, m] of byCampaign) {
+            if (!m.impressions && !m.clicks && !m.spend) continue;
+            const meta = touches.campaigns[id];
+            campaigns.push({ id, name: meta?.name || `Campaign ${id}`, objectiveType: meta?.objectiveType || '', ...m });
+          }
+          if (touches.meta.truncated || touches.meta.failedRanges?.length) journeyError = 'Partial data: LinkedIn returned only part of the window.';
+        } catch (e) {
+          console.error('[get_lead_company_journey] Company touches error:', e);
+          journeyError = e instanceof AccountIntelError ? e.message : 'Could not load this company\'s ad activity.';
         }
 
         // Sort by impressions desc
@@ -13823,6 +13757,8 @@ serve(async (req) => {
           window: { start: windowStart, end: windowEnd, days: lookbackDays },
           total: { impressions: totalImpressions, clicks: totalClicks, spend: totalSpend },
           campaigns,
+          campaignSplit,
+          error: journeyError,
         }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });

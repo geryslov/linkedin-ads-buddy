@@ -17,7 +17,15 @@ export interface JourneyData {
   window?: { start: string; end: string; days: number };
   total: { impressions: number; clicks: number; spend: number };
   campaigns: JourneyCampaign[];
+  /** false when LinkedIn only gave company totals, without the per-campaign split */
+  campaignSplit?: boolean;
+  /** Partial or failed load; totals may be incomplete */
+  error?: string;
 }
+
+// The window ends at the submission, so one company's journey differs per submission day.
+const journeyKey = (accountId: string, orgName: string, submittedAtMs: number) =>
+  `${accountId}::${orgName.toLowerCase()}::${new Date(submittedAtMs || 0).toISOString().slice(0, 10)}`;
 
 export function useLeadJourney(accessToken: string | null) {
   const [journeyCache, setJourneyCache] = useState<Map<string, JourneyData>>(new Map());
@@ -34,7 +42,7 @@ export function useLeadJourney(accessToken: string | null) {
   ) => {
     if (!accessToken || !accountId || !orgName) return;
 
-    const cacheKey = `${accountId}::${orgName.toLowerCase()}`;
+    const cacheKey = journeyKey(accountId, orgName, submittedAtMs);
 
     // Already cached or in flight
     if (journeyCache.has(cacheKey) || inFlight.current.has(cacheKey)) return;
@@ -77,12 +85,12 @@ export function useLeadJourney(accessToken: string | null) {
     }
   }, [accessToken, journeyCache]);
 
-  const getJourney = useCallback((accountId: string, orgName: string): JourneyData | undefined => {
-    return journeyCache.get(`${accountId}::${orgName.toLowerCase()}`);
+  const getJourney = useCallback((accountId: string, orgName: string, submittedAtMs: number): JourneyData | undefined => {
+    return journeyCache.get(journeyKey(accountId, orgName, submittedAtMs));
   }, [journeyCache]);
 
-  const isLoadingJourney = useCallback((accountId: string, orgName: string): boolean => {
-    return loadingKeys.has(`${accountId}::${orgName.toLowerCase()}`);
+  const isLoadingJourney = useCallback((accountId: string, orgName: string, submittedAtMs: number): boolean => {
+    return loadingKeys.has(journeyKey(accountId, orgName, submittedAtMs));
   }, [loadingKeys]);
 
   const clearCache = useCallback(() => {
