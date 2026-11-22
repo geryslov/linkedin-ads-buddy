@@ -17,6 +17,7 @@ export interface OverlapRange { start: string; end: string }
 const dataCache = new Map<string, OverlapData>();
 const nameCache = new Map<string, Record<string, CompanyName>>();
 const BATCH = 25;
+const PARALLEL = 2;
 const NAME_PAGE = 2500;
 
 async function call<T>(action: string, accessToken: string, params: Record<string, unknown>): Promise<T> {
@@ -79,7 +80,15 @@ export function useActivityOverlap(accessToken: string | null, accountId: string
     setLoading(true);
     setError(null);
     try {
-      const res = await call<{ elements?: Record<string, unknown>[]; message?: string }>('get_campaigns', accessToken, { accountId });
+      // Names don't depend on the breakdowns, so they load alongside the scan.
+      if (force || !nameCache.has(k)) loadNames(k);
+      else if (live.current === k) setNames(nameCache.get(k)!);
+      // One campaign-pivot call says which campaigns delivered, so only those get a per-company query.
+      const [res, delivery] = await Promise.all([
+        call<{ elements?: Record<string, unknown>[]; message?: string }>('get_campaigns', accessToken, { accountId }),
+        call<{ elements?: { campaignId: string; impressions?: number; clicks?: number }[] }>('get_campaign_report', accessToken, { accountId, dateRange: range })
+          .catch(() => null),
+      ]);
       // The action passes LinkedIn's payload through, so a 401/403 arrives as a body without elements.
       if (!Array.isArray(res.elements)) throw new Error(res.message || 'LinkedIn returned no campaign list');
       // Strip to what the report needs: the raw list carries targeting criteria (700KB+).
@@ -89,10 +98,14 @@ export function useActivityOverlap(accessToken: string | null, accountId: string
           format: c.format as string | undefined, type: c.type as string | undefined, objectiveType: c.objectiveType as string | undefined,
         }))
         .filter((c) => c.status !== 'DRAFT');
-      // Campaigns scheduled entirely outside the window can't have rows; skip the calls.
+      const delivered = new Set((delivery?.elements || []).filter((r) => r.impressions || r.clicks).map((r) => String(r.campaignId)));
+      const accountImpressions = delivered.size ? (delivery!.elements || []).reduce((s, r) => s + (r.impressions || 0), 0) : null;
+      // The report swallows LinkedIn analytics errors as zeros, so an empty set falls back to the schedule filter:
+      // campaigns scheduled entirely outside the window can't have rows.
       const from = Date.parse(range.start), to = Date.parse(range.end) + 86400000;
       const sched = new Map((res.elements || []).map((c) => [String(c.id), (c.runSchedule || {}) as { start?: number; end?: number }]));
       const inWindow = campaigns.filter((c) => {
+        if (delivered.size) return delivered.has(c.id);
         const r = sched.get(c.id) || {};
         return !(r.end && r.end < from) && !(r.start && r.start > to);
       });
@@ -102,40 +115,40 @@ export function useActivityOverlap(accessToken: string | null, accountId: string
       const batches: OverlapCampaign[][] = [];
       for (let i = 0; i < inWindow.length; i += BATCH) batches.push(inWindow.slice(i, i + BATCH));
       setProgress({ done: 0, total: batches.length });
-      // Sequential: the edge already queries 5 campaigns at a time inside each call.
-      for (const [i, batch] of batches.entries()) {
-        try {
-          const r = await call<{ breakdowns?: Record<string, { campaignId: string; impressions?: number; clicks?: number }[]> }>(
-            'get_company_campaign_breakdown', accessToken, {
-              accountId,
-              campaignIds: batch.map((c) => c.id),
-              campaignNames: Object.fromEntries(batch.map((c) => [c.id, c.name])),
-              dateRange: range, // {start, end} strings; top-level startDate/endDate would be ignored
-            },
-          );
-          for (const [urn, rows] of Object.entries(r.breakdowns || {})) {
-            const kept = rows
-              .map((x) => ({ campaignId: String(x.campaignId), impressions: x.impressions || 0, clicks: x.clicks || 0 }))
-              .filter((x) => x.impressions || x.clicks);
-            if (kept.length) (breakdowns[urn] ||= []).push(...kept);
+      const runBatch = (batch: OverlapCampaign[]) =>
+        call<{ breakdowns?: Record<string, { campaignId: string; impressions?: number; clicks?: number }[]> }>(
+          'get_company_campaign_breakdown', accessToken, {
+            accountId,
+            campaignIds: batch.map((c) => c.id),
+            campaignNames: Object.fromEntries(batch.map((c) => [c.id, c.name])),
+            dateRange: range, // {start, end} strings; top-level startDate/endDate would be ignored
+          },
+        );
+      // Two calls in flight (the edge runs 5 campaigns at a time inside each); a failed batch gets one retry.
+      let next = 0, done = 0;
+      const worker = async () => {
+        while (next < batches.length) {
+          const batch = batches[next++];
+          try {
+            const r = await runBatch(batch).catch(() => runBatch(batch));
+            for (const [urn, rows] of Object.entries(r.breakdowns || {})) {
+              const kept = rows
+                .map((x) => ({ campaignId: String(x.campaignId), impressions: x.impressions || 0, clicks: x.clicks || 0 }))
+                .filter((x) => x.impressions || x.clicks);
+              if (kept.length) (breakdowns[urn] ||= []).push(...kept);
+            }
+          } catch {
+            failedBatches++;
           }
-        } catch {
-          failedBatches++;
+          done++;
+          if (live.current === k) setProgress({ done, total: batches.length });
         }
-        if (live.current === k) setProgress({ done: i + 1, total: batches.length });
-      }
-
-      let accountImpressions: number | null = null;
-      try {
-        const a = await call<{ elements?: { impressions?: number }[] }>('get_analytics', accessToken, { accountId, dateRange: range });
-        accountImpressions = (a.elements || []).reduce((s, e) => s + (e.impressions || 0), 0);
-      } catch { /* the coverage check is skipped */ }
+      };
+      await Promise.all(Array.from({ length: PARALLEL }, worker));
 
       const result = { campaigns, breakdowns, accountImpressions, failedBatches };
       dataCache.set(k, result);
       if (live.current === k) setData(result);
-      if (force || !nameCache.has(k)) loadNames(k);
-      else if (live.current === k) setNames(nameCache.get(k)!);
     } catch (e) {
       if (live.current === k) setError(e instanceof Error ? e.message : String(e));
     } finally {

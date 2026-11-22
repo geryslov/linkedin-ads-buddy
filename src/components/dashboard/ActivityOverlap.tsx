@@ -138,7 +138,7 @@ export function ActivityOverlap({ accessToken, selectedAccount, accountName }: P
           ) : error ? (
             <div className="flex items-start gap-2 text-xs"><AlertTriangle className="h-4 w-4 text-destructive shrink-0" /><span className="font-medium">{error}</span></div>
           ) : (
-            <EmptyState icon={Grid3x3} title="Which companies saw which activities" description="Classifies every non-draft campaign into an activity type, then reads companies per campaign for the period. Large accounts take a minute. Nothing is changed in LinkedIn." />
+            <EmptyState icon={Grid3x3} title="Which companies saw which activities" description="Classifies every non-draft campaign into an activity type, then reads companies per campaign for the period. Only campaigns that delivered in the period are read. A touch is one ad impression to someone at the company. Nothing is changed in LinkedIn." />
           )}
         </WidgetCard>
       </div>
@@ -176,7 +176,7 @@ export function ActivityOverlap({ accessToken, selectedAccount, accountName }: P
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         {[
           { label: 'Companies reached', value: num(totals.companies) },
-          { label: 'Touches', value: num(totals.touches), hint: 'One impression to a member of the company (one delivery for InMail)' },
+          { label: 'Touches', value: num(totals.touches), hint: 'One impression to a member of the company (one delivery for InMail)', sub: '1 touch = 1 ad impression' },
           { label: 'Campaigns delivering', value: num(totals.campaignsDelivering) },
           { label: 'Saw 1 activity', value: pct(totals.singlePct), primary: true },
           { label: 'Saw 3+ activities', value: pct(totals.threePlusPct) },
@@ -184,6 +184,7 @@ export function ActivityOverlap({ accessToken, selectedAccount, accountName }: P
           <div key={k.label} title={k.hint} className={`rounded-xl border p-3 ${k.primary ? 'bg-primary text-primary-foreground border-primary' : 'bg-card border-border'}`}>
             <div className={`text-[11px] ${k.primary ? 'text-primary-foreground/80' : 'text-muted-foreground'}`}>{k.label}</div>
             <div className="font-display text-2xl font-bold tabular-nums mt-0.5">{k.value}</div>
+            {k.sub && <div className="text-[11px] text-muted-foreground mt-0.5">{k.sub}</div>}
           </div>
         ))}
       </div>
