@@ -30,6 +30,7 @@ import { LeadSyncReport } from "@/components/dashboard/LeadSyncReport";
 import { LeadRecordsViewer } from "@/components/dashboard/LeadRecordsViewer";
 import { WeeklyReport } from "@/components/dashboard/WeeklyReport";
 import { ActivityReport } from "@/components/dashboard/ActivityReport";
+import { ActivityOverlap } from "@/components/dashboard/ActivityOverlap";
 import { AnalyticsDashboard } from "@/components/dashboard/AnalyticsDashboard";
 import { CreativeAnalyzer } from "@/components/dashboard/CreativeAnalyzer";
 import { LeadGenAnalyzer } from "@/components/dashboard/LeadGenAnalyzer";
@@ -69,6 +70,7 @@ const tabMeta: Record<string, { group: string; title: string; subtitle: string }
   reports:             { group: "Analytics",  title: "Reports",                     subtitle: "Comprehensive ad performance reports" },
   weekly_report:       { group: "Analytics",  title: "Weekly Report",               subtitle: "Week-over-week performance by creative, campaign, and lead form" },
   conv_breakdown:      { group: "Analytics",  title: "Conv. Breakdown",             subtitle: "Company × conversion cross-tab analysis" },
+  activity_overlap:    { group: "Analytics",  title: "Activity Overlap",            subtitle: "Which companies saw which activities, and how much those audiences overlap" },
   audiences:           { group: "Audience",   title: "Audience Insights",           subtitle: "Understand and manage your target audiences" },
   company_timeline:    { group: "Audience",   title: "Company Timeline",            subtitle: "Track company engagement over time" },
   influence_matcher:   { group: "Audience",   title: "Influence Matcher",           subtitle: "Match companies to influential contacts" },
@@ -565,6 +567,14 @@ export default function Dashboard() {
           <LeadRecordsViewer
             accessToken={accessToken}
             selectedAccount={selectedAccount}
+          />
+        )}
+
+        {activeTab === "activity_overlap" && (
+          <ActivityOverlap
+            accessToken={accessToken}
+            selectedAccount={selectedAccount}
+            accountName={adAccounts.find((a) => a.id === selectedAccount)?.name}
           />
         )}
 

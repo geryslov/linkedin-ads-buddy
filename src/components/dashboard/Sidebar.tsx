@@ -98,6 +98,7 @@ export const navGroups: NavGroup[] = [
       { id: "creative_reports", label: "Creative Reports", icon: TrendingUp },
       { id: "reports", label: "Reports", icon: FileBarChart },
       { id: "weekly_report", label: "Weekly Report", icon: CalendarRange },
+      { id: "activity_overlap", label: "Activity Overlap", icon: Grid3x3 },
       { id: "conv_breakdown", label: "Conv. Breakdown", icon: Grid3x3, hidden: true },
       { id: "activity_report", label: "Activity Report", icon: ClipboardList, hidden: true },
       { id: "creative_analyzer", label: "Creative Analyzer", icon: Sparkles },
