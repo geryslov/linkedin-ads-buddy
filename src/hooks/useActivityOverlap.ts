@@ -18,7 +18,8 @@ const dataCache = new Map<string, OverlapData>();
 const nameCache = new Map<string, Record<string, CompanyName>>();
 const BATCH = 25;
 const PARALLEL = 2;
-const NAME_PAGE = 2500;
+const NAME_PAGE = 500;
+const NAME_PARALLEL = 3;
 
 async function call<T>(action: string, accessToken: string, params: Record<string, unknown>): Promise<T> {
   const { data, error } = await supabase.functions.invoke('linkedin-api', { body: { action, accessToken, params } });
@@ -34,6 +35,7 @@ export function useActivityOverlap(accessToken: string | null, accountId: string
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [namesLoading, setNamesLoading] = useState(false);
+  const [namesProgress, setNamesProgress] = useState<{ done: number; total: number } | null>(null);
   const [namesError, setNamesError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const live = useRef(key);
@@ -45,6 +47,7 @@ export function useActivityOverlap(accessToken: string | null, accountId: string
     setError(null);
     setNamesError(null);
     setProgress(null);
+    setNamesProgress(null);
   }, [key]);
 
   const loadNames = useCallback(async (k: string) => {
@@ -52,20 +55,37 @@ export function useActivityOverlap(accessToken: string | null, accountId: string
     setNamesLoading(true);
     setNamesError(null);
     const out: Record<string, CompanyName> = {};
+    // Each call resolves its slice through LinkedIn's org lookup 50 at a time, so big slices run for minutes.
+    // Small slices, a few in flight; the first one reports how many companies there are.
+    const page = async (offset: number) => {
+      const res = await call<{ elements?: { entityUrn: string; entityName?: string; website?: string }[]; metadata?: { totalCompanies?: number } }>(
+        'get_company_demographic', accessToken, { accountId, dateRange: range, offset, limit: NAME_PAGE },
+      );
+      for (const e of res.elements || []) if (e.entityUrn && e.entityName) out[e.entityUrn] = { name: e.entityName, website: e.website || undefined };
+      if (live.current === k) setNames({ ...out });
+      return res.metadata?.totalCompanies ?? 0;
+    };
     try {
-      for (let offset = 0; offset < 100000; offset += NAME_PAGE) {
-        const res = await call<{ elements?: { entityUrn: string; entityName?: string; website?: string }[]; metadata?: { hasMore?: boolean } }>(
-          'get_company_demographic', accessToken, { accountId, dateRange: range, offset, limit: NAME_PAGE },
-        );
-        for (const e of res.elements || []) if (e.entityUrn && e.entityName) out[e.entityUrn] = { name: e.entityName, website: e.website || undefined };
-        if (live.current === k) setNames({ ...out });
-        if (!res.metadata?.hasMore) break;
-      }
+      const total = Math.min(await page(0), 100000);
+      const offsets: number[] = [];
+      for (let o = NAME_PAGE; o < total; o += NAME_PAGE) offsets.push(o);
+      let next = 0, done = 1, failed = 0;
+      if (live.current === k) setNamesProgress({ done, total: offsets.length + 1 });
+      const worker = async () => {
+        while (next < offsets.length) {
+          const o = offsets[next++];
+          try { await page(o).catch(() => page(o)); } catch { failed++; }
+          done++;
+          if (live.current === k) setNamesProgress({ done, total: offsets.length + 1 });
+        }
+      };
+      await Promise.all(Array.from({ length: NAME_PARALLEL }, worker));
+      if (failed) throw new Error(`${failed} of ${offsets.length + 1} name batches failed`);
       nameCache.set(k, out);
     } catch (e) {
       if (live.current === k) setNamesError(e instanceof Error ? e.message : String(e));
     } finally {
-      if (live.current === k) setNamesLoading(false);
+      if (live.current === k) { setNamesLoading(false); setNamesProgress(null); }
     }
   }, [accessToken, accountId, range]);
 
@@ -156,5 +176,5 @@ export function useActivityOverlap(accessToken: string | null, accountId: string
     }
   }, [accessToken, accountId, key, range, loadNames]);
 
-  return { data, names, loading, progress, namesLoading, namesError, error, load };
+  return { data, names, loading, progress, namesLoading, namesProgress, namesError, error, load };
 }

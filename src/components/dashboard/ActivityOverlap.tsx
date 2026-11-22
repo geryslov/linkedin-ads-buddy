@@ -37,7 +37,7 @@ function readOverrides(acct: string | null): Record<string, string> {
 export function ActivityOverlap({ accessToken, selectedAccount, accountName }: Props) {
   const [days, setDays] = useState(90);
   const range = useMemo(() => ({ start: iso(new Date(Date.now() - days * 86400000)), end: iso(new Date()) }), [days]);
-  const { data, names, loading, progress, namesLoading, namesError, error, load } = useActivityOverlap(accessToken, selectedAccount, range);
+  const { data, names, loading, progress, namesLoading, namesProgress, namesError, error, load } = useActivityOverlap(accessToken, selectedAccount, range);
   const [minTouches, setMinTouches] = useState(1);
   const [overrides, setOverrides] = useState<Record<string, string>>(() => readOverrides(selectedAccount));
   const [openType, setOpenType] = useState<string | null>(null);
@@ -58,7 +58,7 @@ export function ActivityOverlap({ accessToken, selectedAccount, accountName }: P
     [data, classOf, minTouches],
   );
 
-  const nameOf = (urn: string) => names[urn]?.name || `Unresolved (${orgId(urn)})`;
+  const nameOf = (urn: string) => names[urn]?.name || (namesLoading ? `Loading… (${orgId(urn)})` : `Unresolved (${orgId(urn)})`);
   const typeByName = useMemo(() => new Map((report?.types || []).map((t) => [t.type, t])), [report]);
   const unresolved = useMemo(() => (report && !namesLoading ? report.companies.filter((c) => !names[c.urn]).length : 0), [report, names, namesLoading]);
   const rawTouches = useMemo(
@@ -165,9 +165,10 @@ export function ActivityOverlap({ accessToken, selectedAccount, accountName }: P
     <div className="space-y-4">
       {header}
 
-      {(data!.failedBatches > 0 || loading) && (
+      {(data!.failedBatches > 0 || loading || namesLoading) && (
         <div className="text-xs text-muted-foreground space-y-1">
           {loading && <p className="flex gap-1.5"><Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />Refreshing{progress ? `: batch ${progress.done} of ${progress.total}` : ''}…</p>}
+          {namesLoading && <p className="flex gap-1.5"><Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />Loading company names{namesProgress ? `: ${namesProgress.done} of ${namesProgress.total} batches` : ''}…</p>}
           {data!.failedBatches > 0 && <p className="flex gap-1.5"><AlertTriangle className="h-3.5 w-3.5 text-warning shrink-0" />{data!.failedBatches} batch{data!.failedBatches === 1 ? '' : 'es'} of 25 campaigns failed; those campaigns show no companies. Refresh to retry.</p>}
         </div>
       )}
