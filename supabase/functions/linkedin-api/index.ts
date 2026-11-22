@@ -5,7 +5,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { createCreativeReader, CREATIVE_READ_VERSION, metadataCopy } from './creative-metadata.ts';
 import { isInMailRef, readInMailContent, type MessageAdContent } from './message-ad-content.ts';
 import { fetchCompetitorAds } from './ad-library.ts';
-import { AccountIntelError, fetchAccountIntel, fetchAudienceBreakdown, fetchCampaignBreakdown, fetchCampaignSeniority, fetchCompanyDaily, fetchCompanyTouches, fetchCreativeBreakdown, fetchTouchCampaigns, fetchWindowSeries, fetchAdSegments } from './account-intel.ts';
+import { AccountIntelError, fetchAccountIntel, fetchAudienceBreakdown, fetchCampaignBreakdown, fetchCampaignSeniority, fetchCompanyDaily, fetchCompanyTouches, fetchCreativeBreakdown, fetchTouchCampaigns, fetchWindowSeries, fetchAdSegments, resolveLeadOrg } from './account-intel.ts';
 import { targetingCompatibilityError } from './targeting-compatibility.ts';
 import { createCompanyAudience, getCompanyAudience } from './audiences.ts';
 
@@ -13601,10 +13601,10 @@ serve(async (req) => {
       }
 
       case 'get_lead_company_journey': {
-        const { accountId, orgName, submittedAtMs, lookbackDays = 90 } = params || {};
+        const { accountId, orgName, email, submittedAtMs, lookbackDays = 90 } = params || {};
 
-        if (!accountId || !orgName) {
-          return new Response(JSON.stringify({ error: 'accountId and orgName are required' }), {
+        if (!accountId || (!orgName && !email)) {
+          return new Response(JSON.stringify({ error: 'accountId and orgName or email are required' }), {
             status: 400,
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           });
@@ -13612,105 +13612,40 @@ serve(async (req) => {
 
         console.log(`[get_lead_company_journey] account=${accountId} org="${orgName}" submittedAt=${submittedAtMs} lookback=${lookbackDays}d`);
 
-        // --- Step A: Resolve company name → org URN ---
+        // --- Date window: the lookback before the submission ---
+        const endMs = submittedAtMs ? Number(submittedAtMs) : Date.now();
+        const startMs = endMs - lookbackDays * 24 * 60 * 60 * 1000;
+        const toDate = (ms: number) => new Date(ms).toISOString().split('T')[0];
+        const windowStart = toDate(startMs);
+        const windowEnd = toDate(Math.min(endMs, Date.now()));
+
+        // --- Match the lead's company among the orgs the ads reached in the window ---
+        // Name search on LinkedIn's org API often found nothing, or a different
+        // page than the one in the analytics, so the journey came back empty.
         let resolvedOrgId: string | null = null;
-        let resolvedOrgName: string = orgName;
-
-        // A1: Check linkedin_company_cache by name (case-insensitive)
+        let resolvedOrgName: string = orgName || '';
         try {
-          const { data: cached } = await supabaseClient
-            .from('linkedin_company_cache')
-            .select('org_id, name')
-            .ilike('name', orgName)
-            .limit(1);
-          if (cached && cached.length > 0) {
-            resolvedOrgId = cached[0].org_id;
-            resolvedOrgName = cached[0].name || orgName;
-            console.log(`[get_lead_company_journey] Cache hit for "${orgName}" → org_id=${resolvedOrgId}`);
-          }
+          const org = await resolveLeadOrg(accessToken, { accountId: String(accountId), companyName: orgName, email, from: windowStart, to: windowEnd });
+          if (org) { resolvedOrgId = org.id; resolvedOrgName = org.name || resolvedOrgName; }
         } catch (e) {
-          console.error('[get_lead_company_journey] Cache lookup error:', e);
-        }
-
-        // A2: If not in cache, search LinkedIn org API
-        if (!resolvedOrgId) {
-          try {
-            const searchUrl = `https://api.linkedin.com/v2/organizationsLookup?q=vanityName&vanityName=${encodeURIComponent(orgName.toLowerCase().replace(/\s+/g, '-'))}&projection=(results*(id,localizedName))`;
-            const searchResp = await fetch(searchUrl, {
-              headers: { 'Authorization': `Bearer ${accessToken}` },
-            });
-            if (searchResp.ok) {
-              const searchData = await searchResp.json();
-              const results = searchData.results || [];
-              if (results.length > 0) {
-                resolvedOrgId = String(results[0].id);
-                resolvedOrgName = results[0].localizedName || orgName;
-                console.log(`[get_lead_company_journey] vanityName search hit for "${orgName}" → ${resolvedOrgId}`);
-              }
-            }
-          } catch (e) {
-            console.error('[get_lead_company_journey] org vanityName search error:', e);
-          }
-        }
-
-        // A3: Try keyword search if still not resolved
-        if (!resolvedOrgId) {
-          try {
-            const kwUrl = `https://api.linkedin.com/rest/organizations?q=search&keywords=${encodeURIComponent(orgName)}&count=3`;
-            const kwResp = await fetch(kwUrl, {
-              headers: {
-                'Authorization': `Bearer ${accessToken}`,
-                'LinkedIn-Version': LINKEDIN_VERSION,
-                'X-Restli-Protocol-Version': '2.0.0',
-              },
-            });
-            if (kwResp.ok) {
-              const kwData = await kwResp.json();
-              const elements = kwData.elements || [];
-              if (elements.length > 0) {
-                const first = elements[0];
-                const rawId = first.id ? String(first.id) : (first.entityUrn || '').split(':').pop();
-                if (rawId) {
-                  resolvedOrgId = rawId;
-                  resolvedOrgName = first.localizedName || first.name || orgName;
-                  console.log(`[get_lead_company_journey] keyword search hit for "${orgName}" → ${resolvedOrgId}`);
-                  // Cache it
-                  try {
-                    await supabaseClient.from('linkedin_company_cache').upsert({
-                      org_id: resolvedOrgId,
-                      name: resolvedOrgName,
-                      vanity_name: first.vanityName || null,
-                      source: 'keyword_search',
-                      last_seen_at: new Date().toISOString(),
-                    }, { onConflict: 'org_id' });
-                  } catch (_) {}
-                }
-              }
-            }
-          } catch (e) {
-            console.error('[get_lead_company_journey] org keyword search error:', e);
+          console.error('[get_lead_company_journey] org match error:', e);
+          if (e instanceof AccountIntelError && e.kind === 'token_invalid') {
+            return new Response(JSON.stringify({ error: e.message }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
           }
         }
 
         if (!resolvedOrgId) {
-          console.log(`[get_lead_company_journey] Could not resolve org for "${orgName}"`);
+          console.log(`[get_lead_company_journey] No engaged org matched "${orgName}" / ${email ? email.split('@')[1] : 'no email'}`);
           return new Response(JSON.stringify({
             orgResolved: false,
-            orgName,
-            window: null,
+            orgName: orgName || (email ? email.split('@')[1] : ''),
+            window: { start: windowStart, end: windowEnd, days: lookbackDays },
             total: { impressions: 0, clicks: 0, spend: 0 },
             campaigns: [],
           }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           });
         }
-
-        // --- Build date window ---
-        const endMs = submittedAtMs ? Number(submittedAtMs) : Date.now();
-        const startMs = endMs - lookbackDays * 24 * 60 * 60 * 1000;
-        const toDate = (ms: number) => new Date(ms).toISOString().split('T')[0];
-        const windowStart = toDate(startMs);
-        const windowEnd = toDate(endMs);
 
         // --- Company's own paid activity in the window ---
         // Ad Analytics has no member-company filter (a memberCompanies param is

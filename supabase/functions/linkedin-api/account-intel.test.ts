@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { buildFilterCriteria, fetchAccountIntel, fetchAudienceBreakdown, fetchCampaignBreakdown, fetchCampaignSeniority, fetchCompanyDaily, fetchCompanyTouches, fetchCreativeBreakdown, fetchTouchCampaigns, fetchWindowSeries, fetchAdSegments, mergeBySeniority, normalizeCompany, selectBreakdownCampaigns } from './account-intel.ts';
+import { buildFilterCriteria, fetchAccountIntel, fetchAudienceBreakdown, fetchCampaignBreakdown, fetchCampaignSeniority, fetchCompanyDaily, fetchCompanyTouches, fetchCreativeBreakdown, fetchTouchCampaigns, fetchWindowSeries, fetchAdSegments, mergeBySeniority, normalizeCompany, resolveLeadOrg, selectBreakdownCampaigns } from './account-intel.ts';
 
 // Element shape from the docs' 202606+ sample response.
 const el = (name: string, o: Record<string, unknown> = {}) => ({
@@ -375,4 +375,23 @@ test('campaign seniority: one MEMBER_SENIORITY call per campaign, failures per s
 test('campaign seniority: an invalid token fails the whole request', async () => {
   const fake = (async () => json({}, 401)) as unknown as typeof fetch;
   await expect(fetchCampaignSeniority('t', { accountId: '9', campaignIds: ['1'] }, fake)).rejects.toMatchObject({ kind: 'token_invalid' });
+});
+
+test('lead org match: work-email domain, legal-suffix-insensitive name, free mail ignored, window-scoped', async () => {
+  const urls: string[] = [];
+  const fake = (async (url: string) => {
+    urls.push(url);
+    if (url.includes('timeGranularity=ALL')) return json({ elements: [{ pivotValues: ['urn:li:organization:5'], impressions: 90 }, { pivotValues: ['urn:li:organization:77'], impressions: 10 }] });
+    if (url.includes('organizationsLookup')) return json({ results: { '5': { localizedName: 'Globex Corporation', localizedWebsite: 'globex.com' }, '77': { localizedName: 'Acme, Inc.', localizedWebsite: 'https://www.acme.io/about' } } });
+    return json({ elements: [] });
+  }) as unknown as typeof fetch;
+  const range = { accountId: '9', from: '2026-08-24', to: '2026-11-22' };
+
+  const byDomain = await resolveLeadOrg('t', { ...range, companyName: 'ACME Europe', email: 'jo@eu.acme.io' }, fake);
+  expect(byDomain).toMatchObject({ id: '77', name: 'Acme, Inc.' });
+  expect(urls[0]).toContain('dateRange=(start:(year:2026,month:8,day:24),end:(year:2026,month:11,day:22))');
+
+  expect(await resolveLeadOrg('t', { ...range, companyName: 'Globex', email: 'x@gmail.com' }, fake)).toMatchObject({ id: '5' });
+  expect(await resolveLeadOrg('t', { ...range, companyName: 'Initech', email: 'x@gmail.com' }, fake)).toBeNull();
+  expect(await resolveLeadOrg('t', { ...range, email: 'x@gmail.com' }, fake)).toBeNull();
 });

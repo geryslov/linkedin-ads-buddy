@@ -38,6 +38,7 @@ export function useLeadJourney(accessToken: string | null) {
     accountId: string,
     orgName: string,
     submittedAtMs: number,
+    email?: string,
     lookbackDays = 90,
   ) => {
     if (!accessToken || !accountId || !orgName) return;
@@ -55,7 +56,7 @@ export function useLeadJourney(accessToken: string | null) {
         body: {
           action: 'get_lead_company_journey',
           accessToken,
-          params: { accountId, orgName, submittedAtMs, lookbackDays },
+          params: { accountId, orgName, email, submittedAtMs, lookbackDays },
         },
       });
 

@@ -673,6 +673,10 @@ const isoDay = (d: any) => `${d?.year}-${String(d?.month).padStart(2, '0')}-${St
 
 const hostOf = (url: string) => url.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').split(/[/?#]/)[0];
 const normName = (n: string) => n.toLowerCase().replace(/[^a-z0-9]/g, '');
+// "Acme, Inc." and "ACME Ltd" are both "acme" for the looser name tier.
+const LEGAL_SUFFIX = /\b(inc|incorporated|llc|ltd|limited|plc|gmbh|ag|sa|sas|srl|bv|nv|oy|ab|as|co|corp|corporation|company|group|holdings?)\b\.?/g;
+const coreName = (n: string) => normName(n.toLowerCase().replace(LEGAL_SUFFIX, ' '));
+const sameSite = (a: string, b: string) => a === b || a.endsWith(`.${b}`) || b.endsWith(`.${a}`);
 const MAX_MATCH_ORGS = 1000;
 
 // Account Intel rows carry no URN. Try the cheap routes first (numeric page URL,
@@ -682,7 +686,7 @@ const MAX_MATCH_ORGS = 1000;
 async function resolveOrgId(
   accessToken: string, accountId: string, company: { companyPageUrl: string; companyWebsite?: string; companyName?: string },
   dateRange: string, fetchImpl: typeof fetch,
-): Promise<{ id: string; via: string } | null> {
+): Promise<{ id: string; via: string; name?: string } | null> {
   const slug = company.companyPageUrl.match(/\/company\/([^/?#]+)/)?.[1]?.toLowerCase() || '';
   if (/^\d+$/.test(slug)) return { id: slug, via: 'page_url' };
 
@@ -707,6 +711,7 @@ async function resolveOrgId(
 
   const site = company.companyWebsite ? hostOf(company.companyWebsite) : '';
   const name = company.companyName ? normName(company.companyName) : '';
+  const core = company.companyName ? coreName(company.companyName) : '';
   const account = `List(${encodeURIComponent(`urn:li:sponsoredAccount:${accountId}`)})`;
   const res = await fetchImpl(`https://api.linkedin.com/rest/adAnalytics?q=analytics&pivot=MEMBER_COMPANY&timeGranularity=ALL&dateRange=${dateRange}&accounts=${account}&fields=pivotValues,impressions`, {
     headers: { 'Authorization': `Bearer ${accessToken}`, 'LinkedIn-Version': ACCOUNT_INTEL_VERSION, 'X-Restli-Protocol-Version': '2.0.0' },
@@ -738,10 +743,32 @@ async function resolveOrgId(
     const orgs = results.flat();
     const hit = (slug && orgs.find(([, o]) => String(o?.vanityName || '').toLowerCase() === slug))
       || (site && orgs.find(([, o]) => o?.localizedWebsite && hostOf(String(o.localizedWebsite)) === site))
-      || (name && orgs.find(([, o]) => normName(String(o?.localizedName || '')) === name));
-    if (hit) return { id: String(hit[0]), via: 'engaged_orgs' };
+      || (name && orgs.find(([, o]) => normName(String(o?.localizedName || '')) === name))
+      || (site && orgs.find(([, o]) => o?.localizedWebsite && sameSite(hostOf(String(o.localizedWebsite)), site)))
+      || (core.length >= 3 && orgs.find(([, o]) => coreName(String(o?.localizedName || '')) === core));
+    if (hit) return { id: String(hit[0]), via: 'engaged_orgs', name: String(hit[1]?.localizedName || '') || undefined };
   }
   return null;
+}
+
+const FREE_MAIL = new Set(['gmail.com', 'googlemail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'live.com', 'msn.com', 'icloud.com', 'me.com', 'aol.com', 'proton.me', 'protonmail.com', 'gmx.com', 'gmx.de', 'web.de', 'mail.ru', 'yandex.ru', 'qq.com', '163.com']);
+
+/**
+ * Lead ad journey: match a lead's company to an org the account's ads reached in
+ * [from, to], by work-email domain (vs the org's website) and company name. A
+ * match means the company had paid activity in the window; no match means it
+ * had none we can attribute (or the lead's details don't identify it).
+ */
+export async function resolveLeadOrg(
+  accessToken: string, q: { accountId: string; companyName?: string; email?: string; from: string; to: string },
+  fetchImpl: typeof fetch = fetch,
+) {
+  const accountId = String(q.accountId || '').replace(/\D/g, '');
+  const parse = (d: string) => Date.parse(`${d}T00:00:00Z`);
+  const domain = String(q.email || '').toLowerCase().split('@')[1]?.trim() || '';
+  const companyWebsite = domain && !FREE_MAIL.has(domain) ? domain : '';
+  if (!accountId || (!companyWebsite && !q.companyName)) return null;
+  return resolveOrgId(accessToken, accountId, { companyPageUrl: '', companyWebsite, companyName: q.companyName }, `(start:${restDate(parse(q.from))},end:${restDate(parse(q.to))})`, fetchImpl);
 }
 
 export async function fetchCompanyDaily(

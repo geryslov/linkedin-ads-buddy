@@ -54,7 +54,9 @@ function JourneyPanel({
   if (!journey.orgResolved) {
     return (
       <div className="px-6 py-3 text-xs text-muted-foreground italic">
-        Could not match &ldquo;{orgName}&rdquo; to a LinkedIn organization.
+        &ldquo;{orgName}&rdquo; isn&rsquo;t among the companies your ads reached
+        {journey.window ? ` in the ${journey.window.days} days before this lead (${journey.window.start} → ${journey.window.end})` : ''}
+        , matched by work-email domain and company name. Either the company saw no ads in that window, or the lead&rsquo;s details don&rsquo;t identify it.
       </div>
     );
   }
@@ -135,22 +137,23 @@ function LeadRow({
   lead: LeadFormResponse;
   index: number;
   accountId: string;
-  fetchJourney: (accountId: string, orgName: string, submittedAtMs: number) => void;
+  fetchJourney: (accountId: string, orgName: string, submittedAtMs: number, email?: string) => void;
   getJourney: (accountId: string, orgName: string, submittedAtMs: number) => JourneyData | undefined;
   isLoadingJourney: (accountId: string, orgName: string, submittedAtMs: number) => boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const company = lead.company;
+  // The journey is matched on company name and work-email domain, so either one is enough.
+  const company = lead.company || lead.email.split('@')[1] || '';
   const journey = company ? getJourney(accountId, company, lead.submittedAt) : undefined;
   const loading = company ? isLoadingJourney(accountId, company, lead.submittedAt) : false;
 
   const handleToggle = useCallback(() => {
     if (!company) return;
     if (!journey && !loading) {
-      fetchJourney(accountId, company, lead.submittedAt);
+      fetchJourney(accountId, company, lead.submittedAt, lead.email);
     }
     setExpanded(v => !v);
-  }, [company, journey, loading, fetchJourney, accountId, lead.submittedAt]);
+  }, [company, journey, loading, fetchJourney, accountId, lead.submittedAt, lead.email]);
 
   const journeyBadge = () => {
     if (!company) return <span className="text-muted-foreground/40">—</span>;
