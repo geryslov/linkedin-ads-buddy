@@ -45,10 +45,11 @@ export function ActivityOverlap({ accessToken, selectedAccount, accountName }: P
   const [showReview, setShowReview] = useState(false);
 
   useEffect(() => { setOverrides(readOverrides(selectedAccount)); setOpenType(null); }, [selectedAccount]);
-  useEffect(() => {
+  const saveOverrides = (next: Record<string, string>) => {
+    setOverrides(next);
     if (!selectedAccount) return;
-    try { localStorage.setItem(overridesKey(selectedAccount), JSON.stringify(overrides)); } catch { /* per-viewer convenience only */ }
-  }, [overrides, selectedAccount]);
+    try { localStorage.setItem(overridesKey(selectedAccount), JSON.stringify(next)); } catch { /* per-viewer convenience only */ }
+  };
 
   const rules = useMemo(() => rulesFor(selectedAccount || ''), [selectedAccount]);
   const classOf = useMemo(() => (c: { id: string; name: string; status: string; format?: string; type?: string }) => classifyCampaign(c, rules, overrides[c.id]), [rules, overrides]);
@@ -362,7 +363,7 @@ export function ActivityOverlap({ accessToken, selectedAccount, accountName }: P
         {showReview && (
           <div className="space-y-2">
             {Object.keys(overrides).length > 0 && (
-              <button className="text-xs text-primary hover:underline" onClick={() => setOverrides({})}>Clear {Object.keys(overrides).length} override{Object.keys(overrides).length === 1 ? '' : 's'}</button>
+              <button className="text-xs text-primary hover:underline" onClick={() => saveOverrides({})}>Clear {Object.keys(overrides).length} override{Object.keys(overrides).length === 1 ? '' : 's'}</button>
             )}
             <div className="divide-y divide-border/40">
               {reviewRows.map(({ c, k, delivering }) => (
@@ -373,7 +374,7 @@ export function ActivityOverlap({ accessToken, selectedAccount, accountName }: P
                       {[c.status, c.format, c.objectiveType].filter(Boolean).join(' · ')}{!delivering && ' · no companies in period'} · {k.source === 'override' ? 'overridden' : k.source === 'rule' ? 'by rule' : 'by format/name'}
                     </div>
                   </div>
-                  <Select value={k.type} onValueChange={(v) => setOverrides((o) => ({ ...o, [c.id]: v }))}>
+                  <Select value={k.type} onValueChange={(v) => saveOverrides({ ...overrides, [c.id]: v })}>
                     <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
                     <SelectContent>{typeOptions.map((t) => <SelectItem key={t} value={t} className="text-xs">{t}</SelectItem>)}</SelectContent>
                   </Select>

@@ -89,11 +89,18 @@ export function useActivityOverlap(accessToken: string | null, accountId: string
           format: c.format as string | undefined, type: c.type as string | undefined, objectiveType: c.objectiveType as string | undefined,
         }))
         .filter((c) => c.status !== 'DRAFT');
+      // Campaigns scheduled entirely outside the window can't have rows; skip the calls.
+      const from = Date.parse(range.start), to = Date.parse(range.end) + 86400000;
+      const sched = new Map((res.elements || []).map((c) => [String(c.id), (c.runSchedule || {}) as { start?: number; end?: number }]));
+      const inWindow = campaigns.filter((c) => {
+        const r = sched.get(c.id) || {};
+        return !(r.end && r.end < from) && !(r.start && r.start > to);
+      });
 
       const breakdowns: Breakdowns = {};
       let failedBatches = 0;
       const batches: OverlapCampaign[][] = [];
-      for (let i = 0; i < campaigns.length; i += BATCH) batches.push(campaigns.slice(i, i + BATCH));
+      for (let i = 0; i < inWindow.length; i += BATCH) batches.push(inWindow.slice(i, i + BATCH));
       setProgress({ done: 0, total: batches.length });
       // Sequential: the edge already queries 5 campaigns at a time inside each call.
       for (const [i, batch] of batches.entries()) {
