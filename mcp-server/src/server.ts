@@ -207,12 +207,20 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 
 async function lookupLinkedInToken(apiKey: string): Promise<string | null> {
   try {
-    const res = await fetch(
+    // mcp_api_keys isn't readable by anon; this RPC answers only for an exact key.
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/lookup_mcp_token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "apikey": SUPABASE_ANON_KEY, "Authorization": `Bearer ${SUPABASE_ANON_KEY}` },
+      body: JSON.stringify({ p_api_key: apiKey }),
+    });
+    if (res.ok) return (await res.json() as string | null) ?? null;
+    // Until the lockdown migration creates the RPC, read the table as before.
+    const legacy = await fetch(
       `${SUPABASE_URL}/rest/v1/mcp_api_keys?api_key=eq.${encodeURIComponent(apiKey)}&select=linkedin_token&limit=1`,
       { headers: { "apikey": SUPABASE_ANON_KEY, "Authorization": `Bearer ${SUPABASE_ANON_KEY}` } }
     );
-    if (!res.ok) return null;
-    const rows = await res.json() as Array<{ linkedin_token: string }>;
+    if (!legacy.ok) return null;
+    const rows = await legacy.json() as Array<{ linkedin_token: string }>;
     return rows[0]?.linkedin_token ?? null;
   } catch {
     return null;
@@ -290,6 +298,7 @@ app.get("/health", (_req, res) => {
     status: "ok",
     sessions: mcpSessions.size,
     clientId: CLAUDE_CLIENT_ID,
+    tokenLookup: "rpc",
     googleAdsTools: GOOGLE_ADS_MCP_TOOLS ? "on" : "off",
   });
 });

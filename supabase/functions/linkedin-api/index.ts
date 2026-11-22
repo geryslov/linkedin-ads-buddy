@@ -12575,14 +12575,7 @@ serve(async (req) => {
           if (newlyResolved.length > 0) {
             console.log(`[get_company_engagement_timeline] Caching ${newlyResolved.length} newly resolved names...`);
             try {
-              // Create authenticated client for cache writes (RLS requires auth.uid())
-              const authHeader = req.headers.get('Authorization') || '';
-              const supabaseAuth = createClient(
-                Deno.env.get('SUPABASE_URL')!,
-                Deno.env.get('SUPABASE_ANON_KEY')!,
-                { global: { headers: { Authorization: authHeader } } }
-              );
-
+              // Cache is service-role only (no client RLS policies)
               const upsertData = newlyResolved.map(r => ({
                 org_id: r.id,
                 name: r.name,
@@ -12591,7 +12584,7 @@ serve(async (req) => {
                 last_seen_at: new Date().toISOString(),
               }));
               
-              const { error: upsertError } = await supabaseAuth
+              const { error: upsertError } = await supabaseClient
                 .from('linkedin_company_cache')
                 .upsert(upsertData, { onConflict: 'org_id' });
               
@@ -12998,15 +12991,8 @@ serve(async (req) => {
         console.log(`[update_company_name] Saving name for ${orgId}: "${name}" (source: ${source})`);
 
         try {
-          // Create request-scoped authenticated client for RLS
-          const authHeader = req.headers.get('Authorization') || '';
-          const supabaseAuth = createClient(
-            Deno.env.get('SUPABASE_URL')!,
-            Deno.env.get('SUPABASE_ANON_KEY')!,
-            { global: { headers: { Authorization: authHeader } } }
-          );
-
-          const { data, error } = await supabaseAuth
+          // Cache is service-role only (no client RLS policies)
+          const { data, error } = await supabaseClient
             .from('linkedin_company_cache')
             .upsert({
               org_id: orgId,

@@ -102,7 +102,7 @@ The product's own pieces live in `geryslov/ads-manager-hub-2bd81d31`:
 3. Claude sends MCP request with UUID → server resolves it → calls edge function → LinkedIn API
 
 Do NOT try direct browser upsert to `mcp_api_keys` — always sync via the edge function.
-(Note: `ConnectClaude.tsx:33` still attempts one; it is a silent no-op, redundant with `syncMcpToken()`.)
+`ConnectClaude.tsx` now syncs through `sync_mcp_token` too (anon has no grants on the table).
 
 **New (standalone MCP product):** a **separate Railway service** running a **separate entrypoint**
 against a **separate table**. The key carries a `user_id`; resolution goes through
@@ -127,15 +127,17 @@ surface, and duplicating auth into it is how the two systems start to drift.
 | Entrypoint | `src/server.ts` | `src/server-product.ts` |
 | Start | `npm run start:remote` | `npm run start:product` |
 | Table | `mcp_api_keys` | `mcp_keys` |
-| Resolution | anon PostgREST select | `resolve_mcp_key()` RPC, fail-closed |
+| Resolution | `lookup_mcp_token()` RPC (falls back to the old select) | `resolve_mcp_key()` RPC, fail-closed |
 | Key lifecycle | none — possessing the UUID is the auth | owner-scoped, revocable, expiry-aware |
 | Passthrough | unrestricted | allowlist-gated |
 | Railway service | existing | new |
 
-**The legacy server must not change.** It is the user's own working integration. `src/server.ts` is
-byte-identical to its original and should stay that way; `src/index.ts` (stdio) likewise. Everything
-new in `tools.ts` is behind `mode: "product"` and **defaults to `"legacy"`** — do not flip that
-default. If you need new behaviour, add an option that defaults to off.
+**Keep the legacy server's behaviour unchanged.** It is the user's own working integration. The one
+change since the original (2026-11-22) is how it reads a key's token: `lookupLinkedInToken` calls the
+`lookup_mcp_token(p_api_key)` RPC, falling back to the old table select if the RPC is missing; `/health`
+reports `tokenLookup: "rpc"` so the Railway deploy can be confirmed. `src/index.ts` (stdio) is
+untouched. Everything new in `tools.ts` is behind `mode: "product"` and **defaults to `"legacy"`** — do
+not flip that default. If you need new behaviour, add an option that defaults to off.
 
 The two share only the 16 tool definitions, which is the point: fixes land in both, and there is no
 fork to drift. (`/Users/gery/linkedin-ads-mcp` is what a fork looks like after six months — stale,
@@ -144,12 +146,11 @@ no remote, predates OAuth entirely. Don't create another.)
 `sync_mcp_token` stays — the old dashboard depends on it. It is service-role with **zero caller
 auth**, so anyone can overwrite any key's token; it is blocked from the product passthrough.
 
-🔴 **`mcp_api_keys` is anon-readable and this repo is public.** Verified 2026-08-05: the committed
-anon key returns real LinkedIn tokens from that table. The fix is written
-([20260805130000_close_mcp_api_keys_anon_read.sql](supabase/migrations/20260805130000_close_mcp_api_keys_anon_read.sql))
-and deliberately unapplied, because an anon-readable table *is* the legacy resolver's mechanism —
-closing it breaks that server. Run it once your own integration is on the product service. Both
-issues are scoped to the legacy system; `mcp_keys` was locked down from creation.
+**`mcp_api_keys` has no anon/authenticated access** ([20261117170000_security_lockdown.sql](supabase/migrations/20261117170000_security_lockdown.sql)).
+Until 2026-11-22 it was anon-readable (`USING (true)`), and the anon key is committed in this public
+repo, so every stored LinkedIn token was listable. Reads go through `lookup_mcp_token()` (exact key
+only), writes through `sync_mcp_token`. Never re-add a table policy or grant for anon. `mcp_keys` was
+locked down from creation.
 
 Env vars for the product server: `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_MCP_JWT` (the
 `{"role":"mcp_server"}` JWT — **required**, no useful default), `SETUP_URL`, `OAUTH_CLIENT_ID`,

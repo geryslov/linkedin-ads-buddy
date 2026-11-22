@@ -113,7 +113,7 @@ Campaign Editor preflight and writes reject separate Company names AND Company s
 - **Custom fields** — [CustomFieldEditor](src/components/dashboard/CustomFieldEditor.tsx), per campaign / campaign group
 - **Campaign targeting editing** — [CampaignTargetingEditor](src/components/dashboard/CampaignTargetingEditor.tsx), writes targeting back to LinkedIn (surfaced under **Bulk Editing → Campaign Editor**)
 - **CSV export** — most report tables, via [exportUtils](src/lib/exportUtils.ts)
-- **MCP setup** — [ConnectClaude](src/components/dashboard/ConnectClaude.tsx)
+- **MCP setup** — [ConnectClaude](src/components/dashboard/ConnectClaude.tsx); syncs the key's token via edge `sync_mcp_token` (no client access to `mcp_api_keys`; the legacy MCP server reads it through the `lookup_mcp_token` RPC)
 - **Error boundary** — [ErrorBoundary](src/components/ErrorBoundary.tsx) wraps the dashboard tab content (in [Dashboard.tsx](src/pages/Dashboard.tsx)); a render crash shows a recoverable card with the error message instead of a blank page, and resets on tab change
 - **Command palette** — [CommandPalette](src/components/dashboard/CommandPalette.tsx), ⌘K to jump to any screen/action (built off the sidebar's exported `navGroups`; AI Advisor moved to ⌘J)
 

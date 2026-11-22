@@ -30,11 +30,11 @@ export function ConnectClaude({ open, onOpenChange, accessToken }: ConnectClaude
 
     // Always sync on modal open — ensures the row exists
     if (key && accessToken) {
-      supabase.from('mcp_api_keys').upsert(
-        { api_key: key, linkedin_token: accessToken, updated_at: new Date().toISOString() },
-        { onConflict: 'api_key' }
-      ).then(({ error }) => {
-        if (error) console.error('[MCP sync] upsert failed:', error);
+      // mcp_api_keys has no client access; the edge function writes it.
+      supabase.functions.invoke('linkedin-api', {
+        body: { action: 'sync_mcp_token', params: { apiKey: key, linkedinToken: accessToken } },
+      }).then(({ data, error }) => {
+        if (error || data?.error) console.error('[MCP sync] failed:', error || data.error);
       });
     }
 
