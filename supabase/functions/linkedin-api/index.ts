@@ -14054,7 +14054,7 @@ serve(async (req) => {
           return urn.split(':').pop() || '';
         };
 
-        const formQuestionMap = new Map<string, { byId: Map<string, string>; ordered: string[] }>();
+        const formQuestionMap = new Map<string, { byId: Map<string, string>; ordered: string[]; predefinedById: Map<string, string> }>();
         const uniqueFormIds: string[] = Array.from(
           new Set<string>(filteredElements.map((el: any) => extractFormId(el.versionedLeadGenFormUrn || '')).filter(Boolean))
         );
@@ -14071,6 +14071,7 @@ serve(async (req) => {
               if (!r.ok) return;
               const form = await r.json();
               const byId = new Map<string, string>();
+              const predefinedById = new Map<string, string>();
               const ordered: string[] = [];
               const questions =
                 form.questions ||
@@ -14092,17 +14093,33 @@ serve(async (req) => {
                   extractLocalized(q.label) ||
                   extractLocalized(q.title) || '';
                 if (qid) byId.set(qid, label);
+                // Answers often omit predefinedField; the form's question carries it.
+                const predefined = q.predefinedField ?? q.questionDetails?.predefinedField;
+                if (qid && predefined) predefinedById.set(qid, String(predefined));
                 ordered.push(label);
               }
               if (ordered.length === 0) {
                 console.log(`[get_lead_form_responses] Form ${formId} keys:`, Object.keys(form).join(','), '— sample:', JSON.stringify(form).substring(0, 500));
               }
-              formQuestionMap.set(formId, { byId, ordered });
+              formQuestionMap.set(formId, { byId, ordered, predefinedById });
             } catch (e) {
               console.error('[get_lead_form_responses] Form question lookup failed:', e);
             }
           }));
         }
+
+        // Last resort when neither the answer nor the form tags a standard field.
+        const leadFieldFromLabel = (label: string): string => {
+          const l = label.toLowerCase().trim();
+          if (/e-?mail/.test(l)) return 'EMAIL';
+          if (/^first[\s_-]?name$/.test(l)) return 'FIRST_NAME';
+          if (/^(last[\s_-]?name|surname)$/.test(l)) return 'LAST_NAME';
+          if (/^(company|company[\s_-]?name|organi[sz]ation)$/.test(l)) return 'COMPANY';
+          return '';
+        };
+
+        const CORE_LEAD_FIELDS = new Set(['FIRST_NAME', 'LAST_NAME', 'EMAIL', 'WORK_EMAIL', 'COMPANY', 'COMPANY_NAME']);
+        const humanizeLeadField = (f: string) => f.toLowerCase().replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
 
         const leads = filteredElements.map((el: any) => {
           const fieldMap: Record<string, string> = {};
@@ -14123,16 +14140,21 @@ serve(async (req) => {
               (qid && fq?.byId.get(qid)) ||
               fq?.ordered[answerIndex] ||
               '';
-            if (answer.predefinedField) {
-              fieldMap[String(answer.predefinedField).toUpperCase()] = value;
-            } else {
-              const label = resolvedLabel || `Custom ${answerIndex + 1}`;
+            const predefinedField = answer.predefinedField
+              || (qid && fq?.predefinedById.get(qid))
+              || leadFieldFromLabel(resolvedLabel);
+            const fieldKey = String(predefinedField || '').toUpperCase();
+            if (fieldKey) fieldMap[fieldKey] = value;
+            // Name/email/company have their own columns; every other answer
+            // (job title, phone, custom questions) is a question column.
+            if (!CORE_LEAD_FIELDS.has(fieldKey)) {
+              const label = resolvedLabel || (fieldKey ? humanizeLeadField(fieldKey) : `Custom ${answerIndex + 1}`);
               customAnswers[label] = value;
             }
             answers.push({
-              label: resolvedLabel || answer.predefinedField || `Custom ${answerIndex + 1}`,
+              label: resolvedLabel || predefinedField || `Custom ${answerIndex + 1}`,
               value,
-              predefinedField: answer.predefinedField,
+              predefinedField: predefinedField || undefined,
               questionId: answer.questionId,
             });
           }
@@ -14157,8 +14179,8 @@ serve(async (req) => {
             creativeName: creativeMeta?.creativeName || '',
             firstName: fieldMap['FIRST_NAME'] || '',
             lastName: fieldMap['LAST_NAME'] || '',
-            email: fieldMap['EMAIL'] || '',
-            company: fieldMap['COMPANY'] || '',
+            email: fieldMap['EMAIL'] || fieldMap['WORK_EMAIL'] || '',
+            company: fieldMap['COMPANY'] || fieldMap['COMPANY_NAME'] || '',
             submittedAt: el.submittedAt || 0,
             testLead: el.testLead || false,
             customAnswers,

@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   Select,
   SelectContent,
@@ -122,7 +122,9 @@ function LeadRow({
   fetchJourney,
   getJourney,
   isLoadingJourney,
+  questionCols,
 }: {
+  questionCols: string[];
   lead: LeadFormResponse;
   index: number;
   accountId: string;
@@ -184,6 +186,11 @@ function LeadRow({
         </TableCell>
         <TableCell className="text-sm text-muted-foreground">{lead.company || '—'}</TableCell>
         <TableCell className="text-sm text-muted-foreground">{lead.email || '—'}</TableCell>
+        {questionCols.map((label) => (
+          <TableCell key={label} className="text-sm text-muted-foreground max-w-[220px] truncate" title={lead.customAnswers?.[label] || ''}>
+            {lead.customAnswers?.[label] || '—'}
+          </TableCell>
+        ))}
         <TableCell className="text-sm tabular-nums text-muted-foreground">
           {lead.submittedAt
             ? new Date(lead.submittedAt).toLocaleDateString(undefined, {
@@ -192,7 +199,7 @@ function LeadRow({
             : '—'}
         </TableCell>
         <TableCell className="text-xs text-muted-foreground font-mono max-w-[160px] truncate">
-          {lead.campaignUrn ? lead.campaignUrn.split(':').pop() : '—'}
+          {lead.campaignName || (lead.campaignUrn ? lead.campaignUrn.split(':').pop() : '—')}
         </TableCell>
         <TableCell className="text-center">
           {lead.testLead && <StatusPill tone="warning" label="Test" />}
@@ -203,7 +210,7 @@ function LeadRow({
       </TableRow>
       {expanded && journey && (
         <tr>
-          <td colSpan={8} className="p-0">
+          <td colSpan={8 + questionCols.length} className="p-0">
             <JourneyPanel journey={journey} orgName={company || ''} />
           </td>
         </tr>
@@ -295,6 +302,15 @@ export function LeadSyncReport({ accessToken, selectedAccount }: LeadSyncReportP
     ? leads
     : leads.filter(l => !l.testLead);
 
+  // The form's questions as columns, first-seen order, all-empty ones dropped (as in Lead Records).
+  const questionCols = useMemo(() => {
+    const seen: string[] = [];
+    for (const l of filteredLeads) {
+      for (const k of Object.keys(l.customAnswers || {})) if (!seen.includes(k)) seen.push(k);
+    }
+    return seen.filter((label) => filteredLeads.some((l) => String(l.customAnswers?.[label] || '').trim()));
+  }, [filteredLeads]);
+
   const handleExportCSV = () => {
     if (filteredLeads.length === 0) return;
     const columns = [
@@ -302,12 +318,15 @@ export function LeadSyncReport({ accessToken, selectedAccount }: LeadSyncReportP
       { key: 'lastName', label: 'Last Name' },
       { key: 'company', label: 'Company' },
       { key: 'email', label: 'Email' },
+      ...questionCols.map((label) => ({ key: `q:${label}`, label })),
       { key: 'formName', label: 'Form' },
       { key: 'submittedAtFormatted', label: 'Submitted' },
+      { key: 'campaignName', label: 'Campaign' },
       { key: 'campaignUrn', label: 'Campaign URN' },
     ];
     const exportData = filteredLeads.map(l => ({
       ...l,
+      ...Object.fromEntries(questionCols.map((label) => [`q:${label}`, l.customAnswers?.[label] || ''])),
       formName: selectedFormName || '',
       submittedAtFormatted: l.submittedAt ? new Date(l.submittedAt).toISOString() : '',
     }));
@@ -471,6 +490,7 @@ export function LeadSyncReport({ accessToken, selectedAccount }: LeadSyncReportP
                   <TableHead>Name</TableHead>
                   <TableHead>Company</TableHead>
                   <TableHead>Email</TableHead>
+                  {questionCols.map((label) => <TableHead key={label} className="whitespace-nowrap">{label}</TableHead>)}
                   <TableHead>Submitted</TableHead>
                   <TableHead>Campaign</TableHead>
                   <TableHead className="text-center">Test</TableHead>
@@ -487,6 +507,7 @@ export function LeadSyncReport({ accessToken, selectedAccount }: LeadSyncReportP
                     fetchJourney={fetchJourney}
                     getJourney={getJourney}
                     isLoadingJourney={isLoadingJourney}
+                    questionCols={questionCols}
                   />
                 ))}
               </TableBody>
